@@ -48,8 +48,8 @@
             "matchMode": "exact"
           }
         ],
-        "idPrefixGroupAnchor": "nw",
-        "payloadJustification": "left"
+        "idPrefixGroupAnchor": "top",
+        "payloadJustification": "center"
       },
       "BGS-Tally Indicator": {
         "idPrefixes": [
@@ -84,19 +84,6 @@
         "idPrefixGroupAnchor": "nw",
         "payloadJustification": "left"
       },
-      "BGS-Tally Warning": {
-        "idPrefixes": [
-          "bgstally-msg-warning-",
-          {
-            "value": "bgstally-frame-warning",
-            "matchMode": "exact"
-          }
-        ],
-        "idPrefixGroupAnchor": "nw",
-        "offsetX": 190,
-        "offsetY": 2,
-        "payloadJustification": "left"
-      },
       "BGS-Tally Info": {
         "idPrefixes": [
           "bgstally-msg-info-",
@@ -116,8 +103,8 @@
             "matchMode": "exact"
           }
         ],
-        "idPrefixGroupAnchor": "nw",
-        "payloadJustification": "left"
+        "idPrefixGroupAnchor": "top",
+        "payloadJustification": "center"
       },
       "BGS-Tally Tick": {
         "idPrefixes": [
@@ -142,6 +129,17 @@
         "idPrefixGroupAnchor": "ne",
         "payloadJustification": "right",
         "offsetX": -5.0
+      },
+      "BGS-Tally Warning": {
+        "idPrefixes": [
+          "bgstally-msg-warning-",
+          {
+            "value": "bgstally-frame-warning",
+            "matchMode": "exact"
+          }
+        ],
+        "idPrefixGroupAnchor": "center",
+        "payloadJustification": "center"
       }
     }
   },
