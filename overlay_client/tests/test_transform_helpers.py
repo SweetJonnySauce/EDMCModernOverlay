@@ -8,7 +8,9 @@ from overlay_client.transform_helpers import (
     compute_rect_transform,
     compute_vector_transform,
 )
+from overlay_client.payload_builders import build_group_context
 from overlay_client.payload_transform import build_payload_transform_context
+from overlay_client.group_transform import GroupTransform
 from overlay_client.viewport_helper import ScaleMode, ViewportTransform
 from overlay_client.viewport_transform import FillAxisMapping, FillViewport, LegacyMapper, ViewportState
 
@@ -99,6 +101,37 @@ def _remap_context(scale_x: float, scale_y: float, offset_x: float, offset_y: fl
         band_anchor_y=0.0,
     )
     return mapper, fill, scale_x, scale_y, offset_x, offset_y
+
+
+def test_build_group_context_forces_overflow_x_for_fill_groups():
+    mapper = _mapper(scale=1.0, mode=ScaleMode.FILL, overflow_x=False, overflow_y=False)
+    state = _state()
+
+    left_anchor = GroupTransform(anchor_token="nw", payload_justification="left")
+    context = build_group_context(
+        mapper,
+        state,
+        left_anchor,
+        overlay_bounds_hint=None,
+        offset_x=0.0,
+        offset_y=0.0,
+        group_anchor_point=lambda *args, **kwargs: (0.0, 0.0),
+        group_base_point=lambda *args, **kwargs: (0.0, 0.0),
+    )
+    assert context.transform_context.axis_x.overflow is True
+
+    right_anchor = GroupTransform(anchor_token="ne", payload_justification="left")
+    context = build_group_context(
+        mapper,
+        state,
+        right_anchor,
+        overlay_bounds_hint=None,
+        offset_x=0.0,
+        offset_y=0.0,
+        group_anchor_point=lambda *args, **kwargs: (0.0, 0.0),
+        group_base_point=lambda *args, **kwargs: (0.0, 0.0),
+    )
+    assert context.transform_context.axis_x.overflow is True
 
 
 def test_apply_inverse_group_scale_scales_rel_to_anchor():
