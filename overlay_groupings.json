@@ -97,9 +97,7 @@
             "value": "bgstally-frame-system_info",
             "matchMode": "exact"
           }
-        ],
-        "idPrefixGroupAnchor": "top",
-        "payloadJustification": "center"
+        ]
       },
       "BGS-Tally Tick": {
         "idPrefixes": [
