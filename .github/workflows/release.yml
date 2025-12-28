@@ -596,12 +596,18 @@ jobs:
           existing_pr=$(gh pr list --head "${pr_branch}" --repo "${GITHUB_REPOSITORY}" --json number -q '.[0].number')
           if [ -n "${existing_pr}" ]; then
             echo "PR already exists: #${existing_pr}"
-            exit 0
+            pr_url=$(gh pr view "${existing_pr}" --repo "${GITHUB_REPOSITORY}" --json url -q '.url')
+          else
+            pr_url=$(gh pr create \
+              --repo "${GITHUB_REPOSITORY}" \
+              --head "${pr_branch}" \
+              --base "${DEFAULT_BRANCH}" \
+              --title "chore: update VirusTotal report link for ${RELEASE_TAG}" \
+              --body "Automated README update for release ${RELEASE_TAG}." \
+              --json url -q '.url')
           fi
 
-          gh pr create \
-            --repo "${GITHUB_REPOSITORY}" \
-            --head "${pr_branch}" \
-            --base "${DEFAULT_BRANCH}" \
-            --title "chore: update VirusTotal report link for ${RELEASE_TAG}" \
-            --body "Automated README update for release ${RELEASE_TAG}."
+          if [ -n "${pr_url}" ]; then
+            gh pr merge --auto --squash --delete-branch "${pr_url}" --repo "${GITHUB_REPOSITORY}" || \
+              echo "Auto-merge not enabled or blocked by repo rules."
+          fi
