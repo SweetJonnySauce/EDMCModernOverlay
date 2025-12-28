@@ -103,7 +103,7 @@ def _remap_context(scale_x: float, scale_y: float, offset_x: float, offset_y: fl
     return mapper, fill, scale_x, scale_y, offset_x, offset_y
 
 
-def test_build_group_context_forces_overflow_x_for_fill_groups():
+def test_build_group_context_overflow_x_only_when_needed():
     mapper = _mapper(scale=1.0, mode=ScaleMode.FILL, overflow_x=False, overflow_y=False)
     state = _state()
 
@@ -118,13 +118,31 @@ def test_build_group_context_forces_overflow_x_for_fill_groups():
         group_anchor_point=lambda *args, **kwargs: (0.0, 0.0),
         group_base_point=lambda *args, **kwargs: (0.0, 0.0),
     )
-    assert context.transform_context.axis_x.overflow is True
+    assert context.transform_context.axis_x.overflow is False
 
     right_anchor = GroupTransform(anchor_token="ne", payload_justification="left")
     context = build_group_context(
         mapper,
         state,
         right_anchor,
+        overlay_bounds_hint=None,
+        offset_x=0.0,
+        offset_y=0.0,
+        group_anchor_point=lambda *args, **kwargs: (0.0, 0.0),
+        group_base_point=lambda *args, **kwargs: (0.0, 0.0),
+    )
+    assert context.transform_context.axis_x.overflow is False
+
+
+def test_build_group_context_overflow_x_for_overflowing_fill():
+    mapper = _mapper(scale=1.0, mode=ScaleMode.FILL, overflow_x=True, overflow_y=False)
+    state = _state()
+
+    anchor = GroupTransform(anchor_token="nw", payload_justification="left")
+    context = build_group_context(
+        mapper,
+        state,
+        anchor,
         overlay_bounds_hint=None,
         offset_x=0.0,
         offset_y=0.0,

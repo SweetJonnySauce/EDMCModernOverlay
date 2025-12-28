@@ -130,8 +130,8 @@
           }
         ],
         "idPrefixGroupAnchor": "ne",
+        "offsetX": -5,
         "payloadJustification": "right",
-        "offsetX": -5.0,
         "backgroundColor": "green",
         "backgroundBorderColor": "green",
         "backgroundBorderWidth": 3
@@ -145,8 +145,8 @@
           }
         ],
         "idPrefixGroupAnchor": "ne",
+        "offsetX": -5,
         "payloadJustification": "right",
-        "offsetX": -5.0,
         "backgroundColor": "blue",
         "backgroundBorderColor": "blue",
         "backgroundBorderWidth": 3
@@ -161,6 +161,8 @@
         ],
         "idPrefixGroupAnchor": "center",
         "payloadJustification": "center",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last",
         "backgroundColor": "red",
         "backgroundBorderColor": "red",
         "backgroundBorderWidth": 3
