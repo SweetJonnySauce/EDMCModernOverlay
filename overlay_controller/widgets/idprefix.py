@@ -37,6 +37,7 @@ class IdPrefixGroupWidget(tk.Frame):
             "<Alt-KeyPress-Right>",
         )
         block_classes = ("TComboboxListbox", "Listbox", "TComboboxPopdown")
+        self._block_classes = block_classes
         for seq in alt_sequences:
             self.dropdown.bind(seq, lambda _e: "break")
             for class_name in block_classes:
@@ -218,7 +219,39 @@ class IdPrefixGroupWidget(tk.Frame):
                 self._on_selection_changed(self.dropdown.get())
             except Exception:
                 pass
+
+    def set_exit_focus_sequences(self, sequences: list[str]) -> None:
+        """Bind exit focus keys from the controller keybindings."""
+
+        for sequence in sequences:
+            try:
+                self.dropdown.bind(sequence, self._handle_exit_focus, add="+")
+            except Exception:
+                continue
+            for class_name in self._block_classes:
+                try:
+                    self.dropdown.bind_class(class_name, sequence, self._handle_exit_focus, add="+")
+                except Exception:
+                    continue
+
+    def _handle_exit_focus(self, _event: tk.Event[tk.Misc]) -> str | None:  # type: ignore[name-defined]
         self._dropdown_posted = False
+        try:
+            self.dropdown.tk.call("ttk::combobox::Unpost", self.dropdown)
+        except Exception:
+            pass
+        try:
+            root = self.winfo_toplevel()
+        except Exception:
+            root = None
+        if root is not None:
+            handler = getattr(root, "exit_focus_mode", None)
+            if callable(handler):
+                try:
+                    handler()
+                except Exception:
+                    pass
+        return "break"
 
     def _post_dropdown(self) -> None:
         """Open the combobox dropdown without synthesizing key events."""
@@ -284,7 +317,7 @@ class IdPrefixGroupWidget(tk.Frame):
         elif key == "up":
             self._navigate(-1)
             return "break"
-        elif key in {"return", "space"}:
+        elif key == "return":
             try:
                 if self._is_dropdown_open():
                     focus_target = self.dropdown.tk.call("focus")

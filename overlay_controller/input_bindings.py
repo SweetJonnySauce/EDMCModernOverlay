@@ -218,6 +218,19 @@ class BindingManager:
             seq = f"<{seq}>"
         return seq
 
+    def get_sequences(self, action_name: str, scheme_name: Optional[str] = None) -> List[str]:
+        """Return normalized sequences for the requested action."""
+
+        scheme = self.config.get_scheme(scheme_name)
+        sequences = scheme.bindings.get(action_name, [])
+        normalized: List[str] = []
+        for sequence in sequences:
+            try:
+                normalized.append(self._normalize_sequence(sequence))
+            except Exception:
+                continue
+        return normalized
+
     def trigger_action(self, action_name: str) -> bool:
         """Invoke a registered action without relying on a Tk event."""
 
