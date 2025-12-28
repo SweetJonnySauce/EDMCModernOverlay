@@ -32,13 +32,7 @@
             "value": "bgstally-frame-tickwarn",
             "matchMode": "exact"
           }
-        ],
-        "idPrefixGroupAnchor": "ne",
-        "offsetX": -5,
-        "payloadJustification": "right",
-        "markerLabelPosition": "below",
-        "controllerPreviewBoxMode": "last",
-        "backgroundColor": null
+        ]
       },
       "BGS-Tally Cmdr_info": {
         "idPrefixes": [
@@ -79,7 +73,8 @@
           {
             "value": "bgstally-frame-tw",
             "matchMode": "exact"
-          }
+          },
+          "bgstally-bar-tw-"
         ],
         "idPrefixGroupAnchor": "nw",
         "payloadJustification": "left"
@@ -113,10 +108,7 @@
             "value": "bgstally-frame-tick",
             "matchMode": "exact"
           }
-        ],
-        "idPrefixGroupAnchor": "ne",
-        "payloadJustification": "right",
-        "offsetX": -5.0
+        ]
       },
       "BGS-Tally System_tick": {
         "idPrefixes": [
@@ -125,10 +117,7 @@
             "value": "bgstally-frame-system_tick",
             "matchMode": "exact"
           }
-        ],
-        "idPrefixGroupAnchor": "ne",
-        "payloadJustification": "right",
-        "offsetX": -5.0
+        ]
       },
       "BGS-Tally Warning": {
         "idPrefixes": [
@@ -137,9 +126,7 @@
             "value": "bgstally-frame-warning",
             "matchMode": "exact"
           }
-        ],
-        "idPrefixGroupAnchor": "center",
-        "payloadJustification": "center"
+        ]
       }
     }
   },
