@@ -827,10 +827,10 @@ class PluginOverrideManager:
         self._reload_if_needed()
         canonical = self._canonical_plugin_name(plugin)
         if canonical is None or suffix is None:
-            return None, None
+            return None, None, None
         config = self._plugins.get(canonical)
         if config is None or not config.group_specs:
-            return None, None
+            return None, None, None
         for spec in config.group_specs:
             label_value = spec.label or (spec.prefixes[0].value if spec.prefixes else None)
             if label_value == suffix:
