@@ -24,6 +24,7 @@ CHECKSUM_MANIFEST_PATH=""
 CHECKSUM_MANIFEST_EFFECTIVE=""
 CHECKSUM_MANIFEST_TEMP=""
 PLUGIN_DIR_KIND=""
+EXIT_PAUSED=0
 
 declare -a POSITIONAL_ARGS=()
 declare -a MATRIX_STANDARD_PATHS=()
@@ -1336,6 +1337,25 @@ cleanup_checksum_manifest_temp() {
     fi
 }
 
+pause_on_error_exit() {
+    local exit_code="$1"
+    if (( exit_code == 0 )); then
+        return
+    fi
+    if [[ "$ASSUME_YES" == true || ! -t 0 || "${EXIT_PAUSED:-0}" -eq 1 ]]; then
+        return
+    fi
+    EXIT_PAUSED=1
+    read -r -p $'Press Enter to continue...'
+}
+
+on_exit() {
+    local exit_code=$?
+    cleanup_checksum_manifest_temp
+    pause_on_error_exit "$exit_code"
+    return "$exit_code"
+}
+
 verify_checksums() {
     local base_dir="$1"
     local label="${2:-$base_dir}"
@@ -2063,7 +2083,7 @@ check_flatpak_permission() {
 }
 
 main() {
-    trap cleanup_checksum_manifest_temp EXIT
+    trap on_exit EXIT
     local -a ORIGINAL_ARGS=("$@")
     parse_args "$@"
     find_release_root
@@ -2122,9 +2142,6 @@ PY
         echo "    Plugin files will be replaced; you'll be prompted whether to rebuild overlay_client/.venv afterwards."
         if ! prompt_yes_no "Proceed with updating the installation?"; then
             echo "❌ Installation aborted by user to protect the existing virtual environment." >&2
-            if [[ -t 0 ]]; then
-                read -r -p $'Hit Enter to continue...'
-            fi
             exit 1
         fi
         rsync_update_plugin "$src_dir" "$dest_dir"
