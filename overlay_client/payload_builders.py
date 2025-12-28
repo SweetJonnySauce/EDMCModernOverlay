@@ -51,9 +51,9 @@ def build_group_context(
     group_base_point: GroupBasePointFn,
 ) -> GroupContext:
     fill = build_viewport(mapper, state, group_transform, BASE_WIDTH, BASE_HEIGHT)
-    # Allow fill-mode groups to extend past BASE_WIDTH so anchors translate correctly.
+    # Allow fill-mode groups to extend past BASE_WIDTH when the viewport truly overflows.
     overflow_x_override: Optional[bool] = None
-    if mapper.transform.mode is ScaleMode.FILL and group_transform is not None:
+    if mapper.transform.mode is ScaleMode.FILL and group_transform is not None and fill.overflow_x:
         overflow_x_override = True
     transform_context = build_payload_transform_context(fill, overflow_x=overflow_x_override)
     base_width_norm = BASE_WIDTH if BASE_WIDTH > 0.0 else 1.0
