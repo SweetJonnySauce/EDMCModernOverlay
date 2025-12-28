@@ -120,9 +120,12 @@ def _build_payload_handler(helper: DeveloperHelperController, window: OverlayWin
         if event == "OverlayOverridesPayload":
             window.apply_override_payload(payload)
             return
+        if event == "OverlayGroupCacheReset":
+            window.reset_group_cache()
+            return
         if event == "LegacyOverlay":
             payload_id = str(payload.get("id") or "").strip().lower()
-            if payload_id == "overlay-controller-status":
+            if payload_id in {"overlay-controller-status", "edmcmodernoverlay-controller-status"}:
                 window.handle_controller_active_signal()
             helper.handle_legacy_payload(window, payload)
             return

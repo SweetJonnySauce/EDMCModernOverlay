@@ -19,3 +19,4 @@ _external/**
 logs/
 logs/**
 *.log
+overlay_client/fonts/EUROCAPS.TTF

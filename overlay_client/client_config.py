@@ -13,14 +13,15 @@ class InitialClientSettings:
     """Values used to bootstrap the client before config payloads arrive."""
 
     client_log_retention: int = 5
+    global_payload_opacity: int = 100
     force_render: bool = False
-    allow_force_render_release: bool = False
     force_xwayland: bool = False
     physical_clamp_enabled: bool = False
     physical_clamp_overrides: Dict[str, float] = field(default_factory=dict)
     show_debug_overlay: bool = False
     min_font_point: float = 6.0
     max_font_point: float = 24.0
+    legacy_font_step: float = 2.0
     status_bottom_margin: int = 20
     debug_overlay_corner: str = "NW"
     status_corner: str = "SW"
@@ -42,6 +43,7 @@ class DeveloperHelperConfig:
     """Subset of overlay preferences that are considered developer helpers."""
 
     background_opacity: Optional[float] = None
+    global_payload_opacity: Optional[int] = None
     enable_drag: Optional[bool] = None
     client_log_retention: Optional[int] = None
     gridlines_enabled: Optional[bool] = None
@@ -52,6 +54,7 @@ class DeveloperHelperConfig:
     show_debug_overlay: Optional[bool] = None
     min_font_point: Optional[float] = None
     max_font_point: Optional[float] = None
+    legacy_font_step: Optional[float] = None
     status_bottom_margin: Optional[int] = None
     debug_overlay_corner: Optional[str] = None
     status_corner: Optional[str] = None
@@ -113,6 +116,7 @@ class DeveloperHelperConfig:
 
         return cls(
             background_opacity=_float(payload.get("opacity"), None),
+            global_payload_opacity=_int(payload.get("global_payload_opacity"), None),
             enable_drag=_bool(payload.get("enable_drag"), None),
             client_log_retention=_int(payload.get("client_log_retention"), None),
             gridlines_enabled=_bool(payload.get("gridlines_enabled"), None),
@@ -123,6 +127,7 @@ class DeveloperHelperConfig:
             show_debug_overlay=_bool(payload.get("show_debug_overlay"), None),
             min_font_point=_float(payload.get("min_font_point"), None),
             max_font_point=_float(payload.get("max_font_point"), None),
+            legacy_font_step=_float(payload.get("legacy_font_step"), None),
             status_bottom_margin=_int(payload.get("status_bottom_margin"), None),
             debug_overlay_corner=_str(payload.get("debug_overlay_corner"), None),
             title_bar_enabled=_bool(payload.get("title_bar_enabled"), None),
@@ -156,10 +161,12 @@ def load_initial_settings(settings_path: Path) -> InitialClientSettings:
         retention = int(data.get("client_log_retention", retention))
     except (TypeError, ValueError):
         retention = defaults.client_log_retention
-    allow_force_release = bool(data.get("allow_force_render_release", defaults.allow_force_render_release))
+    try:
+        payload_opacity = int(data.get("global_payload_opacity", defaults.global_payload_opacity))
+    except (TypeError, ValueError):
+        payload_opacity = defaults.global_payload_opacity
+    payload_opacity = max(0, min(payload_opacity, 100))
     force_render = bool(data.get("force_render", defaults.force_render))
-    if not allow_force_release:
-        force_render = False
     force_xwayland = bool(data.get("force_xwayland", defaults.force_xwayland))
     physical_clamp_enabled = bool(data.get("physical_clamp_enabled", defaults.physical_clamp_enabled))
     show_debug_overlay = bool(data.get("show_debug_overlay", defaults.show_debug_overlay))
@@ -171,8 +178,13 @@ def load_initial_settings(settings_path: Path) -> InitialClientSettings:
         max_font = float(data.get("max_font_point", defaults.max_font_point))
     except (TypeError, ValueError):
         max_font = defaults.max_font_point
+    try:
+        legacy_font_step = float(data.get("legacy_font_step", defaults.legacy_font_step))
+    except (TypeError, ValueError):
+        legacy_font_step = defaults.legacy_font_step
     min_font = max(1.0, min(min_font, 48.0))
     max_font = max(min_font, min(max_font, 72.0))
+    legacy_font_step = max(0.0, min(legacy_font_step, 10.0))
     try:
         bottom_margin = int(data.get("status_bottom_margin", defaults.status_bottom_margin))
     except (TypeError, ValueError):
@@ -227,11 +239,13 @@ def load_initial_settings(settings_path: Path) -> InitialClientSettings:
 
     return InitialClientSettings(
         client_log_retention=max(1, retention),
+        global_payload_opacity=payload_opacity,
         force_render=force_render,
         force_xwayland=force_xwayland,
         show_debug_overlay=show_debug_overlay,
         min_font_point=min_font,
         max_font_point=max_font,
+        legacy_font_step=legacy_font_step,
         status_bottom_margin=bottom_margin,
         debug_overlay_corner=corner_value,
         title_bar_enabled=title_bar_enabled,
@@ -242,7 +256,6 @@ def load_initial_settings(settings_path: Path) -> InitialClientSettings:
         nudge_overflow_payloads=nudge_overflow,
         payload_nudge_gutter=gutter,
         payload_log_delay_seconds=log_delay,
-        allow_force_render_release=allow_force_release,
         physical_clamp_enabled=physical_clamp_enabled,
         physical_clamp_overrides=overrides,
     )

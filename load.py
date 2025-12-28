@@ -66,6 +66,7 @@ if __package__:
     )
     from .overlay_plugin.journal_commands import build_command_helper
     from .EDMCOverlay.edmcoverlay import normalise_legacy_payload
+    from .group_cache import GroupPlacementCache
     from .overlay_client import env_overrides as env_overrides_helper
 else:  # pragma: no cover - EDMC loads as top-level module
     from version import __version__ as MODERN_OVERLAY_VERSION, DEV_MODE_ENV_VAR, is_dev_build
@@ -108,6 +109,7 @@ else:  # pragma: no cover - EDMC loads as top-level module
     )
     from overlay_plugin.journal_commands import build_command_helper
     from EDMCOverlay.edmcoverlay import normalise_legacy_payload
+    from group_cache import GroupPlacementCache
     import overlay_client.env_overrides as env_overrides_helper
 
 PLUGIN_NAME = "EDMCModernOverlay"
@@ -124,9 +126,15 @@ VERSION_UPDATE_NOTICE_COLOR = "#ff3333"
 VERSION_UPDATE_NOTICE_TTL = 10
 VERSION_UPDATE_NOTICE_POSITION_X = 20
 VERSION_UPDATE_NOTICE_POSITION_Y = 20
-VERSION_UPDATE_NOTICE_ID = "edmc-modernoverlay-version-notice"
+VERSION_UPDATE_NOTICE_ID = f"{PLUGIN_NAME}-version-notice"
 VERSION_UPDATE_NOTICE_REBROADCASTS = 0
 VERSION_UPDATE_NOTICE_REBROADCAST_INTERVAL = 2.0
+
+FONT_PREVIEW_COLOR = "#ff7f00"
+FONT_PREVIEW_TTL = 5
+FONT_PREVIEW_BASE_X = 60
+FONT_PREVIEW_BASE_Y = 120
+FONT_PREVIEW_LINE_SPACING = 40
 
 EDMC_DEFAULT_LOG_LEVEL = logging.DEBUG if DEV_BUILD else logging.INFO
 _LEVEL_NAME_MAP = {
@@ -356,6 +364,7 @@ PAYLOAD_LOGGER_NAME = f"{LOGGER_NAME}.payloads"
 PAYLOAD_LOG_FILE_NAME = "overlay-payloads.log"
 PAYLOAD_LOG_DIR_NAME = PLUGIN_NAME
 PAYLOAD_LOG_MAX_BYTES = 512 * 1024
+CONNECTION_LOG_INTERVAL_SECONDS = 5.0
 
 DEFAULT_DEBUG_CONFIG: Dict[str, Any] = {
     "capture_client_stderrout": True,
@@ -378,16 +387,6 @@ DEFAULT_DEV_SETTINGS: Dict[str, Any] = {
     "log_repaint_debounce": False,
 }
 
-def _is_force_render_enabled(preferences: Optional[Preferences]) -> bool:
-    if preferences is None:
-        return False
-    flag = bool(getattr(preferences, "force_render", False))
-    if DEV_BUILD:
-        return flag
-    allow_flag = bool(getattr(preferences, "allow_force_render_release", False))
-    return flag and allow_flag
-
-
 FLATPAK_ENV_FORWARD_KEYS: Tuple[str, ...] = (
     "EDMC_OVERLAY_SESSION_TYPE",
     "EDMC_OVERLAY_COMPOSITOR",
@@ -403,6 +402,11 @@ FLATPAK_ENV_FORWARD_KEYS: Tuple[str, ...] = (
 def _log(message: str) -> None:
     """Log to EDMC via the Python logging facade."""
     LOGGER.info(message)
+
+
+def _log_debug(message: str) -> None:
+    """Log debug messages through the EDMC logger."""
+    LOGGER.debug(message)
 
 
 class _PluginRuntime:
@@ -421,7 +425,12 @@ class _PluginRuntime:
 
     def __init__(self, plugin_dir: str, preferences: Preferences) -> None:
         self.plugin_dir = Path(plugin_dir)
-        self.broadcaster = WebSocketBroadcaster(log=_log, ingest_callback=self._handle_cli_payload)
+        self.broadcaster = WebSocketBroadcaster(
+            log=_log,
+            log_debug=_log_debug,
+            connection_log_interval=CONNECTION_LOG_INTERVAL_SECONDS,
+            ingest_callback=self._handle_cli_payload,
+        )
         self.watchdog: Optional[OverlayWatchdog] = None
         self._legacy_tcp_server: Optional[LegacyOverlayTCPServer] = None
         self._lock = threading.Lock()
@@ -429,6 +438,7 @@ class _PluginRuntime:
         self._prefs_lock = threading.Lock()
         self._force_monitor_stop = threading.Event()
         self._force_monitor_thread: Optional[threading.Thread] = None
+        self._controller_force_render_override = False
         self._running = False
         self._capture_active = False
         self._state: Dict[str, Any] = {
@@ -466,7 +476,6 @@ class _PluginRuntime:
         self._load_dev_settings(force=True)
         if self._payload_log_handler is None:
             self._configure_payload_logger()
-        self._reset_force_render_override_on_startup()
         self._version_status: Optional[VersionStatus] = None
         self._version_status_lock = threading.Lock()
         self._version_update_notice_sent = False
@@ -495,7 +504,7 @@ class _PluginRuntime:
         self._controller_launch_lock = threading.Lock()
         self._controller_launch_thread: Optional[threading.Thread] = None
         self._controller_process: Optional[subprocess.Popen] = None
-        self._controller_status_id = "overlay-controller-status"
+        self._controller_status_id = f"{PLUGIN_NAME}-controller-status"
         self._controller_pid_path = self.plugin_dir / "overlay_controller.pid"
         self._last_override_reload_nonce: Optional[str] = None
         self._lifecycle.track_handle(self.broadcaster)
@@ -797,27 +806,22 @@ class _PluginRuntime:
     def _start_force_render_monitor_if_needed(self) -> None:
         if self._force_monitor_thread and self._force_monitor_thread.is_alive():
             return
-        if not getattr(self._preferences, "allow_force_render_release", False):
+        if not self._controller_force_render_override:
             return
         self._force_monitor_stop.clear()
 
         def _worker() -> None:
             try:
                 while not self._force_monitor_stop.wait(timeout=5.0):
-                    if not getattr(self._preferences, "allow_force_render_release", False):
+                    if not self._controller_force_render_override:
                         return
                     if self._overlay_controller_active():
                         continue
                     with self._prefs_lock:
-                        if getattr(self._preferences, "allow_force_render_release", False):
-                            self._preferences.allow_force_render_release = False
-                            try:
-                                self._preferences.save()
-                            except Exception as exc:
-                                LOGGER.warning("Failed to clear allow_force_render_release after controller exit: %s", exc)
-                            else:
-                                LOGGER.info("Overlay Controller no longer detected; force-render override cleared.")
-                                self._send_overlay_config()
+                        if self._controller_force_render_override:
+                            self._controller_force_render_override = False
+                            LOGGER.info("Overlay Controller no longer detected; force-render override cleared.")
+                            self._send_overlay_config()
                     return
             except Exception as exc:
                 LOGGER.debug("Force-render monitor terminated with error: %s", exc, exc_info=exc)
@@ -848,6 +852,11 @@ class _PluginRuntime:
         base_value = max(CLIENT_LOG_RETENTION_MIN, min(base_value, CLIENT_LOG_RETENTION_MAX))
         override = self._log_retention_override
         return override if override is not None else base_value
+
+    def _resolve_force_render(self) -> bool:
+        return bool(getattr(self._preferences, "force_render", False)) or bool(
+            getattr(self, "_controller_force_render_override", False)
+        )
 
     def _set_log_retention_override(self, value: Optional[int]) -> bool:
         if value is not None:
@@ -1366,7 +1375,7 @@ class _PluginRuntime:
             self._preferences.gridlines_enabled,
             self._preferences.gridline_spacing,
             self._preferences.overlay_opacity,
-            _is_force_render_enabled(self._preferences),
+            self._resolve_force_render(),
             self._preferences.force_xwayland,
             self._preferences.show_debug_overlay,
             self._preferences.cycle_payload_ids,
@@ -1401,7 +1410,7 @@ class _PluginRuntime:
                 "timestamp": current_time.isoformat(),
                 "event": "LegacyOverlay",
                 "type": "message",
-                "id": f"test-{current_time.strftime('%H%M%S%f')}",
+                "id": f"{PLUGIN_NAME}-test-{current_time.strftime('%H%M%S%f')}",
                 "text": text,
                 "color": "#ffffff",
                 "x": x_val,
@@ -1420,8 +1429,32 @@ class _PluginRuntime:
                 payload["ttl"],
                 payload["size"],
             )
-        else:
-            LOGGER.debug("Sent test message to overlay via API: %s", text)
+
+    def preview_font_sizes(self) -> None:
+        if not self._running:
+            raise RuntimeError("Overlay is not running")
+        timestamp = datetime.now(UTC).isoformat()
+        entries = [
+            ("huge", "Huge"),
+            ("large", "Large"),
+            ("normal", "Normal"),
+            ("small", "Small"),
+        ]
+        for index, (size_label, text_label) in enumerate(entries):
+            payload = {
+                "timestamp": timestamp,
+                "event": "LegacyOverlay",
+                "type": "message",
+                "id": f"{PLUGIN_NAME}-font-preview-{size_label}-{timestamp}",
+                "text": text_label,
+                "color": FONT_PREVIEW_COLOR,
+                "x": FONT_PREVIEW_BASE_X,
+                "y": FONT_PREVIEW_BASE_Y + (index * FONT_PREVIEW_LINE_SPACING),
+                "ttl": FONT_PREVIEW_TTL,
+                "size": size_label,
+            }
+            if not send_overlay_message(payload):
+                raise RuntimeError("Failed to send font preview to overlay")
 
     def preview_overlay_opacity(self, value: float) -> None:
         try:
@@ -1473,6 +1506,19 @@ class _PluginRuntime:
         self._command_helper = self._build_command_helper(normalised, previous_prefix=current_helper_prefix)
         self._command_helper_prefix = normalised
         LOGGER.info("Overlay Controller launch command preference updated to %s", normalised)
+
+    def set_payload_opacity_preference(self, value: int) -> None:
+        try:
+            numeric = int(value)
+        except (TypeError, ValueError):
+            numeric = int(getattr(self._preferences, "global_payload_opacity", 100))
+        numeric = max(0, min(numeric, 100))
+        with self._prefs_lock:
+            if numeric == getattr(self._preferences, "global_payload_opacity", 100):
+                return
+            self._preferences.global_payload_opacity = numeric
+            self._preferences.save()
+        self._send_overlay_config()
 
     def _build_command_helper(self, prefix: str, previous_prefix: Optional[str] = None) -> Any:
         legacy: list[str] = []
@@ -1557,37 +1603,22 @@ class _PluginRuntime:
         self,
         *,
         force_value: Optional[bool],
-        allow_force_release: Optional[bool],
-    ) -> Tuple[bool, bool, bool, bool]:
+    ) -> Tuple[bool, bool, bool]:
         preferences = self._preferences
         previous_force = bool(getattr(preferences, "force_render", False))
-        previous_allow = bool(getattr(preferences, "allow_force_render_release", False))
         broadcast = False
         dirty = False
-        allow_flag = previous_allow if allow_force_release is None else bool(allow_force_release)
-        if allow_flag != previous_allow:
-            preferences.allow_force_render_release = allow_flag
-            dirty = True
-            broadcast = True
         if force_value is not None:
             flag = bool(force_value)
-            if not DEV_BUILD and flag and not allow_flag:
-                LOGGER.warning(
-                    "Ignoring force-render toggle; this option is restricted to developer builds (override disabled)."
-                )
-                flag = False
             if flag != previous_force:
                 preferences.force_render = flag
                 dirty = True
                 broadcast = True
-        return previous_force, previous_allow, dirty, broadcast
+        return previous_force, dirty, broadcast
 
     def set_force_render_preference(self, value: bool) -> None:
         with self._prefs_lock:
-            _prev_force, _prev_allow, dirty, broadcast = self._update_force_render_locked(
-                force_value=value,
-                allow_force_release=None,
-            )
+            _prev_force, dirty, broadcast = self._update_force_render_locked(force_value=value)
             if not dirty:
                 return
             self._preferences.save()
@@ -1910,6 +1941,25 @@ class _PluginRuntime:
         self._send_overlay_config(rebroadcast=True)
         _log("Overlay client restart triggered.")
 
+    def reset_group_cache(self) -> bool:
+        cache_path = self.plugin_dir / "overlay_group_cache.json"
+        try:
+            cache = GroupPlacementCache(cache_path, debounce_seconds=0.1, logger=LOGGER)
+            cache.reset()
+        except Exception as exc:
+            LOGGER.warning("Failed to reset overlay group cache: %s", exc)
+            return False
+        try:
+            self._publish_payload(
+                {
+                    "event": "OverlayGroupCacheReset",
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
+            )
+        except Exception:
+            LOGGER.debug("Failed to notify overlay client about cache reset", exc_info=True)
+        return True
+
     def set_min_font_preference(self, value: float) -> None:
         try:
             minimum = float(value)
@@ -1939,6 +1989,23 @@ class _PluginRuntime:
             if maximum != self._preferences.max_font_point:
                 self._preferences.max_font_point = maximum
                 LOGGER.debug("Overlay maximum font point set to %.1f", maximum)
+                self._preferences.save()
+                broadcast = True
+            else:
+                broadcast = False
+        if broadcast:
+            self._send_overlay_config()
+
+    def set_legacy_font_step_preference(self, value: int) -> None:
+        try:
+            step = int(value)
+        except (TypeError, ValueError):
+            step = int(getattr(self._preferences, "legacy_font_step", 2))
+        step = max(0, min(step, 10))
+        with self._prefs_lock:
+            if step != getattr(self._preferences, "legacy_font_step", 2):
+                self._preferences.legacy_font_step = step
+                LOGGER.debug("Overlay legacy font step set to %d", step)
                 self._preferences.save()
                 broadcast = True
             else:
@@ -2072,41 +2139,31 @@ class _PluginRuntime:
                 preferences = self._preferences
                 if preferences is None:
                     raise RuntimeError("Preferences are not initialised; cannot apply force-render override")
-                if "allow" not in payload:
-                    raise ValueError("force_render_override payload requires 'allow'")
-                allow_flag = bool(payload.get("allow"))
-                desired_force_raw = payload.get("force_render")
-                desired_force: Optional[bool] = None if desired_force_raw is None else bool(desired_force_raw)
+                if "force_render" not in payload:
+                    raise ValueError("force_render_override payload requires 'force_render'")
+                desired_force = bool(payload.get("force_render"))
 
-                def _apply_force_override() -> Tuple[bool, bool, bool]:
+                def _apply_force_override() -> Tuple[bool, bool]:
                     with self._prefs_lock:
-                        previous_force = bool(getattr(preferences, "force_render", False))
-                        previous_allow = bool(getattr(preferences, "allow_force_render_release", False))
-                        _prev_force, _prev_allow, dirty, broadcast = self._update_force_render_locked(
-                            force_value=desired_force,
-                            allow_force_release=allow_flag,
-                        )
-                        if dirty:
-                            try:
-                                preferences.save()
-                            except Exception as exc:
-                                LOGGER.warning("Failed to persist force-render override preference: %s", exc)
-                        return previous_force, previous_allow, broadcast
+                        previous_override = bool(self._controller_force_render_override)
+                        if desired_force == previous_override:
+                            return previous_override, False
+                        self._controller_force_render_override = desired_force
+                        return previous_override, True
 
-                previous_force, previous_allow, broadcast = self._submit_pref_task(
+                previous_override, broadcast = self._submit_pref_task(
                     _apply_force_override,
                     wait=True,
                 )
-                if allow_flag:
+                if desired_force:
                     self._start_force_render_monitor_if_needed()
                 if broadcast:
                     self._send_overlay_config()
                 return {
                     "status": "ok",
-                    "force_render": _is_force_render_enabled(preferences),
-                    "previous_force_render": previous_force,
-                    "previous_allow": previous_allow,
-                    "allow_force_render_release": bool(preferences.allow_force_render_release),
+                    "force_render": self._resolve_force_render(),
+                    "previous_force_render": previous_override,
+                    "force_render_override": bool(self._controller_force_render_override),
                 }
             if command == "legacy_overlay":
                 legacy_payload = payload.get("payload")
@@ -2221,13 +2278,14 @@ class _PluginRuntime:
         payload = {
             "event": "OverlayConfig",
             "opacity": float(self._preferences.overlay_opacity),
+            "global_payload_opacity": int(getattr(self._preferences, "global_payload_opacity", 100)),
             "show_status": bool(self._preferences.show_connection_status),
             "debug_overlay_corner": str(self._preferences.debug_overlay_corner or "NW"),
             "status_bottom_margin": int(self._preferences.status_bottom_margin()),
             "client_log_retention": int(self._resolve_client_log_retention()),
             "gridlines_enabled": bool(self._preferences.gridlines_enabled),
             "gridline_spacing": int(self._preferences.gridline_spacing),
-            "force_render": _is_force_render_enabled(self._preferences),
+            "force_render": self._resolve_force_render(),
             "title_bar_enabled": bool(self._preferences.title_bar_enabled),
             "title_bar_height": int(self._preferences.title_bar_height),
             "show_debug_overlay": show_debug_overlay,
@@ -2235,6 +2293,7 @@ class _PluginRuntime:
             "physical_clamp_overrides": dict(getattr(self._preferences, "physical_clamp_overrides", {}) or {}),
             "min_font_point": float(self._preferences.min_font_point),
             "max_font_point": float(self._preferences.max_font_point),
+            "legacy_font_step": int(getattr(self._preferences, "legacy_font_step", 2)),
             "cycle_payload_ids": bool(self._preferences.cycle_payload_ids),
             "copy_payload_id_on_cycle": bool(self._preferences.copy_payload_id_on_cycle),
             "scale_mode": str(self._preferences.scale_mode or "fit"),
@@ -2246,10 +2305,11 @@ class _PluginRuntime:
         self._last_config = dict(payload)
         self._publish_payload(payload)
         LOGGER.debug(
-            "Published overlay config: opacity=%s show_status=%s debug_overlay_corner=%s status_bottom_margin=%s client_log_retention=%d gridlines_enabled=%s "
+            "Published overlay config: opacity=%s global_payload_opacity=%s show_status=%s debug_overlay_corner=%s status_bottom_margin=%s client_log_retention=%d gridlines_enabled=%s "
             "gridline_spacing=%d force_render=%s title_bar_enabled=%s title_bar_height=%d debug_overlay=%s physical_clamp=%s cycle_payload_ids=%s copy_payload_id_on_cycle=%s "
-            "nudge_overflow=%s payload_gutter=%d payload_log_delay=%.2f font_min=%.1f font_max=%.1f platform_context=%s clamp_overrides=%s",
+            "nudge_overflow=%s payload_gutter=%d payload_log_delay=%.2f font_min=%.1f font_max=%.1f font_step=%d platform_context=%s clamp_overrides=%s",
             payload["opacity"],
+            payload["global_payload_opacity"],
             payload["show_status"],
             payload["debug_overlay_corner"],
             payload["status_bottom_margin"],
@@ -2268,6 +2328,7 @@ class _PluginRuntime:
             payload["payload_log_delay_seconds"],
             payload["min_font_point"],
             payload["max_font_point"],
+            payload["legacy_font_step"],
             payload["platform_context"],
             payload["physical_clamp_overrides"],
         )
@@ -2696,37 +2757,6 @@ class _PluginRuntime:
                 return True
         return False
 
-    def _warn_if_controller_running(self) -> None:
-        try:
-            active = self._overlay_controller_active()
-        except Exception as exc:
-            LOGGER.debug("Controller scan failed: %s", exc, exc_info=exc)
-            return
-        if active:
-            LOGGER.warning(
-                "Overlay Controller appears to be running; force-render override has been cleared on startup. "
-                "Reopen the controller to re-enable force-render if needed."
-            )
-
-    def _reset_force_render_override_on_startup(self) -> None:
-        reset_applied = False
-        with self._prefs_lock:
-            if getattr(self._preferences, "allow_force_render_release", False):
-                self._preferences.allow_force_render_release = False
-                try:
-                    self._preferences.save()
-                except Exception as exc:
-                    LOGGER.warning("Failed to reset allow_force_render_release on startup: %s", exc)
-                else:
-                    reset_applied = True
-        if reset_applied:
-            LOGGER.info("Cleared allow_force_render_release on startup to enforce default force-render policy.")
-        threading.Thread(
-            target=self._warn_if_controller_running,
-            name="ModernOverlayControllerScan",
-            daemon=True,
-        ).start()
-
     def _platform_context_payload(self) -> Dict[str, Any]:
         session = (os.environ.get("XDG_SESSION_TYPE") or "").lower()
         context = {
@@ -2769,7 +2799,7 @@ class _PluginRuntime:
             except Exception:
                 pass
             overlay.send_message(
-                "modern-overlay-conflict",
+                f"{PLUGIN_NAME}-legacy-overlay-conflict",
                 "EDMC Modern Overlay detected the legacy overlay. Using legacy overlay instead.",
                 "#ffa500",
                 100,
@@ -2866,12 +2896,16 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
         payload_logging_callback = _plugin.set_payload_logging_preference if _plugin else None
         font_min_callback = _plugin.set_min_font_preference if _plugin else None
         font_max_callback = _plugin.set_max_font_preference if _plugin else None
+        font_step_callback = _plugin.set_legacy_font_step_preference if _plugin else None
+        font_preview_callback = _plugin.preview_font_sizes if _plugin else None
         cycle_toggle_callback = _plugin.set_cycle_payload_preference if _plugin else None
         cycle_copy_callback = _plugin.set_cycle_payload_copy_preference if _plugin else None
         cycle_prev_callback = _plugin.cycle_payload_prev if _plugin else None
         cycle_next_callback = _plugin.cycle_payload_next if _plugin else None
         restart_overlay_callback = _plugin.restart_overlay_client if _plugin else None
         launch_command_callback = _plugin.set_launch_command_preference if _plugin else None
+        payload_opacity_callback = _plugin.set_payload_opacity_preference if _plugin else None
+        reset_group_cache_callback = _plugin.reset_group_cache if _plugin else None
         capture_override_callback = _plugin.set_capture_override_preference if _plugin else None
         log_retention_override_callback = _plugin.set_log_retention_override_preference if _plugin else None
         payload_exclusion_callback = _plugin.set_payload_logging_exclusions if _plugin else None
@@ -2897,12 +2931,16 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
             payload_logging_callback,
             font_min_callback,
             font_max_callback,
+            font_step_callback,
+            font_preview_callback,
             cycle_toggle_callback,
             cycle_copy_callback,
             cycle_prev_callback,
             cycle_next_callback,
             restart_overlay_callback,
             launch_command_callback,
+            payload_opacity_callback,
+            reset_group_cache_callback=reset_group_cache_callback,
             dev_mode=DEV_BUILD,
             plugin_version=MODERN_OVERLAY_VERSION,
             version_update_available=version_update_available,
@@ -2947,7 +2985,7 @@ def prefs_changed(cmdr: str, is_beta: bool) -> None:  # pragma: no cover - save 
                 _plugin._resolve_client_log_retention() if _plugin else _preferences.client_log_retention,
                 _preferences.gridlines_enabled,
                 _preferences.gridline_spacing,
-                _is_force_render_enabled(_preferences),
+                _plugin._resolve_force_render() if _plugin else bool(getattr(_preferences, "force_render", False)),
                 _preferences.title_bar_enabled,
                 _preferences.title_bar_height,
                 _preferences.force_xwayland,

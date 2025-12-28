@@ -88,6 +88,11 @@ class SetupSurfaceMixin:
         self._current_mode_profile = self._mode_profile.resolve("inactive", self._mode_profile_overrides)
         self._payload_model = payload_model_factory(self._trace_legacy_store_event)
         self._background_opacity: float = 0.0
+        try:
+            payload_opacity = int(getattr(initial, "global_payload_opacity", 100))
+        except (TypeError, ValueError):
+            payload_opacity = 100
+        self._payload_opacity: int = max(0, min(payload_opacity, 100))
         self._gridlines_enabled: bool = False
         self._gridline_spacing: int = 120
         self._grid_pixmap: Optional[QPixmap] = None
@@ -319,6 +324,12 @@ class SetupSurfaceMixin:
         max_font = getattr(initial, "max_font_point", 24.0)
         self._font_min_point = max(1.0, min(float(min_font), 48.0))
         self._font_max_point = max(self._font_min_point, min(float(max_font), 72.0))
+        legacy_step = getattr(initial, "legacy_font_step", 2)
+        try:
+            legacy_step_value = float(legacy_step)
+        except (TypeError, ValueError):
+            legacy_step_value = 2.0
+        self._legacy_font_step = max(0.0, min(legacy_step_value, 10.0))
         user_groupings = os.environ.get("MODERN_OVERLAY_USER_GROUPINGS_PATH", root_dir / "overlay_groupings.user.json")
         self._groupings_loader = GroupingsLoader(
             root_dir / "overlay_groupings.json",

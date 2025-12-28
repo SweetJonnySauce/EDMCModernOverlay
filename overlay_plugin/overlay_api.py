@@ -17,7 +17,9 @@ _LOGGER = logging.getLogger("EDMC.ModernOverlay.API")
 _MAX_MESSAGE_BYTES = 16_384
 _ANCHOR_CHOICES = {"nw", "ne", "sw", "se", "center", "top", "bottom", "left", "right"}
 _JUSTIFICATION_CHOICES = {"left", "center", "right"}
-_HEX_DIGITS = set("0123456789ABCDEF")
+_MARKER_LABEL_POSITIONS = {"below", "above", "centered"}
+_CONTROLLER_PREVIEW_BOX_MODES = {"last", "max"}
+_HEX_DIGITS = set("0123456789ABCDEFabcdef")
 
 _publisher: Optional[Callable[[Mapping[str, Any]], bool]] = None
 _grouping_store: Optional["_PluginGroupingStore"] = None
@@ -140,7 +142,10 @@ def define_plugin_group(
     id_prefix_offset_x: Optional[Union[int, float]] = None,
     id_prefix_offset_y: Optional[Union[int, float]] = None,
     payload_justification: Optional[str] = None,
+    marker_label_position: Optional[str] = None,
+    controller_preview_box_mode: Optional[str] = None,
     background_color: Optional[str] = None,
+    background_border_color: Optional[str] = None,
     background_border_width: Optional[Union[int, float]] = None,
 ) -> bool:
     """Create or replace grouping metadata for a plugin.
@@ -166,10 +171,16 @@ def define_plugin_group(
         and id_prefix_offset_x is None
         and id_prefix_offset_y is None
         and payload_justification is None
+        and marker_label_position is None
+        and controller_preview_box_mode is None
         and background_color is None
+        and background_border_color is None
         and background_border_width is None
     ):
-        raise PluginGroupingError("Provide matchingPrefixes, idPrefixGroup, idPrefixes, or idPrefixGroupAnchor")
+        raise PluginGroupingError(
+            "Provide matchingPrefixes, idPrefixGroup, idPrefixes, idPrefixGroupAnchor, "
+            "markerLabelPosition, controllerPreviewBoxMode, offsets, payloadJustification, or background fields"
+        )
 
     match_list = _normalise_prefixes(matching_prefixes, "matchingPrefixes") if matching_prefixes is not None else None
     id_group_label = _normalise_label(id_prefix_group, "idPrefixGroup") if id_prefix_group is not None else None
@@ -188,14 +199,35 @@ def define_plugin_group(
     )
     if justification_token is not None and id_group_label is None:
         raise PluginGroupingError("idPrefixGroup is required when specifying payloadJustification")
+    marker_label_position_token = (
+        _normalise_marker_label_position(marker_label_position) if marker_label_position is not None else None
+    )
+    if marker_label_position_token is not None and id_group_label is None:
+        raise PluginGroupingError("idPrefixGroup is required when specifying markerLabelPosition")
+    controller_preview_box_mode_token = (
+        _normalise_controller_preview_box_mode(controller_preview_box_mode)
+        if controller_preview_box_mode is not None
+        else None
+    )
+    if controller_preview_box_mode_token is not None and id_group_label is None:
+        raise PluginGroupingError("idPrefixGroup is required when specifying controllerPreviewBoxMode")
     background_color_token = _normalise_background_color(background_color) if background_color is not None else None
+    background_border_color_token = (
+        _normalise_background_color(background_border_color) if background_border_color is not None else None
+    )
     background_border_width_token = (
         _normalise_border_width(background_border_width, "backgroundBorderWidth")
         if background_border_width is not None
         else None
     )
-    if (background_color_token is not None or background_border_width_token is not None) and id_group_label is None:
-        raise PluginGroupingError("idPrefixGroup is required when specifying backgroundColor or backgroundBorderWidth")
+    if (
+        background_color_token is not None
+        or background_border_color_token is not None
+        or background_border_width_token is not None
+    ) and id_group_label is None:
+        raise PluginGroupingError(
+            "idPrefixGroup is required when specifying backgroundColor, backgroundBorderColor, or backgroundBorderWidth"
+        )
 
     update = _GroupingUpdate(
         plugin_group=plugin_label,
@@ -206,7 +238,10 @@ def define_plugin_group(
         offset_x=offset_x,
         offset_y=offset_y,
         payload_justification=justification_token,
+        marker_label_position=marker_label_position_token,
+        controller_preview_box_mode=controller_preview_box_mode_token,
         background_color=background_color_token,
+        background_border_color=background_border_color_token,
         background_border_width=background_border_width_token,
     )
     return store.apply(update)
@@ -300,6 +335,32 @@ def _normalise_justification(value: Optional[str]) -> str:
     return token
 
 
+def _normalise_marker_label_position(value: Optional[str]) -> str:
+    if not isinstance(value, str):
+        raise PluginGroupingError("markerLabelPosition must be a string")
+    token = value.strip().lower()
+    if not token:
+        raise PluginGroupingError("markerLabelPosition must be non-empty")
+    if token not in _MARKER_LABEL_POSITIONS:
+        raise PluginGroupingError(
+            "markerLabelPosition must be one of: " + ", ".join(sorted(_MARKER_LABEL_POSITIONS))
+        )
+    return token
+
+
+def _normalise_controller_preview_box_mode(value: Optional[str]) -> str:
+    if not isinstance(value, str):
+        raise PluginGroupingError("controllerPreviewBoxMode must be a string")
+    token = value.strip().lower()
+    if not token:
+        raise PluginGroupingError("controllerPreviewBoxMode must be non-empty")
+    if token not in _CONTROLLER_PREVIEW_BOX_MODES:
+        raise PluginGroupingError(
+            "controllerPreviewBoxMode must be one of: " + ", ".join(sorted(_CONTROLLER_PREVIEW_BOX_MODES))
+        )
+    return token
+
+
 def _normalise_offset(value: Union[int, float], field: str) -> float:
     if not isinstance(value, (int, float)):
         raise PluginGroupingError(f"{field} must be a number")
@@ -312,15 +373,24 @@ def _normalise_offset(value: Union[int, float], field: str) -> float:
 def _normalise_background_color(value: Optional[str]) -> str:
     if not isinstance(value, str):
         raise PluginGroupingError("backgroundColor must be a string")
-    token = value.strip().upper()
+    token = value.strip()
     if not token:
         raise PluginGroupingError("backgroundColor must be non-empty")
-    if not token.startswith("#"):
-        token = "#" + token
-    if len(token) not in (7, 9):
-        raise PluginGroupingError("backgroundColor must be #RRGGBB or #RRGGBBAA")
-    if not all(ch in _HEX_DIGITS for ch in token[1:]):
-        raise PluginGroupingError("backgroundColor must use hex digits")
+    if token.startswith("#") or (
+        len(token) in (6, 8) and all(ch in _HEX_DIGITS for ch in token)
+    ):
+        if not token.startswith("#"):
+            token = "#" + token
+        token = token.upper()
+        if len(token) not in (7, 9):
+            raise PluginGroupingError("backgroundColor must be #RRGGBB or #AARRGGBB")
+        if not all(ch in _HEX_DIGITS for ch in token[1:]):
+            raise PluginGroupingError("backgroundColor must use hex digits")
+        return token
+    if not token[0].isalpha():
+        raise PluginGroupingError("backgroundColor must be #RRGGBB, #AARRGGBB, or a named color")
+    if not all(ch.isalnum() or ch == "_" for ch in token):
+        raise PluginGroupingError("backgroundColor must be #RRGGBB, #AARRGGBB, or a named color")
     return token
 
 
@@ -386,7 +456,10 @@ class _GroupingUpdate:
     offset_x: Optional[float]
     offset_y: Optional[float]
     payload_justification: Optional[str]
+    marker_label_position: Optional[str]
+    controller_preview_box_mode: Optional[str]
     background_color: Optional[str]
+    background_border_color: Optional[str]
     background_border_width: Optional[int]
 
 
@@ -476,6 +549,14 @@ class _PluginGroupingStore:
                     if group_entry.get("payloadJustification") != update.payload_justification:
                         group_entry["payloadJustification"] = update.payload_justification
                         mutated = True
+                if update.marker_label_position is not None:
+                    if group_entry.get("markerLabelPosition") != update.marker_label_position:
+                        group_entry["markerLabelPosition"] = update.marker_label_position
+                        mutated = True
+                if update.controller_preview_box_mode is not None:
+                    if group_entry.get("controllerPreviewBoxMode") != update.controller_preview_box_mode:
+                        group_entry["controllerPreviewBoxMode"] = update.controller_preview_box_mode
+                        mutated = True
                 if update.offset_x is not None:
                     if group_entry.get("offsetX") != update.offset_x:
                         group_entry["offsetX"] = update.offset_x
@@ -487,6 +568,10 @@ class _PluginGroupingStore:
                 if update.background_color is not None:
                     if group_entry.get("backgroundColor") != update.background_color:
                         group_entry["backgroundColor"] = update.background_color
+                        mutated = True
+                if update.background_border_color is not None:
+                    if group_entry.get("backgroundBorderColor") != update.background_border_color:
+                        group_entry["backgroundBorderColor"] = update.background_border_color
                         mutated = True
                 if update.background_border_width is not None:
                     if group_entry.get("backgroundBorderWidth") != update.background_border_width:
@@ -503,11 +588,15 @@ class _PluginGroupingStore:
                     or update.id_prefix_group_anchor is not None
                     or update.offset_x is not None
                     or update.offset_y is not None
+                    or update.marker_label_position is not None
+                    or update.controller_preview_box_mode is not None
                     or update.background_color is not None
+                    or update.background_border_color is not None
                     or update.background_border_width is not None
                 ):
                     raise PluginGroupingError(
-                        "idPrefixGroup is required when specifying idPrefixes, idPrefixGroupAnchor, offsets, or background fields"
+                        "idPrefixGroup is required when specifying idPrefixes, idPrefixGroupAnchor, "
+                        "markerLabelPosition, controllerPreviewBoxMode, offsets, or background fields"
                     )
 
         if mutated:

@@ -33,14 +33,19 @@ class PayloadTransformContext:
         self.axis_y = axis_y
 
 
-def build_payload_transform_context(fill: "FillViewport") -> PayloadTransformContext:
+def build_payload_transform_context(
+    fill: "FillViewport",
+    *,
+    overflow_x: Optional[bool] = None,
+    overflow_y: Optional[bool] = None,
+) -> PayloadTransformContext:
     axis_x = PayloadAxisContext(
-        overflow=fill.overflow_x,
+        overflow=fill.overflow_x if overflow_x is None else overflow_x,
         min_bound=0.0,
         max_bound=BASE_WIDTH,
     )
     axis_y = PayloadAxisContext(
-        overflow=fill.overflow_y,
+        overflow=fill.overflow_y if overflow_y is None else overflow_y,
         min_bound=0.0,
         max_bound=BASE_HEIGHT,
     )

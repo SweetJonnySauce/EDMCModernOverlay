@@ -36,7 +36,13 @@ from prefix_entries import (
     parse_prefix_entries,
     serialise_prefix_entries,
 )
-from overlay_plugin.overlay_api import PluginGroupingError, _normalise_background_color, _normalise_border_width
+from overlay_plugin.overlay_api import (
+    PluginGroupingError,
+    _normalise_background_color,
+    _normalise_border_width,
+    define_plugin_group,
+    register_grouping_store,
+)
 
 try:
     from overlay_client.plugin_overrides import PluginOverrideManager
@@ -58,6 +64,10 @@ PAYLOAD_LOG_BASENAMES = ("overlay-payloads.log", "overlay_payloads.log")
 ANCHOR_CHOICES = ("nw", "ne", "sw", "se", "center", "top", "bottom", "left", "right")
 PAYLOAD_JUSTIFICATION_CHOICES = ("left", "center", "right")
 DEFAULT_PAYLOAD_JUSTIFICATION = "left"
+MARKER_LABEL_POSITION_CHOICES = ("below", "above", "centered")
+DEFAULT_MARKER_LABEL_POSITION = "below"
+CONTROLLER_PREVIEW_BOX_MODE_CHOICES = ("last", "max")
+DEFAULT_CONTROLLER_PREVIEW_BOX_MODE = "last"
 GENERIC_PAYLOAD_TOKENS = {"vect", "shape", "text"}
 GROUP_SELECTOR_STYLE = "ModernOverlayGroupSelect.TCombobox"
 LEFT_COLUMN_WIDTH = 180
@@ -540,6 +550,7 @@ class GroupConfigStore:
         self._lock = threading.RLock()
         self._data: Dict[str, MutableMapping[str, object]] = {}
         self._mtime: Optional[float] = None
+        register_grouping_store(self._path)
         self._load()
 
     def _current_mtime(self) -> Optional[float]:
@@ -576,6 +587,17 @@ class GroupConfigStore:
                 continue
             cleaned[plugin_name] = self._normalise_plugin_entry(dict(payload))
         self._data = cleaned
+
+    def _reload_from_disk(self) -> None:
+        self._load_unlocked()
+        self._mtime = self._current_mtime()
+
+    @staticmethod
+    def _apply_define_plugin_group(**kwargs: object) -> None:
+        try:
+            define_plugin_group(**kwargs)
+        except PluginGroupingError as exc:
+            raise ValueError(str(exc)) from exc
 
     def refresh_if_changed(self) -> bool:
         with self._lock:
@@ -706,6 +728,28 @@ class GroupConfigStore:
         return None
 
     @staticmethod
+    def _normalise_marker_label_position(value: Any) -> Optional[str]:
+        if not isinstance(value, str):
+            return None
+        token = value.strip().lower()
+        if not token:
+            return None
+        if token in MARKER_LABEL_POSITION_CHOICES:
+            return token
+        return None
+
+    @staticmethod
+    def _normalise_controller_preview_box_mode(value: Any) -> Optional[str]:
+        if not isinstance(value, str):
+            return None
+        token = value.strip().lower()
+        if not token:
+            return None
+        if token in CONTROLLER_PREVIEW_BOX_MODE_CHOICES:
+            return token
+        return None
+
+    @staticmethod
     def _clean_offset_value(value: Any) -> Optional[float]:
         numeric: Optional[float]
         if isinstance(value, (int, float)):
@@ -762,6 +806,16 @@ class GroupConfigStore:
         )
         if justification:
             cleaned["payloadJustification"] = justification
+        marker_label_position = self._normalise_marker_label_position(
+            spec.get("markerLabelPosition") or spec.get("marker_label_position")
+        )
+        if marker_label_position:
+            cleaned["markerLabelPosition"] = marker_label_position
+        controller_preview_box_mode = self._normalise_controller_preview_box_mode(
+            spec.get("controllerPreviewBoxMode") or spec.get("controller_preview_box_mode")
+        )
+        if controller_preview_box_mode:
+            cleaned["controllerPreviewBoxMode"] = controller_preview_box_mode
         if "backgroundColor" in spec or "background_color" in spec:
             raw_color = spec.get("backgroundColor") or spec.get("background_color")
             if raw_color is None:
@@ -769,6 +823,15 @@ class GroupConfigStore:
             else:
                 try:
                     cleaned["backgroundColor"] = _normalise_background_color(raw_color)
+                except PluginGroupingError:
+                    pass
+        if "backgroundBorderColor" in spec or "background_border_color" in spec:
+            raw_border_color = spec.get("backgroundBorderColor") or spec.get("background_border_color")
+            if raw_border_color is None:
+                cleaned["backgroundBorderColor"] = None
+            else:
+                try:
+                    cleaned["backgroundBorderColor"] = _normalise_background_color(raw_border_color)
                 except PluginGroupingError:
                     pass
         if "backgroundBorderWidth" in spec or "background_border_width" in spec:
@@ -839,6 +902,20 @@ class GroupConfigStore:
                             justification = DEFAULT_PAYLOAD_JUSTIFICATION
                         if justification not in PAYLOAD_JUSTIFICATION_CHOICES:
                             justification = DEFAULT_PAYLOAD_JUSTIFICATION
+                        raw_marker_label_position = spec.get("markerLabelPosition")
+                        if isinstance(raw_marker_label_position, str) and raw_marker_label_position.strip():
+                            marker_label_position = raw_marker_label_position.strip().lower()
+                        else:
+                            marker_label_position = DEFAULT_MARKER_LABEL_POSITION
+                        if marker_label_position not in MARKER_LABEL_POSITION_CHOICES:
+                            marker_label_position = DEFAULT_MARKER_LABEL_POSITION
+                        raw_preview_mode = spec.get("controllerPreviewBoxMode")
+                        if isinstance(raw_preview_mode, str) and raw_preview_mode.strip():
+                            controller_preview_box_mode = raw_preview_mode.strip().lower()
+                        else:
+                            controller_preview_box_mode = DEFAULT_CONTROLLER_PREVIEW_BOX_MODE
+                        if controller_preview_box_mode not in CONTROLLER_PREVIEW_BOX_MODE_CHOICES:
+                            controller_preview_box_mode = DEFAULT_CONTROLLER_PREVIEW_BOX_MODE
                         view_entries.append(
                             {
                                 "label": label,
@@ -848,7 +925,10 @@ class GroupConfigStore:
                                 "offsetX": spec.get("offsetX"),
                                 "offsetY": spec.get("offsetY"),
                                 "payloadJustification": justification,
+                                "markerLabelPosition": marker_label_position,
+                                "controllerPreviewBoxMode": controller_preview_box_mode,
                                 "backgroundColor": spec.get("backgroundColor"),
+                                "backgroundBorderColor": spec.get("backgroundBorderColor"),
                                 "backgroundBorderWidth": spec.get("backgroundBorderWidth"),
                                 "notes": notes,
                             }
@@ -882,33 +962,77 @@ class GroupConfigStore:
         with self._lock:
             if cleaned_name in self._data:
                 raise ValueError(f"Group '{cleaned_name}' already exists.")
-            grouping_block: Dict[str, Dict[str, object]] = {}
+            cleaned_match = self._normalise_prefix_list(match_prefixes or [])
+            cleaned_notes = _normalise_notes(notes)
+            initial_label: Optional[str] = None
+            initial_prefixes: Optional[List[object]] = None
+            initial_anchor: Optional[str] = None
+            initial_notes: Optional[str] = None
             if initial_grouping:
                 label = initial_grouping.get("label")
-                if isinstance(label, str) and label:
-                    entry_spec = self._normalise_group_spec(
-                        {
-                            "idPrefixes": initial_grouping.get("idPrefixes")
-                            or initial_grouping.get("id_prefixes")
-                            or initial_grouping.get("prefixes")
-                            or [],
-                            "idPrefixGroupAnchor": initial_grouping.get("anchor"),
-                            "notes": initial_grouping.get("notes"),
-                        }
+                if isinstance(label, str) and label.strip():
+                    initial_label = label.strip()
+                    raw_prefixes = (
+                        initial_grouping.get("idPrefixes")
+                        or initial_grouping.get("id_prefixes")
+                        or initial_grouping.get("prefixes")
+                        or []
                     )
-                    grouping_block[label] = entry_spec
-            entry: Dict[str, object] = {"idPrefixGroups": grouping_block}
-            cleaned_match = self._normalise_prefix_list(match_prefixes or [])
-            if not cleaned_match and initial_grouping:
-                cleaned_match = self._normalise_prefix_list(
-                    initial_grouping.get("idPrefixes")
-                    or initial_grouping.get("id_prefixes")
-                    or initial_grouping.get("prefixes")
-                    or []
+                    parsed_prefixes = parse_prefix_entries(raw_prefixes)
+                    if parsed_prefixes:
+                        initial_prefixes = serialise_prefix_entries(parsed_prefixes)
+                    anchor_value = initial_grouping.get("anchor")
+                    if isinstance(anchor_value, str) and anchor_value.strip():
+                        initial_anchor = anchor_value.strip()
+                    notes_value = initial_grouping.get("notes")
+                    if isinstance(notes_value, str) and notes_value.strip():
+                        initial_notes = notes_value.strip()
+
+            if not cleaned_match and initial_prefixes:
+                cleaned_match = self._normalise_prefix_list(initial_prefixes)
+
+            update_kwargs: Dict[str, object] = {}
+            if cleaned_match:
+                update_kwargs["matching_prefixes"] = cleaned_match
+            if initial_label and initial_prefixes:
+                update_kwargs["id_prefix_group"] = initial_label
+                update_kwargs["id_prefixes"] = initial_prefixes
+                if initial_anchor:
+                    update_kwargs["id_prefix_group_anchor"] = initial_anchor
+
+            if update_kwargs:
+                update_kwargs["plugin_group"] = cleaned_name
+                self._apply_define_plugin_group(**update_kwargs)
+                self._reload_from_disk()
+                entry = self._data.get(cleaned_name, {})
+                if cleaned_notes:
+                    entry["notes"] = cleaned_notes
+                elif notes is not None:
+                    entry.pop("notes", None)
+                if initial_label and initial_notes:
+                    groups = entry.setdefault("idPrefixGroups", {})
+                    group_entry = groups.get(initial_label, {})
+                    if isinstance(group_entry, Mapping):
+                        group_entry = dict(group_entry)
+                    group_entry["notes"] = initial_notes
+                    groups[initial_label] = group_entry
+                self._data[cleaned_name] = entry
+                self.save()
+                return
+
+            grouping_block: Dict[str, Dict[str, object]] = {}
+            if initial_label:
+                entry_spec = self._normalise_group_spec(
+                    {
+                        "idPrefixes": initial_prefixes or [],
+                        "idPrefixGroupAnchor": initial_anchor,
+                        "notes": initial_notes,
+                    }
                 )
+                grouping_block[initial_label] = entry_spec
+            entry: Dict[str, object] = {"idPrefixGroups": grouping_block}
             if cleaned_match:
                 entry["matchingPrefixes"] = cleaned_match
-            cleaned_notes = _normalise_notes(notes)
             if cleaned_notes:
                 entry["notes"] = cleaned_notes
             self._data[cleaned_name] = entry
@@ -942,7 +1066,12 @@ class GroupConfigStore:
             if match_prefixes is not None:
                 cleaned_matches = self._normalise_prefix_list(match_prefixes)
                 if cleaned_matches:
-                    entry["matchingPrefixes"] = cleaned_matches
+                    self._apply_define_plugin_group(
+                        plugin_group=cleaned_original,
+                        matching_prefixes=cleaned_matches,
+                    )
+                    self._reload_from_disk()
+                    entry = self._data.get(cleaned_original, {})
                 else:
                     entry.pop("matchingPrefixes", None)
 
@@ -968,10 +1097,14 @@ class GroupConfigStore:
         offset_x: Optional[object] = None,
         offset_y: Optional[object] = None,
         payload_justification: Optional[str] = None,
+        marker_label_position: Optional[str] = None,
+        controller_preview_box_mode: Optional[str] = None,
         background_color: Optional[str] = None,
+        background_border_color: Optional[str] = None,
         background_border_width: Optional[object] = None,
     ) -> None:
         prefix_entries = self._coerce_prefix_entries(prefixes)
+        serialised_prefixes = serialise_prefix_entries(prefix_entries)
         cleaned_label = label.strip()
         if not cleaned_label:
             raise ValueError("Grouping label is required.")
@@ -985,8 +1118,26 @@ class GroupConfigStore:
         )
         if not justification_token:
             justification_token = DEFAULT_PAYLOAD_JUSTIFICATION
+        marker_label_position_token = (
+            self._normalise_marker_label_position(marker_label_position) if marker_label_position is not None else None
+        )
+        if not marker_label_position_token:
+            marker_label_position_token = DEFAULT_MARKER_LABEL_POSITION
+        controller_preview_box_mode_token = (
+            self._normalise_controller_preview_box_mode(controller_preview_box_mode)
+            if controller_preview_box_mode is not None
+            else None
+        )
+        if not controller_preview_box_mode_token:
+            controller_preview_box_mode_token = DEFAULT_CONTROLLER_PREVIEW_BOX_MODE
         try:
             normalized_color = _normalise_background_color(background_color) if background_color is not None else None
+        except PluginGroupingError as exc:
+            raise ValueError(str(exc)) from exc
+        try:
+            normalized_border_color = (
+                _normalise_background_color(background_border_color) if background_border_color is not None else None
+            )
         except PluginGroupingError as exc:
             raise ValueError(str(exc)) from exc
         try:
@@ -1007,25 +1158,44 @@ class GroupConfigStore:
                 groups = entry["idPrefixGroups"]
             if cleaned_label in groups:
                 raise ValueError(f"Grouping '{cleaned_label}' already exists for '{group_name}'.")
-            cleaned_notes = notes.strip() if isinstance(notes, str) else None
-            spec_payload: Dict[str, object] = {
-                "idPrefixes": serialise_prefix_entries(prefix_entries),
-                "idPrefixGroupAnchor": anchor_token,
-                "notes": cleaned_notes,
+            update_kwargs: Dict[str, object] = {
+                "plugin_group": group_name,
+                "id_prefix_group": cleaned_label,
+                "id_prefixes": serialised_prefixes,
             }
+            if anchor_token:
+                update_kwargs["id_prefix_group_anchor"] = anchor_token
             if offset_x_value is not None:
-                spec_payload["offsetX"] = offset_x_value
+                update_kwargs["id_prefix_offset_x"] = offset_x_value
             if offset_y_value is not None:
-                spec_payload["offsetY"] = offset_y_value
-            spec_payload["payloadJustification"] = justification_token
+                update_kwargs["id_prefix_offset_y"] = offset_y_value
+            if justification_token:
+                update_kwargs["payload_justification"] = justification_token
+            if marker_label_position_token:
+                update_kwargs["marker_label_position"] = marker_label_position_token
+            if controller_preview_box_mode_token:
+                update_kwargs["controller_preview_box_mode"] = controller_preview_box_mode_token
             if background_color is not None:
-                spec_payload["backgroundColor"] = normalized_color
+                update_kwargs["background_color"] = normalized_color
+            if background_border_color is not None:
+                update_kwargs["background_border_color"] = normalized_border_color
             if background_border_width is not None:
-                spec_payload["backgroundBorderWidth"] = normalized_border
-            groups[cleaned_label] = self._normalise_group_spec(
-                spec_payload
-            )
-            self.save()
+                update_kwargs["background_border_width"] = normalized_border
+
+            self._apply_define_plugin_group(**update_kwargs)
+            self._reload_from_disk()
+            entry = self._data.get(group_name, {})
+            groups = entry.setdefault("idPrefixGroups", {})
+            if isinstance(groups, Mapping):
+                group_entry = groups.get(cleaned_label, {})
+                if isinstance(group_entry, Mapping):
+                    group_entry = dict(group_entry)
+                cleaned_notes = notes.strip() if isinstance(notes, str) else None
+                if cleaned_notes:
+                    group_entry["notes"] = cleaned_notes
+                    groups[cleaned_label] = group_entry
+                self._data[group_name] = entry
+                self.save()
 
     def update_grouping(
         self,
@@ -1039,7 +1209,10 @@ class GroupConfigStore:
         offset_x: Optional[object] = None,
         offset_y: Optional[object] = None,
         payload_justification: Optional[object] = None,
+        marker_label_position: Optional[object] = None,
+        controller_preview_box_mode: Optional[object] = None,
         background_color: object = _MISSING,
+        background_border_color: object = _MISSING,
         background_border_width: object = _MISSING,
     ) -> None:
         original_label = label.strip()
@@ -1057,63 +1230,259 @@ class GroupConfigStore:
             if not isinstance(target_spec, MutableMapping):
                 target_spec = {}
                 groups[original_label] = target_spec
+
+            prefix_entries: Optional[List[PrefixEntry]] = None
             if prefixes is not None:
                 prefix_entries = self._coerce_prefix_entries(prefixes)
-                target_spec["idPrefixes"] = serialise_prefix_entries(prefix_entries)
+            elif replacement_label != original_label:
+                existing_prefixes = parse_prefix_entries(target_spec.get("idPrefixes") or [])
+                if not existing_prefixes:
+                    raise ValueError("At least one ID prefix is required.")
+                prefix_entries = existing_prefixes
+
+            anchor_value: Optional[str] = None
+            clear_anchor = False
             if anchor is not None:
                 anchor_token = anchor.strip().lower()
                 if anchor_token:
                     if anchor_token not in ANCHOR_CHOICES:
                         raise ValueError(f"Anchor must be one of {', '.join(ANCHOR_CHOICES)}.")
-                    target_spec["idPrefixGroupAnchor"] = anchor_token
+                    anchor_value = anchor_token
                 else:
+                    clear_anchor = True
+            elif replacement_label != original_label:
+                existing_anchor = target_spec.get("idPrefixGroupAnchor")
+                if isinstance(existing_anchor, str) and existing_anchor.strip():
+                    anchor_value = existing_anchor.strip().lower()
+
+            offset_x_value: Optional[float] = None
+            clear_offset_x = False
+            if offset_x is not None:
+                offset_x_value = self._coerce_offset_value(offset_x, "Offset X")
+                if offset_x_value is None:
+                    clear_offset_x = True
+            elif replacement_label != original_label and "offsetX" in target_spec:
+                existing_offset_x = target_spec.get("offsetX")
+                if isinstance(existing_offset_x, (int, float)):
+                    offset_x_value = float(existing_offset_x)
+
+            offset_y_value: Optional[float] = None
+            clear_offset_y = False
+            if offset_y is not None:
+                offset_y_value = self._coerce_offset_value(offset_y, "Offset Y")
+                if offset_y_value is None:
+                    clear_offset_y = True
+            elif replacement_label != original_label and "offsetY" in target_spec:
+                existing_offset_y = target_spec.get("offsetY")
+                if isinstance(existing_offset_y, (int, float)):
+                    offset_y_value = float(existing_offset_y)
+
+            justification_value: Optional[str] = None
+            clear_justification = False
+            if payload_justification is not None:
+                justification_token = self._normalise_justification(payload_justification)
+                if justification_token:
+                    justification_value = justification_token
+                else:
+                    clear_justification = True
+            elif replacement_label != original_label:
+                existing_justification = target_spec.get("payloadJustification")
+                if isinstance(existing_justification, str) and existing_justification.strip():
+                    justification_value = existing_justification.strip().lower()
+
+            marker_label_position_value: Optional[str] = None
+            clear_marker_label_position = False
+            if marker_label_position is not None:
+                marker_label_position_token = self._normalise_marker_label_position(marker_label_position)
+                if marker_label_position_token:
+                    marker_label_position_value = marker_label_position_token
+                else:
+                    clear_marker_label_position = True
+            elif replacement_label != original_label:
+                existing_marker = target_spec.get("markerLabelPosition")
+                if isinstance(existing_marker, str) and existing_marker.strip():
+                    marker_label_position_value = existing_marker.strip().lower()
+
+            controller_preview_value: Optional[str] = None
+            clear_controller_preview = False
+            if controller_preview_box_mode is not None:
+                preview_mode_token = self._normalise_controller_preview_box_mode(controller_preview_box_mode)
+                if preview_mode_token:
+                    controller_preview_value = preview_mode_token
+                else:
+                    clear_controller_preview = True
+            elif replacement_label != original_label:
+                existing_preview = target_spec.get("controllerPreviewBoxMode")
+                if isinstance(existing_preview, str) and existing_preview.strip():
+                    controller_preview_value = existing_preview.strip().lower()
+
+            background_color_value: Optional[str] = None
+            set_background_color_none = False
+            if background_color is not _MISSING:
+                if background_color is None or background_color == "":
+                    set_background_color_none = True
+                else:
+                    try:
+                        background_color_value = _normalise_background_color(background_color)
+                    except PluginGroupingError as exc:
+                        raise ValueError(str(exc)) from exc
+            elif replacement_label != original_label and "backgroundColor" in target_spec:
+                existing_color = target_spec.get("backgroundColor")
+                if existing_color is None:
+                    set_background_color_none = True
+                else:
+                    try:
+                        background_color_value = _normalise_background_color(existing_color)
+                    except PluginGroupingError as exc:
+                        raise ValueError(str(exc)) from exc
+
+            background_border_color_value: Optional[str] = None
+            set_background_border_color_none = False
+            if background_border_color is not _MISSING:
+                if background_border_color is None or background_border_color == "":
+                    set_background_border_color_none = True
+                else:
+                    try:
+                        background_border_color_value = _normalise_background_color(background_border_color)
+                    except PluginGroupingError as exc:
+                        raise ValueError(str(exc)) from exc
+            elif replacement_label != original_label and "backgroundBorderColor" in target_spec:
+                existing_border_color = target_spec.get("backgroundBorderColor")
+                if existing_border_color is None:
+                    set_background_border_color_none = True
+                else:
+                    try:
+                        background_border_color_value = _normalise_background_color(existing_border_color)
+                    except PluginGroupingError as exc:
+                        raise ValueError(str(exc)) from exc
+
+            background_border_value: Optional[int] = None
+            clear_background_border = False
+            if background_border_width is not _MISSING:
+                if background_border_width is None or background_border_width == "":
+                    clear_background_border = True
+                else:
+                    try:
+                        background_border_value = _normalise_border_width(background_border_width, "backgroundBorderWidth")
+                    except PluginGroupingError as exc:
+                        raise ValueError(str(exc)) from exc
+            elif replacement_label != original_label and "backgroundBorderWidth" in target_spec:
+                existing_border = target_spec.get("backgroundBorderWidth")
+                if existing_border is None:
+                    clear_background_border = True
+                else:
+                    try:
+                        background_border_value = _normalise_border_width(existing_border, "backgroundBorderWidth")
+                    except PluginGroupingError as exc:
+                        raise ValueError(str(exc)) from exc
+
+            use_api = (
+                prefix_entries is not None
+                or anchor_value is not None
+                or offset_x_value is not None
+                or offset_y_value is not None
+                or justification_value is not None
+                or marker_label_position_value is not None
+                or controller_preview_value is not None
+                or background_color_value is not None
+                or background_border_color_value is not None
+                or background_border_value is not None
+                or replacement_label != original_label
+            )
+
+            if use_api:
+                if replacement_label != original_label and replacement_label in groups:
+                    raise ValueError(f"Grouping '{replacement_label}' already exists for '{group_name}'.")
+                update_kwargs: Dict[str, object] = {
+                    "plugin_group": group_name,
+                    "id_prefix_group": replacement_label,
+                }
+                if prefix_entries is not None:
+                    update_kwargs["id_prefixes"] = serialise_prefix_entries(prefix_entries)
+                if anchor_value is not None:
+                    update_kwargs["id_prefix_group_anchor"] = anchor_value
+                if offset_x_value is not None:
+                    update_kwargs["id_prefix_offset_x"] = offset_x_value
+                if offset_y_value is not None:
+                    update_kwargs["id_prefix_offset_y"] = offset_y_value
+                if justification_value is not None:
+                    update_kwargs["payload_justification"] = justification_value
+                if marker_label_position_value is not None:
+                    update_kwargs["marker_label_position"] = marker_label_position_value
+                if controller_preview_value is not None:
+                    update_kwargs["controller_preview_box_mode"] = controller_preview_value
+                if background_color_value is not None:
+                    update_kwargs["background_color"] = background_color_value
+                if background_border_color_value is not None:
+                    update_kwargs["background_border_color"] = background_border_color_value
+                if background_border_value is not None:
+                    update_kwargs["background_border_width"] = background_border_value
+
+                self._apply_define_plugin_group(**update_kwargs)
+                self._reload_from_disk()
+                entry = self._data.get(group_name, {})
+                groups = entry.get("idPrefixGroups")
+                if not isinstance(groups, dict):
+                    raise ValueError(f"Group '{group_name}' no longer exists.")
+                target_spec = groups.get(replacement_label, {})
+                if not isinstance(target_spec, MutableMapping):
+                    target_spec = {}
+                if clear_anchor:
                     target_spec.pop("idPrefixGroupAnchor", None)
+                if clear_offset_x:
+                    target_spec.pop("offsetX", None)
+                if clear_offset_y:
+                    target_spec.pop("offsetY", None)
+                if clear_justification:
+                    target_spec.pop("payloadJustification", None)
+                if clear_marker_label_position:
+                    target_spec.pop("markerLabelPosition", None)
+                if clear_controller_preview:
+                    target_spec.pop("controllerPreviewBoxMode", None)
+                if set_background_color_none:
+                    target_spec["backgroundColor"] = None
+                if set_background_border_color_none:
+                    target_spec["backgroundBorderColor"] = None
+                if clear_background_border:
+                    target_spec.pop("backgroundBorderWidth", None)
+                if notes is not None:
+                    cleaned_notes = notes.strip()
+                    if cleaned_notes:
+                        target_spec["notes"] = cleaned_notes
+                    else:
+                        target_spec.pop("notes", None)
+                groups[replacement_label] = target_spec
+                if replacement_label != original_label and original_label in groups:
+                    groups.pop(original_label, None)
+                entry["idPrefixGroups"] = groups
+                self._data[group_name] = entry
+                self.save()
+                return
+
+            if clear_anchor:
+                target_spec.pop("idPrefixGroupAnchor", None)
+            if clear_offset_x:
+                target_spec.pop("offsetX", None)
+            if clear_offset_y:
+                target_spec.pop("offsetY", None)
+            if clear_justification:
+                target_spec.pop("payloadJustification", None)
+            if clear_marker_label_position:
+                target_spec.pop("markerLabelPosition", None)
+            if clear_controller_preview:
+                target_spec.pop("controllerPreviewBoxMode", None)
+            if set_background_color_none:
+                target_spec["backgroundColor"] = None
+            if set_background_border_color_none:
+                target_spec["backgroundBorderColor"] = None
+            if clear_background_border:
+                target_spec.pop("backgroundBorderWidth", None)
             if notes is not None:
                 cleaned_notes = notes.strip()
                 if cleaned_notes:
                     target_spec["notes"] = cleaned_notes
                 else:
                     target_spec.pop("notes", None)
-            if offset_x is not None:
-                offset_value = self._coerce_offset_value(offset_x, "Offset X")
-                if offset_value is not None:
-                    target_spec["offsetX"] = offset_value
-                else:
-                    target_spec.pop("offsetX", None)
-            if offset_y is not None:
-                offset_value = self._coerce_offset_value(offset_y, "Offset Y")
-                if offset_value is not None:
-                    target_spec["offsetY"] = offset_value
-                else:
-                    target_spec.pop("offsetY", None)
-            if payload_justification is not None:
-                justification_token = self._normalise_justification(payload_justification)
-                if justification_token:
-                    target_spec["payloadJustification"] = justification_token
-                else:
-                    target_spec.pop("payloadJustification", None)
-            if background_color is not _MISSING:
-                if background_color is None or background_color == "":
-                    target_spec["backgroundColor"] = None
-                else:
-                    try:
-                        target_spec["backgroundColor"] = _normalise_background_color(background_color)
-                    except PluginGroupingError as exc:
-                        raise ValueError(str(exc)) from exc
-            if background_border_width is not _MISSING:
-                if background_border_width is None or background_border_width == "":
-                    target_spec.pop("backgroundBorderWidth", None)
-                else:
-                    try:
-                        target_spec["backgroundBorderWidth"] = _normalise_border_width(
-                            background_border_width, "backgroundBorderWidth"
-                        )
-                    except PluginGroupingError as exc:
-                        raise ValueError(str(exc)) from exc
-            if replacement_label != original_label:
-                if replacement_label in groups and replacement_label != original_label:
-                    raise ValueError(f"Grouping '{replacement_label}' already exists for '{group_name}'.")
-                groups[replacement_label] = groups.pop(original_label)
             self.save()
 
     def delete_grouping(self, group_name: str, label: str) -> None:
@@ -1290,29 +1659,65 @@ class NewGroupingDialog(simpledialog.Dialog):
             state="readonly",
         ).grid(row=4, column=1, sticky="w")
 
-        ttk.Label(master, text="Offset X (px)").grid(row=5, column=0, sticky="w")
+        ttk.Label(master, text="Marker label position").grid(row=5, column=0, sticky="w")
+        suggestion_marker = str(
+            self._suggestion.get("markerLabelPosition")
+            or self._suggestion.get("marker_label_position")
+            or DEFAULT_MARKER_LABEL_POSITION
+        ).strip().lower()
+        if suggestion_marker not in MARKER_LABEL_POSITION_CHOICES:
+            suggestion_marker = DEFAULT_MARKER_LABEL_POSITION
+        self.marker_label_position_var = tk.StringVar(value=suggestion_marker)
+        ttk.Combobox(
+            master,
+            values=MARKER_LABEL_POSITION_CHOICES,
+            textvariable=self.marker_label_position_var,
+            state="readonly",
+        ).grid(row=5, column=1, sticky="w")
+
+        ttk.Label(master, text="Controller preview box").grid(row=6, column=0, sticky="w")
+        suggestion_preview = str(
+            self._suggestion.get("controllerPreviewBoxMode")
+            or self._suggestion.get("controller_preview_box_mode")
+            or DEFAULT_CONTROLLER_PREVIEW_BOX_MODE
+        ).strip().lower()
+        if suggestion_preview not in CONTROLLER_PREVIEW_BOX_MODE_CHOICES:
+            suggestion_preview = DEFAULT_CONTROLLER_PREVIEW_BOX_MODE
+        self.controller_preview_box_mode_var = tk.StringVar(value=suggestion_preview)
+        ttk.Combobox(
+            master,
+            values=CONTROLLER_PREVIEW_BOX_MODE_CHOICES,
+            textvariable=self.controller_preview_box_mode_var,
+            state="readonly",
+        ).grid(row=6, column=1, sticky="w")
+
+        ttk.Label(master, text="Offset X (px)").grid(row=7, column=0, sticky="w")
         self.offset_x_var = tk.StringVar(value=self._format_initial_offset(self._suggestion.get("offsetX")))
-        ttk.Entry(master, textvariable=self.offset_x_var, width=40).grid(row=5, column=1, sticky="ew")
+        ttk.Entry(master, textvariable=self.offset_x_var, width=40).grid(row=7, column=1, sticky="ew")
 
-        ttk.Label(master, text="Offset Y (px)").grid(row=6, column=0, sticky="w")
+        ttk.Label(master, text="Offset Y (px)").grid(row=8, column=0, sticky="w")
         self.offset_y_var = tk.StringVar(value=self._format_initial_offset(self._suggestion.get("offsetY")))
-        ttk.Entry(master, textvariable=self.offset_y_var, width=40).grid(row=6, column=1, sticky="ew")
+        ttk.Entry(master, textvariable=self.offset_y_var, width=40).grid(row=8, column=1, sticky="ew")
 
-        ttk.Label(master, text="Background color (#RRGGBB[AA])").grid(row=7, column=0, sticky="w")
+        ttk.Label(master, text="Background color (hex or name)").grid(row=9, column=0, sticky="w")
         self.background_color_var = tk.StringVar(value=str(self._suggestion.get("backgroundColor") or ""))
-        ttk.Entry(master, textvariable=self.background_color_var, width=40).grid(row=7, column=1, sticky="ew")
+        ttk.Entry(master, textvariable=self.background_color_var, width=40).grid(row=9, column=1, sticky="ew")
 
-        ttk.Label(master, text="Background border (0–10 px)").grid(row=8, column=0, sticky="w")
+        ttk.Label(master, text="Border color (hex or name)").grid(row=10, column=0, sticky="w")
+        self.background_border_color_var = tk.StringVar(value=str(self._suggestion.get("backgroundBorderColor") or ""))
+        ttk.Entry(master, textvariable=self.background_border_color_var, width=40).grid(row=10, column=1, sticky="ew")
+
+        ttk.Label(master, text="Background border (0–10 px)").grid(row=11, column=0, sticky="w")
         self.background_border_var = tk.StringVar(
             value=str(self._suggestion.get("backgroundBorderWidth", ""))
         )
         ttk.Spinbox(master, from_=0, to=10, textvariable=self.background_border_var, width=6).grid(
-            row=8, column=1, sticky="w"
+            row=11, column=1, sticky="w"
         )
 
-        ttk.Label(master, text="Notes").grid(row=9, column=0, sticky="w")
+        ttk.Label(master, text="Notes").grid(row=12, column=0, sticky="w")
         self.notes_var = tk.StringVar(value=str(self._suggestion.get("notes") or ""))
-        ttk.Entry(master, textvariable=self.notes_var, width=40).grid(row=9, column=1, sticky="ew")
+        ttk.Entry(master, textvariable=self.notes_var, width=40).grid(row=12, column=1, sticky="ew")
         return master
 
     def validate(self) -> bool:  # type: ignore[override]
@@ -1330,7 +1735,11 @@ class NewGroupingDialog(simpledialog.Dialog):
             return False
         self._validated_prefixes = prefixes
         try:
-            self._validated_background_color, self._validated_border = self._parse_background_inputs()
+            (
+                self._validated_background_color,
+                self._validated_background_border_color,
+                self._validated_border,
+            ) = self._parse_background_inputs()
         except ValueError as exc:
             messagebox.showerror("Validation error", str(exc))
             return False
@@ -1355,9 +1764,12 @@ class NewGroupingDialog(simpledialog.Dialog):
             "prefixes": prefixes,
             "anchor": self.anchor_var.get().strip(),
             "payload_justification": self.justification_var.get().strip(),
+            "marker_label_position": self.marker_label_position_var.get().strip(),
+            "controller_preview_box_mode": self.controller_preview_box_mode_var.get().strip(),
             "offset_x": self.offset_x_var.get().strip(),
             "offset_y": self.offset_y_var.get().strip(),
             "background_color": getattr(self, "_validated_background_color", None),
+            "background_border_color": getattr(self, "_validated_background_border_color", None),
             "background_border_width": getattr(self, "_validated_border", None),
             "notes": self.notes_var.get().strip(),
         }
@@ -1365,16 +1777,23 @@ class NewGroupingDialog(simpledialog.Dialog):
     def apply(self) -> None:  # type: ignore[override]
         self.result = self.result_data()
 
-    def _parse_background_inputs(self) -> tuple[Optional[str], Optional[int]]:
+    def _parse_background_inputs(self) -> tuple[Optional[str], Optional[str], Optional[int]]:
         color_raw = self.background_color_var.get().strip()
         color_value: Optional[str]
         if not color_raw:
             color_value = None
         else:
-            if not color_raw.startswith("#"):
-                color_raw = "#" + color_raw
             try:
                 color_value = _normalise_background_color(color_raw)
+            except PluginGroupingError as exc:
+                raise ValueError(str(exc)) from exc
+        border_color_raw = self.background_border_color_var.get().strip()
+        border_color_value: Optional[str]
+        if not border_color_raw:
+            border_color_value = None
+        else:
+            try:
+                border_color_value = _normalise_background_color(border_color_raw)
             except PluginGroupingError as exc:
                 raise ValueError(str(exc)) from exc
         border_raw = self.background_border_var.get().strip()
@@ -1389,7 +1808,7 @@ class NewGroupingDialog(simpledialog.Dialog):
                 border_value = _normalise_border_width(border_candidate, "backgroundBorderWidth")
             except PluginGroupingError as exc:
                 raise ValueError(str(exc)) from exc
-        return color_value, border_value
+        return color_value, border_color_value, border_value
 
 
 class EditGroupingDialog(simpledialog.Dialog):
@@ -1486,27 +1905,59 @@ class EditGroupingDialog(simpledialog.Dialog):
             state="readonly",
         ).grid(row=5, column=1, sticky="w")
 
-        ttk.Label(master, text="Offset X (px)").grid(row=6, column=0, sticky="w")
+        ttk.Label(master, text="Marker label position").grid(row=6, column=0, sticky="w")
+        marker_label_position = str(
+            self._entry.get("markerLabelPosition") or DEFAULT_MARKER_LABEL_POSITION
+        ).strip().lower()
+        if marker_label_position not in MARKER_LABEL_POSITION_CHOICES:
+            marker_label_position = DEFAULT_MARKER_LABEL_POSITION
+        self.marker_label_position_var = tk.StringVar(value=marker_label_position)
+        ttk.Combobox(
+            master,
+            values=MARKER_LABEL_POSITION_CHOICES,
+            textvariable=self.marker_label_position_var,
+            state="readonly",
+        ).grid(row=6, column=1, sticky="w")
+
+        ttk.Label(master, text="Controller preview box").grid(row=7, column=0, sticky="w")
+        preview_box_mode = str(
+            self._entry.get("controllerPreviewBoxMode") or DEFAULT_CONTROLLER_PREVIEW_BOX_MODE
+        ).strip().lower()
+        if preview_box_mode not in CONTROLLER_PREVIEW_BOX_MODE_CHOICES:
+            preview_box_mode = DEFAULT_CONTROLLER_PREVIEW_BOX_MODE
+        self.controller_preview_box_mode_var = tk.StringVar(value=preview_box_mode)
+        ttk.Combobox(
+            master,
+            values=CONTROLLER_PREVIEW_BOX_MODE_CHOICES,
+            textvariable=self.controller_preview_box_mode_var,
+            state="readonly",
+        ).grid(row=7, column=1, sticky="w")
+
+        ttk.Label(master, text="Offset X (px)").grid(row=8, column=0, sticky="w")
         self.offset_x_var = tk.StringVar(value=self._format_initial_offset(self._entry.get("offsetX")))
-        ttk.Entry(master, textvariable=self.offset_x_var, width=40).grid(row=6, column=1, sticky="ew")
+        ttk.Entry(master, textvariable=self.offset_x_var, width=40).grid(row=8, column=1, sticky="ew")
 
-        ttk.Label(master, text="Offset Y (px)").grid(row=7, column=0, sticky="w")
+        ttk.Label(master, text="Offset Y (px)").grid(row=9, column=0, sticky="w")
         self.offset_y_var = tk.StringVar(value=self._format_initial_offset(self._entry.get("offsetY")))
-        ttk.Entry(master, textvariable=self.offset_y_var, width=40).grid(row=7, column=1, sticky="ew")
+        ttk.Entry(master, textvariable=self.offset_y_var, width=40).grid(row=9, column=1, sticky="ew")
 
-        ttk.Label(master, text="Background color (#RRGGBB[AA])").grid(row=8, column=0, sticky="w")
+        ttk.Label(master, text="Background color (hex or name)").grid(row=10, column=0, sticky="w")
         self.background_color_var = tk.StringVar(value=str(self._entry.get("backgroundColor") or ""))
-        ttk.Entry(master, textvariable=self.background_color_var, width=40).grid(row=8, column=1, sticky="ew")
+        ttk.Entry(master, textvariable=self.background_color_var, width=40).grid(row=10, column=1, sticky="ew")
 
-        ttk.Label(master, text="Background border (0–10 px)").grid(row=9, column=0, sticky="w")
+        ttk.Label(master, text="Border color (hex or name)").grid(row=11, column=0, sticky="w")
+        self.background_border_color_var = tk.StringVar(value=str(self._entry.get("backgroundBorderColor") or ""))
+        ttk.Entry(master, textvariable=self.background_border_color_var, width=40).grid(row=11, column=1, sticky="ew")
+
+        ttk.Label(master, text="Background border (0–10 px)").grid(row=12, column=0, sticky="w")
         self.background_border_var = tk.StringVar(value=str(self._entry.get("backgroundBorderWidth") or ""))
         ttk.Spinbox(master, from_=0, to=10, textvariable=self.background_border_var, width=6).grid(
-            row=9, column=1, sticky="w"
+            row=12, column=1, sticky="w"
         )
 
-        ttk.Label(master, text="Notes").grid(row=10, column=0, sticky="w")
+        ttk.Label(master, text="Notes").grid(row=13, column=0, sticky="w")
         self.notes_var = tk.StringVar(value=str(self._entry.get("notes") or ""))
-        ttk.Entry(master, textvariable=self.notes_var, width=40).grid(row=10, column=1, sticky="ew")
+        ttk.Entry(master, textvariable=self.notes_var, width=40).grid(row=13, column=1, sticky="ew")
         return master
 
     def validate(self) -> bool:  # type: ignore[override]
@@ -1518,7 +1969,11 @@ class EditGroupingDialog(simpledialog.Dialog):
             messagebox.showerror("Validation error", "Enter at least one ID prefix.")
             return False
         try:
-            self._validated_background_color, self._validated_border = self._parse_background_inputs()
+            (
+                self._validated_background_color,
+                self._validated_background_border_color,
+                self._validated_border,
+            ) = self._parse_background_inputs()
         except ValueError as exc:
             messagebox.showerror("Validation error", str(exc))
             return False
@@ -1531,9 +1986,12 @@ class EditGroupingDialog(simpledialog.Dialog):
             "prefixes": list(self._prefix_entries),
             "anchor": self.anchor_var.get().strip(),
             "payload_justification": self.justification_var.get().strip(),
+            "marker_label_position": self.marker_label_position_var.get().strip(),
+            "controller_preview_box_mode": self.controller_preview_box_mode_var.get().strip(),
             "offset_x": self.offset_x_var.get().strip(),
             "offset_y": self.offset_y_var.get().strip(),
             "background_color": getattr(self, "_validated_background_color", None),
+            "background_border_color": getattr(self, "_validated_background_border_color", None),
             "background_border_width": getattr(self, "_validated_border", None),
             "notes": self.notes_var.get().strip(),
         }
@@ -1624,16 +2082,23 @@ class EditGroupingDialog(simpledialog.Dialog):
             return value.strip()
         return ""
 
-    def _parse_background_inputs(self) -> tuple[Optional[str], Optional[int]]:
+    def _parse_background_inputs(self) -> tuple[Optional[str], Optional[str], Optional[int]]:
         color_raw = self.background_color_var.get().strip()
         color_value: Optional[str]
         if not color_raw:
             color_value = None
         else:
-            if not color_raw.startswith("#"):
-                color_raw = "#" + color_raw
             try:
                 color_value = _normalise_background_color(color_raw)
+            except PluginGroupingError as exc:
+                raise ValueError(str(exc)) from exc
+        border_color_raw = self.background_border_color_var.get().strip()
+        border_color_value: Optional[str]
+        if not border_color_raw:
+            border_color_value = None
+        else:
+            try:
+                border_color_value = _normalise_background_color(border_color_raw)
             except PluginGroupingError as exc:
                 raise ValueError(str(exc)) from exc
         border_raw = self.background_border_var.get().strip()
@@ -1648,7 +2113,7 @@ class EditGroupingDialog(simpledialog.Dialog):
                 border_value = _normalise_border_width(border_candidate, "backgroundBorderWidth")
             except PluginGroupingError as exc:
                 raise ValueError(str(exc)) from exc
-        return color_value, border_value
+        return color_value, border_color_value, border_value
 
 
 class AddPrefixDialog(simpledialog.Dialog):
@@ -1865,7 +2330,6 @@ class PluginGroupManagerApp:
             command=self._toggle_watcher,
         ).pack(side="left")
         ttk.Button(control_row, text="Gather from logs", command=self._start_gather).pack(side="left", padx=(12, 0))
-        ttk.Button(control_row, text="Re-check matches", command=self._purge_matched).pack(side="left", padx=(12, 0))
         ttk.Label(top_section, textvariable=self.payload_count_var, anchor="w").pack(fill="x", padx=8, pady=(0, 4))
 
         ttk.Label(top_section, textvariable=self.status_var).pack(fill="x", padx=8)
@@ -2481,12 +2945,28 @@ class PluginGroupManagerApp:
                 justification_value = DEFAULT_PAYLOAD_JUSTIFICATION
             if justification_value not in PAYLOAD_JUSTIFICATION_CHOICES:
                 justification_value = DEFAULT_PAYLOAD_JUSTIFICATION
+            marker_label_value = entry.get("markerLabelPosition") or DEFAULT_MARKER_LABEL_POSITION
+            if isinstance(marker_label_value, str):
+                marker_label_value = marker_label_value.strip().lower() or DEFAULT_MARKER_LABEL_POSITION
+            else:
+                marker_label_value = DEFAULT_MARKER_LABEL_POSITION
+            if marker_label_value not in MARKER_LABEL_POSITION_CHOICES:
+                marker_label_value = DEFAULT_MARKER_LABEL_POSITION
+            preview_box_value = entry.get("controllerPreviewBoxMode") or DEFAULT_CONTROLLER_PREVIEW_BOX_MODE
+            if isinstance(preview_box_value, str):
+                preview_box_value = preview_box_value.strip().lower() or DEFAULT_CONTROLLER_PREVIEW_BOX_MODE
+            else:
+                preview_box_value = DEFAULT_CONTROLLER_PREVIEW_BOX_MODE
+            if preview_box_value not in CONTROLLER_PREVIEW_BOX_MODE_CHOICES:
+                preview_box_value = DEFAULT_CONTROLLER_PREVIEW_BOX_MODE
             notes_text = entry.get("notes") or "- none -"
             left_cell = ttk.Frame(entry_frame, width=LEFT_COLUMN_WIDTH)
             left_cell.grid(row=1, column=0, sticky="nw", pady=(2, 0))
             left_cell.grid_propagate(False)
             ttk.Label(left_cell, text=f"Anchor: {anchor_value}").pack(anchor="w")
             ttk.Label(left_cell, text=f"Justification: {justification_value}").pack(anchor="w", pady=(2, 0))
+            ttk.Label(left_cell, text=f"Marker label: {marker_label_value}").pack(anchor="w", pady=(2, 0))
+            ttk.Label(left_cell, text=f"Controller preview: {preview_box_value}").pack(anchor="w", pady=(2, 0))
             offset_label = (
                 f"Offset: x={self._format_offset_value(entry.get('offsetX'))}, "
                 f"y={self._format_offset_value(entry.get('offsetY'))}"
@@ -3159,7 +3639,10 @@ class PluginGroupManagerApp:
                 offset_x=data.get("offset_x"),
                 offset_y=data.get("offset_y"),
                 payload_justification=data.get("payload_justification"),
+                marker_label_position=data.get("marker_label_position"),
+                controller_preview_box_mode=data.get("controller_preview_box_mode"),
                 background_color=data.get("background_color"),
+                background_border_color=data.get("background_border_color"),
                 background_border_width=data.get("background_border_width"),
             )
         except ValueError as exc:
@@ -3192,7 +3675,10 @@ class PluginGroupManagerApp:
                 offset_x=data.get("offset_x"),
                 offset_y=data.get("offset_y"),
                 payload_justification=data.get("payload_justification"),
+                marker_label_position=data.get("marker_label_position"),
+                controller_preview_box_mode=data.get("controller_preview_box_mode"),
                 background_color=data.get("background_color"),
+                background_border_color=data.get("background_border_color"),
                 background_border_width=data.get("background_border_width"),
             )
         except ValueError as exc:

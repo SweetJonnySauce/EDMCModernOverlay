@@ -46,6 +46,7 @@ class _MessagePaintCommand(_LegacyPaintCommand):
     text_width: int = 0
     ascent: int = 0
     descent: int = 0
+    line_spacing: int = 0
     cycle_anchor: Optional[Tuple[int, int]] = None
     trace_fn: Optional[Callable[[str, Mapping[str, Any]], None]] = None
 
@@ -55,10 +56,16 @@ class _MessagePaintCommand(_LegacyPaintCommand):
         font.setPointSizeF(self.point_size)
         font.setWeight(QFont.Weight.Normal)
         painter.setFont(font)
-        painter.setPen(self.color)
+        painter.setPen(window._apply_payload_opacity_color(self.color))
         draw_x = int(round(self.x + offset_x))
         draw_baseline = int(round(self.baseline + offset_y))
-        painter.drawText(draw_x, draw_baseline, self.text)
+        normalised = str(self.text).replace("\r\n", "\n").replace("\r", "\n")
+        lines = normalised.split("\n") or [""]
+        line_spacing = self.line_spacing or (self.ascent + self.descent)
+        if line_spacing <= 0:
+            line_spacing = 0
+        for idx, line in enumerate(lines):
+            painter.drawText(draw_x, draw_baseline + (line_spacing * idx), line)
         if self.trace_fn:
             self.trace_fn(
                 "render_message:draw",
@@ -87,8 +94,17 @@ class _RectPaintCommand(_LegacyPaintCommand):
     cycle_anchor: Optional[Tuple[int, int]] = None
 
     def paint(self, window: "OverlayWindow", painter: QPainter, offset_x: int, offset_y: int) -> None:
-        painter.setPen(self.pen)
-        painter.setBrush(self.brush)
+        pen = self.pen
+        brush = self.brush
+        if window._payload_opacity_percent() < 100:
+            if pen.style() != Qt.PenStyle.NoPen:
+                pen = QPen(pen)
+                pen.setColor(window._apply_payload_opacity_color(pen.color()))
+            if brush.style() != Qt.BrushStyle.NoBrush:
+                brush = QBrush(brush)
+                brush.setColor(window._apply_payload_opacity_color(brush.color()))
+        painter.setPen(pen)
+        painter.setBrush(brush)
         draw_x = int(round(self.x + offset_x))
         draw_y = int(round(self.y + offset_y))
         painter.drawRect(draw_x, draw_y, self.width, self.height)
@@ -109,6 +125,9 @@ class _VectorPaintCommand(_LegacyPaintCommand):
 
     def paint(self, window: "OverlayWindow", painter: QPainter, offset_x: int, offset_y: int) -> None:
         adapter = _QtVectorPainterAdapter(window, painter)
+        marker_label_position = "below"
+        if self.group_transform is not None:
+            marker_label_position = getattr(self.group_transform, "marker_label_position", None) or "below"
         render_vector(
             adapter,
             self.vector_payload,
@@ -116,6 +135,7 @@ class _VectorPaintCommand(_LegacyPaintCommand):
             self.scale,
             offset_x=self.base_offset_x + offset_x,
             offset_y=self.base_offset_y + offset_y,
+            marker_label_position=marker_label_position,
             trace=self.trace_fn,
         )
         if self.cycle_anchor:
@@ -129,10 +149,37 @@ class _QtVectorPainterAdapter(VectorPainterAdapter):
         self._window = window
         self._painter = painter
 
+    def _text_font(self) -> QFont:
+        font = QFont(self._window._font_family)
+        self._window._apply_font_fallbacks(font)
+        mapper = self._window._compute_legacy_mapper()
+        state = self._window._viewport_state()
+        font.setPointSizeF(self._window._legacy_preset_point_size("small", state, mapper))
+        font.setWeight(QFont.Weight.Normal)
+        return font
+
+    def measure_text_block(self, text: str) -> tuple[int, int]:
+        font = self._text_font()
+        metrics = QFontMetrics(font)
+        normalised = str(text).replace("\r\n", "\n").replace("\r", "\n")
+        lines = normalised.split("\n") or [""]
+        max_width = 0
+        for line in lines:
+            try:
+                advance = metrics.horizontalAdvance(line)
+            except Exception:
+                advance = 0
+            if advance > max_width:
+                max_width = advance
+        line_spacing = max(metrics.lineSpacing(), metrics.height(), 0)
+        total_height = line_spacing * max(1, len(lines))
+        return max(0, max_width), max(0, total_height)
+
     def set_pen(self, color: str, *, width: Optional[int] = None) -> None:
         q_color = QColor(color)
         if not q_color.isValid():
             q_color = QColor("white")
+        q_color = self._window._apply_payload_opacity_color(q_color)
         pen = QPen(q_color)
         pen_width = self._window._line_width("vector_line") if width is None else max(0, int(width))
         pen.setWidth(pen_width)
@@ -146,6 +193,7 @@ class _QtVectorPainterAdapter(VectorPainterAdapter):
         q_color = QColor(color)
         if not q_color.isValid():
             q_color = QColor("white")
+        q_color = self._window._apply_payload_opacity_color(q_color)
         pen = QPen(q_color)
         pen.setWidth(self._window._line_width("vector_marker"))
         self._painter.setPen(pen)
@@ -161,15 +209,17 @@ class _QtVectorPainterAdapter(VectorPainterAdapter):
         q_color = QColor(color)
         if not q_color.isValid():
             q_color = QColor("white")
+        q_color = self._window._apply_payload_opacity_color(q_color)
         pen = QPen(q_color)
         self._painter.setPen(pen)
-        font = QFont(self._window._font_family)
-        self._window._apply_font_fallbacks(font)
-        mapper = self._window._compute_legacy_mapper()
-        state = self._window._viewport_state()
-        font.setPointSizeF(self._window._legacy_preset_point_size("small", state, mapper))
-        font.setWeight(QFont.Weight.Normal)
+        font = self._text_font()
         self._painter.setFont(font)
         metrics = QFontMetrics(font)
+        normalised = str(text).replace("\r\n", "\n").replace("\r", "\n")
+        lines = normalised.split("\n") or [""]
         baseline = int(round(y + metrics.ascent()))
-        self._painter.drawText(x, baseline, text)
+        line_spacing = max(metrics.lineSpacing(), metrics.height(), 0)
+        if line_spacing <= 0:
+            line_spacing = metrics.ascent() + metrics.descent()
+        for idx, line in enumerate(lines):
+            self._painter.drawText(x, baseline + (line_spacing * idx), line)

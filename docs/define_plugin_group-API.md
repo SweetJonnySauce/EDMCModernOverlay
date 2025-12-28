@@ -1,10 +1,11 @@
-`overlay_groupings.json` is the source for Modern Overlay’s plugin-specific behaviour as defined by Plugin Authors. These values can be overridden by CMDRs using the Overlay Controller (stored in `overlay_groupings.user.json`). It powers five things:
+`overlay_groupings.json` is the source for Modern Overlay’s plugin-specific behaviour as defined by Plugin Authors. These values can be overridden by CMDRs using the Overlay Controller (stored in `overlay_groupings.user.json`). It powers six things:
 
 1. **Plugin detection** – payloads without a `plugin` field are mapped to the correct owner via `matchingPrefixes`.
 2. **Grouping** – related payloads stay rigid when they share a named `idPrefixGroup`.
 3. **Anchoring** – each group can declare the anchor point Modern Overlay applies transformatios to.
 4. **Justification** - Payloads within a group can now be centered or right justified (does not work for vector images).
-5. **Backgrounds** – groups can define a background fill and optional border thickness.
+5. **Backgrounds** – groups can define a background fill plus an optional border color and fill expansion.
+6. **Controller target boxes** – group defaults can choose whether the controller box shows the last visible or max transformed bounds.
 
 This document explains the current schema, the helper tooling, and the workflows we now support.
 
@@ -20,7 +21,9 @@ The JSON root is an object keyed by the display name you want shown in the overl
       "alerts": {
         "idPrefixes": ["example-alert-"],
         "idPrefixGroupAnchor": "ne",
-        "backgroundColor": "#1a1a1acc",
+        "controllerPreviewBoxMode": "last",
+        "backgroundColor": "#cc1a1a1a",
+        "backgroundBorderColor": "red",
         "backgroundBorderWidth": 2
       }
     }
@@ -36,8 +39,11 @@ The JSON root is an object keyed by the display name you want shown in the overl
 | `idPrefixGroups.<name>.idPrefixGroupAnchor` | enum | Optional. One of `nw`, `ne`, `sw`, `se`, `center`, `top`, `bottom`, `left`, or `right`. Defaults to `nw` when omitted. `top`/`bottom` keep the midpoint of the vertical edges anchored, while `left`/`right` do the same for the horizontal edges—useful when plugins want edges to stay aligned against the overlay boundary. |
 | `idPrefixGroups.<name>.offsetX` / `offsetY` | number | Optional. Translates the whole group in the legacy 1280 × 960 canvas before Fill-mode scaling applies. Positive values move right/down; negative values move left/up. |
 | `idPrefixGroups.<name>.payloadJustification` | enum | Optional. One of `left` (default), `center`, or `right`. Applies only to idPrefix groups. After anchor adjustments (but before overflow nudging) Modern Overlay shifts narrower payloads so that their right edge or midpoint lines up with the widest payload in the group. The widest entry defines the alignment width and stays put. **Caution** Using justification with vect type payloads isn't supported and probably never will be. |
-| `idPrefixGroups.<name>.backgroundColor` | hex string or null | Optional. Default background fill for this group. Accepts `#RRGGBB` or `#RRGGBBAA` (alpha optional, case-insensitive). `null` forces a transparent override. |
-| `idPrefixGroups.<name>.backgroundBorderWidth` | integer | Optional. Border thickness in pixels (0–10). The background uses the same color and expands by this width on every side. |
+| `idPrefixGroups.<name>.markerLabelPosition` | enum | Optional. One of `below` (default), `above`, or `centered`. Controls where vector marker labels are placed relative to the marker: `below` anchors the top of the text box at Y+7 (legacy default), `above` anchors the bottom of the text box at Y-7, and `centered` anchors the middle of the text box at Y+0. |
+| `idPrefixGroups.<name>.controllerPreviewBoxMode` | enum | Optional. One of `last` (default) or `max`. Controls which cached bounds the overlay controller uses when drawing controller target boxes: `last` uses the last visible transformed bounds, `max` uses the maximum transformed bounds recorded for the group. |
+| `idPrefixGroups.<name>.backgroundColor` | hex string, named color, or null | Optional. Default background fill for this group. Accepts named colors or `#RRGGBB`/`#AARRGGBB` (alpha optional, case-insensitive). `null` forces a transparent override. |
+| `idPrefixGroups.<name>.backgroundBorderColor` | hex string, named color, or null | Optional. Border color for the group background. Uses the same formats as `backgroundColor`. `null` clears the border. |
+| `idPrefixGroups.<name>.backgroundBorderWidth` | integer | Optional. Fill expansion in pixels (0–10). The background fill expands by this width on every side; the border is a fixed 1px stroke drawn outside the expanded fill. |
 
 Additional metadata (`notes`, legacy `grouping.*`, etc.) is ignored by the current engine but preserved so you can document intent for reviewers.
 
@@ -108,21 +114,43 @@ The repository ships with `schemas/overlay_groupings.schema.json` (Draft 2020‑
           "enum": ["left", "center", "right"],
           "default": "left"
         },
+        "markerLabelPosition": {
+          "type": "string",
+          "enum": ["below", "above", "centered"],
+          "default": "below",
+          "description": "Marker label placement relative to the marker."
+        },
+        "controllerPreviewBoxMode": {
+          "type": "string",
+          "enum": ["last", "max"],
+          "default": "last",
+          "description": "Controls controller target box selection: last visible or max transformed bounds."
+        },
         "backgroundColor": {
           "oneOf": [
             {
               "type": "string",
-              "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+              "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$|^[A-Za-z][A-Za-z0-9_]*$"
             },
             { "type": "null" }
           ],
-          "description": "Hex color in #RRGGBB or #RRGGBBAA format (alpha optional). Null clears to transparent."
+          "description": "Hex color in #RRGGBB/#AARRGGBB or a named color. Null clears to transparent."
+        },
+        "backgroundBorderColor": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$|^[A-Za-z][A-Za-z0-9_]*$"
+            },
+            { "type": "null" }
+          ],
+          "description": "Border color in #RRGGBB/#AARRGGBB or named form. Null clears the border."
         },
         "backgroundBorderWidth": {
           "type": "integer",
           "minimum": 0,
           "maximum": 10,
-          "description": "Border width in pixels; extends background equally on all sides."
+          "description": "Fill expansion in pixels; extends background equally on all sides."
         }
       },
       "required": ["idPrefixes"],
@@ -170,7 +198,10 @@ try:
         id_prefix_group="alerts",
         id_prefixes=["myplugin-alert-"],
         id_prefix_group_anchor="ne",
+        marker_label_position="below",
+        controller_preview_box_mode="last",
         background_color="#1A1A1ACC",
+        background_border_color="red",
         background_border_width=2,
     )
 except PluginGroupingError as exc:
@@ -178,7 +209,7 @@ except PluginGroupingError as exc:
     print(f"Could not register grouping: {exc}")
 ```
 
-The helper enforces the schema, lowercases prefixes, ensures per-plugin uniqueness, and writes the JSON back to disk so the overlay client reloads it instantly.
+The helper enforces the schema, lowercases prefixes, ensures per-plugin uniqueness, and writes the JSON back to disk so the overlay client reloads it instantly. Use `controller_preview_box_mode` to choose `last` or `max` when you need to control which bounds the controller target boxes use (stored as `controllerPreviewBoxMode` in JSON).
 
 ## Example 1: Center a text string at the top center of the screen
 

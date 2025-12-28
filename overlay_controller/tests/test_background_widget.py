@@ -79,7 +79,7 @@ def test_background_widget_left_right_respects_spin_cursor(background_widget):
     except Exception:
         pass
     result = background_widget.handle_key("Left", event)
-    assert background_widget._active_field == "pick"
+    assert background_widget._active_field == "border_pick"
     assert result is True
 
 
@@ -96,10 +96,10 @@ def test_background_widget_picker_applies_alpha(background_widget, monkeypatch):
 
     monkeypatch.setattr(background.colorchooser, "askcolor", fake_askcolor)
 
-    widget._open_color_picker()
+    widget._open_color_picker("color")
 
-    assert captured["color"] == "#112233"
-    assert widget._color_var.get() == "#AABBCC44"
+    assert captured["color"] == "#223344"
+    assert widget._color_var.get() == "#11AABBCC"
 
 
 def test_background_widget_picker_cancel_keeps_value(background_widget, monkeypatch):
@@ -113,6 +113,6 @@ def test_background_widget_picker_cancel_keeps_value(background_widget, monkeypa
 
     monkeypatch.setattr(background.colorchooser, "askcolor", fake_askcolor)
 
-    widget._open_color_picker()
+    widget._open_color_picker("color")
 
     assert widget._color_var.get() == "#ABCDEF88"

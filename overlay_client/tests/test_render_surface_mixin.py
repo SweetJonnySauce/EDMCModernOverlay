@@ -1,10 +1,15 @@
 import math
+from types import SimpleNamespace
 from typing import Any, Optional, Tuple
 
 import pytest
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 
-from overlay_client.render_surface import RenderSurfaceMixin, _MeasuredText
+from overlay_client.group_transform import GroupKey
+from overlay_client.legacy_store import LegacyItem
+from overlay_client.paint_commands import _MessagePaintCommand, _RectPaintCommand
+from overlay_client.render_surface import RenderSurfaceMixin, _MeasuredText, _OverlayBounds
 
 
 class _StubMode:
@@ -61,6 +66,186 @@ class _StubSurface(RenderSurfaceMixin):
 
     def format_scale_debug(self) -> str:
         return "scale-debug"
+
+
+class _StubFill:
+    def __init__(self, scale: float = 1.0) -> None:
+        self.scale = scale
+
+    def screen_x(self, value: float) -> float:
+        return value
+
+    def screen_y(self, value: float) -> float:
+        return value
+
+
+class _StubGroupContext:
+    def __init__(self) -> None:
+        self.fill = _StubFill()
+        self.transform_context = None
+        self.scale = 1.0
+        self.selected_anchor = None
+        self.base_anchor_point = None
+        self.anchor_for_transform = None
+        self.base_translation_dx = 0.0
+        self.base_translation_dy = 0.0
+
+
+class _RectStubMapper:
+    pass
+
+
+class _RectSurface(_StubSurface):
+    def __init__(self) -> None:
+        super().__init__()
+        self._line_width_defaults = {"legacy_rect": 2}
+
+    def _line_width(self, key: str) -> int:
+        return self._line_widths.get(key) or self._line_width_defaults.get(key, 1)
+
+    def _viewport_state(self) -> object:
+        return object()
+
+    def _group_offsets(self, group_transform) -> Tuple[float, float]:  # noqa: ANN001
+        return (0.0, 0.0)
+
+    def _group_anchor_point(self, *args, **kwargs):  # noqa: ANN002, ANN003
+        return None
+
+    def _group_base_point(self, *args, **kwargs):  # noqa: ANN002, ANN003
+        return None
+
+    def _should_trace_payload(self, plugin_name: Optional[str], item_id: str) -> bool:
+        return False
+
+    def _compute_rect_transform(self, *args, **kwargs):  # noqa: ANN002, ANN003
+        return ([(0.0, 0.0), (2.0, 0.0), (0.0, 1.0), (2.0, 1.0)], [], None, None)
+
+
+class _CacheCaptureSurface(RenderSurfaceMixin):
+    def __init__(self) -> None:
+        self._render_pipeline = SimpleNamespace(_last_payload_results={})
+        self._group_cache_generations = {}
+        self._group_log_pending_base = {}
+        self._group_log_pending_transform = {}
+        self._group_log_next_allowed = {}
+        self._logged_group_bounds = {}
+        self._logged_group_transforms = {}
+        self._payload_log_delay = 0.0
+        self._cache_write_metadata = {}
+        self.captured_base = None
+        self.captured_transform = None
+
+    def _update_group_cache_from_payloads(self, base_payloads, transform_payloads):  # noqa: ANN001
+        self.captured_base = dict(base_payloads)
+        self.captured_transform = dict(transform_payloads)
+        return set()
+
+
+def test_group_cache_skips_degenerate_payloads() -> None:
+    surface = _CacheCaptureSurface()
+    visible_key = ("PluginA", "G1")
+    hidden_key = ("PluginA", "G2")
+    rect_key = ("PluginA", "G3")
+    surface._render_pipeline._last_payload_results = {
+        "cache_base_payloads": {
+            visible_key: {"plugin": "PluginA", "suffix": "G1"},
+            hidden_key: {"plugin": "PluginA", "suffix": "G2"},
+            rect_key: {"plugin": "PluginA", "suffix": "G3"},
+        },
+        "cache_transform_payloads": {
+            visible_key: {"min_x": 0, "min_y": 0, "max_x": 10, "max_y": 10},
+            hidden_key: {"min_x": 0, "min_y": 0, "max_x": 10, "max_y": 10},
+            rect_key: {"min_x": 0, "min_y": 0, "max_x": 0, "max_y": 0},
+        },
+        "active_group_keys": set(),
+    }
+
+    visible_item = LegacyItem(
+        item_id="msg-1",
+        kind="message",
+        data={"__mo_ttl__": 1, "text": "hi"},
+        plugin="PluginA",
+    )
+    hidden_item = LegacyItem(
+        item_id="msg-2",
+        kind="message",
+        data={"__mo_ttl__": 0, "text": ""},
+        plugin="PluginA",
+    )
+    rect_item = LegacyItem(
+        item_id="rect-1",
+        kind="rect",
+        data={"w": 0, "h": 0},
+        plugin="PluginA",
+    )
+
+    commands = [
+        _MessagePaintCommand(
+            group_key=GroupKey(*visible_key),
+            group_transform=None,
+            legacy_item=visible_item,
+            bounds=(0, 0, 10, 10),
+            overlay_bounds=(0.0, 0.0, 10.0, 10.0),
+            effective_anchor=None,
+            debug_log=None,
+            text="hi",
+        ),
+        _MessagePaintCommand(
+            group_key=GroupKey(*hidden_key),
+            group_transform=None,
+            legacy_item=hidden_item,
+            bounds=(0, 0, 10, 10),
+            overlay_bounds=(0.0, 0.0, 10.0, 10.0),
+            effective_anchor=None,
+            debug_log=None,
+            text="",
+        ),
+        _RectPaintCommand(
+            group_key=GroupKey(*rect_key),
+            group_transform=None,
+            legacy_item=rect_item,
+            bounds=(0, 0, 0, 0),
+            overlay_bounds=(0.0, 0.0, 0.0, 0.0),
+            effective_anchor=None,
+            debug_log=None,
+        ),
+    ]
+
+    surface._apply_group_logging_payloads({}, {}, {}, {}, commands)
+
+    assert surface.captured_base is not None
+    assert surface.captured_transform is not None
+    assert set(surface.captured_base.keys()) == {visible_key}
+    assert set(surface.captured_transform.keys()) == {visible_key}
+
+
+def test_reset_group_cache_clears_target_maps() -> None:
+    cache_calls = {}
+
+    class _CacheStub:
+        def reset(self) -> None:
+            cache_calls["reset"] = True
+
+    class _ResetSurface(RenderSurfaceMixin):
+        def __init__(self) -> None:
+            self._group_cache = _CacheStub()
+            self._last_visible_overlay_bounds_for_target = {("Plugin", "G1"): _OverlayBounds(0, 0, 10, 10)}
+            self._last_overlay_bounds_for_target = {("Plugin", "G1"): _OverlayBounds(5, 5, 15, 15)}
+            self._last_transform_by_group = {("Plugin", "G1"): object()}
+            self._repaint_calls = []
+
+        def _request_repaint(self, reason: str, *, immediate: bool = False) -> None:
+            self._repaint_calls.append((reason, immediate))
+
+    surface = _ResetSurface()
+    surface.reset_group_cache()
+
+    assert cache_calls.get("reset") is True
+    assert surface._last_visible_overlay_bounds_for_target == {}
+    assert surface._last_overlay_bounds_for_target == {}
+    assert surface._last_transform_by_group == {}
+    assert surface._repaint_calls == [("group_cache_reset", True)]
 
 
 def test_line_width_respects_override_defaults() -> None:
@@ -121,4 +306,50 @@ def test_measure_text_uses_injected_measurer_and_resets_context() -> None:
 def test_qcolor_from_background_parses_rgba() -> None:
     color = RenderSurfaceMixin._qcolor_from_background("#11223344")
     assert isinstance(color, QColor)
-    assert (color.red(), color.green(), color.blue(), color.alpha()) == (0x11, 0x22, 0x33, 0x44)
+    assert (color.red(), color.green(), color.blue(), color.alpha()) == (0x22, 0x33, 0x44, 0x11)
+
+
+def test_qcolor_from_background_accepts_named_colors() -> None:
+    color = RenderSurfaceMixin._qcolor_from_background("red")
+    assert isinstance(color, QColor)
+    assert color.isValid()
+
+
+def _build_rect_command(surface: _RectSurface, border_spec: str, *, fill_spec: str = "#112233"):
+    legacy_item = LegacyItem(
+        item_id="rect-1",
+        kind="rect",
+        data={"color": border_spec, "fill": fill_spec, "x": 1.0, "y": 2.0, "w": 3.0, "h": 4.0},
+        plugin="plugin",
+    )
+    return surface._build_rect_command(legacy_item, _RectStubMapper(), GroupKey("plugin"), None, None)
+
+
+@pytest.mark.parametrize("border_spec", ["", "none", "dd5500,"])
+def test_rect_command_invalid_border_color_skips_pen(monkeypatch: pytest.MonkeyPatch, border_spec: str) -> None:
+    surface = _RectSurface()
+    monkeypatch.setattr(
+        "overlay_client.render_surface.build_group_context",
+        lambda *args, **kwargs: _StubGroupContext(),
+    )
+
+    cmd = _build_rect_command(surface, border_spec)
+
+    assert cmd is not None
+    assert cmd.pen.style() == Qt.PenStyle.NoPen
+    assert cmd.brush.color().name() == QColor("#112233").name()
+
+
+def test_rect_command_valid_border_color_uses_pen(monkeypatch: pytest.MonkeyPatch) -> None:
+    surface = _RectSurface()
+    monkeypatch.setattr(
+        "overlay_client.render_surface.build_group_context",
+        lambda *args, **kwargs: _StubGroupContext(),
+    )
+
+    cmd = _build_rect_command(surface, "#ff00ff")
+
+    assert cmd is not None
+    assert cmd.pen.style() == Qt.PenStyle.SolidLine
+    assert cmd.pen.color().name() == QColor("#ff00ff").name()
+    assert cmd.pen.width() == surface._line_width("legacy_rect")

@@ -20,6 +20,7 @@ from overlay_plugin.overlay_api import (
     _normalise_background_color,
     _normalise_border_width,
     _normalise_justification,
+    _normalise_marker_label_position,
     _normalise_offset,
     _normalise_prefixes,
 )
@@ -193,6 +194,9 @@ def _normalise_group_entry(plugin_name: str, group_label: str, entry: Any) -> Di
     if "payloadJustification" in entry:
         normalised["payloadJustification"] = _normalise_justification(entry.get("payloadJustification"))
 
+    if "markerLabelPosition" in entry:
+        normalised["markerLabelPosition"] = _normalise_marker_label_position(entry.get("markerLabelPosition"))
+
     if "offsetX" in entry:
         normalised["offsetX"] = _normalise_offset(entry.get("offsetX"), "offsetX")
 
@@ -205,6 +209,13 @@ def _normalise_group_entry(plugin_name: str, group_label: str, entry: Any) -> Di
             normalised["backgroundColor"] = None
         else:
             normalised["backgroundColor"] = _normalise_background_color(value)
+
+    if "backgroundBorderColor" in entry:
+        value = entry.get("backgroundBorderColor")
+        if value is None:
+            normalised["backgroundBorderColor"] = None
+        else:
+            normalised["backgroundBorderColor"] = _normalise_background_color(value)
 
     if "backgroundBorderWidth" in entry:
         value = entry.get("backgroundBorderWidth")
@@ -219,9 +230,11 @@ def _normalise_group_entry(plugin_name: str, group_label: str, entry: Any) -> Di
             "idPrefixes",
             "idPrefixGroupAnchor",
             "payloadJustification",
+            "markerLabelPosition",
             "offsetX",
             "offsetY",
             "backgroundColor",
+            "backgroundBorderColor",
             "backgroundBorderWidth",
         }:
             continue

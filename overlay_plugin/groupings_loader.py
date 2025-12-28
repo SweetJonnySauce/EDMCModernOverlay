@@ -22,6 +22,7 @@ from overlay_plugin.overlay_api import (
     _normalise_background_color,
     _normalise_border_width,
     _normalise_justification,
+    _normalise_marker_label_position,
     _normalise_offset,
     _normalise_prefixes,
 )
@@ -260,6 +261,14 @@ class GroupingsLoader:
         payload_justification = self._select(user_entry, base_entry, "payloadJustification", _normalise_justification)
         if payload_justification is not None:
             merged["payloadJustification"] = payload_justification
+        marker_label_position = self._select(
+            user_entry,
+            base_entry,
+            "markerLabelPosition",
+            _normalise_marker_label_position,
+        )
+        if marker_label_position is not None:
+            merged["markerLabelPosition"] = marker_label_position
 
         offset_x = self._select(user_entry, base_entry, "offsetX", lambda value: _normalise_offset(value, "offsetX"))
         if offset_x is not None:
@@ -273,6 +282,10 @@ class GroupingsLoader:
         if background_color is not None:
             merged["backgroundColor"] = background_color
 
+        border_color = self._select_background_border_color(user_entry, base_entry, plugin_name, group_label)
+        if border_color is not None:
+            merged["backgroundBorderColor"] = border_color
+
         border_width = self._select_background_border(user_entry, base_entry, plugin_name, group_label)
         if border_width is not None:
             merged["backgroundBorderWidth"] = border_width
@@ -284,9 +297,11 @@ class GroupingsLoader:
                     "idPrefixes",
                     "idPrefixGroupAnchor",
                     "payloadJustification",
+                    "markerLabelPosition",
                     "offsetX",
                     "offsetY",
                     "backgroundColor",
+                    "backgroundBorderColor",
                     "backgroundBorderWidth",
                     "disabled",
                 }:
@@ -363,6 +378,31 @@ class GroupingsLoader:
         except PluginGroupingError as exc:
             self._logger.warning(
                 "plugin %s group %s: invalid shipped backgroundBorderWidth %s", plugin_name, group_label, exc
+            )
+            return None
+
+    def _select_background_border_color(
+        self, user_entry: Mapping[str, Any], base_entry: Mapping[str, Any], plugin_name: str, group_label: str
+    ) -> Optional[str]:
+        user_has_value = "backgroundBorderColor" in user_entry
+        user_value = user_entry.get("backgroundBorderColor", None)
+        if user_has_value:
+            if user_value is None:
+                return None
+            try:
+                return _normalise_background_color(user_value)
+            except PluginGroupingError as exc:
+                self._logger.warning(
+                    "plugin %s group %s: invalid user backgroundBorderColor %s", plugin_name, group_label, exc
+                )
+        base_value = base_entry.get("backgroundBorderColor", None)
+        if base_value is None:
+            return None
+        try:
+            return _normalise_background_color(base_value)
+        except PluginGroupingError as exc:
+            self._logger.warning(
+                "plugin %s group %s: invalid shipped backgroundBorderColor %s", plugin_name, group_label, exc
             )
             return None
 

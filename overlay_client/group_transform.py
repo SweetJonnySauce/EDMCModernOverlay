@@ -30,7 +30,9 @@ class GroupTransform:
     bounds_max_y: float = 0.0
     anchor_token: str = "nw"
     payload_justification: str = "left"
+    marker_label_position: str = "below"
     background_color: Optional[str] = None
+    background_border_color: Optional[str] = None
     background_border_width: int = 0
 
 

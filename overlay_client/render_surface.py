@@ -32,6 +32,7 @@ from overlay_client.viewport_transform import (
     legacy_scale_components,
 )
 from overlay_client.viewport_helper import BASE_HEIGHT, BASE_WIDTH, ScaleMode
+from overlay_client.opacity_utils import apply_global_payload_opacity, coerce_percent
 from overlay_client.window_utils import legacy_preset_point_size as util_legacy_preset_point_size, line_width as util_line_width
 
 _CLIENT_LOGGER = logging.getLogger("EDMC.ModernOverlay.Client")
@@ -376,6 +377,7 @@ class RenderSurfaceMixin:
                 transform_candidates,
                 translations,
                 report_overlay_bounds,
+                commands,
             )
             anchor_translations = payload_results.get("anchor_translation_by_group") or {}
             # Preserve debug helpers/logging behavior.
@@ -393,6 +395,7 @@ class RenderSurfaceMixin:
                 self._last_transform_by_group = dict(transform_by_group)
             except Exception:
                 pass
+            self._update_last_visible_overlay_bounds_for_target(overlay_bounds_for_draw, commands)
             # Paint commands and collect offscreen/debug helpers.
             self._render_commands(
                 painter,
@@ -413,6 +416,7 @@ class RenderSurfaceMixin:
         transform_candidates: Mapping[Tuple[str, Optional[str]], Tuple[str, Optional[str]]],
         translations: Mapping[Tuple[str, Optional[str]], Tuple[int, int]],
         report_overlay_bounds: Mapping[Tuple[str, Optional[str]], _OverlayBounds],
+        commands: Sequence[_LegacyPaintCommand],
     ) -> None:
         """Apply group logging/cache updates using payload data returned by the render pipeline."""
         payload_results = getattr(self._render_pipeline, "_last_payload_results", {}) or {}
@@ -421,6 +425,15 @@ class RenderSurfaceMixin:
         active_group_keys: Set[Tuple[str, Optional[str]]] = payload_results.get("active_group_keys") or set()
         now_monotonic = self._monotonic_now() if hasattr(self, "_monotonic_now") else time.monotonic()
         mode_state = self.controller_mode_state() if hasattr(self, "controller_mode_state") else "inactive"
+        visible_groups = self._visible_group_keys(commands)
+        if visible_groups:
+            cache_base_payloads = {key: payload for key, payload in cache_base_payloads.items() if key in visible_groups}
+            cache_transform_payloads = {
+                key: payload for key, payload in cache_transform_payloads.items() if key in visible_groups
+            }
+        else:
+            cache_base_payloads = {}
+            cache_transform_payloads = {}
 
         for key, payload in latest_base_payload.items():
             edit_nonce = str(payload.get("edit_nonce") or "")
@@ -613,14 +626,12 @@ class RenderSurfaceMixin:
         for key, transform in transform_by_group.items():
             if transform is None:
                 continue
-            color_value = getattr(transform, "background_color", None)
-            if not color_value:
+            fill_value = getattr(transform, "background_color", None)
+            border_value = getattr(transform, "background_border_color", None)
+            if not fill_value and not border_value:
                 continue
             bounds = translated_bounds_by_group.get(key)
             if bounds is None or not bounds.is_valid():
-                continue
-            q_color = self._qcolor_from_background(color_value)
-            if q_color is None:
                 continue
             try:
                 border_width = int(getattr(transform, "background_border_width", 0) or 0)
@@ -635,11 +646,31 @@ class RenderSurfaceMixin:
             top_px = int(round(top - border_width))
             width_px = int(round((right - left) + border_width * 2))
             height_px = int(round((bottom - top) + border_width * 2))
-            painter.save()
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QBrush(q_color))
-            painter.drawRect(left_px, top_px, width_px, height_px)
-            painter.restore()
+            if fill_value:
+                q_color = self._qcolor_from_background(fill_value)
+                if q_color is not None:
+                    q_color = self._apply_payload_opacity_color(q_color)
+                    painter.save()
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.setBrush(QBrush(q_color))
+                    painter.drawRect(left_px, top_px, width_px, height_px)
+                    painter.restore()
+            if border_value:
+                q_border = self._qcolor_from_background(border_value)
+                if q_border is not None:
+                    q_border = self._apply_payload_opacity_color(q_border)
+                    outer_left = left_px - 1
+                    outer_top = top_px - 1
+                    outer_right = left_px + width_px + 1
+                    outer_bottom = top_px + height_px + 1
+                    painter.save()
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.setBrush(QBrush(q_border))
+                    painter.drawRect(outer_left, outer_top, outer_right - outer_left, 1)
+                    painter.drawRect(outer_left, outer_bottom - 1, outer_right - outer_left, 1)
+                    painter.drawRect(outer_left, top_px, 1, height_px)
+                    painter.drawRect(outer_right - 1, top_px, 1, height_px)
+                    painter.restore()
 
     @staticmethod
     def _qcolor_from_background(value: object) -> Optional[QColor]:
@@ -649,16 +680,20 @@ class RenderSurfaceMixin:
         if not token:
             return None
         if not token.startswith("#"):
-            token = "#" + token
+            if len(token) in (6, 8) and all(ch in "0123456789abcdefABCDEF" for ch in token):
+                token = "#" + token
+            else:
+                q_color = QColor(token)
+                return q_color if q_color.isValid() else None
         if len(token) == 9:
             hex_part = token[1:]
             if not all(ch in "0123456789abcdefABCDEF" for ch in hex_part):
                 return None
             try:
-                red = int(hex_part[0:2], 16)
-                green = int(hex_part[2:4], 16)
-                blue = int(hex_part[4:6], 16)
-                alpha = int(hex_part[6:8], 16)
+                alpha = int(hex_part[0:2], 16)
+                red = int(hex_part[2:4], 16)
+                green = int(hex_part[4:6], 16)
+                blue = int(hex_part[6:8], 16)
             except ValueError:
                 return None
             return QColor(red, green, blue, alpha)
@@ -1004,6 +1039,7 @@ class RenderSurfaceMixin:
             self._font_scale_diag,
             self._font_min_point,
             self._font_max_point,
+            getattr(self, "_legacy_font_step", 2.0),
         )
 
     def _invalidate_text_cache(self, reason: Optional[str] = None) -> None:
@@ -1038,6 +1074,10 @@ class RenderSurfaceMixin:
             stats["calls"] = stats.get("calls", 0) + 1
         cache = getattr(self, "_text_cache", None)
         family = font_family or self._font_family
+        normalised = str(text)
+        has_newline = "\n" in normalised or "\r" in normalised
+        if has_newline:
+            normalised = normalised.replace("\r\n", "\n").replace("\r", "\n")
         try:
             ensure_context = getattr(self, "_ensure_text_cache_context", None)
             if callable(ensure_context):
@@ -1051,6 +1091,28 @@ class RenderSurfaceMixin:
                 stats["cache_hit"] = stats.get("cache_hit", 0) + 1 if isinstance(stats, dict) else 0
                 return cached
         if self._text_measurer is not None:
+            if has_newline:
+                lines = normalised.split("\n") or [""]
+                max_width = 0
+                line_height = 0
+                ascent = 0
+                for idx, line in enumerate(lines):
+                    measured = self._text_measurer(line, point_size, font_family or self._font_family)
+                    if idx == 0:
+                        ascent = max(0, int(measured.ascent))
+                    line_width = max(0, int(measured.width))
+                    if line_width > max_width:
+                        max_width = line_width
+                    line_height = max(line_height, int(measured.ascent + measured.descent))
+                total_height = line_height * max(1, len(lines))
+                descent = max(0, total_height - ascent)
+                measured_tuple = (max_width, ascent, descent)
+                if cache is not None:
+                    stats["cache_miss"] = stats.get("cache_miss", 0) + 1 if isinstance(stats, dict) else 0
+                    cache[key] = measured_tuple
+                    if len(cache) > self._TEXT_CACHE_MAX:
+                        cache.pop(next(iter(cache)))
+                return measured_tuple
             measured = self._text_measurer(text, point_size, font_family or self._font_family)
             return measured.width, measured.ascent, measured.descent
         metrics_font = QFont(family)
@@ -1058,7 +1120,25 @@ class RenderSurfaceMixin:
         metrics_font.setPointSizeF(point_size)
         metrics_font.setWeight(QFont.Weight.Normal)
         metrics = QFontMetrics(metrics_font)
-        measured = (metrics.horizontalAdvance(text), metrics.ascent(), metrics.descent())
+        if has_newline:
+            lines = normalised.split("\n") or [""]
+            max_width = 0
+            for line in lines:
+                try:
+                    advance = metrics.horizontalAdvance(line)
+                except Exception:
+                    advance = 0
+                if advance > max_width:
+                    max_width = advance
+            line_spacing = max(metrics.lineSpacing(), metrics.height(), 0)
+            if line_spacing <= 0:
+                line_spacing = metrics.ascent() + metrics.descent()
+            total_height = line_spacing * max(1, len(lines))
+            ascent = metrics.ascent()
+            descent = max(0, int(total_height - ascent))
+            measured = (max(0, max_width), ascent, descent)
+        else:
+            measured = (metrics.horizontalAdvance(text), metrics.ascent(), metrics.descent())
         if cache is not None:
             stats["cache_miss"] = stats.get("cache_miss", 0) + 1 if isinstance(stats, dict) else 0
             cache[key] = measured
@@ -1142,6 +1222,14 @@ class RenderSurfaceMixin:
         )
         text = str(item.get("text", ""))
         text_width, ascent, descent = self._measure_text(text, scaled_point_size, self._font_family)
+        metrics_font = QFont(self._font_family)
+        self._apply_font_fallbacks(metrics_font)
+        metrics_font.setPointSizeF(scaled_point_size)
+        metrics_font.setWeight(QFont.Weight.Normal)
+        metrics = QFontMetrics(metrics_font)
+        line_spacing = max(metrics.lineSpacing(), metrics.height(), 0)
+        if line_spacing <= 0:
+            line_spacing = ascent + descent
         x = int(round(fill.screen_x(adjusted_left)))
         payload_point_y = int(round(fill.screen_y(adjusted_top)))
         baseline = int(round(payload_point_y + ascent))
@@ -1209,6 +1297,7 @@ class RenderSurfaceMixin:
             text_width=text_width,
             ascent=ascent,
             descent=descent,
+            line_spacing=line_spacing,
             cycle_anchor=(center_x, center_y),
             trace_fn=trace_fn,
             base_overlay_bounds=base_overlay_bounds,
@@ -1238,9 +1327,10 @@ class RenderSurfaceMixin:
         else:
             border_color = QColor(border_spec)
             if not border_color.isValid():
-                border_color = QColor("white")
-            pen = QPen(border_color)
-            pen.setWidth(self._line_width("legacy_rect"))
+                pen = QPen(Qt.PenStyle.NoPen)
+            else:
+                pen = QPen(border_color)
+                pen.setWidth(self._line_width("legacy_rect"))
 
         if not fill_spec or fill_spec.lower() == "none":
             brush = QBrush(Qt.BrushStyle.NoBrush)
@@ -1597,6 +1687,30 @@ class RenderSurfaceMixin:
         except Exception as exc:
             _CLIENT_LOGGER.debug("Forced cache flush failed: %s", exc, exc_info=exc)
 
+    def reset_group_cache(self) -> None:
+        cache = getattr(self, "_group_cache", None)
+        if cache is not None and hasattr(cache, "reset"):
+            try:
+                cache.reset()
+            except Exception as exc:
+                _CLIENT_LOGGER.debug("Failed to reset group cache: %s", exc, exc_info=exc)
+        for attr in (
+            "_last_visible_overlay_bounds_for_target",
+            "_last_overlay_bounds_for_target",
+            "_last_transform_by_group",
+        ):
+            current = getattr(self, attr, None)
+            if isinstance(current, dict):
+                current.clear()
+            else:
+                setattr(self, attr, {})
+        repaint = getattr(self, "_request_repaint", None)
+        if callable(repaint):
+            try:
+                repaint("group_cache_reset", immediate=True)
+            except Exception:
+                pass
+
     def _draw_payload_vertex_markers(self, painter: QPainter, points: Sequence[Tuple[int, int]]) -> None:
         if not points:
             return
@@ -1825,16 +1939,56 @@ class RenderSurfaceMixin:
         mode_state = getattr(self, "controller_mode_state", None)
         if callable(mode_state) and mode_state() != "active":
             return
-        bounds_map = getattr(self, "_last_overlay_bounds_for_target", {}) or {}
         transform_map = getattr(self, "_last_transform_by_group", {}) or {}
         mapper = self._compute_legacy_mapper()
         anchor_override = getattr(self, "_controller_active_anchor", None)
-        bounds = self._resolve_bounds_for_active_group(active_group, bounds_map)
+        preview_mode = "last"
+        override_manager = getattr(self, "_override_manager", None)
+        if override_manager is not None:
+            try:
+                preview_mode = override_manager.group_controller_preview_box_mode(active_group[0], active_group[1])
+            except Exception:
+                preview_mode = "last"
+        if isinstance(preview_mode, str):
+            preview_mode = preview_mode.strip().lower()
+        if preview_mode not in {"last", "max"}:
+            preview_mode = "last"
+        bounds_map = getattr(self, "_last_visible_overlay_bounds_for_target", None)
+        if not isinstance(bounds_map, dict) or not bounds_map:
+            bounds_map = getattr(self, "_last_overlay_bounds_for_target", {}) or {}
+        bounds = None
         anchor_token = None
-        if bounds is None or not bounds.is_valid():
-            bounds, anchor_token = self._fallback_bounds_from_cache(active_group, mapper, anchor_override=anchor_override)
+        if preview_mode == "last":
+            bounds = self._resolve_bounds_for_active_group(active_group, bounds_map)
             if bounds is None or not bounds.is_valid():
-                return
+                bounds, anchor_token = self._fallback_bounds_from_cache(
+                    active_group,
+                    mapper,
+                    anchor_override=anchor_override,
+                    cache_mode="last",
+                )
+            if bounds is None or not bounds.is_valid():
+                bounds, anchor_token = self._fallback_bounds_from_cache(active_group, mapper, anchor_override=anchor_override)
+        else:
+            bounds, anchor_token = self._fallback_bounds_from_cache(
+                active_group,
+                mapper,
+                anchor_override=anchor_override,
+                cache_mode="max",
+            )
+            if bounds is None or not bounds.is_valid():
+                bounds = self._resolve_bounds_for_active_group(active_group, bounds_map)
+            if bounds is None or not bounds.is_valid():
+                bounds, anchor_token = self._fallback_bounds_from_cache(
+                    active_group,
+                    mapper,
+                    anchor_override=anchor_override,
+                    cache_mode="last",
+                )
+            if bounds is None or not bounds.is_valid():
+                bounds, anchor_token = self._fallback_bounds_from_cache(active_group, mapper, anchor_override=anchor_override)
+        if bounds is None or not bounds.is_valid():
+            return
         rect = self._overlay_bounds_to_rect(bounds, mapper)
         if rect.width() <= 0 or rect.height() <= 0:
             return
@@ -1859,6 +2013,69 @@ class RenderSurfaceMixin:
         painter.setBrush(QColor(255, 255, 255))
         radius = 5
         painter.drawEllipse(QPoint(anchor_px[0], anchor_px[1]), radius, radius)
+
+    def _update_last_visible_overlay_bounds_for_target(
+        self,
+        overlay_bounds_for_draw: Mapping[Tuple[str, Optional[str]], _OverlayBounds],
+        commands: Sequence[_LegacyPaintCommand],
+    ) -> None:
+        if not overlay_bounds_for_draw:
+            return
+        visible_groups = self._visible_group_keys(commands)
+        if not visible_groups:
+            return
+        cloned_bounds = self._clone_overlay_bounds_map(overlay_bounds_for_draw)
+        last_visible = getattr(self, "_last_visible_overlay_bounds_for_target", {}) or {}
+        if not isinstance(last_visible, dict):
+            last_visible = {}
+        for key in visible_groups:
+            bounds = cloned_bounds.get(key)
+            if bounds is None or not bounds.is_valid():
+                continue
+            if (bounds.max_x - bounds.min_x) <= 0.0 or (bounds.max_y - bounds.min_y) <= 0.0:
+                continue
+            last_visible[key] = bounds
+        self._last_visible_overlay_bounds_for_target = last_visible
+
+    def _visible_group_keys(self, commands: Sequence[_LegacyPaintCommand]) -> Set[Tuple[str, Optional[str]]]:
+        visible_groups: Set[Tuple[str, Optional[str]]] = set()
+        for command in commands:
+            if command.overlay_bounds is None and command.bounds is None:
+                continue
+            if self._command_is_visible_for_target(command):
+                visible_groups.add(command.group_key.as_tuple())
+        return visible_groups
+
+    @staticmethod
+    def _safe_float(value: object, default: float = 0.0) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _command_is_visible_for_target(self, command: _LegacyPaintCommand) -> bool:
+        bounds = command.overlay_bounds or command.bounds
+        if bounds is not None:
+            if (bounds[2] - bounds[0]) <= 0.0 or (bounds[3] - bounds[1]) <= 0.0:
+                return False
+        if isinstance(command, _MessagePaintCommand):
+            text = str(getattr(command, "text", "") or "")
+            ttl_raw = command.legacy_item.data.get("__mo_ttl__")
+            ttl_val = self._safe_float(ttl_raw, default=-1.0)
+            if ttl_val == 0.0 and not text.strip():
+                return False
+            return True
+        if isinstance(command, _RectPaintCommand):
+            item = command.legacy_item.data
+            width = self._safe_float(item.get("w"), default=0.0)
+            height = self._safe_float(item.get("h"), default=0.0)
+            if width <= 0.0 or height <= 0.0:
+                return False
+            return True
+        if isinstance(command, _VectorPaintCommand):
+            points = command.legacy_item.data.get("points")
+            return bool(points)
+        return True
 
     @staticmethod
     def _match_group_key(target: Tuple[str, Optional[str]], candidates: Mapping[Tuple[str, Optional[str]], Any]) -> Optional[Tuple[str, Optional[str]]]:
@@ -1888,6 +2105,8 @@ class RenderSurfaceMixin:
         active_group: Tuple[str, Optional[str]],
         mapper: Optional[LegacyMapper] = None,
         anchor_override: Optional[str] = None,
+        cache_mode: Optional[str] = None,
+        require_transformed: bool = False,
     ) -> Tuple[Optional[_OverlayBounds], Optional[str]]:
         cache = getattr(self, "_group_cache", None)
         if cache is None or not hasattr(cache, "get_group"):
@@ -1918,6 +2137,7 @@ class RenderSurfaceMixin:
                 entry = None
         if entry is None:
             return None, None
+        mode_token = (cache_mode or "transformed").strip().lower()
         token_override = anchor_override
         override_manager = getattr(self, "_override_manager", None)
         base_meta = entry.get("base") if isinstance(entry, Mapping) else {}
@@ -1949,12 +2169,49 @@ class RenderSurfaceMixin:
         )
         if base_bounds is None or not base_bounds.is_valid():
             return None, None
-
-        transformed = entry.get("transformed") if isinstance(entry, Mapping) else None
         cache_anchor_token = base_anchor_token
         bounds = base_bounds
         width = base_width
         height = base_height
+
+        def _payload_kind(payload: Any) -> str:
+            if not isinstance(payload, Mapping):
+                return ""
+            for key in payload.keys():
+                if key.startswith("trans_"):
+                    return "transformed"
+            for key in payload.keys():
+                if key.startswith("base_"):
+                    return "base"
+            return ""
+
+        cache_payload = None
+        payload_kind = ""
+        if isinstance(entry, Mapping):
+            if mode_token == "last":
+                cache_payload = entry.get("last_visible_transformed")
+            elif mode_token == "max":
+                cache_payload = entry.get("max_transformed")
+            else:
+                cache_payload = entry.get("transformed")
+            payload_kind = _payload_kind(cache_payload)
+
+        transformed = None
+        if mode_token in {"last", "max"} and payload_kind == "base":
+            cached_bounds, _cached_anchor, cached_width, cached_height = self._overlay_bounds_from_cache_entry(
+                {"base": cache_payload}, prefer_transformed=False
+            )
+            if cached_bounds is not None and cached_bounds.is_valid():
+                bounds = cached_bounds
+                width = cached_width
+                height = cached_height
+        else:
+            if payload_kind == "transformed":
+                transformed = cache_payload
+            elif mode_token not in {"last", "max"}:
+                transformed = cache_payload if isinstance(cache_payload, Mapping) else None
+        if require_transformed and not isinstance(transformed, Mapping):
+            return None, None
 
         def _offsets_match(payload: Mapping[str, Any], target_dx: float, target_dy: float) -> bool:
             tol = 0.5
@@ -1983,7 +2240,7 @@ class RenderSurfaceMixin:
             timestamp_ok = not generation_ts or entry_last_updated >= generation_ts - 1e-6
             if nonce_ok and timestamp_ok and _offsets_match(transformed, offset_dx, offset_dy):
                 cached_bounds, cached_anchor, cached_width, cached_height = self._overlay_bounds_from_cache_entry(
-                    entry or {}, prefer_transformed=True
+                    {"transformed": transformed}, prefer_transformed=True
                 )
                 if cached_bounds is not None and cached_bounds.is_valid():
                     bounds = cached_bounds
@@ -1992,6 +2249,8 @@ class RenderSurfaceMixin:
                     height = cached_height
                     use_cached_transform = True
 
+        if require_transformed and not use_cached_transform:
+            return None, None
         if not use_cached_transform and (offset_dx or offset_dy):
             bounds.translate(offset_dx, offset_dy)
 
@@ -2206,6 +2465,12 @@ class RenderSurfaceMixin:
 
     def _apply_window_dimensions(self, *, force: bool = False) -> None:
         return
+
+    def _payload_opacity_percent(self) -> int:
+        return coerce_percent(getattr(self, "_payload_opacity", 100), 100)
+
+    def _apply_payload_opacity_color(self, color: QColor) -> QColor:
+        return apply_global_payload_opacity(color, self._payload_opacity_percent())
 
     def _line_width(self, key: str) -> int:
         defaults = getattr(self, "_line_width_defaults", _LINE_WIDTH_DEFAULTS_FALLBACK)

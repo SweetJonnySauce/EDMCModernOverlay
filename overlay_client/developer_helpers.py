@@ -36,6 +36,7 @@ class DeveloperHelperController:
 
     def apply_initial_window_state(self, window: "OverlayWindow", initial: InitialClientSettings) -> None:
         window.set_log_retention(self._current_log_retention)
+        window.set_payload_opacity(getattr(initial, "global_payload_opacity", 100))
         window.set_force_render(initial.force_render)
         window.set_physical_clamp_enabled(getattr(initial, "physical_clamp_enabled", False))
         if getattr(initial, "physical_clamp_overrides", None):
@@ -43,6 +44,7 @@ class DeveloperHelperController:
         window.set_follow_enabled(True)
         window.set_debug_overlay(initial.show_debug_overlay)
         window.set_font_bounds(initial.min_font_point, initial.max_font_point)
+        window.set_legacy_font_step(getattr(initial, "legacy_font_step", 2.0))
         window.set_status_bottom_margin(initial.status_bottom_margin)
         window.set_debug_overlay_corner(getattr(initial, "debug_overlay_corner", "NW"))
         window.set_title_bar_compensation(initial.title_bar_enabled, initial.title_bar_height)
@@ -58,6 +60,8 @@ class DeveloperHelperController:
         config = DeveloperHelperConfig.from_payload(payload)
         if config.background_opacity is not None:
             window.set_background_opacity(config.background_opacity)
+        if config.global_payload_opacity is not None:
+            window.set_payload_opacity(config.global_payload_opacity)
         if config.enable_drag is not None:
             window.set_drag_enabled(config.enable_drag)
         if config.gridlines_enabled is not None or config.gridline_spacing is not None:
@@ -83,6 +87,8 @@ class DeveloperHelperController:
             window.set_debug_overlay(config.show_debug_overlay)
         if config.min_font_point is not None or config.max_font_point is not None:
             window.set_font_bounds(config.min_font_point, config.max_font_point)
+        if config.legacy_font_step is not None:
+            window.set_legacy_font_step(config.legacy_font_step)
         if config.cycle_payload_ids is not None:
             window.set_cycle_payload_enabled(config.cycle_payload_ids)
         if config.copy_payload_id_on_cycle is not None:
@@ -104,9 +110,16 @@ class DeveloperHelperController:
     def handle_legacy_payload(self, window: "OverlayWindow", payload: Dict[str, Any]) -> None:
         if payload.get("type") == "shape" and payload.get("shape") == "vect":
             points = payload.get("vector")
-            if not isinstance(points, list) or len(points) < 2:
+            if not isinstance(points, list) or not points:
                 self._logger.warning("Vector payload ignored: requires at least two points (%s)", points)
                 return
+            if len(points) < 2:
+                point = points[0] if isinstance(points[0], dict) else {}
+                has_marker = bool(point.get("marker"))
+                has_text = point.get("text") is not None and str(point.get("text")) != ""
+                if not (has_marker or has_text):
+                    self._logger.warning("Vector payload ignored: requires at least two points (%s)", points)
+                    return
         window.handle_legacy_payload(payload)
 
     def set_log_retention(self, retention: int) -> None:

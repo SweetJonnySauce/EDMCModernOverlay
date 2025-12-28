@@ -208,6 +208,69 @@ def test_define_plugin_group_updates_payload_justification(grouping_store):
     assert payload["Example"]["idPrefixGroups"]["alerts"]["payloadJustification"] == "right"
 
 
+def test_define_plugin_group_sets_marker_label_position(grouping_store):
+    overlay_api.define_plugin_group(
+        plugin_group="Example",
+        id_prefix_group="alerts",
+        id_prefixes=["example-alert-"],
+        marker_label_position="below",
+    )
+
+    payload = _load(grouping_store)
+    group = payload["Example"]["idPrefixGroups"]["alerts"]
+    assert group["markerLabelPosition"] == "below"
+
+
+def test_define_plugin_group_updates_marker_label_position(grouping_store):
+    overlay_api.define_plugin_group(
+        plugin_group="Example",
+        id_prefix_group="alerts",
+        id_prefixes=["example-alert-"],
+        marker_label_position="below",
+    )
+
+    updated = overlay_api.define_plugin_group(
+        plugin_group="Example",
+        id_prefix_group="alerts",
+        marker_label_position="centered",
+    )
+    assert updated is True
+
+    payload = _load(grouping_store)
+    assert payload["Example"]["idPrefixGroups"]["alerts"]["markerLabelPosition"] == "centered"
+
+def test_define_plugin_group_sets_controller_preview_box_mode(grouping_store):
+    overlay_api.define_plugin_group(
+        plugin_group="Example",
+        id_prefix_group="alerts",
+        id_prefixes=["example-alert-"],
+        controller_preview_box_mode="max",
+    )
+
+    payload = _load(grouping_store)
+    group = payload["Example"]["idPrefixGroups"]["alerts"]
+    assert group["controllerPreviewBoxMode"] == "max"
+
+
+def test_define_plugin_group_updates_controller_preview_box_mode(grouping_store):
+    overlay_api.define_plugin_group(
+        plugin_group="Example",
+        id_prefix_group="alerts",
+        id_prefixes=["example-alert-"],
+        controller_preview_box_mode="last",
+    )
+
+    updated = overlay_api.define_plugin_group(
+        plugin_group="Example",
+        id_prefix_group="alerts",
+        controller_preview_box_mode="max",
+    )
+    assert updated is True
+
+    payload = _load(grouping_store)
+    assert payload["Example"]["idPrefixGroups"]["alerts"]["controllerPreviewBoxMode"] == "max"
+
+
 def test_define_plugin_group_requires_id_group_for_payload_justification(grouping_store):
     with pytest.raises(PluginGroupingError):
         overlay_api.define_plugin_group(
@@ -223,6 +286,40 @@ def test_define_plugin_group_validates_payload_justification_token(grouping_stor
             id_prefix_group="alerts",
             id_prefixes=["example-"],
             payload_justification="middle",
+        )
+
+
+def test_define_plugin_group_requires_id_group_for_marker_label_position(grouping_store):
+    with pytest.raises(PluginGroupingError):
+        overlay_api.define_plugin_group(
+            plugin_group="Example",
+            marker_label_position="below",
+        )
+
+def test_define_plugin_group_requires_id_group_for_controller_preview_box_mode(grouping_store):
+    with pytest.raises(PluginGroupingError):
+        overlay_api.define_plugin_group(
+            plugin_group="Example",
+            controller_preview_box_mode="max",
+        )
+
+
+def test_define_plugin_group_validates_marker_label_position_token(grouping_store):
+    with pytest.raises(PluginGroupingError):
+        overlay_api.define_plugin_group(
+            plugin_group="Example",
+            id_prefix_group="alerts",
+            id_prefixes=["example-"],
+            marker_label_position="low",
+        )
+
+def test_define_plugin_group_validates_controller_preview_box_mode_token(grouping_store):
+    with pytest.raises(PluginGroupingError):
+        overlay_api.define_plugin_group(
+            plugin_group="Example",
+            id_prefix_group="alerts",
+            id_prefixes=["example-"],
+            controller_preview_box_mode="largest",
         )
 
 
@@ -261,10 +358,12 @@ def test_define_plugin_group_supports_background_fields(grouping_store):
         id_prefix_group="alerts",
         id_prefixes=["example-alert-"],
         background_color="#ab12cd",
+        background_border_color="red",
         background_border_width=4,
     )
 
     payload = _load(grouping_store)
     group = payload["Example"]["idPrefixGroups"]["alerts"]
     assert group["backgroundColor"] == "#AB12CD"
+    assert group["backgroundBorderColor"] == "red"
     assert group["backgroundBorderWidth"] == 4
