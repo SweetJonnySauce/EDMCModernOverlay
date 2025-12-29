@@ -20,7 +20,8 @@
   - Cleaned up some inconsistencies with pref pane, internal messages being sent, and plugged `define_plugin_group` api into `utils/plugin_group_manager.py` for add/update operations.
   - Cleaned up a noisy log message (client connected)
   - Addresses [#56](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/56) by creating a vt_transparency.html asset you can download and view.
-
+  - Fixed issue where updating README with latest VT source code report failed after locking down `main` from commits.
+  - Fixed [#65](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/65) where `<space>` did not exit focus out of the controller id_prefix widget.
   
 ## 0.7.5
 - Features & Improvements:

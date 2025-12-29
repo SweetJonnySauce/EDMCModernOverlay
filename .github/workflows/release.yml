@@ -479,6 +479,7 @@ jobs:
     if: always() && github.event_name == 'release'
     permissions:
       contents: write
+      pull-requests: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -574,15 +575,39 @@ jobs:
                   fh.write(f"changed={'true' if changed else 'false'}\n")
           PY
 
-      - name: Commit README update
+      - name: Commit README update and open PR
         if: steps.update_readme.outputs.changed == 'true'
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
           RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add README.md
           git commit -m "chore: update VirusTotal report link for ${RELEASE_TAG}"
-          git push origin HEAD:${DEFAULT_BRANCH}
+
+          safe_tag=$(printf '%s' "${RELEASE_TAG}" | tr '/ ' '-' | tr -cd 'A-Za-z0-9._-')
+          pr_branch="automation/update-vt-link-${safe_tag}"
+          git checkout -b "${pr_branch}"
+          git push --force-with-lease origin "${pr_branch}"
+
+          existing_pr=$(gh pr list --head "${pr_branch}" --repo "${GITHUB_REPOSITORY}" --json number -q '.[0].number')
+          if [ -n "${existing_pr}" ]; then
+            echo "PR already exists: #${existing_pr}"
+          else
+            gh pr create \
+              --repo "${GITHUB_REPOSITORY}" \
+              --head "${pr_branch}" \
+              --base "${DEFAULT_BRANCH}" \
+              --title "chore: update VirusTotal report link for ${RELEASE_TAG}" \
+              --body "Automated README update for release ${RELEASE_TAG}."
+          fi
+
+          pr_url=$(gh pr list --head "${pr_branch}" --repo "${GITHUB_REPOSITORY}" --json url -q '.[0].url')
+
+          if [ -n "${pr_url}" ]; then
+            gh pr merge --auto --squash --delete-branch "${pr_url}" --repo "${GITHUB_REPOSITORY}" || \
+              echo "Auto-merge not enabled or blocked by repo rules."
+          fi

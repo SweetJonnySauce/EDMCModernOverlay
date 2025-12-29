@@ -290,6 +290,16 @@ class OverlayConfigApp(tk.Tk):
         self.sidebar.grid_propagate(True)
         self._binding_config = BindingConfig.load()
         self._binding_manager = BindingManager(self, self._binding_config)
+        if self.idprefix_widget is not None:
+            try:
+                sequences = self._binding_manager.get_sequences("exit_focus")
+                for sequence in self._binding_manager.get_sequences("enter_focus"):
+                    if sequence not in sequences:
+                        sequences.append(sequence)
+                if sequences:
+                    self.idprefix_widget.set_exit_focus_sequences(sequences)
+            except Exception:
+                pass
         self._gamepad_bridge = GamepadBridge(
             self,
             self._binding_manager.trigger_action,
