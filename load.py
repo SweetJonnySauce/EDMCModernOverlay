@@ -53,6 +53,8 @@ if __package__:
         PreferencesPanel,
         STATUS_GUTTER_MAX,
         TroubleshootingPanelState,
+        _apply_font_bounds_edit,
+        _apply_font_step_edit,
         _normalise_launch_command,
     )
     from .overlay_plugin.version_helper import VersionStatus, evaluate_version_status
@@ -96,6 +98,8 @@ else:  # pragma: no cover - EDMC loads as top-level module
         PreferencesPanel,
         STATUS_GUTTER_MAX,
         TroubleshootingPanelState,
+        _apply_font_bounds_edit,
+        _apply_font_step_edit,
         _normalise_launch_command,
     )
     from overlay_plugin.version_helper import VersionStatus, evaluate_version_status
@@ -1961,55 +1965,46 @@ class _PluginRuntime:
         return True
 
     def set_min_font_preference(self, value: float) -> None:
-        try:
-            minimum = float(value)
-        except (TypeError, ValueError):
-            minimum = self._preferences.min_font_point
-        minimum = max(1.0, min(minimum, 48.0))
         with self._prefs_lock:
-            if minimum != self._preferences.min_font_point:
-                if minimum > self._preferences.max_font_point:
-                    self._preferences.max_font_point = minimum
-                self._preferences.min_font_point = minimum
-                LOGGER.debug("Overlay minimum font point set to %.1f", minimum)
+            current_min = self._preferences.min_font_point
+            current_max = self._preferences.max_font_point
+            new_min, _new_max, accepted = _apply_font_bounds_edit(current_min, current_max, "min", value)
+            if not accepted or new_min == current_min:
+                broadcast = False
+            else:
+                self._preferences.min_font_point = new_min
+                LOGGER.debug("Overlay minimum font point set to %.1f", new_min)
                 self._preferences.save()
                 broadcast = True
-            else:
-                broadcast = False
         if broadcast:
             self._send_overlay_config()
 
     def set_max_font_preference(self, value: float) -> None:
-        try:
-            maximum = float(value)
-        except (TypeError, ValueError):
-            maximum = self._preferences.max_font_point
-        maximum = max(self._preferences.min_font_point, min(maximum, 72.0))
         with self._prefs_lock:
-            if maximum != self._preferences.max_font_point:
-                self._preferences.max_font_point = maximum
-                LOGGER.debug("Overlay maximum font point set to %.1f", maximum)
+            current_min = self._preferences.min_font_point
+            current_max = self._preferences.max_font_point
+            _new_min, new_max, accepted = _apply_font_bounds_edit(current_min, current_max, "max", value)
+            if not accepted or new_max == current_max:
+                broadcast = False
+            else:
+                self._preferences.max_font_point = new_max
+                LOGGER.debug("Overlay maximum font point set to %.1f", new_max)
                 self._preferences.save()
                 broadcast = True
-            else:
-                broadcast = False
         if broadcast:
             self._send_overlay_config()
 
     def set_legacy_font_step_preference(self, value: int) -> None:
-        try:
-            step = int(value)
-        except (TypeError, ValueError):
-            step = int(getattr(self._preferences, "legacy_font_step", 2))
-        step = max(0, min(step, 10))
         with self._prefs_lock:
-            if step != getattr(self._preferences, "legacy_font_step", 2):
+            current_step = int(getattr(self._preferences, "legacy_font_step", 2))
+            step, accepted = _apply_font_step_edit(current_step, value)
+            if not accepted or step == current_step:
+                broadcast = False
+            else:
                 self._preferences.legacy_font_step = step
                 LOGGER.debug("Overlay legacy font step set to %d", step)
                 self._preferences.save()
                 broadcast = True
-            else:
-                broadcast = False
         if broadcast:
             self._send_overlay_config()
 

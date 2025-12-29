@@ -47,8 +47,8 @@
 | Phase | Description | Status |
 | --- | --- | --- |
 | 0 | Discovery: current behavior and issue 80 findings | Completed |
-| 1 | Requirements: preference UI bounds + apply behavior | Pending |
-| 2 | Implementation plan: preference clamps + apply flow | Pending |
+| 1 | Requirements: preference UI bounds + apply behavior | Completed |
+| 2 | Implementation plan: preference clamps + apply flow | Completed |
 
 ## Phase Details
 
@@ -93,14 +93,36 @@
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 1.1 | Document preference-only clamp rules, UI apply triggers, and clarifications | Pending |
+| 1.1 | Document preference-only clamp rules, UI apply triggers, and clarifications | Completed |
 
-### Phase N: Title Placeholder
-- Describe the extraction/decoupling goal for this phase.
-- Note the APIs you intend to introduce and the behaviors that must remain unchanged.
-- Call out edge cases and invariants that need tests before and after the move.
-- Risks: list potential regressions unique to this phase.
-- Mitigations: planned tests, flags, and rollout steps to contain those risks.
+### Phase 2: Implementation Plan (Preference Clamps + Apply Flow)
+- Goal: implement preference-side validation with focus-out-only behavior, centralized bounds/step rules, and updated tooltip copy without changing render behavior.
+- Touch points:
+  - `overlay_plugin/preferences.py`: UI wiring, focus-out handlers, tooltip, persistence, and validation helpers.
+  - `load.py`: preference setters called from UI (enforce same bounds/step rules).
+  - `overlay_client/client_config.py`: confirm defaults remain consistent (no behavior change, but ensure new limits align).
+- Invariants and edge cases:
+  - No live validation while typing; validation runs on the field losing focus (including tabbing between fields).
+  - Invalid edits revert to the last committed valid value; do not snap to bounds during typing.
+  - Min/max order enforcement blocks the edited value and keeps the other field unchanged.
+  - Preview triggers a forced apply of current fields before sending.
+- Risks:
+  - Focus/trace recursion causing unintended updates or lost edits.
+  - Inconsistent clamping between UI and setter paths.
+- Mitigations:
+  - Use a single helper for bounds/step validation shared by UI + setters.
+  - Add unit tests for helper behavior and ordering/revert cases.
 
 | Stage | Description | Status |
 | --- | --- | --- |
+| 2.1 | Define shared clamp helpers/constants for min/max bounds + step limits; add unit tests for helper behavior | Completed |
+| 2.2 | Remove live trace validation; wire focus-out-only apply + last-committed value tracking for min/max/step | Completed |
+| 2.3 | Update apply flow to enforce ordering/revert rules and preview force-apply behavior | Completed |
+| 2.4 | Enforce the same helper in preference setters/load callbacks to keep UI and persistence consistent | Completed |
+| 2.5 | Update tooltip copy and adjust/expand tests for ordering + revert behavior | Completed |
+
+#### Phase 2 Results
+- Added shared font bounds/step validation helpers + constants and applied them to preference loading + setters.
+- Switched font bounds/step UI updates to focus-out-only validation with last-committed reverts; preview now forces apply.
+- Updated font bounds tooltip copy and added unit tests for ordering and invalid edits (`tests/test_font_bounds_validation.py`).
+- Tests: `python3 -m pytest tests/test_font_bounds_validation.py`
