@@ -686,7 +686,8 @@ class PreferencesPanel:
             self._scale_style,
             self._labelframe_style,
         ) = self._init_theme_styles(nb)
-        self._var_opacity = tk.DoubleVar(value=preferences.overlay_opacity)
+        initial_opacity = _coerce_float(preferences.overlay_opacity, 0.0, minimum=0.0, maximum=1.0)
+        self._var_opacity = tk.DoubleVar(value=initial_opacity)
         self._var_payload_opacity = tk.DoubleVar(value=float(preferences.global_payload_opacity))
         self._var_show_status = tk.BooleanVar(value=preferences.show_connection_status)
         self._var_status_gutter = tk.IntVar(value=max(0, int(preferences.status_message_gutter)))
@@ -783,6 +784,8 @@ class PreferencesPanel:
         self._test_x_var = tk.StringVar()
         self._test_y_var = tk.StringVar()
         self._status_var = tk.StringVar(value="")
+        opacity_percent = int(round(initial_opacity * 100))
+        self._opacity_label = tk.StringVar(value=f"{opacity_percent}%")
         self._payload_opacity_label = tk.StringVar(value=f"{int(preferences.global_payload_opacity)}%")
         self._dev_mode = bool(dev_mode)
 
@@ -1015,8 +1018,8 @@ class PreferencesPanel:
         payload_opacity_scale = ttk.Scale(
             payload_opacity_row,
             variable=self._var_payload_opacity,
-            from_=0,
-            to=100,
+            from_=100,
+            to=0,
             orient=tk.HORIZONTAL,
             length=200,
             command=self._on_payload_opacity_change,
@@ -1230,7 +1233,7 @@ class PreferencesPanel:
 
             opacity_label = nb.Label(
                 dev_frame,
-                text="Overlay background opacity (0.0 transparent – 1.0 opaque).",
+                text="Overlay background opacity (100% opaque - 0% transparent).",
             )
             opacity_label.grid(row=dev_row, column=0, sticky="w", pady=ROW_PAD)
             dev_row += 1
@@ -1239,14 +1242,16 @@ class PreferencesPanel:
             opacity_scale = ttk.Scale(
                 opacity_row,
                 variable=self._var_opacity,
-                from_=0.0,
-                to=1.0,
+                from_=1.0,
+                to=0.0,
                 orient=tk.HORIZONTAL,
                 length=250,
                 command=self._on_opacity_change,
                 style=self._scale_style,
             )
             opacity_scale.pack(side="left", fill="x")
+            opacity_value = nb.Label(opacity_row, textvariable=self._opacity_label)
+            opacity_value.pack(side="left", padx=(8, 0))
             opacity_row.grid(row=dev_row, column=0, sticky="we", pady=ROW_PAD)
             dev_row += 1
 
@@ -1387,6 +1392,7 @@ class PreferencesPanel:
             numeric = 0.0
         numeric = max(0.0, min(1.0, numeric))
         self._var_opacity.set(numeric)
+        self._opacity_label.set(f"{int(round(numeric * 100))}%")
         self._preferences.overlay_opacity = numeric
         if self._set_opacity:
             try:
