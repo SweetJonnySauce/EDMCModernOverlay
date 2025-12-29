@@ -637,8 +637,11 @@ classify_packages_for_dnf() {
         fi
 
         if [[ -n "$candidate_evr" && -n "$installed_evr" && $vercmp_available -eq 1 ]]; then
-            rpmdev-vercmp "$installed_evr" "$candidate_evr" >/dev/null 2>&1
-            rc=$?
+            if rpmdev-vercmp "$installed_evr" "$candidate_evr" >/dev/null 2>&1; then
+                rc=0
+            else
+                rc=$?
+            fi
             case "$rc" in
                 0)
                     PACKAGES_ALREADY_OK+=("$pkg")
