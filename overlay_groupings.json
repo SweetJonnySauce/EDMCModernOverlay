@@ -305,10 +305,38 @@
         "idPrefixGroupAnchor": "top",
         "offsetX": 640,
         "offsetY": 5,
-        "payloadJustification": "left",
-        "markerLabelPosition": "below",
-        "controllerPreviewBoxMode": "last",
-        "backgroundColor": null
+        "payloadJustification": "left"
+      },
+      "Edr Sitrep": {
+        "idPrefixes": [
+          "edr-sitrep-"
+        ],
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left"
+      }
+    }
+  },
+  "Example Plugin": {
+    "matchingPrefixes": [
+      "example-",
+      "example-alt-",
+      "test-1"
+    ],
+    "idPrefixGroups": {
+      "status": {
+        "idPrefixes": [
+          "example-",
+          "example-alert-"
+        ],
+        "idPrefixGroupAnchor": "ne",
+        "payloadJustification": "left"
+      },
+      "test": {
+        "idPrefixes": [
+          "example-bob"
+        ],
+        "idPrefixGroupAnchor": "top",
+        "payloadJustification": "left"
       }
     }
   },
