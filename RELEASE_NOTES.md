@@ -23,6 +23,7 @@
   - Fixed issue where updating README with latest VT source code report failed after locking down `main` from commits.
   - Fixed [#65](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/65) where `<space>` did not exit focus out of the controller id_prefix widget.
   - Fixed [#86](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/86) to have 100% on opacity sliders be on the left to match the UI/UX for what EDMC does already. 
+  - Fixed [#80](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/80) where font bound settings could go out of control by adding enforcement rules and min/max boundaries.
   
 ## 0.7.5
 - Features & Improvements:
