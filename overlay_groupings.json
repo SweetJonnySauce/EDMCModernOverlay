@@ -175,13 +175,19 @@
       }
     }
   },
-  "ED-Mining-Analytics": {
+  "EDMC-Mining-Analytics": {
+    "matchingPrefixes": [
+      "edmcma"
+    ],
     "idPrefixGroups": {
-      "All-edmca-prefixes": {
+      "EDMC-Mining-Analytics": {
         "idPrefixes": [
-          "edmcma"
+          "edmcma.metric."
         ],
-        "payloadJustification": "left"
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last"
       }
     }
   },
