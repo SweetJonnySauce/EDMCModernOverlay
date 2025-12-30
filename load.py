@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -737,7 +738,11 @@ class _PluginRuntime:
         backup_count = max(0, retention - 1)
         log_dir = self._resolve_payload_logs_dir()
         log_path = log_dir / PAYLOAD_LOG_FILE_NAME
-        formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", "%Y-%m-%d %H:%M:%S")
+        formatter = logging.Formatter(
+            "%(asctime)s.%(msecs)03d UTC - %(levelname)s - %(message)s",
+            "%Y-%m-%d %H:%M:%S",
+        )
+        formatter.converter = time.gmtime
         try:
             handler = build_rotating_payload_handler(
                 log_dir,
@@ -2019,7 +2024,7 @@ class _PluginRuntime:
         original_payload = dict(payload)
         self._trace_payload_marker(
             original_payload,
-            "Trace starting for {payload_id} payload={payload}",
+            "Trace starting for {payload_id} trace_id={trace_id} payload={payload}",
             include_payload=True,
         )
         self._trace_payload_event("ingest:external_raw", original_payload)
@@ -2087,6 +2092,7 @@ class _PluginRuntime:
         if not self._running:
             return False
         raw_payload = dict(payload)
+        trace_id = self._trace_payload_id(raw_payload)
         self._trace_payload_event("legacy_tcp:received", raw_payload)
         normalised = normalise_legacy_payload(raw_payload)
         if normalised is None:
@@ -2098,6 +2104,8 @@ class _PluginRuntime:
             **normalised,
             "legacy_raw": raw_payload,
         }
+        if trace_id:
+            message["__mo_trace_id"] = trace_id
         message.setdefault("timestamp", datetime.now(UTC).isoformat())
         self._trace_payload_event(
             "legacy_tcp:normalised",
@@ -2344,10 +2352,10 @@ class _PluginRuntime:
         message = dict(payload)
         self._trace_payload_event("publish:dispatch", message)
         self._log_payload(message)
-        self._trace_payload_marker(message, "Trace queued for client for {payload_id}.")
+        self._trace_payload_marker(message, "Trace queued for client for {payload_id} trace_id={trace_id}.")
         self.broadcaster.publish(dict(message))
         self._trace_payload_event("publish:sent", message)
-        self._trace_payload_marker(message, "Trace handed off to client for {payload_id}.")
+        self._trace_payload_marker(message, "Trace handed off to client for {payload_id} trace_id={trace_id}.")
 
     def _load_plugin_prefix_map(self) -> Dict[str, str]:
         config_path = self.plugin_dir / "overlay_groupings.json"
@@ -2490,7 +2498,8 @@ class _PluginRuntime:
         if not self._trace_enabled:
             return
         plugin_name, payload_id = self._plugin_name_for_payload(payload)
-        if not self._should_trace_payload(plugin_name, payload_id):
+        trace_id = self._trace_payload_id(payload, plugin_name=plugin_name, payload_id=payload_id)
+        if not trace_id:
             return
         info: Dict[str, Any] = {}
         event_name = payload.get("event")
@@ -2503,9 +2512,10 @@ class _PluginRuntime:
             for key, value in extra.items():
                 info[key] = value
         LOGGER.debug(
-            "trace plugin=%s id=%s stage=%s info=%s",
+            "trace plugin=%s id=%s trace_id=%s stage=%s info=%s",
             plugin_name or "unknown",
             payload_id or "",
+            trace_id,
             stage,
             info,
         )
@@ -2514,13 +2524,38 @@ class _PluginRuntime:
         if not self._trace_enabled:
             return
         plugin_name, payload_id = self._plugin_name_for_payload(payload)
-        if not self._should_trace_payload(plugin_name, payload_id):
+        trace_id = self._trace_payload_id(payload, plugin_name=plugin_name, payload_id=payload_id)
+        if not trace_id:
             return
         if include_payload:
             payload_repr = self._format_trace_payload(payload)
-            LOGGER.debug(template.format(payload_id=payload_id or "", payload=payload_repr))
+            LOGGER.debug(
+                template.format(payload_id=payload_id or "", payload=payload_repr, trace_id=trace_id)
+            )
         else:
-            LOGGER.debug(template.format(payload_id=payload_id or ""))
+            LOGGER.debug(template.format(payload_id=payload_id or "", trace_id=trace_id))
+
+    def _trace_payload_id(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        plugin_name: Optional[str] = None,
+        payload_id: Optional[str] = None,
+    ) -> Optional[str]:
+        if not self._trace_enabled:
+            return None
+        if plugin_name is None or payload_id is None:
+            plugin_name, payload_id = self._plugin_name_for_payload(payload)
+        if not self._should_trace_payload(plugin_name, payload_id):
+            return None
+        existing = payload.get("__mo_trace_id")
+        if isinstance(existing, str) and existing:
+            return existing
+        if isinstance(payload, MutableMapping):
+            trace_id = str(uuid.uuid4())
+            payload["__mo_trace_id"] = trace_id
+            return trace_id
+        return None
 
     @staticmethod
     def _format_trace_payload(payload: Mapping[str, Any]) -> str:

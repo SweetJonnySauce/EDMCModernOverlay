@@ -2589,7 +2589,11 @@ def _ensure_controller_logger(root_path: Path) -> Optional[logging.Logger]:
         return _CONTROLLER_LOGGER
     try:
         log_dir = resolve_logs_dir(root_path, log_dir_name="EDMCModernOverlay")
-        formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", "%Y-%m-%d %H:%M:%S")
+        formatter = logging.Formatter(
+            "%(asctime)s.%(msecs)03d UTC - %(levelname)s - %(message)s",
+            "%Y-%m-%d %H:%M:%S",
+        )
+        formatter.converter = time.gmtime
         handler = None
         try:
             handler = build_rotating_file_handler(

@@ -1,5 +1,12 @@
 # Release Notes
 
+## 0.7.7
+
+### Features
+### Bug Fixes
+  - Updates to payload tracing to help with Issue [#83](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/83) 
+  - Changed client, controller, payload logs to UTC. Does not change the min version python3.10 contract.
+
 ## 0.7.6
 - Features
   - Added functionality to set plugin group background color via define_plugin_group for Plugin Authors or via Overlay Controller for CMDRs.

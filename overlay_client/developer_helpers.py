@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
@@ -139,9 +140,10 @@ class DeveloperHelperController:
         retention = max(1, retention)
         logs_dir = resolve_logs_dir(self._client_root)
         formatter = logging.Formatter(
-            "%(asctime)s.%(msecs)03d [%(levelname)s] %(message)s",
+            "%(asctime)s.%(msecs)03d UTC - %(levelname)s - %(message)s",
             "%Y-%m-%d %H:%M:%S",
         )
+        formatter.converter = time.gmtime
         try:
             handler = build_rotating_file_handler(
                 logs_dir,
