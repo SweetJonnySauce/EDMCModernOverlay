@@ -1192,7 +1192,15 @@ class RenderSurfaceMixin:
         raw_left = float(item.get("x", 0))
         raw_top = float(item.get("y", 0))
         if trace_enabled and not collect_only:
-            self._log_legacy_trace(plugin_name, item_id, "client:received", {"message": "received from plugin"})
+            self._log_legacy_trace(
+                plugin_name,
+                item_id,
+                "client:received",
+                {
+                    "message": "received from plugin",
+                    "payload": dict(item),
+                },
+            )
         (
             adjusted_left,
             adjusted_top,

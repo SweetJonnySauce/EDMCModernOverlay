@@ -3,7 +3,7 @@
   "overlay_logs_to_keep": 5,
   "payload_logging": {
     "exclude_plugins": [
-      "bgs-tallyx",
+      "bgs-tally",
       "bioscan"
     ],
     "overlay_payload_log_enabled": true
