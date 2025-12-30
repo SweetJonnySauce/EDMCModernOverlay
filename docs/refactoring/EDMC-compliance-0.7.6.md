@@ -15,7 +15,6 @@
 - Keep changes small and behavior-scoped; prefer feature flags/dev-mode toggles for risky tweaks.
 - Plan before coding: note touch points, expected unchanged behavior, and tests you’ll run.
 - Avoid UI work off the main thread; keep new helpers pure/data-only where possible.
-- When touching preferences/config code, use EDMC `config.get_int/str/bool/list` helpers and `number_from_string` for locale-aware numeric parsing; avoid raw `config.get/set`.
 - Record tests run (or skipped with reasons) when landing changes; default to headless tests for pure helpers.
 - Prefer fast/no-op paths in release builds; keep debug logging/dev overlays gated behind dev mode.
 
