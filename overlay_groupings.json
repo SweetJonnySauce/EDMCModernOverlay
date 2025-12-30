@@ -21,8 +21,8 @@
           "bgstally-msg-tickwarn-"
         ],
         "idPrefixGroupAnchor": "ne",
+        "offsetX": -5,
         "payloadJustification": "right",
-        "offsetX": -5.0,
         "backgroundColor": "None",
         "backgroundBorderColor": "None",
         "backgroundBorderWidth": 3
@@ -70,7 +70,11 @@
       },
       "BGS-Tally Info": {
         "idPrefixes": [
-          "bgstally-msg-info-"
+          "bgstally-msg-info-",
+          {
+            "value": "bgstally-frame-info",
+            "matchMode": "exact"
+          }
         ],
         "idPrefixGroupAnchor": "nw",
         "payloadJustification": "left",
@@ -90,25 +94,34 @@
       },
       "BGS-Tally Tick": {
         "idPrefixes": [
-          "bgstally-msg-tick-"
+          "bgstally-msg-tick-",
+          {
+            "value": "bgstally-frame-tick",
+            "matchMode": "exact"
+          }
         ],
-        "idPrefixGroupAnchor": "ne",
-        "payloadJustification": "right",
-        "offsetX": -5.0,
-        "backgroundColor": "green",
-        "backgroundBorderColor": "green",
-        "backgroundBorderWidth": 3
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last",
+        "backgroundColor": null,
+        "backgroundBorderColor": null
       },
       "BGS-Tally System_tick": {
         "idPrefixes": [
-          "bgstally-msg-system_tick-"
+          "bgstally-msg-system_tick-",
+          {
+            "value": "bgstally-frame-system_tick",
+            "matchMode": "exact"
+          }
         ],
-        "idPrefixGroupAnchor": "ne",
-        "payloadJustification": "right",
-        "offsetX": -5.0,
-        "backgroundColor": "blue",
-        "backgroundBorderColor": "blue",
-        "backgroundBorderWidth": 3
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last",
+        "backgroundColor": null,
+        "backgroundBorderColor": null,
+        "backgroundBorderWidth": null
       },
       "BGS-Tally Warning": {
         "idPrefixes": [

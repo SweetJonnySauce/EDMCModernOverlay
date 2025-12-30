@@ -2,7 +2,10 @@
   "capture_client_stderrout": false,
   "overlay_logs_to_keep": 5,
   "payload_logging": {
-    "exclude_plugins": [],
+    "exclude_plugins": [
+      "bgs-tallyx",
+      "bioscan"
+    ],
     "overlay_payload_log_enabled": true
   }
 }

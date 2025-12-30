@@ -1191,6 +1191,8 @@ class RenderSurfaceMixin:
         self._debug_legacy_point_size = scaled_point_size
         raw_left = float(item.get("x", 0))
         raw_top = float(item.get("y", 0))
+        if trace_enabled and not collect_only:
+            self._log_legacy_trace(plugin_name, item_id, "client:received", {"message": "received from plugin"})
         (
             adjusted_left,
             adjusted_top,
@@ -1362,6 +1364,10 @@ class RenderSurfaceMixin:
         base_translation_dy = group_ctx.base_translation_dy
         transform_meta = item.get("__mo_transform__")
         trace_enabled = self._should_trace_payload(plugin_name, item_id)
+        trace_fn = None
+        if trace_enabled and not collect_only:
+            def trace_fn(stage: str, details: Mapping[str, Any]) -> None:
+                self._log_legacy_trace(plugin_name, item_id, stage, details)
         raw_x = float(item.get("x", 0))
         raw_y = float(item.get("y", 0))
         raw_w = float(item.get("w", 0))
@@ -1436,6 +1442,7 @@ class RenderSurfaceMixin:
             ],
             raw_min_x=raw_x,
             right_just_multiplier=2,
+            trace_fn=trace_fn,
         )
         if trace_enabled and not collect_only:
             self._log_legacy_trace(

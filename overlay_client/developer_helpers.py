@@ -138,7 +138,10 @@ class DeveloperHelperController:
     def _configure_client_logging(self, retention: int) -> None:
         retention = max(1, retention)
         logs_dir = resolve_logs_dir(self._client_root)
-        formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", "%Y-%m-%d %H:%M:%S")
+        formatter = logging.Formatter(
+            "%(asctime)s.%(msecs)03d [%(levelname)s] %(message)s",
+            "%Y-%m-%d %H:%M:%S",
+        )
         try:
             handler = build_rotating_file_handler(
                 logs_dir,

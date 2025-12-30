@@ -77,6 +77,7 @@ class _MessagePaintCommand(_LegacyPaintCommand):
                     "color": self.color.name(),
                 },
             )
+            self.trace_fn("trace:complete", {"kind": "message"})
         if self.cycle_anchor:
             anchor_x = int(round(self.cycle_anchor[0] + offset_x))
             anchor_y = int(round(self.cycle_anchor[1] + offset_y))
@@ -92,6 +93,7 @@ class _RectPaintCommand(_LegacyPaintCommand):
     width: int = 0
     height: int = 0
     cycle_anchor: Optional[Tuple[int, int]] = None
+    trace_fn: Optional[Callable[[str, Mapping[str, Any]], None]] = None
 
     def paint(self, window: "OverlayWindow", painter: QPainter, offset_x: int, offset_y: int) -> None:
         pen = self.pen
@@ -108,6 +110,8 @@ class _RectPaintCommand(_LegacyPaintCommand):
         draw_x = int(round(self.x + offset_x))
         draw_y = int(round(self.y + offset_y))
         painter.drawRect(draw_x, draw_y, self.width, self.height)
+        if self.trace_fn:
+            self.trace_fn("trace:complete", {"kind": "rect"})
         if self.cycle_anchor:
             anchor_x = int(round(self.cycle_anchor[0] + offset_x))
             anchor_y = int(round(self.cycle_anchor[1] + offset_y))
@@ -138,6 +142,8 @@ class _VectorPaintCommand(_LegacyPaintCommand):
             marker_label_position=marker_label_position,
             trace=self.trace_fn,
         )
+        if self.trace_fn:
+            self.trace_fn("trace:complete", {"kind": "vector"})
         if self.cycle_anchor:
             anchor_x = int(round(self.cycle_anchor[0] + offset_x))
             anchor_y = int(round(self.cycle_anchor[1] + offset_y))

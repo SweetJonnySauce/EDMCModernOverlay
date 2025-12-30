@@ -2017,6 +2017,11 @@ class _PluginRuntime:
         if not self._running:
             return False
         original_payload = dict(payload)
+        self._trace_payload_marker(
+            original_payload,
+            "Trace starting for {payload_id} payload={payload}",
+            include_payload=True,
+        )
         self._trace_payload_event("ingest:external_raw", original_payload)
         message = dict(original_payload)
         message.setdefault("cmdr", self._state.get("cmdr", ""))
@@ -2339,8 +2344,10 @@ class _PluginRuntime:
         message = dict(payload)
         self._trace_payload_event("publish:dispatch", message)
         self._log_payload(message)
+        self._trace_payload_marker(message, "Trace queued for client for {payload_id}.")
         self.broadcaster.publish(dict(message))
         self._trace_payload_event("publish:sent", message)
+        self._trace_payload_marker(message, "Trace handed off to client for {payload_id}.")
 
     def _load_plugin_prefix_map(self) -> Dict[str, str]:
         config_path = self.plugin_dir / "overlay_groupings.json"
@@ -2502,6 +2509,25 @@ class _PluginRuntime:
             stage,
             info,
         )
+
+    def _trace_payload_marker(self, payload: Mapping[str, Any], template: str, *, include_payload: bool = False) -> None:
+        if not self._trace_enabled:
+            return
+        plugin_name, payload_id = self._plugin_name_for_payload(payload)
+        if not self._should_trace_payload(plugin_name, payload_id):
+            return
+        if include_payload:
+            payload_repr = self._format_trace_payload(payload)
+            LOGGER.debug(template.format(payload_id=payload_id or "", payload=payload_repr))
+        else:
+            LOGGER.debug(template.format(payload_id=payload_id or ""))
+
+    @staticmethod
+    def _format_trace_payload(payload: Mapping[str, Any]) -> str:
+        try:
+            return json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+        except Exception:
+            return repr(payload)
 
     def _log_payload(self, payload: Mapping[str, Any]) -> None:
         event: Optional[str] = None
