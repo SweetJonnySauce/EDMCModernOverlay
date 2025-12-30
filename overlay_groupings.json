@@ -21,8 +21,8 @@
           "bgstally-msg-tickwarn-"
         ],
         "idPrefixGroupAnchor": "ne",
+        "offsetX": -5,
         "payloadJustification": "right",
-        "offsetX": -5.0,
         "backgroundColor": "None",
         "backgroundBorderColor": "None",
         "backgroundBorderWidth": 3
@@ -70,7 +70,11 @@
       },
       "BGS-Tally Info": {
         "idPrefixes": [
-          "bgstally-msg-info-"
+          "bgstally-msg-info-",
+          {
+            "value": "bgstally-frame-info",
+            "matchMode": "exact"
+          }
         ],
         "idPrefixGroupAnchor": "nw",
         "payloadJustification": "left",
@@ -90,25 +94,34 @@
       },
       "BGS-Tally Tick": {
         "idPrefixes": [
-          "bgstally-msg-tick-"
+          "bgstally-msg-tick-",
+          {
+            "value": "bgstally-frame-tick",
+            "matchMode": "exact"
+          }
         ],
-        "idPrefixGroupAnchor": "ne",
-        "payloadJustification": "right",
-        "offsetX": -5.0,
-        "backgroundColor": "green",
-        "backgroundBorderColor": "green",
-        "backgroundBorderWidth": 3
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last",
+        "backgroundColor": null,
+        "backgroundBorderColor": null
       },
       "BGS-Tally System_tick": {
         "idPrefixes": [
-          "bgstally-msg-system_tick-"
+          "bgstally-msg-system_tick-",
+          {
+            "value": "bgstally-frame-system_tick",
+            "matchMode": "exact"
+          }
         ],
-        "idPrefixGroupAnchor": "ne",
-        "payloadJustification": "right",
-        "offsetX": -5.0,
-        "backgroundColor": "blue",
-        "backgroundBorderColor": "blue",
-        "backgroundBorderWidth": 3
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last",
+        "backgroundColor": null,
+        "backgroundBorderColor": null,
+        "backgroundBorderWidth": null
       },
       "BGS-Tally Warning": {
         "idPrefixes": [
@@ -289,38 +302,10 @@
         "idPrefixGroupAnchor": "top",
         "offsetX": 640,
         "offsetY": 5,
-        "payloadJustification": "left"
-      },
-      "Edr Sitrep": {
-        "idPrefixes": [
-          "edr-sitrep-"
-        ],
-        "idPrefixGroupAnchor": "nw",
-        "payloadJustification": "left"
-      }
-    }
-  },
-  "Example Plugin": {
-    "matchingPrefixes": [
-      "example-",
-      "example-alt-",
-      "test-1"
-    ],
-    "idPrefixGroups": {
-      "status": {
-        "idPrefixes": [
-          "example-",
-          "example-alert-"
-        ],
-        "idPrefixGroupAnchor": "ne",
-        "payloadJustification": "left"
-      },
-      "test": {
-        "idPrefixes": [
-          "example-bob"
-        ],
-        "idPrefixGroupAnchor": "top",
-        "payloadJustification": "left"
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last",
+        "backgroundColor": null
       }
     }
   },
@@ -363,6 +348,52 @@
         "offsetX": 640,
         "offsetY": -60.093,
         "payloadJustification": "center"
+      }
+    }
+  },
+  "PlanetPOI": {
+    "matchingPrefixes": [
+      "checkmark-",
+      "heading-",
+      "poi-",
+      "poi_"
+    ],
+    "idPrefixGroups": {
+      "Checkmark": {
+        "idPrefixes": [
+          "checkmark-left-",
+          "checkmark-right-"
+        ],
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "max",
+        "backgroundColor": null,
+        "backgroundBorderColor": null
+      },
+      "Heading Arrow": {
+        "idPrefixes": [
+          "heading-arrow-",
+          "heading-center-"
+        ],
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "max",
+        "backgroundColor": null,
+        "backgroundBorderColor": null
+      },
+      "POI": {
+        "idPrefixes": [
+          "poi_"
+        ],
+        "idPrefixGroupAnchor": "top",
+        "offsetX": 140,
+        "payloadJustification": "center",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "max",
+        "backgroundColor": null,
+        "backgroundBorderColor": null
       }
     }
   }
