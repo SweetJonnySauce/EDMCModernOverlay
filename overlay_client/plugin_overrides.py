@@ -943,6 +943,8 @@ class PluginOverrideManager:
         cfg = self._debug_config
         if not cfg.trace_enabled:
             return
+        trace_id = payload.get("__mo_trace_id")
+        trace_id_token = trace_id if isinstance(trace_id, str) else ""
         shape = str(payload.get("shape") or "").lower()
         if shape == "vect":
             vector = payload.get("vector")
@@ -952,7 +954,14 @@ class PluginOverrideManager:
             for point in vector:
                 if isinstance(point, Mapping):
                     coords.append((point.get("x"), point.get("y")))
-            self._logger.debug("trace plugin=%s id=%s stage=%s vector=%s", plugin, message_id, stage, coords)
+            self._logger.debug(
+                "trace plugin=%s id=%s trace_id=%s stage=%s vector=%s",
+                plugin,
+                message_id,
+                trace_id_token,
+                stage,
+                coords,
+            )
         elif shape == "rect":
             try:
                 x_val = payload.get("x")
@@ -962,9 +971,10 @@ class PluginOverrideManager:
             except Exception:
                 return
             self._logger.debug(
-                "trace plugin=%s id=%s stage=%s rect=(x=%s,y=%s,w=%s,h=%s)",
+                "trace plugin=%s id=%s trace_id=%s stage=%s rect=(x=%s,y=%s,w=%s,h=%s)",
                 plugin,
                 message_id,
+                trace_id_token,
                 stage,
                 x_val,
                 y_val,

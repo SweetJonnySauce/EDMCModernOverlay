@@ -291,10 +291,47 @@ class PayloadTailer(threading.Thread):
             "plugin_group": plugin_group,
             "group_label": prefix_group,
             "payload_id": record.payload_id,
+            "payload_type": self._payload_type_label(record.payload),
+            "ttl": self._payload_ttl_label(record.payload),
+            "empty_text": self._payload_empty_label(record.payload),
             "payload_json": payload_json,
         }
         self._queue.put(("payload_history" if history else "payload", entry))
         return True
+
+    @staticmethod
+    def _payload_type_label(payload: Mapping[str, Any]) -> str:
+        raw_type = payload.get("type")
+        if isinstance(raw_type, str) and raw_type.strip():
+            return raw_type.strip()
+        shape = payload.get("shape")
+        if isinstance(shape, str) and shape.strip():
+            return shape.strip()
+        return ""
+
+    @staticmethod
+    def _payload_ttl_label(payload: Mapping[str, Any]) -> str:
+        ttl = payload.get("ttl")
+        if ttl is None:
+            return ""
+        if isinstance(ttl, bool):
+            return "1" if ttl else "0"
+        if isinstance(ttl, float):
+            if ttl.is_integer():
+                return str(int(ttl))
+            return str(ttl)
+        if isinstance(ttl, int):
+            return str(ttl)
+        if isinstance(ttl, str):
+            return ttl.strip()
+        return str(ttl)
+
+    @staticmethod
+    def _payload_empty_label(payload: Mapping[str, Any]) -> str:
+        text = payload.get("text")
+        if isinstance(text, str) and text == "":
+            return "Yes"
+        return "No"
 
 
 class PayloadInspectorApp:
@@ -315,7 +352,20 @@ class PayloadInspectorApp:
         self._suppressed_plugin_groups: set[str] = set()
         self._suppressed_group_labels: set[str] = set()
         self._suppressed_payload_ids: set[str] = set()
+        self._suppressed_payload_types: set[str] = set()
+        self._suppressed_ttls: set[str] = set()
+        self._suppressed_empty_flags: set[str] = set()
         self._group_preview_payloads: Optional[str] = None
+        self._column_tooltips: Dict[str, str] = {
+            "timestamp": "Log timestamp prefix from the payload line.",
+            "plugin": "Plugin name recorded in the payload log line.",
+            "payload_type": "Payload type field (message, shape, etc).",
+            "ttl": "Time-to-live in seconds (as logged).",
+            "empty_text": "Yes when payload text is an empty string.",
+            "plugin_group": "Grouping label resolved from plugin overrides.",
+            "group_label": "ID prefix group resolved from overrides.",
+            "payload": "Payload id (id or raw/legacy id).",
+        }
 
         self._user_config = self._load_user_config()
         custom_path = self._user_config.get("log_file")
@@ -350,20 +400,22 @@ class PayloadInspectorApp:
         log_entry.pack(side="left", fill="x", expand=True, padx=5)
         ttk.Button(log_row, text="Choose...", command=self._choose_log_file).pack(side="right", padx=5)
 
-        main_frame = ttk.Frame(self.root)
-        main_frame.pack(fill="both", expand=True)
+        main_pane = ttk.Panedwindow(self.root, orient="horizontal")
+        main_pane.pack(fill="both", expand=True)
 
-        left_frame = ttk.Frame(main_frame)
-        left_frame.pack(side="left", fill="y", padx=(0, 6))
+        left_frame = ttk.Frame(main_pane)
         ttk.Label(left_frame, text="Payload list", font=("TkDefaultFont", 10, "bold")).pack(anchor="w", padx=(5, 0), pady=(0, 4))
 
-        columns = ("timestamp", "plugin", "plugin_group", "group_label", "payload")
+        columns = ("timestamp", "plugin", "payload_type", "ttl", "empty_text", "plugin_group", "group_label", "payload")
         tree_container = ttk.Frame(left_frame)
         tree_container.pack(fill="both", expand=True, padx=(5, 0))
         self.tree = ttk.Treeview(tree_container, columns=columns, show="headings")
         headings = {
             "timestamp": "Timestamp",
             "plugin": "Plugin",
+            "payload_type": "Type",
+            "ttl": "TTL",
+            "empty_text": "Empty",
             "plugin_group": "Plugin Group",
             "group_label": "ID Prefix Group",
             "payload": "Payload ID",
@@ -373,6 +425,12 @@ class PayloadInspectorApp:
             width = 140 if column == "timestamp" else 110
             if column == "plugin":
                 width = 100
+            if column == "payload_type":
+                width = 80
+            if column == "ttl":
+                width = 60
+            if column == "empty_text":
+                width = 70
             if column == "plugin_group":
                 width = 110
             if column == "group_label":
@@ -386,6 +444,8 @@ class PayloadInspectorApp:
         scroll_y.pack(side="right", fill="y")
         self.tree.configure(yscrollcommand=scroll_y.set)
         self.tree.bind("<<TreeviewSelect>>", self._on_selection_changed)
+        self.tree.bind("<Motion>", self._on_tree_motion)
+        self.tree.bind("<Leave>", self._on_tree_leave)
         # Right-click suppression menu (Button-2 for mac support)
         self.tree.bind("<Button-3>", self._show_context_menu)
         self.tree.bind("<Button-2>", self._show_context_menu)
@@ -410,8 +470,10 @@ class PayloadInspectorApp:
         self._tip_index = -1
         self._rotate_tip()
 
-        right_frame = ttk.Frame(main_frame)
-        right_frame.pack(side="left", fill="both", expand=True, padx=(8, 0))
+        right_frame = ttk.Frame(main_pane)
+
+        main_pane.add(left_frame, weight=3)
+        main_pane.add(right_frame, weight=2)
 
         preview_frame = ttk.Frame(right_frame)
         preview_frame.pack(fill="x", padx=(5, 0), pady=(0, 8))
@@ -435,6 +497,7 @@ class PayloadInspectorApp:
         detail_scroll_y.pack(side="right", fill="y")
         self.detail_text.configure(yscrollcommand=detail_scroll_y.set)
         ttk.Frame(right_frame).pack(fill="x", padx=(5, 5), pady=(4, 0))
+        self._header_tooltip = HeaderTooltip(self.root)
 
 
     def _toggle_pause(self) -> None:
@@ -442,6 +505,30 @@ class PayloadInspectorApp:
         self._tailer.set_paused(self._paused)
         self.pause_button.config(text="Resume" if self._paused else "Pause")
         self.status_var.set("Paused" if self._paused else "Resumed - catching up...")
+
+    def _on_tree_motion(self, event) -> None:
+        region = self.tree.identify_region(event.x, event.y)
+        if region != "heading":
+            self._header_tooltip.hide()
+            return
+        column_id = self.tree.identify_column(event.x)
+        if not column_id:
+            self._header_tooltip.hide()
+            return
+        index = int(column_id.lstrip("#")) - 1
+        columns = self.tree["columns"]
+        if index < 0 or index >= len(columns):
+            self._header_tooltip.hide()
+            return
+        column_key = columns[index]
+        text = self._column_tooltips.get(column_key)
+        if not text:
+            self._header_tooltip.hide()
+            return
+        self._header_tooltip.show(event.x_root, event.y_root + 16, text)
+
+    def _on_tree_leave(self, _event=None) -> None:
+        self._header_tooltip.hide()
 
     def _drain_queue(self) -> None:
         try:
@@ -472,6 +559,9 @@ class PayloadInspectorApp:
         values = (
             payload.get("timestamp", ""),
             payload.get("plugin", ""),
+            payload.get("payload_type", ""),
+            payload.get("ttl", ""),
+            payload.get("empty_text", ""),
             payload.get("plugin_group") or "",
             payload.get("group_label") or "",
             payload.get("payload_id", ""),
@@ -497,6 +587,9 @@ class PayloadInspectorApp:
         details = payload.get("payload_json", "")
         if not isinstance(details, str):
             details = json.dumps(payload, indent=2, ensure_ascii=False)
+        plugin_name = (payload.get("plugin") or "").strip()
+        plugin_line = plugin_name if plugin_name else "(unknown)"
+        details = f"Plugin: {plugin_line}\n\n{details}"
         self.detail_text.configure(state="normal")
         self.detail_text.delete("1.0", tk.END)
         self.detail_text.insert("1.0", details)
@@ -544,6 +637,9 @@ class PayloadInspectorApp:
         plugin_group = (payload.get("plugin_group") or "").strip()
         group_label = (payload.get("group_label") or "").strip()
         payload_id = (payload.get("payload_id") or "").strip()
+        payload_type = (payload.get("payload_type") or "").strip()
+        payload_ttl = (payload.get("ttl") or "").strip()
+        empty_text = (payload.get("empty_text") or "").strip()
 
         def _add(label: str, handler: Callable[[], None]) -> None:
             menu.add_command(label=label, command=handler)
@@ -560,6 +656,15 @@ class PayloadInspectorApp:
                 f"Suppress ID prefix group '{group_label}'",
                 lambda lbl=group_label: self._suppress("group_label", lbl),
             )
+            added = True
+        if payload_type:
+            _add(f"Suppress type '{payload_type}'", lambda pt=payload_type: self._suppress("payload_type", pt))
+            added = True
+        if payload_ttl:
+            _add(f"Suppress TTL '{payload_ttl}'", lambda ttl=payload_ttl: self._suppress("ttl", ttl))
+            added = True
+        if empty_text:
+            _add(f"Suppress Empty '{empty_text}'", lambda flag=empty_text: self._suppress("empty_text", flag))
             added = True
         if payload_id:
             _add(f"Suppress payload id '{payload_id}'", lambda pid=payload_id: self._suppress("payload_id", pid))
@@ -640,6 +745,33 @@ class PayloadInspectorApp:
                 return (item.get("payload_id") or "").strip() == token
 
             self.status_var.set(f"Suppressed payload id '{token}'.")
+        elif kind == "payload_type":
+            if lowered in self._suppressed_payload_types:
+                return
+            self._suppressed_payload_types.add(lowered)
+
+            def predicate(item: Mapping[str, Any]) -> bool:
+                return (item.get("payload_type") or "").strip().casefold() == lowered
+
+            self.status_var.set(f"Suppressed payload type '{token}'.")
+        elif kind == "ttl":
+            if token in self._suppressed_ttls:
+                return
+            self._suppressed_ttls.add(token)
+
+            def predicate(item: Mapping[str, Any]) -> bool:
+                return (item.get("ttl") or "").strip() == token
+
+            self.status_var.set(f"Suppressed TTL '{token}'.")
+        elif kind == "empty_text":
+            if token in self._suppressed_empty_flags:
+                return
+            self._suppressed_empty_flags.add(token)
+
+            def predicate(item: Mapping[str, Any]) -> bool:
+                return (item.get("empty_text") or "").strip() == token
+
+            self.status_var.set(f"Suppressed Empty '{token}'.")
         else:
             return
         self._remove_rows(predicate)
@@ -663,6 +795,9 @@ class PayloadInspectorApp:
             and not self._suppressed_plugin_groups
             and not self._suppressed_group_labels
             and not self._suppressed_payload_ids
+            and not self._suppressed_payload_types
+            and not self._suppressed_ttls
+            and not self._suppressed_empty_flags
         ):
             self.status_var.set("No suppression rules to clear.")
             return
@@ -670,6 +805,9 @@ class PayloadInspectorApp:
         self._suppressed_plugin_groups.clear()
         self._suppressed_group_labels.clear()
         self._suppressed_payload_ids.clear()
+        self._suppressed_payload_types.clear()
+        self._suppressed_ttls.clear()
+        self._suppressed_empty_flags.clear()
         self.status_var.set("Suppression rules cleared.")
 
     def _is_suppressed(self, payload: Mapping[str, object]) -> bool:
@@ -684,6 +822,15 @@ class PayloadInspectorApp:
             return True
         payload_id = (payload.get("payload_id") or "").strip()
         if payload_id and payload_id in self._suppressed_payload_ids:
+            return True
+        payload_type = (payload.get("payload_type") or "").strip()
+        if payload_type and payload_type.casefold() in self._suppressed_payload_types:
+            return True
+        payload_ttl = (payload.get("ttl") or "").strip()
+        if payload_ttl and payload_ttl in self._suppressed_ttls:
+            return True
+        empty_text = (payload.get("empty_text") or "").strip()
+        if empty_text and empty_text in self._suppressed_empty_flags:
             return True
         return False
 
@@ -929,6 +1076,47 @@ class PayloadInspectorApp:
                 fill=fill_color if self._is_valid_color(fill_color) else "",
             )
         return text if isinstance(text, str) and text else None
+
+
+class HeaderTooltip:
+    """Simple tooltip helper for treeview headers."""
+
+    def __init__(self, root: tk.Tk) -> None:
+        self._root = root
+        self._window: Optional[tk.Toplevel] = None
+        self._label: Optional[tk.Label] = None
+        self._text: Optional[str] = None
+
+    def show(self, x: int, y: int, text: str) -> None:
+        if self._text == text and self._window is not None:
+            self._window.geometry(f"+{x}+{y}")
+            return
+        self._text = text
+        if self._window is None:
+            window = tk.Toplevel(self._root)
+            window.wm_overrideredirect(True)
+            window.attributes("-topmost", True)
+            label = tk.Label(
+                window,
+                text=text,
+                background="#ffffe0",
+                relief="solid",
+                borderwidth=1,
+                font=("TkDefaultFont", 9),
+                justify="left",
+            )
+            label.pack(ipadx=6, ipady=3)
+            self._window = window
+            self._label = label
+        else:
+            self._label.config(text=text)
+        self._window.geometry(f"+{x}+{y}")
+        self._window.deiconify()
+
+    def hide(self) -> None:
+        if self._window is None:
+            return
+        self._window.withdraw()
 
 
 def _coerce_number(value: Any) -> float:

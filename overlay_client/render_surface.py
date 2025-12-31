@@ -234,6 +234,10 @@ class RenderSurfaceMixin:
     ) -> None:
         if not self._should_trace_payload(plugin, message_id):
             return
+        trace_id = ""
+        trace_map = getattr(self, "_trace_id_by_item", None)
+        if isinstance(trace_map, dict):
+            trace_id = str(trace_map.get(message_id) or "")
         serialisable: Dict[str, Any] = {}
         for key, value in info.items():
             if key in {"points", "scaled_points"}:
@@ -241,12 +245,35 @@ class RenderSurfaceMixin:
             else:
                 serialisable[key] = value
         _CLIENT_LOGGER.debug(
-            "trace plugin=%s id=%s stage=%s info=%s",
+            "trace plugin=%s id=%s trace_id=%s stage=%s info=%s",
             plugin or "unknown",
             message_id,
+            trace_id,
             stage,
             serialisable,
         )
+
+    def _trace_paint_phase(self, plugin: Optional[str], message_id: str, *, kind: str) -> None:
+        if not self._should_trace_payload(plugin, message_id):
+            return
+        key = (plugin or "", message_id)
+        trace_map = getattr(self, "_trace_paint_seen", None)
+        if not isinstance(trace_map, dict):
+            trace_map = {}
+            setattr(self, "_trace_paint_seen", trace_map)
+        if trace_map.get(key):
+            stage = "paint:repaint"
+        else:
+            stage = "paint:initial"
+            trace_map[key] = True
+        self._log_legacy_trace(plugin, message_id, stage, {"kind": kind})
+
+    def _reset_paint_phase(self, plugin: Optional[str], message_id: str) -> None:
+        trace_map = getattr(self, "_trace_paint_seen", None)
+        if not isinstance(trace_map, dict):
+            return
+        key = (plugin or "", message_id)
+        trace_map.pop(key, None)
 
     def _trace_legacy_store_event(self, stage: str, item: LegacyItem) -> None:
         details: Dict[str, Any] = {"kind": item.kind}
@@ -290,6 +317,19 @@ class RenderSurfaceMixin:
     def _handle_legacy(self, payload: Dict[str, Any]) -> None:
         plugin_name = self._extract_plugin_name(payload)
         message_id = str(payload.get("id") or "")
+        trace_id = payload.get("__mo_trace_id")
+        if isinstance(trace_id, str) and trace_id:
+            trace_map = getattr(self, "_trace_id_by_item", None)
+            if not isinstance(trace_map, dict):
+                trace_map = {}
+                setattr(self, "_trace_id_by_item", trace_map)
+            trace_map[message_id] = trace_id
+        elif self._should_trace_payload(plugin_name, message_id):
+            trace_map = getattr(self, "_trace_id_by_item", None)
+            if isinstance(trace_map, dict):
+                trace_map.pop(message_id, None)
+        if self._should_trace_payload(plugin_name, message_id):
+            self._reset_paint_phase(plugin_name, message_id)
         self._override_manager.apply(payload)
         inferred = self._override_manager.infer_plugin_name(payload)
         if inferred:
@@ -1191,6 +1231,17 @@ class RenderSurfaceMixin:
         self._debug_legacy_point_size = scaled_point_size
         raw_left = float(item.get("x", 0))
         raw_top = float(item.get("y", 0))
+        if trace_enabled and not collect_only:
+            self._trace_paint_phase(plugin_name, item_id, kind="message")
+            self._log_legacy_trace(
+                plugin_name,
+                item_id,
+                "client:received",
+                {
+                    "message": "received from plugin",
+                    "payload": dict(item),
+                },
+            )
         (
             adjusted_left,
             adjusted_top,
@@ -1362,6 +1413,11 @@ class RenderSurfaceMixin:
         base_translation_dy = group_ctx.base_translation_dy
         transform_meta = item.get("__mo_transform__")
         trace_enabled = self._should_trace_payload(plugin_name, item_id)
+        trace_fn = None
+        if trace_enabled and not collect_only:
+            def trace_fn(stage: str, details: Mapping[str, Any]) -> None:
+                self._log_legacy_trace(plugin_name, item_id, stage, details)
+            self._trace_paint_phase(plugin_name, item_id, kind="rect")
         raw_x = float(item.get("x", 0))
         raw_y = float(item.get("y", 0))
         raw_w = float(item.get("w", 0))
@@ -1436,6 +1492,7 @@ class RenderSurfaceMixin:
             ],
             raw_min_x=raw_x,
             right_just_multiplier=2,
+            trace_fn=trace_fn,
         )
         if trace_enabled and not collect_only:
             self._log_legacy_trace(
@@ -1469,6 +1526,8 @@ class RenderSurfaceMixin:
         item = legacy_item.data
         plugin_name = legacy_item.plugin
         trace_enabled = self._should_trace_payload(plugin_name, item_id)
+        if trace_enabled and not collect_only:
+            self._trace_paint_phase(plugin_name, item_id, kind="vector")
         state = self._viewport_state()
         offset_x, offset_y = self._group_offsets(group_transform)
         group_ctx = build_group_context(
