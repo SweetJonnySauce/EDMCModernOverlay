@@ -57,6 +57,11 @@ if __package__:
         _apply_font_step_edit,
         _normalise_launch_command,
     )
+    from .overlay_plugin.spam_detection import (
+        PayloadSpamTracker,
+        build_spam_detection_updates,
+        parse_spam_config,
+    )
     from .overlay_plugin.version_helper import VersionStatus, evaluate_version_status
     from .overlay_plugin.legacy_tcp_server import LegacyOverlayTCPServer
     from .overlay_plugin.overlay_api import (
@@ -101,6 +106,11 @@ else:  # pragma: no cover - EDMC loads as top-level module
         _apply_font_bounds_edit,
         _apply_font_step_edit,
         _normalise_launch_command,
+    )
+    from overlay_plugin.spam_detection import (
+        PayloadSpamTracker,
+        build_spam_detection_updates,
+        parse_spam_config,
     )
     from overlay_plugin.version_helper import VersionStatus, evaluate_version_status
     from overlay_plugin.legacy_tcp_server import LegacyOverlayTCPServer
@@ -377,6 +387,13 @@ DEFAULT_DEBUG_CONFIG: Dict[str, Any] = {
         "overlay_payload_log_enabled": True,
         "exclude_plugins": [],
     },
+    "payload_spam_detection": {
+        "enabled": False,
+        "window_seconds": 2.0,
+        "max_payloads_per_window": 200,
+        "warn_cooldown_seconds": 30.0,
+        "exclude_plugins": [],
+    },
 }
 
 DEFAULT_DEV_SETTINGS: Dict[str, Any] = {
@@ -469,6 +486,8 @@ class _PluginRuntime:
         self._dev_settings_mtime: Optional[float] = None
         self._payload_filter_excludes: Set[str] = set()
         self._payload_logging_enabled: bool = False
+        self._payload_spam_tracker = PayloadSpamTracker(LOGGER.warning)
+        self._payload_spam_config = parse_spam_config({}, DEFAULT_DEBUG_CONFIG.get("payload_spam_detection", {}))
         self._trace_enabled: bool = False
         self._trace_payload_prefixes: Tuple[str, ...] = ()
         self._capture_client_stderrout: bool = False
@@ -1035,6 +1054,11 @@ class _PluginRuntime:
             capture_client_stderrout = bool(capture_value)
         log_retention_override = _coerce_log_retention(data.get("overlay_logs_to_keep"))
 
+        spam_defaults = DEFAULT_DEBUG_CONFIG.get("payload_spam_detection", {})
+        spam_config = parse_spam_config(data.get("payload_spam_detection"), spam_defaults)
+        self._payload_spam_config = spam_config
+        self._payload_spam_tracker.configure(spam_config)
+
         self._payload_filter_excludes = excludes
         effective_logging = pref_logging_enabled if logging_override is None else logging_override
         self._payload_logging_enabled = effective_logging
@@ -1073,7 +1097,7 @@ class _PluginRuntime:
             return deepcopy(DEFAULT_DEBUG_CONFIG)
         return dict(data)
 
-    def _edit_debug_config(self, mutator: Callable[[MutableMapping[str, Any]], bool]) -> None:
+    def _edit_debug_config(self, mutator: Callable[[MutableMapping[str, Any]], bool]) -> bool:
         if not _diagnostic_logging_enabled():
             raise RuntimeError("Set EDMC log level to DEBUG (or enable dev mode) to update debug.json.")
         payload = self._read_debug_config_payload()
@@ -1081,12 +1105,13 @@ class _PluginRuntime:
             raise RuntimeError(f"Unable to load debug.json from {self._payload_filter_path}")
         changed = bool(mutator(payload))
         if not changed:
-            return
+            return False
         try:
             self._payload_filter_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         except OSError as exc:
             raise RuntimeError(f"Failed to update debug.json: {exc}") from exc
         self._load_payload_debug_config(force=True)
+        return True
 
     @staticmethod
     def _coerce_payload_id_list(value: Any) -> List[str]:
@@ -1690,11 +1715,16 @@ class _PluginRuntime:
             excludes = tuple(sorted(self._payload_filter_excludes))
             retention = self._log_retention_override
             capture = self._capture_client_stderrout
+            spam_config = self._payload_spam_config
         return TroubleshootingPanelState(
             diagnostics_enabled=_diagnostic_logging_enabled(),
             capture_enabled=capture,
             log_retention_override=retention,
             exclude_plugins=excludes,
+            payload_spam_enabled=spam_config.enabled,
+            payload_spam_window_seconds=spam_config.window_seconds,
+            payload_spam_max_payloads=spam_config.max_payloads,
+            payload_spam_warn_cooldown_seconds=spam_config.warn_cooldown_seconds,
         )
 
     def set_capture_override_preference(self, enabled: bool) -> None:
@@ -1758,6 +1788,47 @@ class _PluginRuntime:
 
         self._edit_debug_config(mutator)
         LOGGER.info("Payload logging exclusions updated via preferences UI: %s", ", ".join(cleaned) or "<none>")
+
+    def set_payload_spam_detection_preference(
+        self,
+        enabled: bool,
+        window_seconds: float,
+        max_payloads: int,
+        warn_cooldown_seconds: float,
+    ) -> None:
+        spam_defaults = DEFAULT_DEBUG_CONFIG.get("payload_spam_detection", {})
+        spam_config, updates = build_spam_detection_updates(
+            enabled=enabled,
+            window_seconds=window_seconds,
+            max_payloads=max_payloads,
+            warn_cooldown_seconds=warn_cooldown_seconds,
+            defaults=spam_defaults,
+        )
+
+        def mutator(payload: MutableMapping[str, Any]) -> bool:
+            section = payload.get("payload_spam_detection")
+            if not isinstance(section, MutableMapping):
+                normalized: Dict[str, Any] = {}
+                changed = True
+            else:
+                normalized = dict(section)
+                changed = False
+            for key, value in updates.items():
+                if normalized.get(key) != value:
+                    normalized[key] = value
+                    changed = True
+            payload["payload_spam_detection"] = normalized
+            return changed
+
+        changed = self._edit_debug_config(mutator)
+        if changed:
+            LOGGER.debug(
+                "Payload spam detection updated via preferences UI: enabled=%s window=%.1fs max=%d cooldown=%.1fs",
+                spam_config.enabled,
+                spam_config.window_seconds,
+                spam_config.max_payloads,
+                spam_config.warn_cooldown_seconds,
+            )
 
     def set_cycle_payload_preference(self, value: bool) -> None:
         flag = bool(value)
@@ -2332,6 +2403,8 @@ class _PluginRuntime:
 
     def _publish_payload(self, payload: Mapping[str, Any]) -> None:
         message = dict(payload)
+        plugin_name, _payload_id = self._plugin_name_for_payload(message)
+        self._payload_spam_tracker.record(plugin_name)
         self._trace_payload_event("publish:dispatch", message)
         self._log_payload(message)
         self.broadcaster.publish(dict(message))
@@ -2871,11 +2944,17 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
     opacity_callback = _plugin.preview_overlay_opacity if _plugin else None
     version_status = _plugin.get_version_status() if _plugin else None
     version_update_available = bool(version_status.update_available) if version_status else False
+    spam_defaults = DEFAULT_DEBUG_CONFIG.get("payload_spam_detection", {})
+    spam_config = parse_spam_config({}, spam_defaults)
     diagnostics_state = TroubleshootingPanelState(
         diagnostics_enabled=_diagnostic_logging_enabled(),
         capture_enabled=False,
         log_retention_override=None,
         exclude_plugins=(),
+        payload_spam_enabled=spam_config.enabled,
+        payload_spam_window_seconds=spam_config.window_seconds,
+        payload_spam_max_payloads=spam_config.max_payloads,
+        payload_spam_warn_cooldown_seconds=spam_config.warn_cooldown_seconds,
     )
     try:
         status_callback = _plugin.set_show_status_preference if _plugin else None
@@ -2904,6 +2983,7 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
         capture_override_callback = _plugin.set_capture_override_preference if _plugin else None
         log_retention_override_callback = _plugin.set_log_retention_override_preference if _plugin else None
         payload_exclusion_callback = _plugin.set_payload_logging_exclusions if _plugin else None
+        payload_spam_detection_callback = _plugin.set_payload_spam_detection_preference if _plugin else None
         if _plugin:
             diagnostics_state = _plugin.get_troubleshooting_panel_state()
         if launch_command_callback:
@@ -2943,6 +3023,7 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
             set_capture_override_callback=capture_override_callback,
             set_log_retention_override_callback=log_retention_override_callback,
             set_payload_exclusion_callback=payload_exclusion_callback,
+            set_payload_spam_detection_callback=payload_spam_detection_callback,
             payload_logging_initial=_plugin._payload_logging_enabled if _plugin else None,
         )
     except Exception as exc:

@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 import load
+from overlay_plugin import spam_detection
 from overlay_plugin import version_helper
 
 
@@ -144,6 +145,11 @@ def _runtime_for_debug_json(tmp_path: Path):
     runtime._payload_filter_path = tmp_path / "debug.json"
     runtime._payload_filter_excludes = set()
     runtime._payload_logging_enabled = False
+    runtime._payload_spam_tracker = spam_detection.PayloadSpamTracker(lambda *_args: None)
+    runtime._payload_spam_config = spam_detection.parse_spam_config(
+        {},
+        load.DEFAULT_DEBUG_CONFIG.get("payload_spam_detection", {}),
+    )
     runtime._payload_filter_mtime = None
     runtime._trace_enabled = False
     runtime._trace_payload_prefixes = ()
@@ -253,6 +259,23 @@ def test_set_log_retention_override_preference(monkeypatch, tmp_path):
     assert runtime._log_retention_override is None
 
 
+def test_set_payload_spam_detection_preference(monkeypatch, tmp_path):
+    runtime = _runtime_for_debug_json(tmp_path)
+    monkeypatch.setattr(load, "_diagnostic_logging_enabled", lambda: True)
+    runtime.set_payload_spam_detection_preference(True, 1.25, 50, 5.0)
+    data = json.loads(runtime._payload_filter_path.read_text(encoding="utf-8"))
+    spam = data["payload_spam_detection"]
+    assert spam["enabled"] is True
+    assert spam["window_seconds"] == pytest.approx(1.25)
+    assert spam["max_payloads_per_window"] == 50
+    assert spam["warn_cooldown_seconds"] == pytest.approx(5.0)
+    config = runtime._payload_spam_config
+    assert config.enabled is True
+    assert config.window_seconds == pytest.approx(1.25)
+    assert config.max_payloads == 50
+    assert config.warn_cooldown_seconds == pytest.approx(5.0)
+
+
 def test_set_payload_logging_exclusions(monkeypatch, tmp_path):
     runtime = _runtime_for_debug_json(tmp_path)
     monkeypatch.setattr(load, "_diagnostic_logging_enabled", lambda: True)
@@ -282,17 +305,50 @@ def test_set_payload_logging_preference_without_diagnostics(monkeypatch, tmp_pat
     assert runtime._payload_filter_path.exists() is False
 
 
+def test_payload_spam_detection_loaded_from_debug_json(monkeypatch, tmp_path):
+    runtime = _runtime_for_debug_json(tmp_path)
+    monkeypatch.setattr(load, "_diagnostic_logging_enabled", lambda: True)
+    debug_payload = {
+        "payload_spam_detection": {
+            "enabled": True,
+            "window_seconds": 1.5,
+            "max_payloads_per_window": 12,
+            "warn_cooldown_seconds": 7.0,
+            "exclude_plugins": ["Foo", "bar"],
+        }
+    }
+    runtime._payload_filter_path.write_text(json.dumps(debug_payload), encoding="utf-8")
+    runtime._load_payload_debug_config(force=True)
+    tracker = runtime._payload_spam_tracker
+    assert tracker._enabled is True
+    assert tracker._window_seconds == pytest.approx(1.5)
+    assert tracker._max_payloads == 12
+    assert tracker._warn_cooldown == pytest.approx(7.0)
+    assert tracker._exclude_plugins == {"foo", "bar"}
+
+
 def test_troubleshooting_panel_state_reflects_runtime(monkeypatch, tmp_path):
     runtime = _runtime_for_debug_json(tmp_path)
     runtime._payload_filter_excludes = {"beta", "alpha"}
     runtime._log_retention_override = 8
     runtime._capture_client_stderrout = True
+    runtime._payload_spam_config = spam_detection.SpamConfig(
+        enabled=True,
+        window_seconds=1.5,
+        max_payloads=25,
+        warn_cooldown_seconds=9.0,
+        exclude_plugins=(),
+    )
     monkeypatch.setattr(load, "_diagnostic_logging_enabled", lambda: True)
     state = runtime.get_troubleshooting_panel_state()
     assert state.diagnostics_enabled is True
     assert state.capture_enabled is True
     assert state.log_retention_override == 8
     assert state.exclude_plugins == ("alpha", "beta")
+    assert state.payload_spam_enabled is True
+    assert state.payload_spam_window_seconds == pytest.approx(1.5)
+    assert state.payload_spam_max_payloads == 25
+    assert state.payload_spam_warn_cooldown_seconds == pytest.approx(9.0)
 
 
 def test_troubleshooting_panel_state_disabled(monkeypatch, tmp_path):
@@ -300,12 +356,23 @@ def test_troubleshooting_panel_state_disabled(monkeypatch, tmp_path):
     runtime._capture_client_stderrout = False
     runtime._payload_filter_excludes = set()
     runtime._log_retention_override = None
+    runtime._payload_spam_config = spam_detection.SpamConfig(
+        enabled=False,
+        window_seconds=2.0,
+        max_payloads=200,
+        warn_cooldown_seconds=30.0,
+        exclude_plugins=(),
+    )
     monkeypatch.setattr(load, "_diagnostic_logging_enabled", lambda: False)
     state = runtime.get_troubleshooting_panel_state()
     assert state.diagnostics_enabled is False
     assert state.capture_enabled is False
     assert state.log_retention_override is None
     assert state.exclude_plugins == ()
+    assert state.payload_spam_enabled is False
+    assert state.payload_spam_window_seconds == pytest.approx(2.0)
+    assert state.payload_spam_max_payloads == 200
+    assert state.payload_spam_warn_cooldown_seconds == pytest.approx(30.0)
 
 
 def test_debug_config_edit_requires_diagnostics(monkeypatch, tmp_path):

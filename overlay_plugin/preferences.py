@@ -35,6 +35,12 @@ FONT_BOUND_MIN = 6.0
 FONT_BOUND_MAX = 32.0
 FONT_STEP_MIN = 0
 FONT_STEP_MAX = 10
+SPAM_WINDOW_MIN = 0.1
+SPAM_WINDOW_MAX = 60.0
+SPAM_MAX_PAYLOADS_MIN = 1
+SPAM_MAX_PAYLOADS_MAX = 5000
+SPAM_WARN_COOLDOWN_MIN = 0.0
+SPAM_WARN_COOLDOWN_MAX = 600.0
 
 LOGGER = logging.getLogger(__name__)
 
@@ -45,6 +51,10 @@ class TroubleshootingPanelState:
     capture_enabled: bool = False
     log_retention_override: Optional[int] = None
     exclude_plugins: Tuple[str, ...] = ()
+    payload_spam_enabled: bool = False
+    payload_spam_window_seconds: float = 2.0
+    payload_spam_max_payloads: int = 200
+    payload_spam_warn_cooldown_seconds: float = 30.0
 
 
 def _config_available() -> bool:
@@ -730,6 +740,7 @@ class PreferencesPanel:
         set_capture_override_callback: Optional[Callable[[bool], None]] = None,
         set_log_retention_override_callback: Optional[Callable[[Optional[int]], None]] = None,
         set_payload_exclusion_callback: Optional[Callable[[Sequence[str]], None]] = None,
+        set_payload_spam_detection_callback: Optional[Callable[[bool, float, int, float], None]] = None,
         payload_logging_initial: Optional[bool] = None,
     ) -> None:
         import tkinter as tk
@@ -782,6 +793,32 @@ class PreferencesPanel:
         )
         self._diagnostics_enabled = bool(state.diagnostics_enabled)
         self._var_capture_override = tk.BooleanVar(value=state.capture_enabled)
+        spam_window = _coerce_float(
+            state.payload_spam_window_seconds,
+            2.0,
+            minimum=SPAM_WINDOW_MIN,
+            maximum=SPAM_WINDOW_MAX,
+        )
+        spam_max = _coerce_int(
+            state.payload_spam_max_payloads,
+            200,
+            minimum=SPAM_MAX_PAYLOADS_MIN,
+            maximum=SPAM_MAX_PAYLOADS_MAX,
+        )
+        spam_cooldown = _coerce_float(
+            state.payload_spam_warn_cooldown_seconds,
+            30.0,
+            minimum=SPAM_WARN_COOLDOWN_MIN,
+            maximum=SPAM_WARN_COOLDOWN_MAX,
+        )
+        self._var_payload_spam_enabled = tk.BooleanVar(value=state.payload_spam_enabled)
+        self._var_payload_spam_window = tk.DoubleVar(value=spam_window)
+        self._var_payload_spam_max = tk.IntVar(value=spam_max)
+        self._var_payload_spam_cooldown = tk.DoubleVar(value=spam_cooldown)
+        self._payload_spam_enabled_committed = bool(state.payload_spam_enabled)
+        self._payload_spam_window_committed = spam_window
+        self._payload_spam_max_committed = spam_max
+        self._payload_spam_cooldown_committed = spam_cooldown
         retention_value = state.log_retention_override
         if retention_value is None:
             try:
@@ -826,6 +863,7 @@ class PreferencesPanel:
         self._set_capture_override = set_capture_override_callback
         self._set_log_retention_override = set_log_retention_override_callback
         self._set_payload_exclusions = set_payload_exclusion_callback
+        self._set_payload_spam_detection = set_payload_spam_detection_callback
 
         self._legacy_client = None
         self._status_gutter_spin = None
@@ -837,8 +875,14 @@ class PreferencesPanel:
         self._cycle_copy_checkbox = None
         self._log_retention_spin = None
         self._payload_exclude_entry = None
+        self._payload_spam_window_spin = None
+        self._payload_spam_max_spin = None
+        self._payload_spam_cooldown_spin = None
+        self._payload_spam_apply_btn = None
+        self._payload_spam_checkbox = None
         self._managed_fonts = []
         self._status_gutter_apply_in_progress = False
+        self._payload_spam_apply_in_progress = False
         self._var_status_gutter.trace_add("write", self._on_status_gutter_trace)
         self._plugin_version = (plugin_version or "").strip()
         self._version_update_available = bool(version_update_available)
@@ -1255,6 +1299,74 @@ class PreferencesPanel:
             if not (self._diagnostics_enabled and self._set_payload_exclusions):
                 exclude_entry.configure(state="disabled")
                 exclude_button.configure(state="disabled")
+            diag_row += 1
+
+            spam_row = ttk.Frame(diagnostics_frame, style=self._frame_style)
+            spam_row.grid(row=diag_row, column=0, sticky="w", pady=ROW_PAD)
+            spam_checkbox = nb.Checkbutton(
+                spam_row,
+                text="Warn when a plugin spams payloads:",
+                variable=self._var_payload_spam_enabled,
+                onvalue=True,
+                offvalue=False,
+                command=self._on_payload_spam_toggle,
+            )
+            spam_checkbox.pack(side="left")
+            max_label = nb.Label(spam_row, text="Max:")
+            max_label.pack(side="left", padx=(12, 4))
+            spam_max_spin = ttk.Spinbox(
+                spam_row,
+                from_=SPAM_MAX_PAYLOADS_MIN,
+                to=SPAM_MAX_PAYLOADS_MAX,
+                increment=10,
+                width=5,
+                textvariable=self._var_payload_spam_max,
+                command=self._on_payload_spam_apply,
+                style=self._spinbox_style,
+            )
+            spam_max_spin.pack(side="left")
+            per_label = nb.Label(spam_row, text="per")
+            per_label.pack(side="left", padx=(8, 4))
+            spam_window_spin = ttk.Spinbox(
+                spam_row,
+                from_=SPAM_WINDOW_MIN,
+                to=SPAM_WINDOW_MAX,
+                increment=0.5,
+                width=5,
+                textvariable=self._var_payload_spam_window,
+                command=self._on_payload_spam_apply,
+                style=self._spinbox_style,
+            )
+            spam_window_spin.pack(side="left")
+            window_label = nb.Label(spam_row, text="s, cooldown")
+            window_label.pack(side="left", padx=(8, 4))
+            spam_cooldown_spin = ttk.Spinbox(
+                spam_row,
+                from_=SPAM_WARN_COOLDOWN_MIN,
+                to=SPAM_WARN_COOLDOWN_MAX,
+                increment=5,
+                width=5,
+                textvariable=self._var_payload_spam_cooldown,
+                command=self._on_payload_spam_apply,
+                style=self._spinbox_style,
+            )
+            spam_cooldown_spin.pack(side="left")
+            cooldown_label = nb.Label(spam_row, text="s")
+            cooldown_label.pack(side="left", padx=(4, 0))
+            spam_apply_btn = nb.Button(spam_row, text="Apply", command=self._on_payload_spam_apply)
+            spam_apply_btn.pack(side="left", padx=(8, 0))
+            spam_max_spin.bind("<FocusOut>", self._on_payload_spam_apply_event)
+            spam_max_spin.bind("<Return>", self._on_payload_spam_apply_event)
+            spam_window_spin.bind("<FocusOut>", self._on_payload_spam_apply_event)
+            spam_window_spin.bind("<Return>", self._on_payload_spam_apply_event)
+            spam_cooldown_spin.bind("<FocusOut>", self._on_payload_spam_apply_event)
+            spam_cooldown_spin.bind("<Return>", self._on_payload_spam_apply_event)
+            self._payload_spam_checkbox = spam_checkbox
+            self._payload_spam_max_spin = spam_max_spin
+            self._payload_spam_window_spin = spam_window_spin
+            self._payload_spam_cooldown_spin = spam_cooldown_spin
+            self._payload_spam_apply_btn = spam_apply_btn
+            self._update_payload_spam_controls_state()
             user_row += 1
 
         next_row = 2
@@ -1699,6 +1811,30 @@ class PreferencesPanel:
         else:
             self._log_retention_spin.state(["disabled"])
 
+    def _update_payload_spam_controls_state(self) -> None:
+        enabled = self._diagnostics_enabled and self._set_payload_spam_detection is not None
+        if self._payload_spam_checkbox is not None:
+            if enabled:
+                self._payload_spam_checkbox.state(["!disabled"])
+            else:
+                self._payload_spam_checkbox.state(["disabled"])
+        for spin in (
+            self._payload_spam_window_spin,
+            self._payload_spam_max_spin,
+            self._payload_spam_cooldown_spin,
+        ):
+            if spin is None:
+                continue
+            if enabled:
+                spin.state(["!disabled"])
+            else:
+                spin.state(["disabled"])
+        if self._payload_spam_apply_btn is not None:
+            if enabled:
+                self._payload_spam_apply_btn.configure(state="normal")
+            else:
+                self._payload_spam_apply_btn.configure(state="disabled")
+
     def _on_log_retention_override_toggle(self) -> None:
         active = bool(self._var_log_retention_override_active.get())
         if not (self._diagnostics_enabled and self._set_log_retention_override):
@@ -1771,6 +1907,97 @@ class PreferencesPanel:
     def _on_payload_exclude_event(self, _event) -> str:  # pragma: no cover - Tk event
         self._on_payload_exclude_apply()
         return "break"
+
+    def _restore_payload_spam_committed(self) -> None:
+        self._var_payload_spam_enabled.set(self._payload_spam_enabled_committed)
+        self._var_payload_spam_window.set(self._payload_spam_window_committed)
+        self._var_payload_spam_max.set(self._payload_spam_max_committed)
+        self._var_payload_spam_cooldown.set(self._payload_spam_cooldown_committed)
+
+    def _on_payload_spam_toggle(self) -> None:
+        if not (self._diagnostics_enabled and self._set_payload_spam_detection):
+            self._restore_payload_spam_committed()
+            self._status_var.set("Set EDMC logging to DEBUG to edit payload spam detection.")
+            return
+        self._apply_payload_spam_detection()
+
+    def _on_payload_spam_apply(self) -> None:
+        if not (self._diagnostics_enabled and self._set_payload_spam_detection):
+            self._status_var.set("Set EDMC logging to DEBUG to edit payload spam detection.")
+            return
+        self._apply_payload_spam_detection()
+
+    def _on_payload_spam_apply_event(self, _event) -> str:  # pragma: no cover - Tk event
+        self._on_payload_spam_apply()
+        return "break"
+
+    def _apply_payload_spam_detection(self) -> bool:
+        if self._payload_spam_apply_in_progress:
+            return False
+        self._payload_spam_apply_in_progress = True
+        try:
+            enabled = bool(self._var_payload_spam_enabled.get())
+            try:
+                raw_window = (
+                    self._payload_spam_window_spin.get()
+                    if self._payload_spam_window_spin is not None
+                    else self._var_payload_spam_window.get()
+                )
+            except Exception:
+                raw_window = self._payload_spam_window_committed
+            window_seconds = _coerce_float(
+                raw_window,
+                self._payload_spam_window_committed,
+                minimum=SPAM_WINDOW_MIN,
+                maximum=SPAM_WINDOW_MAX,
+            )
+            try:
+                raw_max = (
+                    self._payload_spam_max_spin.get()
+                    if self._payload_spam_max_spin is not None
+                    else self._var_payload_spam_max.get()
+                )
+            except Exception:
+                raw_max = self._payload_spam_max_committed
+            max_payloads = _coerce_int(
+                raw_max,
+                self._payload_spam_max_committed,
+                minimum=SPAM_MAX_PAYLOADS_MIN,
+                maximum=SPAM_MAX_PAYLOADS_MAX,
+            )
+            try:
+                raw_cooldown = (
+                    self._payload_spam_cooldown_spin.get()
+                    if self._payload_spam_cooldown_spin is not None
+                    else self._var_payload_spam_cooldown.get()
+                )
+            except Exception:
+                raw_cooldown = self._payload_spam_cooldown_committed
+            warn_cooldown = _coerce_float(
+                raw_cooldown,
+                self._payload_spam_cooldown_committed,
+                minimum=SPAM_WARN_COOLDOWN_MIN,
+                maximum=SPAM_WARN_COOLDOWN_MAX,
+            )
+            self._var_payload_spam_window.set(window_seconds)
+            self._var_payload_spam_max.set(max_payloads)
+            self._var_payload_spam_cooldown.set(warn_cooldown)
+            if self._set_payload_spam_detection is None:
+                return False
+            self._set_payload_spam_detection(enabled, window_seconds, max_payloads, warn_cooldown)
+        except Exception as exc:
+            self._status_var.set(f"Failed to update payload spam detection: {exc}")
+            self._restore_payload_spam_committed()
+            return False
+        else:
+            self._payload_spam_enabled_committed = enabled
+            self._payload_spam_window_committed = window_seconds
+            self._payload_spam_max_committed = max_payloads
+            self._payload_spam_cooldown_committed = warn_cooldown
+            self._status_var.set("Payload spam detection updated.")
+            return True
+        finally:
+            self._payload_spam_apply_in_progress = False
 
     def _update_cycle_button_state(self) -> None:
         state = "normal" if self._var_cycle_payload.get() else "disabled"
