@@ -7,9 +7,7 @@
   "repaint_debounce_enabled": true,
   "trace_enabled": false,
   "tracing": {
-    "enabled": true,
-    "payload_ids": [
-      "poi_0"
-    ]
+    "enabled": false,
+    "payload_ids": []
   }
 }
