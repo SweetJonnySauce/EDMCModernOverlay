@@ -2,10 +2,12 @@
 [![Github All Releases](https://img.shields.io/github/downloads/SweetJonnySauce/EDMCModernOverlay/total.svg)](https://github.com/SweetJonnySauce/EDMCModernOverlay/releases/latest)
 [![GitHub Latest Version](https://img.shields.io/github/v/release/SweetJonnySauce/EDMCModernOverlay)](https://github.com/SweetJonnySauce/EDMCModernOverlay/releases/latest)
 [![Build Status][build-badge]][build-url]
-[![VirusTotal](https://img.shields.io/badge/VirusTotal-clean-brightgreen.svg)](https://www.virustotal.com/gui/file/c5bcfad593cbf1144c0a4968e3fc09ae0d7753fa9c13ac2a2cafae34874642e3)
+[![VirusTotal](https://img.shields.io/badge/VirusTotal-clean-brightgreen.svg)](https://www.virustotal.com/gui/file/fa4e8cb641e48c1b42e382cc79ac71e91bc694bd1cc4779224bf76b2b12e8e71)
 
 [build-badge]: https://github.com/SweetJonnySauce/EDMCModernOverlay/actions/workflows/ci.yml/badge.svg?branch=main
 [build-url]: https://github.com/SweetJonnySauce/EDMCModernOverlay/actions/workflows/ci.yml
+
+🔥🔥🔥0.7.6 Beta has been released. Test it out [here](https://github.com/SweetJonnySauce/EDMCModernOverlay/releases/tag/0.7.6-beta-release-2)🔥🔥🔥
 
 EDMC Modern Overlay (packaged as `EDMCModernOverlay`) is a drop-in replacement for [EDMCOverlay](https://github.com/inorton/EDMCOverlay) and [edmcoverlay2](https://github.com/pan-mroku/edmcoverlay2). It is a cross-platform (Windows and Linux), two-part implementation (plugin and overlay client) for Elite Dangerous Market Connector ([EDMC](https://github.com/EDCD/EDMarketConnector)). It streams data from EDMC plugins over a lightweight TCP socket and displays a transparent, click-through PyQt6 heads-up display on the Elite Dangerous game. It runs in both fullscreen borderless and windowed mode on any display size. The [plugin releases](https://github.com/SweetJonnySauce/EDMC-ModernOverlay/releases/latest) ship with both Windows and Linux installers.
 

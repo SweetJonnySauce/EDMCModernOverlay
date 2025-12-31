@@ -31,6 +31,10 @@ CLIENT_LOG_RETENTION_MAX = 20
 DEFAULT_CLIENT_LOG_RETENTION = 5
 PHYSICAL_CLAMP_SCALE_MIN = 0.5
 PHYSICAL_CLAMP_SCALE_MAX = 3.0
+FONT_BOUND_MIN = 6.0
+FONT_BOUND_MAX = 32.0
+FONT_STEP_MIN = 0
+FONT_STEP_MAX = 10
 
 LOGGER = logging.getLogger(__name__)
 
@@ -126,6 +130,53 @@ def _coerce_float(value: Any, default: float, *, minimum: Optional[float] = None
     if maximum is not None:
         numeric = min(maximum, numeric)
     return numeric
+
+
+def _validate_font_bound(value: Any) -> Optional[float]:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if numeric < FONT_BOUND_MIN or numeric > FONT_BOUND_MAX:
+        return None
+    return numeric
+
+
+def _validate_font_step(value: Any) -> Optional[int]:
+    try:
+        numeric = int(value)
+    except (TypeError, ValueError):
+        return None
+    if numeric < FONT_STEP_MIN or numeric > FONT_STEP_MAX:
+        return None
+    return numeric
+
+
+def _apply_font_bounds_edit(
+    current_min: float,
+    current_max: float,
+    edited_field: str,
+    edited_value: Any,
+) -> tuple[float, float, bool]:
+    candidate = _validate_font_bound(edited_value)
+    if candidate is None:
+        return current_min, current_max, False
+    if edited_field == "min":
+        if candidate > current_max:
+            return current_min, current_max, False
+        return candidate, current_max, True
+    if edited_field == "max":
+        if candidate < current_min:
+            return current_min, current_max, False
+        return current_min, candidate, True
+    return current_min, current_max, False
+
+
+def _apply_font_step_edit(current_step: int, edited_value: Any) -> tuple[int, bool]:
+    candidate = _validate_font_step(edited_value)
+    if candidate is None:
+        return current_step, False
+    return candidate, True
 
 
 def _coerce_str(
@@ -498,15 +549,23 @@ class Preferences:
             allow_empty=True,
         )
         self.show_debug_overlay = _coerce_bool(data.get("show_debug_overlay"), self.show_debug_overlay)
-        self.min_font_point = _coerce_float(data.get("min_font_point"), self.min_font_point, minimum=1.0, maximum=48.0)
+        self.min_font_point = _coerce_float(
+            data.get("min_font_point"),
+            self.min_font_point,
+            minimum=FONT_BOUND_MIN,
+            maximum=FONT_BOUND_MAX,
+        )
         self.max_font_point = _coerce_float(
-            data.get("max_font_point"), self.max_font_point, minimum=self.min_font_point, maximum=72.0
+            data.get("max_font_point"),
+            self.max_font_point,
+            minimum=self.min_font_point,
+            maximum=FONT_BOUND_MAX,
         )
         self.legacy_font_step = _coerce_int(
             data.get("legacy_font_step"),
             self.legacy_font_step,
-            minimum=0,
-            maximum=10,
+            minimum=FONT_STEP_MIN,
+            maximum=FONT_STEP_MAX,
         )
         self.title_bar_enabled = _coerce_bool(data.get("title_bar_enabled"), self.title_bar_enabled)
         self.title_bar_height = _coerce_int(data.get("title_bar_height"), self.title_bar_height, minimum=0)
@@ -686,7 +745,8 @@ class PreferencesPanel:
             self._scale_style,
             self._labelframe_style,
         ) = self._init_theme_styles(nb)
-        self._var_opacity = tk.DoubleVar(value=preferences.overlay_opacity)
+        initial_opacity = _coerce_float(preferences.overlay_opacity, 0.0, minimum=0.0, maximum=1.0)
+        self._var_opacity = tk.DoubleVar(value=initial_opacity)
         self._var_payload_opacity = tk.DoubleVar(value=float(preferences.global_payload_opacity))
         self._var_show_status = tk.BooleanVar(value=preferences.show_connection_status)
         self._var_status_gutter = tk.IntVar(value=max(0, int(preferences.status_message_gutter)))
@@ -708,6 +768,9 @@ class PreferencesPanel:
         self._var_min_font = tk.DoubleVar(value=float(preferences.min_font_point))
         self._var_max_font = tk.DoubleVar(value=float(preferences.max_font_point))
         self._var_legacy_font_step = tk.IntVar(value=int(preferences.legacy_font_step))
+        self._font_min_committed = float(preferences.min_font_point)
+        self._font_max_committed = float(preferences.max_font_point)
+        self._font_step_committed = int(preferences.legacy_font_step)
         self._var_cycle_payload = tk.BooleanVar(value=preferences.cycle_payload_ids)
         self._var_cycle_copy = tk.BooleanVar(value=preferences.copy_payload_id_on_cycle)
         self._var_launch_command = tk.StringVar(value=preferences.controller_launch_command)
@@ -783,14 +846,13 @@ class PreferencesPanel:
         self._test_x_var = tk.StringVar()
         self._test_y_var = tk.StringVar()
         self._status_var = tk.StringVar(value="")
+        opacity_percent = int(round(initial_opacity * 100))
+        self._opacity_label = tk.StringVar(value=f"{opacity_percent}%")
         self._payload_opacity_label = tk.StringVar(value=f"{int(preferences.global_payload_opacity)}%")
         self._dev_mode = bool(dev_mode)
 
         frame = nb.Frame(parent)
 
-        self._var_min_font.trace_add("write", self._on_font_bounds_trace)
-        self._var_max_font.trace_add("write", self._on_font_bounds_trace)
-        self._var_legacy_font_step.trace_add("write", self._on_font_step_trace)
         header_frame = ttk.Frame(frame, style=self._frame_style)
         header_frame.grid(row=0, column=0, sticky="we")
         header_frame.columnconfigure(0, weight=1)
@@ -880,34 +942,35 @@ class PreferencesPanel:
 
         font_row = ttk.Frame(user_section, style=self._frame_style)
         font_label = nb.Label(font_row, text="Font scaling bounds (pt):")
+        _attach_tooltip(
+            font_label,
+            "Clamp the auto-scaled font size range; these bounds do not set a fixed font size.",
+            nb_module=nb,
+        )
         font_label.pack(side="left")
         min_spin = ttk.Spinbox(
             font_row,
-            from_=1.0,
-            to=72.0,
+            from_=FONT_BOUND_MIN,
+            to=FONT_BOUND_MAX,
             increment=0.5,
             width=5,
             textvariable=self._var_min_font,
-            command=self._on_font_bounds_command,
             style=self._spinbox_style,
         )
         min_spin.pack(side="left", padx=(6, 0))
-        min_spin.bind("<FocusOut>", self._on_font_bounds_event)
-        min_spin.bind("<Return>", self._on_font_bounds_event)
+        min_spin.bind("<FocusOut>", lambda event: self._on_font_bounds_event("min", event))
         nb.Label(font_row, text="–").pack(side="left", padx=(4, 4))
         max_spin = ttk.Spinbox(
             font_row,
-            from_=1.0,
-            to=72.0,
+            from_=FONT_BOUND_MIN,
+            to=FONT_BOUND_MAX,
             increment=0.5,
             width=5,
             textvariable=self._var_max_font,
-            command=self._on_font_bounds_command,
             style=self._spinbox_style,
         )
         max_spin.pack(side="left")
-        max_spin.bind("<FocusOut>", self._on_font_bounds_event)
-        max_spin.bind("<Return>", self._on_font_bounds_event)
+        max_spin.bind("<FocusOut>", lambda event: self._on_font_bounds_event("max", event))
         step_label = nb.Label(font_row, text="Font Step:")
         _attach_tooltip(
             step_label,
@@ -917,17 +980,15 @@ class PreferencesPanel:
         step_label.pack(side="left", padx=(12, 4))
         step_spin = ttk.Spinbox(
             font_row,
-            from_=0,
-            to=10,
+            from_=FONT_STEP_MIN,
+            to=FONT_STEP_MAX,
             increment=1,
             width=3,
             textvariable=self._var_legacy_font_step,
-            command=self._on_font_step_command,
             style=self._spinbox_style,
         )
         step_spin.pack(side="left")
         step_spin.bind("<FocusOut>", self._on_font_step_event)
-        step_spin.bind("<Return>", self._on_font_step_event)
         preview_btn = nb.Button(font_row, text="Preview", command=self._on_font_preview)
         preview_btn.pack(side="left", padx=(8, 0))
         font_row.grid(row=user_row, column=0, sticky="w", pady=ROW_PAD)
@@ -1015,8 +1076,8 @@ class PreferencesPanel:
         payload_opacity_scale = ttk.Scale(
             payload_opacity_row,
             variable=self._var_payload_opacity,
-            from_=0,
-            to=100,
+            from_=100,
+            to=0,
             orient=tk.HORIZONTAL,
             length=200,
             command=self._on_payload_opacity_change,
@@ -1230,7 +1291,7 @@ class PreferencesPanel:
 
             opacity_label = nb.Label(
                 dev_frame,
-                text="Overlay background opacity (0.0 transparent – 1.0 opaque).",
+                text="Overlay background opacity (100% opaque - 0% transparent).",
             )
             opacity_label.grid(row=dev_row, column=0, sticky="w", pady=ROW_PAD)
             dev_row += 1
@@ -1239,14 +1300,16 @@ class PreferencesPanel:
             opacity_scale = ttk.Scale(
                 opacity_row,
                 variable=self._var_opacity,
-                from_=0.0,
-                to=1.0,
+                from_=1.0,
+                to=0.0,
                 orient=tk.HORIZONTAL,
                 length=250,
                 command=self._on_opacity_change,
                 style=self._scale_style,
             )
             opacity_scale.pack(side="left", fill="x")
+            opacity_value = nb.Label(opacity_row, textvariable=self._opacity_label)
+            opacity_value.pack(side="left", padx=(8, 0))
             opacity_row.grid(row=dev_row, column=0, sticky="we", pady=ROW_PAD)
             dev_row += 1
 
@@ -1387,6 +1450,7 @@ class PreferencesPanel:
             numeric = 0.0
         numeric = max(0.0, min(1.0, numeric))
         self._var_opacity.set(numeric)
+        self._opacity_label.set(f"{int(round(numeric * 100))}%")
         self._preferences.overlay_opacity = numeric
         if self._set_opacity:
             try:
@@ -1949,90 +2013,136 @@ class PreferencesPanel:
 
         self._preferences.save()
 
-    def _on_font_bounds_command(self) -> None:
-        self._apply_font_bounds()
-
-    def _on_font_bounds_event(self, _event) -> None:  # pragma: no cover - Tk event
-        self._apply_font_bounds()
-
-    def _on_font_bounds_trace(self, *_args) -> None:
-        if self._font_bounds_apply_in_progress:
+    def _on_font_bounds_event(self, field: str, event) -> None:  # pragma: no cover - Tk event
+        widget = getattr(event, "widget", None)
+        if widget is not None and hasattr(widget, "after_idle"):
+            widget.after_idle(lambda: self._apply_font_bounds(edited_field=field))
             return
-        self._apply_font_bounds()
+        self._apply_font_bounds(edited_field=field)
 
-    def _on_font_step_command(self) -> None:
-        self._apply_font_step()
-
-    def _on_font_step_event(self, _event) -> None:  # pragma: no cover - Tk event
-        self._apply_font_step()
-
-    def _on_font_step_trace(self, *_args) -> None:
-        if self._font_step_apply_in_progress:
+    def _on_font_step_event(self, event) -> None:  # pragma: no cover - Tk event
+        widget = getattr(event, "widget", None)
+        if widget is not None and hasattr(widget, "after_idle"):
+            widget.after_idle(self._apply_font_step)
             return
         self._apply_font_step()
 
-    def _apply_font_bounds(self, update_remote: bool = True) -> None:
+    def _apply_font_bounds(self, edited_field: Optional[str] = None, *, update_remote: bool = True) -> None:
         if self._font_bounds_apply_in_progress:
             return
         self._font_bounds_apply_in_progress = True
         try:
-            min_value = float(self._var_min_font.get())
-        except (TypeError, ValueError):
-            min_value = self._preferences.min_font_point
-        try:
-            max_value = float(self._var_max_font.get())
-        except (TypeError, ValueError):
-            max_value = self._preferences.max_font_point
-        min_value = max(1.0, min(min_value, 48.0))
-        max_value = max(min_value, min(max_value, 72.0))
-        self._var_min_font.set(min_value)
-        self._var_max_font.set(max_value)
-        callback_failed = False
-        if update_remote and self._set_font_min:
-            try:
-                self._set_font_min(min_value)
-            except Exception as exc:
-                self._status_var.set(f"Failed to update minimum font size: {exc}")
-                callback_failed = True
-        if update_remote and self._set_font_max:
-            try:
-                self._set_font_max(max_value)
-            except Exception as exc:
-                self._status_var.set(f"Failed to update maximum font size: {exc}")
-                callback_failed = True
-        if callback_failed:
+            if edited_field:
+                raw_value = None
+                try:
+                    if edited_field == "min":
+                        raw_value = self._var_min_font.get()
+                    elif edited_field == "max":
+                        raw_value = self._var_max_font.get()
+                except Exception:
+                    raw_value = None
+                min_value, max_value, accepted = _apply_font_bounds_edit(
+                    self._font_min_committed,
+                    self._font_max_committed,
+                    edited_field,
+                    raw_value,
+                )
+                if not accepted:
+                    if edited_field == "min":
+                        self._var_min_font.set(self._font_min_committed)
+                    elif edited_field == "max":
+                        self._var_max_font.set(self._font_max_committed)
+                    return
+            else:
+                min_value = self._font_min_committed
+                max_value = self._font_max_committed
+                raw_max = None
+                raw_min = None
+                try:
+                    raw_max = self._var_max_font.get()
+                except Exception:
+                    raw_max = None
+                try:
+                    raw_min = self._var_min_font.get()
+                except Exception:
+                    raw_min = None
+                min_value, max_value, max_ok = _apply_font_bounds_edit(
+                    min_value,
+                    max_value,
+                    "max",
+                    raw_max,
+                )
+                if not max_ok:
+                    self._var_max_font.set(self._font_max_committed)
+                    min_value = self._font_min_committed
+                    max_value = self._font_max_committed
+                min_value, max_value, min_ok = _apply_font_bounds_edit(
+                    min_value,
+                    max_value,
+                    "min",
+                    raw_min,
+                )
+                if not min_ok:
+                    self._var_min_font.set(self._font_min_committed)
+                    min_value = self._font_min_committed
+            self._var_min_font.set(min_value)
+            self._var_max_font.set(max_value)
+            callback_failed = False
+            if update_remote and self._set_font_min:
+                try:
+                    self._set_font_min(min_value)
+                except Exception as exc:
+                    self._status_var.set(f"Failed to update minimum font size: {exc}")
+                    callback_failed = True
+            if update_remote and self._set_font_max:
+                try:
+                    self._set_font_max(max_value)
+                except Exception as exc:
+                    self._status_var.set(f"Failed to update maximum font size: {exc}")
+                    callback_failed = True
+            if callback_failed:
+                return
+            self._preferences.min_font_point = min_value
+            self._preferences.max_font_point = max_value
+            self._preferences.save()
+            self._font_min_committed = min_value
+            self._font_max_committed = max_value
+        finally:
             self._font_bounds_apply_in_progress = False
-            return
-        self._preferences.min_font_point = min_value
-        self._preferences.max_font_point = max_value
-        self._preferences.save()
-        self._font_bounds_apply_in_progress = False
 
     def _apply_font_step(self, update_remote: bool = True) -> None:
         if self._font_step_apply_in_progress:
             return
         self._font_step_apply_in_progress = True
         try:
-            step_value = int(self._var_legacy_font_step.get())
-        except (TypeError, ValueError):
-            step_value = int(self._preferences.legacy_font_step)
-        step_value = max(0, min(step_value, 10))
-        self._var_legacy_font_step.set(step_value)
-        if update_remote and self._set_font_step:
+            raw_value = None
             try:
-                self._set_font_step(step_value)
-            except Exception as exc:
-                self._status_var.set(f"Failed to update font step: {exc}")
-                self._font_step_apply_in_progress = False
+                raw_value = self._var_legacy_font_step.get()
+            except Exception:
+                raw_value = None
+            step_value, accepted = _apply_font_step_edit(self._font_step_committed, raw_value)
+            if not accepted:
+                self._var_legacy_font_step.set(self._font_step_committed)
                 return
-        self._preferences.legacy_font_step = step_value
-        self._preferences.save()
-        self._font_step_apply_in_progress = False
+            self._var_legacy_font_step.set(step_value)
+            if update_remote and self._set_font_step:
+                try:
+                    self._set_font_step(step_value)
+                except Exception as exc:
+                    self._status_var.set(f"Failed to update font step: {exc}")
+                    return
+            self._preferences.legacy_font_step = step_value
+            self._preferences.save()
+            self._font_step_committed = step_value
+        finally:
+            self._font_step_apply_in_progress = False
 
     def _on_font_preview(self) -> None:
         if not self._preview_font_sizes:
             self._status_var.set("Overlay not running; preview unavailable.")
             return
+        self._apply_font_bounds()
+        self._apply_font_step()
         try:
             self._preview_font_sizes()
         except Exception as exc:  # pragma: no cover - defensive UI handler
