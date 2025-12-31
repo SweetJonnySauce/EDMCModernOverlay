@@ -4,5 +4,12 @@
   "payload_logging": {
     "exclude_plugins": [],
     "overlay_payload_log_enabled": false
+  },
+  "payload_spam_detection": {
+    "enabled": false,
+    "exclude_plugins": [],
+    "max_payloads_per_window": 200,
+    "warn_cooldown_seconds": 30.0,
+    "window_seconds": 2.0
   }
 }
