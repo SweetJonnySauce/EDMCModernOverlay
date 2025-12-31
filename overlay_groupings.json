@@ -21,7 +21,7 @@
           "bgstally-msg-tickwarn-"
         ],
         "idPrefixGroupAnchor": "ne",
-        "offsetX": -5,
+        "offsetX": 195,
         "payloadJustification": "right",
         "backgroundColor": "None",
         "backgroundBorderColor": "None",
@@ -78,8 +78,8 @@
         ],
         "idPrefixGroupAnchor": "nw",
         "payloadJustification": "left",
-        "backgroundColor": "green",
-        "backgroundBorderColor": "green",
+        "backgroundColor": "None",
+        "backgroundBorderColor": "None",
         "backgroundBorderWidth": 3
       },
       "BGS-Tally System_info": {
@@ -100,8 +100,9 @@
             "matchMode": "exact"
           }
         ],
-        "idPrefixGroupAnchor": "nw",
-        "payloadJustification": "left",
+        "idPrefixGroupAnchor": "ne",
+        "offsetX": 195,
+        "payloadJustification": "right",
         "markerLabelPosition": "below",
         "controllerPreviewBoxMode": "last",
         "backgroundColor": null,
@@ -115,13 +116,13 @@
             "matchMode": "exact"
           }
         ],
-        "idPrefixGroupAnchor": "nw",
-        "payloadJustification": "left",
+        "idPrefixGroupAnchor": "ne",
+        "offsetX": 195,
+        "payloadJustification": "right",
         "markerLabelPosition": "below",
         "controllerPreviewBoxMode": "last",
         "backgroundColor": null,
-        "backgroundBorderColor": null,
-        "backgroundBorderWidth": null
+        "backgroundBorderColor": null
       },
       "BGS-Tally Warning": {
         "idPrefixes": [
