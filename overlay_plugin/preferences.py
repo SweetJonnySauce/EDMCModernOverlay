@@ -10,9 +10,13 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 
 try:
+    import config as _edmc_config_module  # type: ignore
     from config import config as EDMC_CONFIG  # type: ignore
+    from config import number_from_string as _edmc_number_from_string  # type: ignore
 except Exception:  # pragma: no cover - running outside EDMC
+    _edmc_config_module = None
     EDMC_CONFIG = None
+    _edmc_number_from_string = None
 
 
 PREFERENCES_FILE = "overlay_settings.json"
@@ -57,35 +61,87 @@ class TroubleshootingPanelState:
     payload_spam_warn_cooldown_seconds: float = 30.0
 
 
+def _config_getter(name: str) -> Optional[Callable[..., Any]]:
+    if _edmc_config_module is not None:
+        getter = getattr(_edmc_config_module, name, None)
+        if callable(getter):
+            return getter
+    if EDMC_CONFIG is not None:
+        getter = getattr(EDMC_CONFIG, name, None)
+        if callable(getter):
+            return getter
+    return None
+
+
 def _config_available() -> bool:
-    return EDMC_CONFIG is not None and hasattr(EDMC_CONFIG, "get") and hasattr(EDMC_CONFIG, "set")
+    return _config_getter("set") is not None
 
 
 def _config_key(name: str) -> str:
     return f"{CONFIG_PREFIX}{name}"
 
 
+def _config_call(getter: Callable[..., Any], key: str, default: Any) -> Any:
+    try:
+        return getter(key, default)
+    except TypeError:
+        try:
+            return getter(key)
+        except Exception:
+            return default
+    except Exception:
+        return default
+
+
 def _config_get_raw(key: str, default: Any) -> Any:
     if not _config_available():
         return default
-    getter = getattr(EDMC_CONFIG, "get", None)
-    if callable(getter):
-        try:
-            value = getter(key)
-        except TypeError:
-            try:
-                value = getter(key, default)
-            except Exception:
-                value = default
+    getter = _config_getter("get")
+    if getter is not None:
+        value = _config_call(getter, key, default)
     else:
-        value = getattr(EDMC_CONFIG, key, default)
+        value = getattr(EDMC_CONFIG, key, default) if EDMC_CONFIG is not None else default
     return default if value is None else value
 
 
-def _config_set_raw(key: str, value: Any) -> None:
+def _config_get_value(name: str, key: str, default: Any) -> Any:
+    getter = _config_getter(name)
+    if getter is None:
+        return _config_get_raw(key, default)
+    return _config_call(getter, key, default)
+
+
+def _config_get_str(key: str, default: str) -> str:
+    value = _config_get_value("get_str", key, default)
+    if value is None:
+        return default
+    try:
+        return str(value)
+    except Exception:
+        return default
+
+
+def _config_get_bool(key: str, default: bool) -> bool:
+    value = _config_get_value("get_bool", key, default)
+    return _coerce_bool(value, default)
+
+
+def _config_get_int(key: str, default: int) -> int:
+    value = _config_get_value("get_int", key, default)
+    return _coerce_int(value, default)
+
+
+def _config_get_list(key: str, default: Sequence[Any]) -> list[Any]:
+    value = _config_get_value("get_list", key, default)
+    if isinstance(value, list):
+        return value
+    return list(default)
+
+
+def _config_set_value(key: str, value: Any) -> None:
     if not _config_available():
         return
-    setter = getattr(EDMC_CONFIG, "set", None)
+    setter = _config_getter("set")
     if callable(setter):
         try:
             setter(key, value)
@@ -99,9 +155,37 @@ def _config_set_raw(key: str, value: Any) -> None:
         except Exception:
             pass
     try:
-        setattr(EDMC_CONFIG, key, value)
+        if EDMC_CONFIG is not None:
+            setattr(EDMC_CONFIG, key, value)
     except Exception:
         LOGGER.debug("Failed to persist %s into EDMC config", key)
+
+
+def _parse_number(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        text = str(value).strip()
+    except Exception:
+        return None
+    if not text:
+        return None
+    if _edmc_number_from_string is not None:
+        try:
+            return float(_edmc_number_from_string(text))
+        except Exception:
+            pass
+    try:
+        return float(text)
+    except Exception:
+        return None
+
+
+def _config_get_locale_number(key: str, default: float) -> Optional[float]:
+    raw = _config_get_str(key, str(default))
+    return _parse_number(raw)
 
 
 def _coerce_bool(value: Any, default: bool) -> bool:
@@ -454,13 +538,13 @@ class Preferences:
         self._apply_raw_data(data)
 
     def _maybe_import_legacy_json(self) -> None:
-        current_version = _coerce_int(_config_get_raw(CONFIG_VERSION_KEY, 0), 0)
+        current_version = _config_get_int(CONFIG_VERSION_KEY, 0)
         if current_version >= CONFIG_STATE_VERSION:
             return
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError):
-            _config_set_raw(CONFIG_VERSION_KEY, CONFIG_STATE_VERSION)
+            _config_set_value(CONFIG_VERSION_KEY, CONFIG_STATE_VERSION)
             return
         self._apply_raw_data(data)
         self._persist_to_config()
@@ -468,57 +552,65 @@ class Preferences:
     def _load_from_config(self) -> None:
         LOGGER.debug(
             "Loading prefs from EDMC config (controller_launch_command=%s default=%s)",
-            _config_get_raw(_config_key("controller_launch_command"), self.controller_launch_command),
+            _config_get_str(_config_key("controller_launch_command"), self.controller_launch_command),
             self.controller_launch_command,
         )
+        overrides_default = "{}"
+        try:
+            overrides_default = json.dumps(self.physical_clamp_overrides)
+        except Exception:
+            pass
         payload: Dict[str, Any] = {
-            "overlay_opacity": _config_get_raw(_config_key("overlay_opacity"), self.overlay_opacity),
-            "global_payload_opacity": _config_get_raw(
+            "overlay_opacity": _config_get_locale_number(_config_key("overlay_opacity"), self.overlay_opacity),
+            "global_payload_opacity": _config_get_int(
                 _config_key("global_payload_opacity"),
                 self.global_payload_opacity,
             ),
-            "show_connection_status": _config_get_raw(_config_key("show_connection_status"), self.show_connection_status),
-            "debug_overlay_corner": _config_get_raw(_config_key("debug_overlay_corner"), self.debug_overlay_corner),
-            "client_log_retention": _config_get_raw(_config_key("client_log_retention"), self.client_log_retention),
-            "gridlines_enabled": _config_get_raw(_config_key("gridlines_enabled"), self.gridlines_enabled),
-            "gridline_spacing": _config_get_raw(_config_key("gridline_spacing"), self.gridline_spacing),
-            "force_render": _config_get_raw(_config_key("force_render"), self.force_render),
-            "force_xwayland": _config_get_raw(_config_key("force_xwayland"), self.force_xwayland),
-            "physical_clamp_enabled": _config_get_raw(
+            "show_connection_status": _config_get_bool(_config_key("show_connection_status"), self.show_connection_status),
+            "debug_overlay_corner": _config_get_str(_config_key("debug_overlay_corner"), self.debug_overlay_corner),
+            "client_log_retention": _config_get_int(_config_key("client_log_retention"), self.client_log_retention),
+            "gridlines_enabled": _config_get_bool(_config_key("gridlines_enabled"), self.gridlines_enabled),
+            "gridline_spacing": _config_get_locale_number(_config_key("gridline_spacing"), self.gridline_spacing),
+            "force_render": _config_get_bool(_config_key("force_render"), self.force_render),
+            "force_xwayland": _config_get_bool(_config_key("force_xwayland"), self.force_xwayland),
+            "physical_clamp_enabled": _config_get_bool(
                 _config_key("physical_clamp_enabled"),
                 self.physical_clamp_enabled,
             ),
-            "physical_clamp_overrides": _config_get_raw(
+            "physical_clamp_overrides": _config_get_str(
                 _config_key("physical_clamp_overrides"),
-                self.physical_clamp_overrides,
+                overrides_default,
             ),
-            "show_debug_overlay": _config_get_raw(_config_key("show_debug_overlay"), self.show_debug_overlay),
-            "min_font_point": _config_get_raw(_config_key("min_font_point"), self.min_font_point),
-            "max_font_point": _config_get_raw(_config_key("max_font_point"), self.max_font_point),
-            "legacy_font_step": _config_get_raw(_config_key("legacy_font_step"), self.legacy_font_step),
-            "title_bar_enabled": _config_get_raw(_config_key("title_bar_enabled"), self.title_bar_enabled),
-            "title_bar_height": _config_get_raw(_config_key("title_bar_height"), self.title_bar_height),
-            "cycle_payload_ids": _config_get_raw(_config_key("cycle_payload_ids"), self.cycle_payload_ids),
-            "copy_payload_id_on_cycle": _config_get_raw(
+            "show_debug_overlay": _config_get_bool(_config_key("show_debug_overlay"), self.show_debug_overlay),
+            "min_font_point": _config_get_locale_number(_config_key("min_font_point"), self.min_font_point),
+            "max_font_point": _config_get_locale_number(_config_key("max_font_point"), self.max_font_point),
+            "legacy_font_step": _config_get_int(_config_key("legacy_font_step"), self.legacy_font_step),
+            "title_bar_enabled": _config_get_bool(_config_key("title_bar_enabled"), self.title_bar_enabled),
+            "title_bar_height": _config_get_int(_config_key("title_bar_height"), self.title_bar_height),
+            "cycle_payload_ids": _config_get_bool(_config_key("cycle_payload_ids"), self.cycle_payload_ids),
+            "copy_payload_id_on_cycle": _config_get_bool(
                 _config_key("copy_payload_id_on_cycle"),
                 self.copy_payload_id_on_cycle,
             ),
-            "scale_mode": _config_get_raw(_config_key("scale_mode"), self.scale_mode),
-            "nudge_overflow_payloads": _config_get_raw(
+            "scale_mode": _config_get_str(_config_key("scale_mode"), self.scale_mode),
+            "nudge_overflow_payloads": _config_get_bool(
                 _config_key("nudge_overflow_payloads"),
                 self.nudge_overflow_payloads,
             ),
-            "payload_nudge_gutter": _config_get_raw(_config_key("payload_nudge_gutter"), self.payload_nudge_gutter),
-            "status_message_gutter": _config_get_raw(
+            "payload_nudge_gutter": _config_get_locale_number(
+                _config_key("payload_nudge_gutter"),
+                self.payload_nudge_gutter,
+            ),
+            "status_message_gutter": _config_get_locale_number(
                 _config_key("status_message_gutter"),
                 self.status_message_gutter,
             ),
-            "log_payloads": _config_get_raw(_config_key("log_payloads"), self.log_payloads),
-            "payload_log_delay_seconds": _config_get_raw(
+            "log_payloads": _config_get_bool(_config_key("log_payloads"), self.log_payloads),
+            "payload_log_delay_seconds": _config_get_locale_number(
                 _config_key("payload_log_delay_seconds"),
                 self.payload_log_delay_seconds,
             ),
-            "controller_launch_command": _config_get_raw(
+            "controller_launch_command": _config_get_str(
                 _config_key("controller_launch_command"),
                 self.controller_launch_command,
             ),
@@ -658,44 +750,44 @@ class Preferences:
     def _persist_to_config(self) -> None:
         if not self._config_enabled:
             return
-        _config_set_raw(_config_key("overlay_opacity"), float(self.overlay_opacity))
-        _config_set_raw(_config_key("global_payload_opacity"), int(self.global_payload_opacity))
-        _config_set_raw(_config_key("show_connection_status"), bool(self.show_connection_status))
-        _config_set_raw(_config_key("debug_overlay_corner"), str(self.debug_overlay_corner or "NW"))
-        _config_set_raw(_config_key("client_log_retention"), int(self.client_log_retention))
-        _config_set_raw(_config_key("gridlines_enabled"), bool(self.gridlines_enabled))
-        _config_set_raw(_config_key("gridline_spacing"), int(self.gridline_spacing))
-        _config_set_raw(_config_key("force_render"), bool(self.force_render))
-        _config_set_raw(_config_key("force_xwayland"), bool(self.force_xwayland))
-        _config_set_raw(_config_key("physical_clamp_enabled"), bool(self.physical_clamp_enabled))
+        _config_set_value(_config_key("overlay_opacity"), float(self.overlay_opacity))
+        _config_set_value(_config_key("global_payload_opacity"), int(self.global_payload_opacity))
+        _config_set_value(_config_key("show_connection_status"), bool(self.show_connection_status))
+        _config_set_value(_config_key("debug_overlay_corner"), str(self.debug_overlay_corner or "NW"))
+        _config_set_value(_config_key("client_log_retention"), int(self.client_log_retention))
+        _config_set_value(_config_key("gridlines_enabled"), bool(self.gridlines_enabled))
+        _config_set_value(_config_key("gridline_spacing"), int(self.gridline_spacing))
+        _config_set_value(_config_key("force_render"), bool(self.force_render))
+        _config_set_value(_config_key("force_xwayland"), bool(self.force_xwayland))
+        _config_set_value(_config_key("physical_clamp_enabled"), bool(self.physical_clamp_enabled))
         try:
             overrides_payload = json.dumps(self.physical_clamp_overrides)
         except Exception:
             overrides_payload = "{}"
-        _config_set_raw(_config_key("physical_clamp_overrides"), overrides_payload)
-        _config_set_raw(_config_key("show_debug_overlay"), bool(self.show_debug_overlay))
-        _config_set_raw(_config_key("min_font_point"), float(self.min_font_point))
-        _config_set_raw(_config_key("max_font_point"), float(self.max_font_point))
-        _config_set_raw(_config_key("legacy_font_step"), int(self.legacy_font_step))
-        _config_set_raw(_config_key("title_bar_enabled"), bool(self.title_bar_enabled))
-        _config_set_raw(_config_key("title_bar_height"), int(self.title_bar_height))
-        _config_set_raw(_config_key("cycle_payload_ids"), bool(self.cycle_payload_ids))
-        _config_set_raw(_config_key("copy_payload_id_on_cycle"), bool(self.copy_payload_id_on_cycle))
-        _config_set_raw(_config_key("scale_mode"), str(self.scale_mode or "fit"))
-        _config_set_raw(_config_key("nudge_overflow_payloads"), bool(self.nudge_overflow_payloads))
-        _config_set_raw(_config_key("payload_nudge_gutter"), int(self.payload_nudge_gutter))
-        _config_set_raw(_config_key("status_message_gutter"), int(self.status_message_gutter))
-        _config_set_raw(_config_key("log_payloads"), bool(self.log_payloads))
-        _config_set_raw(_config_key("payload_log_delay_seconds"), float(self.payload_log_delay_seconds))
-        _config_set_raw(_config_key("controller_launch_command"), str(self.controller_launch_command or "!ovr"))
-        _config_set_raw(CONFIG_VERSION_KEY, CONFIG_STATE_VERSION)
+        _config_set_value(_config_key("physical_clamp_overrides"), overrides_payload)
+        _config_set_value(_config_key("show_debug_overlay"), bool(self.show_debug_overlay))
+        _config_set_value(_config_key("min_font_point"), float(self.min_font_point))
+        _config_set_value(_config_key("max_font_point"), float(self.max_font_point))
+        _config_set_value(_config_key("legacy_font_step"), int(self.legacy_font_step))
+        _config_set_value(_config_key("title_bar_enabled"), bool(self.title_bar_enabled))
+        _config_set_value(_config_key("title_bar_height"), int(self.title_bar_height))
+        _config_set_value(_config_key("cycle_payload_ids"), bool(self.cycle_payload_ids))
+        _config_set_value(_config_key("copy_payload_id_on_cycle"), bool(self.copy_payload_id_on_cycle))
+        _config_set_value(_config_key("scale_mode"), str(self.scale_mode or "fit"))
+        _config_set_value(_config_key("nudge_overflow_payloads"), bool(self.nudge_overflow_payloads))
+        _config_set_value(_config_key("payload_nudge_gutter"), int(self.payload_nudge_gutter))
+        _config_set_value(_config_key("status_message_gutter"), int(self.status_message_gutter))
+        _config_set_value(_config_key("log_payloads"), bool(self.log_payloads))
+        _config_set_value(_config_key("payload_log_delay_seconds"), float(self.payload_log_delay_seconds))
+        _config_set_value(_config_key("controller_launch_command"), str(self.controller_launch_command or "!ovr"))
+        _config_set_value(CONFIG_VERSION_KEY, CONFIG_STATE_VERSION)
 
     def _ensure_state_version_mark(self) -> None:
         if not self._config_enabled:
             return
-        current_version = _coerce_int(_config_get_raw(CONFIG_VERSION_KEY, 0), 0)
+        current_version = _config_get_int(CONFIG_VERSION_KEY, 0)
         if current_version < CONFIG_STATE_VERSION:
-            _config_set_raw(CONFIG_VERSION_KEY, CONFIG_STATE_VERSION)
+            _config_set_value(CONFIG_VERSION_KEY, CONFIG_STATE_VERSION)
 
     def status_bottom_margin(self) -> int:
         return STATUS_BASE_MARGIN + int(max(0, self.status_message_gutter))

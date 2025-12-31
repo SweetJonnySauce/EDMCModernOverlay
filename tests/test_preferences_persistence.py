@@ -17,6 +17,18 @@ class DummyConfig:
     def get(self, key: str, default: object | None = None) -> object | None:
         return self.store.get(key, default)
 
+    def get_str(self, key: str, default: object | None = None) -> object | None:
+        return self.store.get(key, default)
+
+    def get_int(self, key: str, default: object | None = None) -> object | None:
+        return self.store.get(key, default)
+
+    def get_bool(self, key: str, default: object | None = None) -> object | None:
+        return self.store.get(key, default)
+
+    def get_list(self, key: str, default: object | None = None) -> object | None:
+        return self.store.get(key, default)
+
     def set(self, key: str, value: object) -> None:
         self.store[key] = value
 
@@ -82,3 +94,33 @@ def test_preferences_reload_merges_shadow_when_config_empty(plugin_dir: Path, mo
         "DisplayPort-2": 1.0,
         "HDMI-0": 1.25,
     }
+
+
+def test_preferences_locale_numbers_from_config(plugin_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def number_from_string(value: str) -> float:
+        return float(value.replace(",", "."))
+
+    config = DummyConfig(
+        {
+            prefs._config_key("overlay_opacity"): "0,75",
+            prefs._config_key("min_font_point"): "7,5",
+            prefs._config_key("max_font_point"): "15,5",
+            prefs._config_key("gridline_spacing"): "123,4",
+            prefs._config_key("payload_nudge_gutter"): "42,0",
+            prefs._config_key("status_message_gutter"): "33,0",
+            prefs._config_key("payload_log_delay_seconds"): "1,25",
+            prefs._config_key("client_log_retention"): "not-a-number",
+        }
+    )
+    monkeypatch.setattr(prefs, "_edmc_number_from_string", number_from_string)
+    monkeypatch.setattr(prefs, "EDMC_CONFIG", config)
+
+    preferences = prefs.Preferences(plugin_dir, dev_mode=True)
+    assert preferences.overlay_opacity == pytest.approx(0.75)
+    assert preferences.min_font_point == pytest.approx(7.5)
+    assert preferences.max_font_point == pytest.approx(15.5)
+    assert preferences.gridline_spacing == 123
+    assert preferences.payload_nudge_gutter == 42
+    assert preferences.status_message_gutter == 33
+    assert preferences.payload_log_delay_seconds == pytest.approx(1.25)
+    assert preferences.client_log_retention == prefs.DEFAULT_CLIENT_LOG_RETENTION
