@@ -110,6 +110,7 @@ def _build_payload_handler(helper: DeveloperHelperController, window: OverlayWin
         event = payload.get("event")
         if event == "OverlayConfig":
             helper.apply_config(window, payload)
+            window.maybe_warn_transparent_overlay()
             return
         if event == "OverlayControllerActiveGroup":
             window.set_active_controller_group(payload.get("plugin"), payload.get("label"), payload.get("anchor"), payload.get("edit_nonce"))
