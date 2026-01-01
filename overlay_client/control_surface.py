@@ -25,6 +25,12 @@ _CLIENT_LOGGER = logging.getLogger("EDMC.ModernOverlay.Client")
 
 DEFAULT_WINDOW_BASE_HEIGHT = 960
 DEFAULT_WINDOW_BASE_WIDTH = 1280
+TRANSPARENCY_WARNING_THRESHOLD_PERCENT = 10
+TRANSPARENCY_WARNING_TTL_SECONDS = 10.0
+TRANSPARENCY_WARNING_TITLE = "WARNING:"
+TRANSPARENCY_WARNING_BODY_FULL = "The EDMCModernOverlay plugin is set to full transparency."
+TRANSPARENCY_WARNING_BODY_LOW = "The EDMCModernOverlay plugin is more than {threshold}% transparent and may not be visible"
+TRANSPARENCY_WARNING_BODY_COLOR = "#ffa500"
 
 
 class ControlSurfaceMixin:
@@ -450,6 +456,45 @@ class ControlSurfaceMixin:
     def _clear_message(self) -> None:
         self._state["message"] = ""
         self.message_label.clear()
+
+    def maybe_warn_transparent_overlay(self, opacity: Optional[float] = None) -> None:
+        if getattr(self, "_transparency_warning_shown", False):
+            return
+        if opacity is None:
+            opacity = getattr(self, "_payload_opacity", None)
+        try:
+            numeric = float(opacity)
+        except (TypeError, ValueError):
+            return
+        if not math.isfinite(numeric):
+            return
+        if numeric <= 1.0:
+            numeric *= 100.0
+        numeric = max(0.0, min(numeric, 100.0))
+        if numeric >= TRANSPARENCY_WARNING_THRESHOLD_PERCENT:
+            return
+        self._transparency_warning_shown = True
+        base_point = self.message_label.font().pointSizeF()
+        if base_point <= 0:
+            base_point = float(getattr(self, "_base_message_point_size", 16.0))
+        step_value = getattr(self, "_legacy_font_step", 2.0)
+        try:
+            step = float(step_value)
+        except (TypeError, ValueError):
+            step = 2.0
+        step = max(0.0, min(step, 10.0))
+        large_size = max(1.0, base_point + step)
+        huge_size = max(1.0, base_point + (step * 2.0))
+        warning_percent = max(0, min(100, 100 - TRANSPARENCY_WARNING_THRESHOLD_PERCENT))
+        if math.isclose(numeric, 0.0, abs_tol=1e-6):
+            body_text = TRANSPARENCY_WARNING_BODY_FULL
+        else:
+            body_text = TRANSPARENCY_WARNING_BODY_LOW.format(threshold=warning_percent)
+        warning_message = (
+            f'<span style="color: #ff0000; font-size: {huge_size:.1f}pt;">{TRANSPARENCY_WARNING_TITLE}</span>'
+            f'<br><span style="color: {TRANSPARENCY_WARNING_BODY_COLOR}; font-size: {large_size:.1f}pt;">{body_text}</span>'
+        )
+        self.display_message(warning_message, ttl=TRANSPARENCY_WARNING_TTL_SECONDS)
 
     def set_status_text(self, status: str) -> None:
         self._status_presenter.set_status_text(status)

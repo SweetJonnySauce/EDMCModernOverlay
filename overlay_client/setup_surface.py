@@ -59,6 +59,7 @@ class SetupSurfaceMixin:
         self._state: Dict[str, Any] = {
             "message": "",
         }
+        self._transparency_warning_shown: bool = False
         self._debug_config = debug_config
         self._last_override_reload_nonce: Optional[str] = None
         self._controller_active_group: Optional[tuple[str, str]] = None
@@ -357,9 +358,9 @@ class SetupSurfaceMixin:
         self._cycle_overlay_view = CycleOverlayView()
         self._env_override_debug = self._collect_env_override_debug_info()
         layout = QVBoxLayout()
-        layout.addWidget(self.message_label, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(self.message_label)
         layout.addStretch(1)
-        layout.setContentsMargins(20, 20, 20, 40)
+        layout.setContentsMargins(20, 120, 20, 40)
         self._apply_drag_state()
         self.setLayout(layout)
 

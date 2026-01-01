@@ -4,6 +4,7 @@
 
 ### Features
   - New plugin groups added for Pioneer & Canonn
+  - Added a warning on startup if the opacity setting is less than 10% (90% transparent)
 ### Bug Fixes
   - Updates to payload tracing to help with Issue [#83](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/83) 
   - Changed client, controller, payload logs to UTC. Does not change the min version python3.10 contract.
