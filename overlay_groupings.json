@@ -21,7 +21,7 @@
           "bgstally-msg-tickwarn-"
         ],
         "idPrefixGroupAnchor": "ne",
-        "offsetX": 195,
+        "offsetX": -5,
         "payloadJustification": "right",
         "backgroundColor": "None",
         "backgroundBorderColor": "None",
@@ -70,16 +70,12 @@
       },
       "BGS-Tally Info": {
         "idPrefixes": [
-          "bgstally-msg-info-",
-          {
-            "value": "bgstally-frame-info",
-            "matchMode": "exact"
-          }
+          "bgstally-msg-info-"
         ],
         "idPrefixGroupAnchor": "nw",
         "payloadJustification": "left",
-        "backgroundColor": "None",
-        "backgroundBorderColor": "None",
+        "backgroundColor": "green",
+        "backgroundBorderColor": "green",
         "backgroundBorderWidth": 3
       },
       "BGS-Tally System_info": {
@@ -94,35 +90,29 @@
       },
       "BGS-Tally Tick": {
         "idPrefixes": [
-          "bgstally-msg-tick-",
-          {
-            "value": "bgstally-frame-tick",
-            "matchMode": "exact"
-          }
+          "bgstally-msg-tick-"
         ],
         "idPrefixGroupAnchor": "ne",
-        "offsetX": 195,
+        "offsetX": -5,
         "payloadJustification": "right",
         "markerLabelPosition": "below",
         "controllerPreviewBoxMode": "last",
-        "backgroundColor": null,
-        "backgroundBorderColor": null
+        "backgroundColor": "None",
+        "backgroundBorderColor": "None",
+        "backgroundBorderWidth": 3
       },
       "BGS-Tally System_tick": {
         "idPrefixes": [
-          "bgstally-msg-system_tick-",
-          {
-            "value": "bgstally-frame-system_tick",
-            "matchMode": "exact"
-          }
+          "bgstally-msg-system_tick-"
         ],
         "idPrefixGroupAnchor": "ne",
-        "offsetX": 195,
+        "offsetX": -5,
         "payloadJustification": "right",
         "markerLabelPosition": "below",
         "controllerPreviewBoxMode": "last",
-        "backgroundColor": null,
-        "backgroundBorderColor": null
+        "backgroundColor": "None",
+        "backgroundBorderColor": "None",
+        "backgroundBorderWidth": 3
       },
       "BGS-Tally Warning": {
         "idPrefixes": [
@@ -173,6 +163,34 @@
         ],
         "idPrefixGroupAnchor": "nw",
         "payloadJustification": "left"
+      }
+    }
+  },
+  "CANONN": {
+    "matchingPrefixes": [
+      "canonn-"
+    ],
+    "idPrefixGroups": {
+      "Canonn Patrol": {
+        "idPrefixes": [
+          "canonn-patrol-"
+        ],
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last"
+      },
+      "Canonn Startup": {
+        "idPrefixes": [
+          "canonn-startup-"
+        ],
+        "idPrefixGroupAnchor": "top",
+        "offsetX": 70,
+        "payloadJustification": "center",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last",
+        "backgroundColor": null,
+        "backgroundBorderColor": null
       }
     }
   },
@@ -355,6 +373,22 @@
         "offsetX": 640,
         "offsetY": -60.093,
         "payloadJustification": "center"
+      }
+    }
+  },
+  "Pioneer": {
+    "matchingPrefixes": [
+      "pioneer_"
+    ],
+    "idPrefixGroups": {
+      "Pioneer Text": {
+        "idPrefixes": [
+          "pioneer_text_"
+        ],
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last"
       }
     }
   },
