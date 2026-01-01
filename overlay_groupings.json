@@ -356,7 +356,11 @@
         "idPrefixGroupAnchor": "center",
         "offsetX": 40,
         "offsetY": 37,
-        "payloadJustification": "left"
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "max",
+        "backgroundColor": null,
+        "backgroundBorderColor": null
       }
     }
   },
@@ -388,7 +392,9 @@
         "idPrefixGroupAnchor": "nw",
         "payloadJustification": "left",
         "markerLabelPosition": "below",
-        "controllerPreviewBoxMode": "last"
+        "controllerPreviewBoxMode": "max",
+        "backgroundColor": null,
+        "backgroundBorderColor": null
       }
     }
   },

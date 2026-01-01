@@ -95,6 +95,120 @@ def test_snapshot_synthesizes_from_base_and_offsets(tmp_path: Path) -> None:
     assert snapshot.cache_timestamp == 123.0
 
 
+def test_snapshot_uses_max_transformed_when_mode_max(tmp_path: Path) -> None:
+    shipped = tmp_path / "overlay_groupings.json"
+    user = tmp_path / "overlay_groupings.user.json"
+    cache = tmp_path / "overlay_group_cache.json"
+
+    service = GroupStateService(shipped_path=shipped, user_groupings_path=user, cache_path=cache)
+    service._groupings_data = {
+        "PluginA": {
+            "idPrefixGroups": {
+                "G1": {
+                    "offsetX": 10.0,
+                    "offsetY": 5.0,
+                    "idPrefixGroupAnchor": "nw",
+                    "controllerPreviewBoxMode": "max",
+                }
+            }
+        }
+    }
+    cache_payload = {
+        "groups": {
+            "PluginA": {
+                "G1": {
+                    "base": {
+                        "base_min_x": 0.0,
+                        "base_min_y": 0.0,
+                        "base_max_x": 100.0,
+                        "base_max_y": 50.0,
+                    },
+                    "transformed": {
+                        "trans_min_x": 10.0,
+                        "trans_min_y": 5.0,
+                        "trans_max_x": 110.0,
+                        "trans_max_y": 55.0,
+                        "anchor": "se",
+                    },
+                    "max_transformed": {
+                        "trans_min_x": 0.0,
+                        "trans_min_y": 0.0,
+                        "trans_max_x": 200.0,
+                        "trans_max_y": 100.0,
+                        "anchor": "center",
+                    },
+                    "last_updated": 321.0,
+                }
+            }
+        }
+    }
+    cache.write_text(json.dumps(cache_payload), encoding="utf-8")
+    service.refresh_cache()
+
+    snapshot = service.snapshot("PluginA", "G1")
+
+    assert snapshot is not None
+    assert snapshot.transform_bounds == (0.0, 0.0, 200.0, 100.0)
+    assert snapshot.transform_anchor_token == "center"
+    assert snapshot.cache_timestamp == 321.0
+
+
+def test_snapshot_max_falls_back_to_last_visible(tmp_path: Path) -> None:
+    shipped = tmp_path / "overlay_groupings.json"
+    user = tmp_path / "overlay_groupings.user.json"
+    cache = tmp_path / "overlay_group_cache.json"
+
+    service = GroupStateService(shipped_path=shipped, user_groupings_path=user, cache_path=cache)
+    service._groupings_data = {
+        "PluginA": {
+            "idPrefixGroups": {
+                "G1": {
+                    "offsetX": 10.0,
+                    "offsetY": 5.0,
+                    "idPrefixGroupAnchor": "nw",
+                    "controller_preview_box_mode": "max",
+                }
+            }
+        }
+    }
+    cache_payload = {
+        "groups": {
+            "PluginA": {
+                "G1": {
+                    "base": {
+                        "base_min_x": 0.0,
+                        "base_min_y": 0.0,
+                        "base_max_x": 100.0,
+                        "base_max_y": 50.0,
+                    },
+                    "transformed": {
+                        "trans_min_x": 10.0,
+                        "trans_min_y": 5.0,
+                        "trans_max_x": 110.0,
+                        "trans_max_y": 55.0,
+                        "anchor": "se",
+                    },
+                    "last_visible_transformed": {
+                        "base_min_x": 2.0,
+                        "base_min_y": 3.0,
+                        "base_max_x": 12.0,
+                        "base_max_y": 13.0,
+                    },
+                    "last_updated": 444.0,
+                }
+            }
+        }
+    }
+    cache.write_text(json.dumps(cache_payload), encoding="utf-8")
+    service.refresh_cache()
+
+    snapshot = service.snapshot("PluginA", "G1")
+
+    assert snapshot is not None
+    assert snapshot.transform_bounds == (12.0, 8.0, 22.0, 18.0)
+    assert snapshot.transform_anchor_token == "se"
+
+
 def test_persist_offsets_writes_diff_and_invalidates_cache(tmp_path: Path) -> None:
     shipped = tmp_path / "overlay_groupings.json"
     user = tmp_path / "overlay_groupings.user.json"
