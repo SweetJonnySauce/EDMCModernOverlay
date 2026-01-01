@@ -845,10 +845,8 @@ class OverlayConfigApp(tk.Tk):
     def _get_cache_record(
         self, plugin_name: str, label: str
     ) -> tuple[dict[str, object] | None, dict[str, object] | None, float]:
-        groups = self._groupings_cache.get("groups") if isinstance(self._groupings_cache, dict) else {}
-        plugin_entry = groups.get(plugin_name) if isinstance(groups, dict) else {}
-        entry = plugin_entry.get(label) if isinstance(plugin_entry, dict) else {}
-        if not isinstance(entry, dict):
+        entry = self._get_cache_entry_raw(plugin_name, label)
+        if not entry:
             return None, None, 0.0
         normalized = entry.get("base") or entry.get("normalized")
         normalized = normalized if isinstance(normalized, dict) else None
@@ -856,6 +854,12 @@ class OverlayConfigApp(tk.Tk):
         transformed = transformed if isinstance(transformed, dict) else None
         timestamp = float(entry.get("last_updated", 0.0)) if isinstance(entry, dict) else 0.0
         return normalized, transformed, timestamp
+
+    def _get_cache_entry_raw(self, plugin_name: str, label: str) -> dict[str, object]:
+        groups = self._groupings_cache.get("groups") if isinstance(self._groupings_cache, dict) else {}
+        plugin_entry = groups.get(plugin_name) if isinstance(groups, dict) else {}
+        entry = plugin_entry.get(label) if isinstance(plugin_entry, dict) else {}
+        return entry if isinstance(entry, dict) else {}
 
     def _set_group_controls_enabled(self, enabled: bool) -> None:
         self._group_controls_enabled = bool(enabled)
@@ -903,16 +907,70 @@ class OverlayConfigApp(tk.Tk):
         if controller is None:
             # Legacy/test fallback when preview controller is not initialized.
             cfg = self._get_group_config(plugin_name, label)
-            base_payload, transformed_payload, cache_ts = self._get_cache_record(plugin_name, label)
+            cache_entry = self._get_cache_entry_raw(plugin_name, label)
+            base_payload = cache_entry.get("base") or cache_entry.get("normalized")
+            base_payload = base_payload if isinstance(base_payload, dict) else None
+            transformed_payload = cache_entry.get("transformed")
+            transformed_payload = transformed_payload if isinstance(transformed_payload, dict) else None
+            last_visible_payload = cache_entry.get("last_visible_transformed")
+            last_visible_payload = last_visible_payload if isinstance(last_visible_payload, dict) else None
+            max_payload = cache_entry.get("max_transformed")
+            max_payload = max_payload if isinstance(max_payload, dict) else None
+            cache_ts = float(cache_entry.get("last_updated", 0.0)) if isinstance(cache_entry, dict) else 0.0
             if base_payload is None:
                 return None
+
+            def _preview_mode(raw_value: object) -> str:
+                if not isinstance(raw_value, str):
+                    return "last"
+                token = raw_value.strip().lower()
+                return token if token in {"last", "max"} else "last"
+
+            def _anchor_from_payload(payload: Optional[dict[str, object]]) -> Optional[str]:
+                if not isinstance(payload, dict):
+                    return None
+                value = payload.get("anchor")
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+                return None
+
+            def _bounds_from_payload(payload: Optional[dict[str, object]]) -> tuple[Optional[tuple[float, float, float, float]], str]:
+                if not isinstance(payload, dict):
+                    return None, ""
+                has_trans = any(key.startswith("trans_") for key in payload.keys())
+                has_base = any(key.startswith("base_") for key in payload.keys())
+
+                def _float(value: object, default: float = 0.0) -> float:
+                    try:
+                        return float(value)
+                    except (TypeError, ValueError):
+                        return default
+
+                if has_trans:
+                    min_x = _float(payload.get("trans_min_x"))
+                    min_y = _float(payload.get("trans_min_y"))
+                    max_x = _float(payload.get("trans_max_x"))
+                    max_y = _float(payload.get("trans_max_y"))
+                    return (min_x, min_y, max_x, max_y), "transformed"
+                if has_base:
+                    min_x = _float(payload.get("base_min_x"))
+                    min_y = _float(payload.get("base_min_y"))
+                    max_x = _float(payload.get("base_max_x"))
+                    max_y = _float(payload.get("base_max_y"))
+                    return (min_x, min_y, max_x, max_y), "base"
+                return None, ""
+
+            preview_mode = _preview_mode(cfg.get("controllerPreviewBoxMode") or cfg.get("controller_preview_box_mode"))
             anchor_token = str(
                 cfg.get("idPrefixGroupAnchor")
                 or (transformed_payload.get("anchor") if transformed_payload else "nw")
                 or "nw"
             ).lower()
+            preview_anchor = _anchor_from_payload(max_payload if preview_mode == "max" else transformed_payload)
             transform_anchor_token = str(
-                transformed_payload.get("anchor", anchor_token) if isinstance(transformed_payload, dict) else anchor_token
+                preview_anchor
+                or _anchor_from_payload(transformed_payload)
+                or anchor_token
             ).lower()
             offset_x = float(cfg.get("offsetX", 0.0)) if isinstance(cfg, dict) else 0.0
             offset_y = float(cfg.get("offsetY", 0.0)) if isinstance(cfg, dict) else 0.0
@@ -922,10 +980,25 @@ class OverlayConfigApp(tk.Tk):
             base_max_y = float(base_payload.get("base_max_y", base_min_y))
             base_bounds = (base_min_x, base_min_y, base_max_x, base_max_y)
             base_anchor = self._compute_anchor_point(base_min_x, base_max_x, base_min_y, base_max_y, anchor_token)
-            trans_min_x = base_min_x + offset_x
-            trans_min_y = base_min_y + offset_y
-            trans_max_x = base_max_x + offset_x
-            trans_max_y = base_max_y + offset_y
+            if preview_mode == "max":
+                preview_payload = max_payload or last_visible_payload or transformed_payload
+                preview_bounds, preview_kind = _bounds_from_payload(preview_payload)
+                if preview_bounds is None:
+                    preview_bounds = base_bounds
+                    preview_kind = "base"
+                if preview_kind == "base":
+                    trans_min_x = preview_bounds[0] + offset_x
+                    trans_min_y = preview_bounds[1] + offset_y
+                    trans_max_x = preview_bounds[2] + offset_x
+                    trans_max_y = preview_bounds[3] + offset_y
+                else:
+                    trans_min_x, trans_min_y, trans_max_x, trans_max_y = preview_bounds
+            else:
+                # Preserve legacy behavior for "last" by synthesizing from base + offsets.
+                trans_min_x = base_min_x + offset_x
+                trans_min_y = base_min_y + offset_y
+                trans_max_x = base_max_x + offset_x
+                trans_max_y = base_max_y + offset_y
             transform_bounds = (trans_min_x, trans_min_y, trans_max_x, trans_max_y)
             transform_anchor = self._compute_anchor_point(
                 trans_min_x, trans_max_x, trans_min_y, trans_max_y, transform_anchor_token
