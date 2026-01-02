@@ -104,6 +104,15 @@ Run these checks after the installer finishes (replace paths if you customised t
 5. When the overlay window gets an `OverlayConfig` event in `_on_message`, it applies the updated opacity, scaling, grid, window size, log retention, and status flags immediately (`overlay_client/overlay_client.py`).
 6. On startup, the plugin rebroadcasts the current configuration a few times so newly launched clients always get the latest settings, and the client seeds its defaults from `overlay_settings.json` if no update has arrived yet (`load.py`, `overlay_client/overlay_client.py`).
 
+## How do I use the in-game chat command?
+
+The launch command is configurable in the EDMC preferences pane (default `!ovr`). Enter the command alone to launch the overlay controller, or add a single opacity argument to update the global payload opacity:
+
+- `!ovr` launches the overlay controller.
+- `!ovr 0` sets payload opacity to 0.
+- `!ovr 65` sets payload opacity to 65.
+- `!ovr 100%` sets payload opacity to 100.
+
 ## Why does the overlay stay visible when I alt‑tab out of Elite Dangerous on Windows?
 
 The overlay hides itself when the game window is not foreground. This behavior is controlled by the `force_render` setting.

@@ -12,6 +12,8 @@ class _DummyRuntime:
         self.controller_launches = 0
         self.controller_enabled = True
         self.controller_should_fail = False
+        self.opacity_calls: list[int] = []
+        self.opacity_enabled = True
 
     def send_test_message(self, text: str, x: int | None = None, y: int | None = None) -> None:
         self.messages.append(text)
@@ -32,6 +34,11 @@ class _DummyRuntime:
         if self.controller_should_fail:
             raise RuntimeError("boom")
         self.controller_launches += 1
+
+    def set_payload_opacity_preference(self, value: int) -> None:
+        if not self.opacity_enabled:
+            raise RuntimeError("disabled")
+        self.opacity_calls.append(value)
 
 
 def build_helper(runtime: _DummyRuntime | None = None) -> tuple[_DummyRuntime, object]:
@@ -85,6 +92,38 @@ def test_overlay_unknown_subcommand():
     assert runtime.messages == []
 
 
+def test_overlay_opacity_numeric_command():
+    runtime, helper = build_helper()
+    assert helper.handle_entry({"event": "SendText", "Message": "!overlay 42"}) is True
+    assert runtime.opacity_calls == [42]
+    assert runtime.controller_launches == 0
+    assert runtime.messages == []
+
+
+def test_overlay_opacity_percent_command():
+    runtime, helper = build_helper()
+    assert helper.handle_entry({"event": "SendText", "Message": "!overlay 100%"}) is True
+    assert runtime.opacity_calls == [100]
+    assert runtime.controller_launches == 0
+    assert runtime.messages == []
+
+
+def test_overlay_opacity_out_of_range_ignored():
+    runtime, helper = build_helper()
+    assert helper.handle_entry({"event": "SendText", "Message": "!overlay 101"}) is True
+    assert runtime.opacity_calls == []
+    assert runtime.controller_launches == 0
+    assert runtime.messages == []
+
+
+def test_overlay_opacity_invalid_value_ignored():
+    runtime, helper = build_helper()
+    assert helper.handle_entry({"event": "SendText", "Message": "!overlay fifty"}) is True
+    assert runtime.opacity_calls == []
+    assert runtime.controller_launches == 0
+    assert runtime.messages == []
+
+
 def test_overlay_cycle_disabled_message():
     runtime, helper = build_helper()
     runtime.cycle_enabled = False
@@ -98,6 +137,14 @@ def test_overlay_launch_unavailable():
     runtime, helper = build_helper(runtime)
     assert helper.handle_entry({"event": "SendText", "Message": "!overlay"}) is True
     assert "unavailable" in runtime.messages[-1].lower()
+
+
+def test_overlay_opacity_unavailable():
+    runtime = _DummyRuntime()
+    runtime.set_payload_opacity_preference = None  # type: ignore[assignment]
+    runtime, helper = build_helper(runtime)
+    assert helper.handle_entry({"event": "SendText", "Message": "!overlay 50"}) is True
+    assert "opacity" in runtime.messages[-1].lower()
 
 
 def test_overlay_launch_failure():

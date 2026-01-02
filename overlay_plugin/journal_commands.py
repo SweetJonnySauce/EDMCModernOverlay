@@ -30,6 +30,7 @@ class _OverlayCommandContext:
     cycle_next: Optional[Callable[[], None]] = None
     cycle_prev: Optional[Callable[[], None]] = None
     launch_controller: Optional[Callable[[], None]] = None
+    set_opacity: Optional[Callable[[int], None]] = None
 
 
 def _normalise_prefix(value: str) -> str:
@@ -37,6 +38,22 @@ def _normalise_prefix(value: str) -> str:
     if not text.startswith("!"):
         text = "!" + text
     return text.lower()
+
+
+def _parse_opacity_argument(value: str) -> Optional[int]:
+    text = (value or "").strip()
+    if not text:
+        return None
+    if text.endswith("%"):
+        text = text[:-1].strip()
+        if not text:
+            return None
+    if not text.isdigit():
+        return None
+    opacity = int(text)
+    if 0 <= opacity <= 100:
+        return opacity
+    return None
 
 
 class JournalCommandHelper:
@@ -87,6 +104,11 @@ class JournalCommandHelper:
         if not args:
             return self._launch_controller()
 
+        if len(args) == 1:
+            opacity = _parse_opacity_argument(args[0])
+            if opacity is not None:
+                return self._set_opacity(opacity)
+
         action = args[0].lower()
         if action in {"launch", "open", "controller", "config"}:
             return self._launch_controller()
@@ -105,6 +127,20 @@ class JournalCommandHelper:
 
     def _emit_help(self) -> None:
         self._ctx.send_message(self._help_text)
+
+    def _set_opacity(self, value: int) -> bool:
+        callback = self._ctx.set_opacity
+        if callback is None:
+            self._ctx.send_message("Overlay opacity command unavailable.")
+            return True
+        try:
+            callback(value)
+        except RuntimeError as exc:
+            self._ctx.send_message(f"Overlay opacity unavailable: {exc}")
+        except Exception as exc:  # pragma: no cover - defensive guard
+            _LOGGER.warning("Overlay opacity callback failed: %s", exc)
+            self._ctx.send_message("Overlay opacity update failed; see EDMC log.")
+        return True
 
     def _launch_controller(self) -> bool:
         callback = self._ctx.launch_controller
@@ -157,6 +193,7 @@ def build_command_helper(
         cycle_next=getattr(plugin_runtime, "cycle_payload_next", None),
         cycle_prev=getattr(plugin_runtime, "cycle_payload_prev", None),
         launch_controller=getattr(plugin_runtime, "launch_overlay_controller", None),
+        set_opacity=getattr(plugin_runtime, "set_payload_opacity_preference", None),
     )
     legacy = legacy_prefixes if legacy_prefixes is not None else ["!overlay"]
     if command_prefix in legacy:
