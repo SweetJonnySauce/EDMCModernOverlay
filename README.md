@@ -2,7 +2,7 @@
 [![Github All Releases](https://img.shields.io/github/downloads/SweetJonnySauce/EDMCModernOverlay/total.svg)](https://github.com/SweetJonnySauce/EDMCModernOverlay/releases/latest)
 [![GitHub Latest Version](https://img.shields.io/github/v/release/SweetJonnySauce/EDMCModernOverlay)](https://github.com/SweetJonnySauce/EDMCModernOverlay/releases/latest)
 [![Build Status][build-badge]][build-url]
-[![VirusTotal](https://img.shields.io/badge/VirusTotal-clean-brightgreen.svg)](https://www.virustotal.com/gui/file/8c42044a0fdf0d8c15160cecd83cda4f4a46c40643fd85f888cf3c7ecf24092b)
+[![VirusTotal](https://img.shields.io/badge/VirusTotal-clean-brightgreen.svg)](https://www.virustotal.com/gui/file/66112c3634b4b4fa84b14c05ba462e1a87b0a27debe5b20821523776ebaff668)
 
 [build-badge]: https://github.com/SweetJonnySauce/EDMCModernOverlay/actions/workflows/ci.yml/badge.svg?branch=main
 [build-url]: https://github.com/SweetJonnySauce/EDMCModernOverlay/actions/workflows/ci.yml
