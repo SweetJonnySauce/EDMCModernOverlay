@@ -39,6 +39,7 @@ class DeveloperHelperController:
         window.set_log_retention(self._current_log_retention)
         window.set_payload_opacity(getattr(initial, "global_payload_opacity", 100))
         window.set_force_render(initial.force_render)
+        window.set_obs_capture_friendly(getattr(initial, "obs_capture_friendly", False))
         window.set_physical_clamp_enabled(getattr(initial, "physical_clamp_enabled", False))
         if getattr(initial, "physical_clamp_overrides", None):
             window.set_physical_clamp_overrides(getattr(initial, "physical_clamp_overrides"))
@@ -78,6 +79,8 @@ class DeveloperHelperController:
             window.set_debug_overlay_corner(config.debug_overlay_corner)
         if config.force_render is not None:
             window.set_force_render(config.force_render)
+        if config.obs_capture_friendly is not None:
+            window.set_obs_capture_friendly(config.obs_capture_friendly)
         if "physical_clamp_enabled" in payload:
             window.set_physical_clamp_enabled(payload.get("physical_clamp_enabled"))
         if "physical_clamp_overrides" in payload:

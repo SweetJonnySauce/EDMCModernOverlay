@@ -38,6 +38,9 @@ See the [Wiki for Usage](https://github.com/SweetJonnySauce/EDMCModernOverlay/wi
 
 See the [Wiki for Overlay Controller ](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Overlay-Controller) for how to modify where overlays are placed on the game screen.
 
+## OBS Capture (Windows)
+If you stream with OBS and want the overlay as its own Window Capture source, enable "OBS capture-friendly mode" in the preferences pane. This is Windows-only and may make the overlay appear in Alt-Tab/taskbar. Click-through remains enabled.
+
    
 # Support
 Best way to get support for this plugin is to create a github issue in this repo. This is a side project for me. As such, support is best effort only and there is no guarantee I'll be able to fix or fully address your issue/request. You can occassionally find me on [EDCD Discord](https://edcd.github.io/) in the `#edmc-plugins` channel.

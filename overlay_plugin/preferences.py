@@ -9,6 +9,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 
+from overlay_plugin.obs_capture_support import (
+    OBS_CAPTURE_LABEL,
+    OBS_CAPTURE_PREF_KEY,
+    OBS_CAPTURE_TOOLTIP,
+    obs_capture_supported,
+)
+
 try:
     import config as _edmc_config_module  # type: ignore
     from config import config as EDMC_CONFIG  # type: ignore
@@ -483,6 +490,7 @@ class Preferences:
     gridlines_enabled: bool = False
     gridline_spacing: int = 120
     force_render: bool = False
+    obs_capture_friendly: bool = False
     force_xwayland: bool = False
     physical_clamp_enabled: bool = False
     physical_clamp_overrides: Dict[str, float] = field(default_factory=dict)
@@ -572,6 +580,10 @@ class Preferences:
             "gridlines_enabled": _config_get_bool(_config_key("gridlines_enabled"), self.gridlines_enabled),
             "gridline_spacing": _config_get_locale_number(_config_key("gridline_spacing"), self.gridline_spacing),
             "force_render": _config_get_bool(_config_key("force_render"), self.force_render),
+            "obs_capture_friendly": _config_get_bool(
+                _config_key(OBS_CAPTURE_PREF_KEY),
+                self.obs_capture_friendly,
+            ),
             "force_xwayland": _config_get_bool(_config_key("force_xwayland"), self.force_xwayland),
             "physical_clamp_enabled": _config_get_bool(
                 _config_key("physical_clamp_enabled"),
@@ -640,6 +652,10 @@ class Preferences:
         self.gridlines_enabled = _coerce_bool(data.get("gridlines_enabled"), self.gridlines_enabled)
         self.gridline_spacing = _coerce_int(data.get("gridline_spacing"), self.gridline_spacing, minimum=10)
         self.force_render = _coerce_bool(data.get("force_render"), self.force_render)
+        self.obs_capture_friendly = _coerce_bool(
+            data.get(OBS_CAPTURE_PREF_KEY),
+            self.obs_capture_friendly,
+        )
         self.force_xwayland = _coerce_bool(data.get("force_xwayland"), self.force_xwayland)
         self.physical_clamp_enabled = _coerce_bool(
             data.get("physical_clamp_enabled"),
@@ -722,6 +738,7 @@ class Preferences:
             "gridlines_enabled": bool(self.gridlines_enabled),
             "gridline_spacing": int(self.gridline_spacing),
             "force_render": bool(self.force_render),
+            OBS_CAPTURE_PREF_KEY: bool(self.obs_capture_friendly),
             "force_xwayland": bool(self.force_xwayland),
             "physical_clamp_enabled": bool(self.physical_clamp_enabled),
             "physical_clamp_overrides": dict(self.physical_clamp_overrides or {}),
@@ -758,6 +775,7 @@ class Preferences:
         _config_set_value(_config_key("gridlines_enabled"), bool(self.gridlines_enabled))
         _config_set_value(_config_key("gridline_spacing"), int(self.gridline_spacing))
         _config_set_value(_config_key("force_render"), bool(self.force_render))
+        _config_set_value(_config_key(OBS_CAPTURE_PREF_KEY), bool(self.obs_capture_friendly))
         _config_set_value(_config_key("force_xwayland"), bool(self.force_xwayland))
         _config_set_value(_config_key("physical_clamp_enabled"), bool(self.physical_clamp_enabled))
         try:
@@ -810,6 +828,7 @@ class PreferencesPanel:
         set_payload_nudge_callback: Optional[Callable[[bool], None]] = None,
         set_payload_gutter_callback: Optional[Callable[[int], None]] = None,
         set_force_render_callback: Optional[Callable[[bool], None]] = None,
+        set_obs_capture_friendly_callback: Optional[Callable[[bool], None]] = None,
         set_title_bar_config_callback: Optional[Callable[[bool, int], None]] = None,
         set_debug_overlay_callback: Optional[Callable[[bool], None]] = None,
         set_payload_logging_callback: Optional[Callable[[bool], None]] = None,
@@ -859,6 +878,7 @@ class PreferencesPanel:
         self._var_payload_nudge = tk.BooleanVar(value=preferences.nudge_overflow_payloads)
         self._var_payload_gutter = tk.IntVar(value=max(0, int(preferences.payload_nudge_gutter)))
         self._var_force_render = tk.BooleanVar(value=preferences.force_render)
+        self._var_obs_capture_friendly = tk.BooleanVar(value=preferences.obs_capture_friendly)
         self._var_physical_clamp = tk.BooleanVar(value=preferences.physical_clamp_enabled)
         self._var_physical_clamp_overrides = tk.StringVar(
             value=_format_physical_clamp_overrides(preferences.physical_clamp_overrides)
@@ -937,6 +957,7 @@ class PreferencesPanel:
         self._set_payload_nudge = set_payload_nudge_callback
         self._set_payload_gutter = set_payload_gutter_callback
         self._set_force_render = set_force_render_callback
+        self._set_obs_capture_friendly = set_obs_capture_friendly_callback
         self._set_title_bar_config = set_title_bar_config_callback
         self._set_debug_overlay = set_debug_overlay_callback
         self._set_payload_logging = set_payload_logging_callback
@@ -1074,6 +1095,26 @@ class PreferencesPanel:
         )
         force_checkbox.pack(side="left")
         force_row.grid(row=user_row, column=0, sticky="w", pady=ROW_PAD)
+        user_row += 1
+
+        obs_row = ttk.Frame(user_section, style=self._frame_style)
+        obs_checkbox = nb.Checkbutton(
+            obs_row,
+            text=OBS_CAPTURE_LABEL,
+            variable=self._var_obs_capture_friendly,
+            onvalue=True,
+            offvalue=False,
+            command=self._on_obs_capture_friendly_toggle,
+        )
+        _attach_tooltip(
+            obs_checkbox,
+            OBS_CAPTURE_TOOLTIP,
+            nb_module=nb,
+        )
+        obs_checkbox.pack(side="left")
+        if not obs_capture_supported():
+            obs_checkbox.state(["disabled"])
+        obs_row.grid(row=user_row, column=0, sticky="w", pady=ROW_PAD)
         user_row += 1
 
         font_row = ttk.Frame(user_section, style=self._frame_style)
@@ -2174,6 +2215,18 @@ class PreferencesPanel:
                 return
         else:
             self._preferences.force_render = value
+            self._preferences.save()
+
+    def _on_obs_capture_friendly_toggle(self) -> None:
+        value = bool(self._var_obs_capture_friendly.get())
+        if self._set_obs_capture_friendly:
+            try:
+                self._set_obs_capture_friendly(value)
+            except Exception as exc:
+                self._status_var.set(f"Failed to update OBS capture-friendly mode: {exc}")
+                return
+        else:
+            self._preferences.obs_capture_friendly = value
             self._preferences.save()
 
     def _on_physical_clamp_toggle(self) -> None:

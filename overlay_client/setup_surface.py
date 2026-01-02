@@ -110,6 +110,9 @@ class SetupSurfaceMixin:
         self._base_width: int = int(BASE_WIDTH)
         self._log_retention: int = max(1, int(initial.client_log_retention))
         self._force_render: bool = bool(getattr(initial, "force_render", False))
+        self._obs_capture_friendly: bool = bool(getattr(initial, "obs_capture_friendly", False))
+        if not sys.platform.startswith("win"):
+            self._obs_capture_friendly = False
         self._physical_clamp_enabled: bool = bool(getattr(initial, "physical_clamp_enabled", False))
         self._physical_clamp_overrides: Dict[str, float] = dict(
             getattr(initial, "physical_clamp_overrides", {}) or {}
@@ -153,7 +156,7 @@ class SetupSurfaceMixin:
             clear_transient_parent_ids_fn=self._clear_transient_parent_ids,
             window_handle_fn=lambda: self.windowHandle(),
             set_widget_attribute_fn=lambda attr, enabled: self.setAttribute(attr, enabled),
-            set_window_flag_fn=lambda flag, enabled: self.setWindowFlag(flag, enabled),
+            set_window_flag_fn=self._set_window_flag,
             ensure_visible_fn=lambda: self.show() if not self.isVisible() else None,
             raise_fn=lambda: self.raise_() if self.isVisible() else None,
             set_children_attr_fn=lambda transparent: self._set_children_click_through(transparent),
@@ -404,6 +407,15 @@ class SetupSurfaceMixin:
             "skipped_existing": self._parse_env_override_list("EDMC_OVERLAY_ENV_OVERRIDES_SKIPPED_EXISTING"),
             "values": values,
         }
+
+    def _set_window_flag(self, flag: Qt.WindowType, enabled: bool) -> None:
+        apply_enabled = enabled
+        if flag == Qt.WindowType.Tool and self._obs_capture_friendly and sys.platform.startswith("win"):
+            apply_enabled = False
+        try:
+            self.setWindowFlag(flag, apply_enabled)
+        except Exception as exc:
+            _CLIENT_LOGGER.debug("Failed to set window flag %s=%s: %s", flag, apply_enabled, exc)
 
     def _handle_show_event(self) -> None:
         self._apply_legacy_scale()
