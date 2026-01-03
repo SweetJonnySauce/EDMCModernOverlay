@@ -324,7 +324,11 @@ check_required_packages() {
         # shellcheck disable=SC1091
         . /etc/os-release
         distro_id="${ID,,}"
-        distro_like="${ID_LIKE,,}"
+        distro_like="${ID_LIKE:-}"
+        distro_like="${distro_like,,}"
+        if [[ -z "$distro_like" ]]; then
+            echo "note: ID_LIKE not set in /etc/os-release"
+        fi
     fi
 
     local profile=""
