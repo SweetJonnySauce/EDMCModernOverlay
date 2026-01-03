@@ -69,6 +69,7 @@ class ControlSurfaceMixin:
         self._obs_capture_friendly = flag
         _CLIENT_LOGGER.debug("OBS capture-friendly mode %s", "enabled" if flag else "disabled")
         self._apply_drag_state()
+        self._apply_obs_capture_window_identity()
 
     def set_physical_clamp_enabled(self, enabled: bool) -> None:
         flag = bool(enabled)
