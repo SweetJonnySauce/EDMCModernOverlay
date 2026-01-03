@@ -120,7 +120,8 @@
         "install": [
           "sudo",
           "rpm-ostree",
-          "install"
+          "install",
+          "--allow-inactive"
         ]
       },
       "packages": {
