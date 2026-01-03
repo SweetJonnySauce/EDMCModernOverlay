@@ -22,7 +22,7 @@ from overlay_client.window_tracking import create_elite_window_tracker
 
 APP_NAME = "EDMC Modern Overlay"
 APP_ICON_TEXT = "MO"
-APP_ICON_PATH = CLIENT_DIR / "assets" / "app_icon.xpm"
+APP_ICON_PATH = CLIENT_DIR / "assets" / "EDMCModernOverlay.ico"
 
 
 def _build_app_icon(text: str = APP_ICON_TEXT) -> QIcon:
