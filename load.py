@@ -288,6 +288,9 @@ def _edmc_debug_logging_active() -> bool:
 def _dev_override_active() -> bool:
     """Return True when Modern Overlay is running in dev mode."""
 
+    prefs = globals().get("_preferences")
+    if prefs is not None:
+        return bool(getattr(prefs, "dev_mode", DEV_BUILD))
     return bool(DEV_BUILD)
 
 
@@ -2798,6 +2801,7 @@ class _PluginRuntime:
         env["EDMC_OVERLAY_LOG_LEVEL"] = str(log_level_payload.get("value"))
         log_level_name = log_level_payload.get("name") or logging.getLevelName(logging.INFO)
         env["EDMC_OVERLAY_LOG_LEVEL_NAME"] = str(log_level_name)
+        env[DEV_MODE_ENV_VAR] = "1" if self._preferences.dev_mode else "0"
         env["EDMC_OVERLAY_SESSION_TYPE"] = session or "unknown"
         env["EDMC_OVERLAY_COMPOSITOR"] = compositor
         env["EDMC_OVERLAY_FORCE_XWAYLAND"] = "1" if force_xwayland else "0"
@@ -3041,6 +3045,7 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
             diagnostics_state = _plugin.get_troubleshooting_panel_state()
         if launch_command_callback:
             LOGGER.debug("Attaching launch command callback with initial value=%s", _preferences.controller_launch_command)
+        dev_mode = _preferences.dev_mode if _preferences is not None else DEV_BUILD
         panel = PreferencesPanel(
             parent,
             _preferences,
@@ -3070,7 +3075,7 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
             launch_command_callback,
             payload_opacity_callback,
             reset_group_cache_callback=reset_group_cache_callback,
-            dev_mode=DEV_BUILD,
+            dev_mode=dev_mode,
             plugin_version=MODERN_OVERLAY_VERSION,
             version_update_available=version_update_available,
             troubleshooting_state=diagnostics_state,

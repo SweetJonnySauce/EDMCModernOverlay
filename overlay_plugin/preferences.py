@@ -37,6 +37,7 @@ OVERLAY_ID_PREFIX = "EDMCModernOverlay-"
 CONFIG_PREFIX = "edmc_modern_overlay."
 CONFIG_STATE_VERSION = 1
 CONFIG_VERSION_KEY = f"{CONFIG_PREFIX}state_version"
+DEV_MODE_PREF_KEY = "dev_mode"
 CLIENT_LOG_RETENTION_MIN = 1
 CLIENT_LOG_RETENTION_MAX = 20
 DEFAULT_CLIENT_LOG_RETENTION = 5
@@ -569,6 +570,7 @@ class Preferences:
         except Exception:
             pass
         payload: Dict[str, Any] = {
+            "dev_mode": _config_get_bool(_config_key(DEV_MODE_PREF_KEY), self.dev_mode),
             "overlay_opacity": _config_get_locale_number(_config_key("overlay_opacity"), self.overlay_opacity),
             "global_payload_opacity": _config_get_int(
                 _config_key("global_payload_opacity"),
@@ -630,6 +632,7 @@ class Preferences:
         self._apply_raw_data(payload)
 
     def _apply_raw_data(self, data: Mapping[str, Any]) -> None:
+        self.dev_mode = _coerce_bool(data.get("dev_mode"), self.dev_mode)
         self.overlay_opacity = _coerce_float(data.get("overlay_opacity"), self.overlay_opacity, minimum=0.0, maximum=1.0)
         self.global_payload_opacity = _coerce_int(
             data.get("global_payload_opacity"),
@@ -730,6 +733,7 @@ class Preferences:
 
     def _shadow_payload(self) -> Dict[str, Any]:
         return {
+            "dev_mode": bool(self.dev_mode),
             "overlay_opacity": float(self.overlay_opacity),
             "global_payload_opacity": int(self.global_payload_opacity),
             "show_connection_status": bool(self.show_connection_status),
@@ -767,6 +771,7 @@ class Preferences:
     def _persist_to_config(self) -> None:
         if not self._config_enabled:
             return
+        _config_set_value(_config_key(DEV_MODE_PREF_KEY), bool(self.dev_mode))
         _config_set_value(_config_key("overlay_opacity"), float(self.overlay_opacity))
         _config_set_value(_config_key("global_payload_opacity"), int(self.global_payload_opacity))
         _config_set_value(_config_key("show_connection_status"), bool(self.show_connection_status))
@@ -942,6 +947,7 @@ class PreferencesPanel:
         self._var_log_retention_override_active = tk.BooleanVar(value=state.log_retention_override is not None)
         self._var_log_retention_value = tk.IntVar(value=int(retention_value))
         self._var_payload_exclude = tk.StringVar(value=", ".join(state.exclude_plugins))
+        self._var_dev_mode = tk.BooleanVar(value=preferences.dev_mode)
         self._font_bounds_apply_in_progress = False
         self._font_step_apply_in_progress = False
         self._launch_command_apply_in_progress = False
@@ -1048,9 +1054,17 @@ class PreferencesPanel:
                 )
                 warning_label.grid(row=1, column=0, sticky="e", pady=(2, 0))
 
-        user_section = ttk.Frame(frame, style=self._frame_style)
-        user_section.grid(row=1, column=0, sticky="we")
+        tabs = nb.Notebook(frame)
+        overlay_tab = nb.Frame(tabs)
+        experimental_tab = nb.Frame(tabs)
+        tabs.add(overlay_tab, text="Overlay")
+        tabs.add(experimental_tab, text="Experimental")
+        tabs.grid(row=1, column=0, sticky="we")
+
+        user_section = ttk.Frame(overlay_tab, style=self._frame_style)
+        user_section.grid(row=0, column=0, sticky="we")
         user_section.columnconfigure(0, weight=1)
+        overlay_tab.columnconfigure(0, weight=1)
         user_row = 0
 
         status_row = ttk.Frame(user_section, style=self._frame_style)
@@ -1095,26 +1109,6 @@ class PreferencesPanel:
         )
         force_checkbox.pack(side="left")
         force_row.grid(row=user_row, column=0, sticky="w", pady=ROW_PAD)
-        user_row += 1
-
-        obs_row = ttk.Frame(user_section, style=self._frame_style)
-        obs_checkbox = nb.Checkbutton(
-            obs_row,
-            text=OBS_CAPTURE_LABEL,
-            variable=self._var_obs_capture_friendly,
-            onvalue=True,
-            offvalue=False,
-            command=self._on_obs_capture_friendly_toggle,
-        )
-        _attach_tooltip(
-            obs_checkbox,
-            OBS_CAPTURE_TOOLTIP,
-            nb_module=nb,
-        )
-        obs_checkbox.pack(side="left")
-        if not obs_capture_supported():
-            obs_checkbox.state(["disabled"])
-        obs_row.grid(row=user_row, column=0, sticky="w", pady=ROW_PAD)
         user_row += 1
 
         font_row = ttk.Frame(user_section, style=self._frame_style)
@@ -1264,57 +1258,6 @@ class PreferencesPanel:
         payload_opacity_value = nb.Label(payload_opacity_row, textvariable=self._payload_opacity_label)
         payload_opacity_value.pack(side="left", padx=(8, 0))
         payload_opacity_row.grid(row=user_row, column=0, sticky="w", pady=ROW_PAD)
-        user_row += 1
-
-        clamp_row = ttk.Frame(user_section, style=self._frame_style)
-        clamp_checkbox = nb.Checkbutton(
-            clamp_row,
-            text="Clamp fractional desktop scaling (physical clamp)",
-            variable=self._var_physical_clamp,
-            onvalue=True,
-            offvalue=False,
-            command=self._on_physical_clamp_toggle,
-        )
-        clamp_checkbox.pack(side="left")
-        clamp_row.grid(row=user_row, column=0, sticky="w", pady=ROW_PAD)
-        user_row += 1
-
-        clamp_override_row = ttk.Frame(user_section, style=self._frame_style)
-        clamp_override_row.columnconfigure(1, weight=1)
-        nb.Label(
-            clamp_override_row,
-            text="Per-monitor clamp overrides (name=scale, comma-separated):",
-        ).grid(row=0, column=0, sticky="w")
-        clamp_override_entry = nb.EntryMenu(
-            clamp_override_row,
-            width=40,
-            textvariable=self._var_physical_clamp_overrides,
-        )
-        clamp_override_entry.grid(row=0, column=1, padx=(8, 0), sticky="we")
-        clamp_override_entry.bind("<Return>", self._on_physical_clamp_overrides_event)
-        clamp_override_entry.bind("<FocusOut>", self._on_physical_clamp_overrides_event)
-        clamp_override_apply = nb.Button(
-            clamp_override_row,
-            text="Apply",
-            command=self._on_physical_clamp_overrides_apply,
-        )
-        clamp_override_apply.grid(row=0, column=2, padx=(8, 0), sticky="e")
-        helper_label = nb.Label(
-            clamp_override_row,
-            text="Example: DisplayPort-2=1.0, HDMI-0=1.25 (empty to clear)",
-        )
-        helper_label.grid(row=1, column=0, columnspan=3, sticky="w", pady=(ROW_PAD[0], 0))
-        clamp_override_row.grid(row=user_row, column=0, sticky="we", pady=ROW_PAD)
-        user_row += 1
-
-        cache_row = ttk.Frame(user_section, style=self._frame_style)
-        cache_label = nb.Label(cache_row, text="Overlay group cache:")
-        cache_label.pack(side="left")
-        reset_cache_btn = nb.Button(cache_row, text="Reset cached values", command=self._on_reset_group_cache)
-        if self._reset_group_cache is None:
-            reset_cache_btn.configure(state="disabled")
-        reset_cache_btn.pack(side="left", padx=(8, 0))
-        cache_row.grid(row=user_row, column=0, sticky="w", pady=ROW_PAD)
         user_row += 1
 
         if self._diagnostics_enabled:
@@ -1502,9 +1445,100 @@ class PreferencesPanel:
             self._update_payload_spam_controls_state()
             user_row += 1
 
-        next_row = 2
+        experimental_tab.columnconfigure(0, weight=1)
+        experimental_row = 0
+        disclaimer_label = nb.Label(
+            experimental_tab,
+            text="Experimental settings are unstable and may change without notice.",
+            wraplength=420,
+            justify="left",
+        )
+        disclaimer_label.grid(row=experimental_row, column=0, sticky="w", pady=ROW_PAD)
+        experimental_row += 1
+        dev_mode_row = ttk.Frame(experimental_tab, style=self._frame_style)
+        dev_mode_checkbox = nb.Checkbutton(
+            dev_mode_row,
+            text="Enable dev mode (requires restart)",
+            variable=self._var_dev_mode,
+            onvalue=True,
+            offvalue=False,
+            command=self._on_dev_mode_toggle,
+        )
+        dev_mode_checkbox.pack(side="left")
+        dev_mode_row.grid(row=experimental_row, column=0, sticky="w", pady=ROW_PAD)
+        experimental_row += 1
+        obs_row = ttk.Frame(experimental_tab, style=self._frame_style)
+        obs_checkbox = nb.Checkbutton(
+            obs_row,
+            text=OBS_CAPTURE_LABEL,
+            variable=self._var_obs_capture_friendly,
+            onvalue=True,
+            offvalue=False,
+            command=self._on_obs_capture_friendly_toggle,
+        )
+        _attach_tooltip(
+            obs_checkbox,
+            OBS_CAPTURE_TOOLTIP,
+            nb_module=nb,
+        )
+        obs_checkbox.pack(side="left")
+        if not obs_capture_supported():
+            obs_checkbox.state(["disabled"])
+        obs_row.grid(row=experimental_row, column=0, sticky="w", pady=ROW_PAD)
+        experimental_row += 1
+
+        clamp_row = ttk.Frame(experimental_tab, style=self._frame_style)
+        clamp_checkbox = nb.Checkbutton(
+            clamp_row,
+            text="Clamp fractional desktop scaling (physical clamp)",
+            variable=self._var_physical_clamp,
+            onvalue=True,
+            offvalue=False,
+            command=self._on_physical_clamp_toggle,
+        )
+        clamp_checkbox.pack(side="left")
+        clamp_row.grid(row=experimental_row, column=0, sticky="w", pady=ROW_PAD)
+        experimental_row += 1
+
+        clamp_override_row = ttk.Frame(experimental_tab, style=self._frame_style)
+        clamp_override_row.columnconfigure(1, weight=1)
+        nb.Label(
+            clamp_override_row,
+            text="Per-monitor clamp overrides (name=scale, comma-separated):",
+        ).grid(row=0, column=0, sticky="w")
+        clamp_override_entry = nb.EntryMenu(
+            clamp_override_row,
+            width=40,
+            textvariable=self._var_physical_clamp_overrides,
+        )
+        clamp_override_entry.grid(row=0, column=1, padx=(8, 0), sticky="we")
+        clamp_override_entry.bind("<Return>", self._on_physical_clamp_overrides_event)
+        clamp_override_entry.bind("<FocusOut>", self._on_physical_clamp_overrides_event)
+        clamp_override_apply = nb.Button(
+            clamp_override_row,
+            text="Apply",
+            command=self._on_physical_clamp_overrides_apply,
+        )
+        clamp_override_apply.grid(row=0, column=2, padx=(8, 0), sticky="e")
+        helper_label = nb.Label(
+            clamp_override_row,
+            text="Example: DisplayPort-2=1.0, HDMI-0=1.25 (empty to clear)",
+        )
+        helper_label.grid(row=1, column=0, columnspan=3, sticky="w", pady=(ROW_PAD[0], 0))
+        clamp_override_row.grid(row=experimental_row, column=0, sticky="we", pady=ROW_PAD)
+        experimental_row += 1
+
+        cache_row = ttk.Frame(experimental_tab, style=self._frame_style)
+        cache_label = nb.Label(cache_row, text="Overlay group cache:")
+        cache_label.pack(side="left")
+        reset_cache_btn = nb.Button(cache_row, text="Reset cached values", command=self._on_reset_group_cache)
+        if self._reset_group_cache is None:
+            reset_cache_btn.configure(state="disabled")
+        reset_cache_btn.pack(side="left", padx=(8, 0))
+        cache_row.grid(row=experimental_row, column=0, sticky="w", pady=ROW_PAD)
+        experimental_row += 1
         if self._dev_mode:
-            dev_label = nb.Label(frame, text="Developer Settings")
+            dev_label = nb.Label(experimental_tab, text="Developer Settings")
             try:
                 dev_font = tkfont.Font(root=parent, font=dev_label.cget("font"))
             except Exception:
@@ -1517,12 +1551,12 @@ class PreferencesPanel:
                 except Exception:
                     pass
             dev_frame = ttk.LabelFrame(
-                frame,
+                experimental_tab,
                 labelwidget=dev_label,
                 padding=(8, 8),
                 style=self._labelframe_style,
             )
-            dev_frame.grid(row=next_row, column=0, sticky="we", pady=ROW_PAD)
+            dev_frame.grid(row=experimental_row, column=0, sticky="we", pady=ROW_PAD)
             dev_frame.columnconfigure(0, weight=1)
             dev_row = 0
 
@@ -1645,12 +1679,12 @@ class PreferencesPanel:
             legacy_row.grid(row=dev_row, column=0, sticky="w", pady=ROW_PAD)
             dev_row += 1
 
-            next_row += 1
+            experimental_row += 1
 
         self._update_cycle_button_state()
 
         status_label = nb.Label(frame, textvariable=self._status_var, wraplength=400, justify="left")
-        status_label.grid(row=next_row, column=0, sticky="w", pady=ROW_PAD)
+        status_label.grid(row=2, column=0, sticky="w", pady=ROW_PAD)
         frame.columnconfigure(0, weight=1)
 
         self._frame = frame
@@ -1756,6 +1790,13 @@ class PreferencesPanel:
             self._status_var.set("Failed to reset cached values.")
             return
         self._status_var.set("Cached overlay values reset.")
+
+    def _on_dev_mode_toggle(self) -> None:
+        value = bool(self._var_dev_mode.get())
+        self._preferences.dev_mode = value
+        self._preferences.save()
+        self._dev_mode = value
+        self._status_var.set("Dev mode updated. Restart EDMC to apply.")
 
     def _on_show_status_toggle(self) -> None:
         value = bool(self._var_show_status.get())
