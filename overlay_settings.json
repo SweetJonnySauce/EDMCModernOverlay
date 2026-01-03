@@ -6,8 +6,7 @@
   "client_log_retention": 5,
   "gridlines_enabled": true,
   "gridline_spacing": 120,
-  "force_render": false,
-  "obs_capture_friendly": false,
+  "force_render": true,
   "force_xwayland": true,
   "physical_clamp_enabled": false,
   "physical_clamp_overrides": {},
@@ -24,7 +23,7 @@
   "nudge_overflow_payloads": false,
   "payload_nudge_gutter": 20,
   "status_message_gutter": 20,
-  "log_payloads": false,
+  "log_payloads": true,
   "payload_log_delay_seconds": 0.5,
   "controller_launch_command": "!ovr"
 }
