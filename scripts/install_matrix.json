@@ -109,6 +109,45 @@
       }
     },
     {
+      "id": "fedora-ostree",
+      "label": "Fedora (rpm-ostree/Bazzite)",
+      "match": {
+        "ids": [
+          "bazzite"
+        ]
+      },
+      "pkg_manager": {
+        "install": [
+          "sudo",
+          "rpm-ostree",
+          "install",
+          "--allow-inactive"
+        ]
+      },
+      "packages": {
+        "core": [
+          "python3",
+          "python3-pip",
+          "python3-virtualenv",
+          "rsync",
+          "curl",
+          "wmctrl"
+        ],
+        "qt": [
+          "libxkbcommon",
+          "libxkbcommon-x11",
+          "xcb-util-cursor"
+        ],
+        "wayland": [
+          "xwininfo",
+          "xprop"
+        ],
+        "flatpak": [
+          "flatpak-spawn"
+        ]
+      }
+    },
+    {
       "id": "opensuse",
       "label": "openSUSE / SLE",
       "match": {

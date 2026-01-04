@@ -73,6 +73,14 @@ EDMCModernOverlay/
 
 Eurocaps ships with Elite: Dangerous, but its redistribution rights are tied to Typodermic’s “Font Software for Desktop End User License Agreement (v230123)” (https://typodermicfonts.com/end-user-license-agreement). Because we can’t grant you that license, the installer now asks **you** to confirm that you already have the rights to use Eurocaps before it downloads the font. If you say no, the install continues with the bundled open-source fonts instead. Windows users can still run `scripts\install-eurocaps.bat`; Linux users just re-run `install_linux.sh` and accept the Eurocaps prompt when they’re ready.
 
+## How do I install on Bazzite (rpm-ostree)?
+
+The Linux installer detects Bazzite via `/run/ostree-booted` and `ID=bazzite`, skips rpm/dnf status checks, and offers to layer dependencies with `rpm-ostree install`. Layering requires a reboot once the packages are applied.
+
+- To auto-approve in non-interactive runs, pass `--yes`.
+- If you decline layering, you can choose to skip dependency installation and continue (manage packages manually).
+- Only Bazzite is mapped to the rpm-ostree profile right now; other rpm-ostree variants are not auto-mapped yet.
+
 ## Emoji characters show up as squares. How do I fix it?
 
 Source Sans 3 (the default HUD font) does not include emoji glyphs, so 📝 and friends render as tofu unless a fallback font is configured. Drop an emoji-capable font such as [Noto Color Emoji](https://github.com/googlefonts/noto-emoji) into `overlay_client/fonts/` and list it in `overlay_client/fonts/emoji_fallbacks.txt`. Each line can reference either a font file in that directory (`NotoColorEmoji.ttf`) or an installed family name (`Segoe UI Emoji`, `Twemoji Mozilla`, etc.). The overlay loads the fonts at startup and automatically falls back to the first family that contains the requested glyph, so messages published by plugins can freely include emoji once the font is available.

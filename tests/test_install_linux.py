@@ -90,6 +90,172 @@ echo "DETAIL_PY=${{PACKAGE_STATUS_DETAILS[python]}}"
     assert "status check unavailable" in lines.get("DETAIL_PY", "") or "status check unsupported" in lines.get("DETAIL_PY", "")
 
 
+def test_bazzite_ostree_routes_to_fedora_ostree() -> None:
+    env = os.environ.copy()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        installer_path = _write_trimmed_installer(tmpdir)
+        os_release = Path(tmpdir) / "os-release"
+        os_release.write_text("ID=bazzite\nID_LIKE=fedora\n", encoding="utf-8")
+        ostree_marker = Path(tmpdir) / "ostree-booted"
+        ostree_marker.write_text("", encoding="utf-8")
+        env["MODERN_OVERLAY_OS_RELEASE_PATH"] = str(os_release)
+        env["MODERN_OVERLAY_OSTREE_BOOTED_PATH"] = str(ostree_marker)
+        script = f"""
+export MODERN_OVERLAY_INSTALLER_IMPORT=1
+source "{installer_path}"
+PROFILE_SELECTED=0
+PROFILE_OVERRIDE=""
+auto_detect_profile
+echo "PROFILE_ID=${{PROFILE_ID:-}}"
+echo "PROFILE_SOURCE=${{PROFILE_SOURCE:-}}"
+"""
+        output = _run_bash(script, env)
+    lines = dict(line.split("=", 1) for line in output.strip().splitlines() if "=" in line)
+    assert lines.get("PROFILE_ID") == "fedora-ostree"
+    assert lines.get("PROFILE_SOURCE") == "auto"
+
+
+def test_fedora_non_ostree_keeps_fedora_profile() -> None:
+    env = os.environ.copy()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        installer_path = _write_trimmed_installer(tmpdir)
+        os_release = Path(tmpdir) / "os-release"
+        os_release.write_text("ID=fedora\nID_LIKE=fedora\n", encoding="utf-8")
+        env["MODERN_OVERLAY_OS_RELEASE_PATH"] = str(os_release)
+        env["MODERN_OVERLAY_OSTREE_BOOTED_PATH"] = str(Path(tmpdir) / "no-ostree-marker")
+        script = f"""
+export MODERN_OVERLAY_INSTALLER_IMPORT=1
+source "{installer_path}"
+PROFILE_SELECTED=0
+PROFILE_OVERRIDE=""
+auto_detect_profile
+echo "PROFILE_ID=${{PROFILE_ID:-}}"
+echo "PROFILE_SOURCE=${{PROFILE_SOURCE:-}}"
+"""
+        output = _run_bash(script, env)
+    lines = dict(line.split("=", 1) for line in output.strip().splitlines() if "=" in line)
+    assert lines.get("PROFILE_ID") == "fedora"
+    assert lines.get("PROFILE_SOURCE") == "auto"
+
+
+def test_ostree_skips_package_status_checks() -> None:
+    env = os.environ.copy()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        installer_path = _write_trimmed_installer(tmpdir)
+        os_release = Path(tmpdir) / "os-release"
+        os_release.write_text("ID=bazzite\nID_LIKE=fedora\n", encoding="utf-8")
+        ostree_marker = Path(tmpdir) / "ostree-booted"
+        ostree_marker.write_text("", encoding="utf-8")
+        sudo_path = Path(tmpdir) / "sudo"
+        sudo_path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        sudo_path.chmod(0o755)
+        env["PATH"] = f"{tmpdir}:{env.get('PATH','')}"
+        env["MODERN_OVERLAY_OS_RELEASE_PATH"] = str(os_release)
+        env["MODERN_OVERLAY_OSTREE_BOOTED_PATH"] = str(ostree_marker)
+        script = f"""
+export MODERN_OVERLAY_INSTALLER_IMPORT=1
+source "{installer_path}"
+DRY_RUN=true
+ASSUME_YES=true
+PROFILE_SELECTED=0
+PROFILE_OVERRIDE=""
+PLUGIN_DIR_KIND="standard"
+XDG_SESSION_TYPE=x11
+ensure_system_packages
+echo "SUPPORTED=${{PACKAGE_STATUS_CHECK_SUPPORTED}}"
+echo "TO_INSTALL=${{PACKAGES_TO_INSTALL[*]}}"
+echo "DETAIL_PY=${{PACKAGE_STATUS_DETAILS[python3]}}"
+"""
+        output = _run_bash(script, env)
+    lines = dict(line.split("=", 1) for line in output.strip().splitlines() if "=" in line)
+    assert lines.get("SUPPORTED") == "0"
+    assert "python3" in lines.get("TO_INSTALL", "")
+    assert "rpm-ostree" in lines.get("DETAIL_PY", "")
+
+
+def test_ostree_noninteractive_auto_approves_layering() -> None:
+    env = os.environ.copy()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        installer_path = _write_trimmed_installer(tmpdir)
+        os_release = Path(tmpdir) / "os-release"
+        os_release.write_text("ID=bazzite\nID_LIKE=fedora\n", encoding="utf-8")
+        ostree_marker = Path(tmpdir) / "ostree-booted"
+        ostree_marker.write_text("", encoding="utf-8")
+        sudo_path = Path(tmpdir) / "sudo"
+        sudo_path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        sudo_path.chmod(0o755)
+        env["PATH"] = f"{tmpdir}:{env.get('PATH','')}"
+        env["MODERN_OVERLAY_OS_RELEASE_PATH"] = str(os_release)
+        env["MODERN_OVERLAY_OSTREE_BOOTED_PATH"] = str(ostree_marker)
+        script = f"""
+export MODERN_OVERLAY_INSTALLER_IMPORT=1
+source "{installer_path}"
+DRY_RUN=true
+ASSUME_YES=false
+PROFILE_SELECTED=0
+PROFILE_OVERRIDE=""
+PLUGIN_DIR_KIND="standard"
+XDG_SESSION_TYPE=x11
+ensure_system_packages
+echo "DONE=1"
+"""
+        output = _run_bash(script, env)
+    lines = dict(line.split("=", 1) for line in output.strip().splitlines() if "=" in line)
+    assert lines.get("DONE") == "1"
+
+
+def test_ostree_flatpak_packages_added() -> None:
+    env = os.environ.copy()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        installer_path = _write_trimmed_installer(tmpdir)
+        os_release = Path(tmpdir) / "os-release"
+        os_release.write_text("ID=bazzite\nID_LIKE=fedora\n", encoding="utf-8")
+        ostree_marker = Path(tmpdir) / "ostree-booted"
+        ostree_marker.write_text("", encoding="utf-8")
+        sudo_path = Path(tmpdir) / "sudo"
+        sudo_path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        sudo_path.chmod(0o755)
+        env["PATH"] = f"{tmpdir}:{env.get('PATH','')}"
+        env["MODERN_OVERLAY_OS_RELEASE_PATH"] = str(os_release)
+        env["MODERN_OVERLAY_OSTREE_BOOTED_PATH"] = str(ostree_marker)
+        script = f"""
+export MODERN_OVERLAY_INSTALLER_IMPORT=1
+source "{installer_path}"
+DRY_RUN=true
+ASSUME_YES=true
+PROFILE_SELECTED=0
+PROFILE_OVERRIDE=""
+PLUGIN_DIR_KIND="flatpak"
+XDG_SESSION_TYPE=x11
+ensure_system_packages
+echo "TO_INSTALL=${{PACKAGES_TO_INSTALL[*]}}"
+"""
+        output = _run_bash(script, env)
+    lines = dict(line.split("=", 1) for line in output.strip().splitlines() if "=" in line)
+    assert "flatpak-spawn" in lines.get("TO_INSTALL", "")
+
+
+def test_command_logging_records_dry_run_package_install() -> None:
+    env = os.environ.copy()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        installer_path = _write_trimmed_installer(tmpdir)
+        log_file = Path(tmpdir) / "install.log"
+        script = f"""
+export MODERN_OVERLAY_INSTALLER_IMPORT=1
+source "{installer_path}"
+LOG_ENABLED=true
+LOG_FILE="{log_file}"
+DRY_RUN=true
+PKG_UPDATE_CMD=(dnf check-update)
+PKG_INSTALL_CMD=(dnf install -y)
+run_package_install "core dependencies" python3
+"""
+        _run_bash(script, env)
+        log_content = log_file.read_text(encoding="utf-8")
+    assert "Would execute: dnf check-update" in log_content
+    assert "Would execute: dnf install -y python3" in log_content
+
+
 def test_matrix_helper_emits_compositor_match() -> None:
     env = os.environ.copy()
     with tempfile.TemporaryDirectory() as tmpdir:
