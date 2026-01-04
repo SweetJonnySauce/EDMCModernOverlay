@@ -228,7 +228,7 @@ PROFILE_OVERRIDE=""
 PLUGIN_DIR_KIND="flatpak"
 XDG_SESSION_TYPE=x11
 ensure_system_packages
-echo "TO_INSTALL=${{PACKAGES_TO_INSTALL[*]}}"
+echo "TO_INSTALL=$(format_list_or_none \"${{PACKAGES_TO_INSTALL[@]}}\")"
 """
         output = _run_bash(script, env)
     lines = dict(line.split("=", 1) for line in output.strip().splitlines() if "=" in line)
