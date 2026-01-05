@@ -1195,4 +1195,8 @@ else
 fi
 print_notes
 
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
+fi
+
 exit 0
