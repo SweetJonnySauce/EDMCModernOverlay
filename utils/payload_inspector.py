@@ -1127,6 +1127,7 @@ def _coerce_number(value: Any) -> float:
 
 
 def main() -> None:
+    """Launch the payload inspector UI."""
     parser = argparse.ArgumentParser(description="Tail overlay payloads with grouping metadata.")
     parser.add_argument(
         "--log-dir",

@@ -52,6 +52,7 @@ class SetupSurfaceMixin:
         line_width_defaults: Dict[str, int],
         payload_model_factory: Callable[[Callable[[str, Dict[str, Any]], None]], Any],
     ) -> None:
+        """Initialize overlay state, timers, and helper services for a window."""
         self._font_family = self._resolve_font_family()
         self._font_fallbacks: Tuple[str, ...] = self._resolve_emoji_font_families()
         self._status_raw = "Initialising"

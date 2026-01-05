@@ -252,6 +252,7 @@ def _apply_font_bounds_edit(
     edited_field: str,
     edited_value: Any,
 ) -> tuple[float, float, bool]:
+    """Validate and apply a font-bound edit, returning updated bounds + acceptance."""
     candidate = _validate_font_bound(edited_value)
     if candidate is None:
         return current_min, current_max, False
@@ -267,6 +268,7 @@ def _apply_font_bounds_edit(
 
 
 def _apply_font_step_edit(current_step: int, edited_value: Any) -> tuple[int, bool]:
+    """Validate and apply a legacy font step edit, returning value + acceptance."""
     candidate = _validate_font_step(edited_value)
     if candidate is None:
         return current_step, False
@@ -708,6 +710,7 @@ class Preferences:
         )
 
     def save(self) -> None:
+        """Persist preferences to EDMC config and the JSON shadow file."""
         if self._config_enabled:
             self._persist_to_config()
         self._write_shadow_file()
@@ -1616,9 +1619,11 @@ class PreferencesPanel:
 
     @property
     def frame(self):  # pragma: no cover - Tk integration
+        """Return the root Tk frame for embedding in EDMC."""
         return self._frame
 
     def apply(self) -> None:
+        """Apply pending UI edits and persist preferences."""
         # Ensure any pending entry/spinbox values are written back before saving.
         self._apply_font_bounds(update_remote=False)
         self._apply_font_step(update_remote=False)

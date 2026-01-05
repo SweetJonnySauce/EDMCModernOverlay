@@ -24,10 +24,10 @@
 
 | Phase | Description | Status |
 | --- | --- | --- |
-| 1 | Inventory and prioritize docstring targets | Planned |
-| 2 | Document core runtime and API entrypoints | Planned |
-| 3 | Document UI-heavy modules and utilities | Planned |
-| 4 | Review, consistency pass, and verification | Planned |
+| 1 | Inventory and prioritize docstring targets | Completed |
+| 2 | Document core runtime and API entrypoints | Completed |
+| 3 | Document UI-heavy modules and utilities | Completed |
+| 4 | Review, consistency pass, and verification | Completed |
 
 ## Phase Details
 
@@ -46,9 +46,20 @@
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 1.1 | Scan for exported/public functions lacking docstrings | Planned |
-| 1.2 | Build a prioritized target list (top 20-30 items) | Planned |
-| 1.3 | Agree on docstring style conventions for this pass | Planned |
+| 1.1 | Scan for exported/public functions lacking docstrings | Completed |
+| 1.2 | Build a prioritized target list (top 20-30 items) | Completed |
+| 1.3 | Agree on docstring style conventions for this pass | Completed |
+
+**Target list (Phase 1.2)**
+- `load.py` (EDMC hook entrypoints, runtime lifecycle helpers)
+- `overlay_plugin/overlay_api.py` (public integration API + grouping store)
+- `overlay_client/overlay_client.py` (client window + log level integration)
+- `overlay_controller/overlay_controller.py` (controller entrypoints + log hint API)
+- `overlay_client/render_surface.py` (rendering data helpers used by overlay client)
+- `overlay_client/setup_surface.py` (setup mixin that wires window services)
+- `overlay_plugin/preferences.py` (preference persistence + panel apply hooks)
+- `utils/plugin_group_manager.py` (grouping UI entrypoint + payload records)
+- `utils/payload_inspector.py` (payload inspector UI entrypoint)
 
 ### Phase 2: Document core runtime and API entrypoints
 - Focus on entrypoints, runtime services, and cross-process boundaries.
@@ -56,25 +67,32 @@
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 2.1 | Add/update docstrings in `load.py` for runtime lifecycle helpers | Planned |
-| 2.2 | Add/update docstrings in `overlay_plugin/overlay_api.py` | Planned |
-| 2.3 | Add/update docstrings in `overlay_client/overlay_client.py` and `overlay_controller/overlay_controller.py` | Planned |
-| 2.4 | Add/update docstrings in `overlay_client/render_surface.py` and `overlay_client/setup_surface.py` | Planned |
+| 2.1 | Add/update docstrings in `load.py` for runtime lifecycle helpers | Completed |
+| 2.2 | Add/update docstrings in `overlay_plugin/overlay_api.py` | Completed |
+| 2.3 | Add/update docstrings in `overlay_client/overlay_client.py` and `overlay_controller/overlay_controller.py` | Completed |
+| 2.4 | Add/update docstrings in `overlay_client/render_surface.py` and `overlay_client/setup_surface.py` | Completed |
 
 ### Phase 3: Document UI-heavy modules and utilities
 - Target large UI constructors and debug tooling where intent is currently implicit.
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 3.1 | Add/update docstrings in `overlay_plugin/preferences.py` (panel sections + callbacks) | Planned |
-| 3.2 | Add/update docstrings in `utils/plugin_group_manager.py` and `utils/payload_inspector.py` | Planned |
-| 3.3 | Add/update docstrings in smaller helper UIs where behavior is non-obvious | Planned |
+| 3.1 | Add/update docstrings in `overlay_plugin/preferences.py` (panel sections + callbacks) | Completed |
+| 3.2 | Add/update docstrings in `utils/plugin_group_manager.py` and `utils/payload_inspector.py` | Completed |
+| 3.3 | Add/update docstrings in smaller helper UIs where behavior is non-obvious | Completed |
 
 ### Phase 4: Review, consistency pass, and verification
 - Ensure wording consistency, no contradictions, and no promises beyond behavior.
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 4.1 | Consistency sweep (terminology, tense, and side-effect mentions) | Planned |
-| 4.2 | Run selected tests or skip with notes if unchanged behavior | Planned |
-| 4.3 | Final docstring lint/PEP 257 sanity check (manual) | Planned |
+| 4.1 | Consistency sweep (terminology, tense, and side-effect mentions) | Completed |
+| 4.2 | Run selected tests or skip with notes if unchanged behavior | Skipped (docstring-only changes) |
+| 4.3 | Final docstring lint/PEP 257 sanity check (manual) | Completed |
+
+## Results
+- Added/updated docstrings in core entrypoints (`load.py`, `overlay_controller/overlay_controller.py`).
+- Documented overlay API and client mixins (`overlay_plugin/overlay_api.py`, `overlay_client/overlay_client.py`).
+- Added docstrings for rendering/setup helpers (`overlay_client/render_surface.py`, `overlay_client/setup_surface.py`).
+- Clarified preferences apply helpers and UI entrypoints (`overlay_plugin/preferences.py`, `utils/plugin_group_manager.py`, `utils/payload_inspector.py`).
+- Tests not run (docstring-only changes).

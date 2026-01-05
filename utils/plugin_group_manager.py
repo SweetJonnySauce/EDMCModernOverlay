@@ -96,6 +96,8 @@ _MISSING = object()
 
 @dataclass(frozen=True)
 class PayloadRecord:
+    """Snapshot of an overlay payload parsed from the log stream."""
+
     payload_id: str
     plugin: Optional[str] = None
     payload: Optional[Mapping[str, Any]] = None
@@ -3781,6 +3783,7 @@ class PluginGroupManagerApp:
 
 
 def main() -> None:
+    """Launch the interactive plugin grouping UI."""
     parser = argparse.ArgumentParser(description="Interactive Plugin Group Manager for Modern Overlay.")
     parser.add_argument(
         "--log-dir",

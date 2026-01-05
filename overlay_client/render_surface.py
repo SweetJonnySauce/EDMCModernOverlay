@@ -40,6 +40,8 @@ _CLIENT_LOGGER = logging.getLogger("EDMC.ModernOverlay.Client")
 
 @dataclass
 class _ScreenBounds:
+    """Track the min/max bounds for on-screen debug geometry."""
+
     min_x: float = float("inf")
     min_y: float = float("inf")
     max_x: float = float("-inf")
@@ -65,6 +67,8 @@ class _ScreenBounds:
 
 @dataclass
 class _OverlayBounds:
+    """Track the min/max bounds for rendered overlay payloads."""
+
     min_x: float = float("inf")
     min_y: float = float("inf")
     max_x: float = float("-inf")
@@ -100,6 +104,8 @@ class _GroupDebugState:
 
 @dataclass(frozen=True)
 class _MeasuredText:
+    """Measured text extents in pixels for cached payload rendering."""
+
     width: int
     ascent: int
     descent: int
