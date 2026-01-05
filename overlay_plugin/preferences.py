@@ -1452,10 +1452,21 @@ class PreferencesPanel:
         experimental_row = 0
         disclaimer_label = nb.Label(
             experimental_tab,
-            text="Experimental settings are unstable and may change without notice.",
-            wraplength=420,
+            text="Experimental settings are unstable, unsupported, and may change without notice.",
+            wraplength=640,
             justify="left",
         )
+        try:
+            disclaimer_font = tkfont.Font(root=parent, font=disclaimer_label.cget("font"))
+        except Exception:
+            disclaimer_font = None
+        else:
+            try:
+                disclaimer_font.configure(weight="bold")
+                self._managed_fonts.append(disclaimer_font)
+                disclaimer_label.configure(font=disclaimer_font)
+            except Exception:
+                pass
         disclaimer_label.grid(row=experimental_row, column=0, sticky="w", pady=ROW_PAD)
         experimental_row += 1
         dev_mode_row = ttk.Frame(experimental_tab, style=self._frame_style)

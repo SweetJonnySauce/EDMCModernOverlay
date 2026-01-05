@@ -208,6 +208,13 @@ def main(argv: Optional[list[str]] = None) -> int:
             "dev_settings.json ignored (release mode). Export %s=1 or use a -dev version to enable dev helpers.",
             DEV_MODE_ENV_VAR,
         )
+    if sys.platform.startswith("win") and getattr(initial_settings, "obs_capture_friendly", False):
+        try:
+            from overlay_client.windows_icon import apply_app_user_model_id
+
+            apply_app_user_model_id(logger=_CLIENT_LOGGER)
+        except Exception as exc:
+            _CLIENT_LOGGER.debug("Failed to apply AppUserModelID for OBS capture mode: %s", exc)
     helper = DeveloperHelperController(_CLIENT_LOGGER, CLIENT_DIR, initial_settings)
     if troubleshooting_config.overlay_logs_to_keep is not None:
         helper.set_log_retention(troubleshooting_config.overlay_logs_to_keep)
