@@ -2997,6 +2997,11 @@ def plugin_app(parent) -> Optional[Any]:  # pragma: no cover - EDMC Tk frame hoo
 
 
 def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - optional settings pane
+    """EDMC entrypoint: build and return the Modern Overlay preferences panel.
+
+    Returns the Tk frame embedded in the EDMC settings dialog and caches the
+    panel so subsequent save hooks can persist changes.
+    """
     LOGGER.debug("plugin_prefs invoked: parent=%r cmdr=%r is_beta=%s", parent, cmdr, is_beta)
     if _preferences is None:
         LOGGER.debug("Preferences not initialised; returning no UI")
@@ -3106,6 +3111,7 @@ def get_version_status() -> Optional[VersionStatus]:
 
 
 def prefs_changed(cmdr: str, is_beta: bool) -> None:  # pragma: no cover - save hook
+    """EDMC entrypoint: persist preference edits and notify the running overlay."""
     LOGGER.debug("prefs_changed invoked: cmdr=%r is_beta=%s", cmdr, is_beta)
     if _prefs_panel is None:
         LOGGER.debug("No preferences panel to save")
@@ -3146,6 +3152,7 @@ def journal_entry(
     entry: Dict[str, Any],
     state: Dict[str, Any],
 ) -> None:
+    """EDMC entrypoint: forward journal entries to the overlay runtime when active."""
     if _plugin:
         _plugin.handle_journal(cmdr, system, station, entry)
 
