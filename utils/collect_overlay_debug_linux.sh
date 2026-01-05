@@ -452,7 +452,12 @@ abbrev_path() {
 
 check_python_modules() {
     print_header "Python Module Checks"
-    local modules=(pydbus)
+    echo "Note: pywayland and PyQt6.QtWaylandClient are Wayland-only helpers."
+    local modules=(
+        pydbus
+        pywayland
+        PyQt6.QtWaylandClient
+    )
     local interpreters=()
     local venv_python="${OVERLAY_CLIENT_DIR}/.venv/bin/python"
     if [[ -x "$venv_python" ]]; then
@@ -1189,5 +1194,9 @@ else
     printf '\n(Overlay client logs omitted; re-run with --show-logs to include them.)\n'
 fi
 print_notes
+
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
+fi
 
 exit 0

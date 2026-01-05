@@ -2,7 +2,7 @@
 [![Github All Releases](https://img.shields.io/github/downloads/SweetJonnySauce/EDMCModernOverlay/total.svg)](https://github.com/SweetJonnySauce/EDMCModernOverlay/releases/latest)
 [![GitHub Latest Version](https://img.shields.io/github/v/release/SweetJonnySauce/EDMCModernOverlay)](https://github.com/SweetJonnySauce/EDMCModernOverlay/releases/latest)
 [![Build Status][build-badge]][build-url]
-[![VirusTotal](https://img.shields.io/badge/VirusTotal-clean-brightgreen.svg)](https://www.virustotal.com/gui/file/8c42044a0fdf0d8c15160cecd83cda4f4a46c40643fd85f888cf3c7ecf24092b)
+[![VirusTotal](https://img.shields.io/badge/VirusTotal-clean-brightgreen.svg)](https://www.virustotal.com/gui/file/91eda0c93c5f54259afcd2244021bf7a690d1e1203b0e249cef16cd94051b506)
 
 [build-badge]: https://github.com/SweetJonnySauce/EDMCModernOverlay/actions/workflows/ci.yml/badge.svg?branch=main
 [build-url]: https://github.com/SweetJonnySauce/EDMCModernOverlay/actions/workflows/ci.yml
@@ -20,7 +20,7 @@ Plugin authors can leverage EDMC Modern Overlay's flexible payload grouping syst
 - Custom placement of Plugin overlays using the Overlay Controller (see the [Wiki for Overlay Controller](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Overlay-Controller))
 - Works in borderless or windowed mode on any display size
 - Cross platform for Windows and Linux
-- Support 4 distributions for Linux (Debian, Fedora, OpenSUSE, Arch)
+- Supports Debian/Ubuntu, Fedora (dnf), openSUSE, Arch, and Bazzite (rpm-ostree)
 - Supports host and Flatpak installs of EDMC on Linux
 - Code is 100% Python
 - Numerous development features for EDMC Plugin Developers
@@ -29,6 +29,8 @@ Plugin authors can leverage EDMC Modern Overlay's flexible payload grouping syst
 
 ## Installation
 See the [Wiki for Prerequisites and Installation](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Installation). Refer to the [Installation FAQ](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Installation-FAQs) for more OS and distro specific details.
+
+On Bazzite (rpm-ostree), the Linux installer layers dependencies with `rpm-ostree install` and requires a reboot after the packages are applied. Use `--yes` for non-interactive installs, or choose to skip dependency installation if you prefer to manage packages manually.
 
 ## Upgrades
 See the [Wiki for Upgrading](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Upgrading)

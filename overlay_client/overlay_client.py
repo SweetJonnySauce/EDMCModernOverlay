@@ -104,7 +104,11 @@ _CLIENT_LOGGER.addFilter(_ReleaseLogLevelFilter(release_mode=not DEBUG_CONFIG_EN
 
 
 def apply_log_level_hint(level: Optional[int], *, source: Optional[str] = None) -> None:
-    """Force the client logger level to the propagated EDMC level."""
+    """Force the client logger level to match the propagated EDMC hint.
+
+    This also disables the release-mode log filter so debug settings can
+    take effect in the running client.
+    """
 
     global _LOG_LEVEL_HINT, _LOG_LEVEL_HINT_SOURCE, _RELEASE_FILTER_ENABLED
     if level is None:
@@ -180,7 +184,11 @@ def _load_line_width_config() -> Dict[str, int]:
     return config
 
 class OverlayWindow(SetupSurfaceMixin, InteractionSurfaceMixin, QWidget, RenderSurfaceMixin, FollowSurfaceMixin, ControlSurfaceMixin):
-    """Transparent overlay that renders CMDR and location info."""
+    """Transparent overlay window that renders payloads and debug surfaces.
+
+    This is the main PyQt6 widget used by the standalone overlay client and
+    mixes setup, render, follow, control, and interaction behaviors.
+    """
 
     _resolve_font_family = _resolve_font_family
     _resolve_emoji_font_families = _resolve_emoji_font_families

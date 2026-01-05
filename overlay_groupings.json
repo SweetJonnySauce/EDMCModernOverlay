@@ -341,7 +341,8 @@
       "toaster-left-",
       "toaster-right-",
       "pad-",
-      "station-"
+      "station-",
+      "landingpad-"
     ],
     "idPrefixGroups": {
       "LandingPad": {
@@ -360,7 +361,44 @@
         "markerLabelPosition": "below",
         "controllerPreviewBoxMode": "max",
         "backgroundColor": null,
-        "backgroundBorderColor": null
+        "backgroundBorderColor": null,
+        "notes": "Pre 2.5.6"
+      },
+      "Landingpad Starport": {
+        "idPrefixes": [
+          "landingpad-starport-"
+        ],
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last"
+      },
+      "Landingpad FleetCarrier": {
+        "idPrefixes": [
+          "landingpad-fleetcarrier-"
+        ],
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last"
+      },
+      "Landingpad SquadronCarrier": {
+        "idPrefixes": [
+          "landingpad-squadroncarrier-"
+        ],
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last"
+      },
+      "Landingpad ColonisationShip": {
+        "idPrefixes": [
+          "landingpad-colonisationship-"
+        ],
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last"
       }
     }
   },

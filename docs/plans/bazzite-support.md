@@ -27,11 +27,13 @@
 - Installer matrix: add a dedicated `fedora-ostree` profile in `scripts/install_matrix.json` for rpm-ostree variants.
 - Installer behavior: ask permission before running any rpm-ostree layering commands.
 - Declined rpm-ostree installs: prompt the user to either skip dependency installation (continue with a warning) or exit.
-- Distro scope: limit the new profile mapping to Bazzite for now.
-- Non-interactive: `--yes` auto-approves rpm-ostree layering.
+- Distro scope: limit the new profile mapping to Bazzite for now (i.e., only `ID=bazzite`; do not map uBlue/Kinoite/Silverblue yet).
+- rpm/dnf checks: hard skip all rpm/dnf package checks on rpm-ostree systems (no timeout fallback).
+- Non-interactive: support non-interactive mode; `--yes` auto-approves rpm-ostree layering.
 
 ## Open Questions
 - Are any Fedora package names different or unavailable in Bazzite/uBlue images for the current dependency list? (Unknown; use the `fedora-ostree` profile to carry overrides once validated.)
+  - Current status: no known differences; keep `fedora-ostree` as the override hook for future deltas.
 
 ## Refactorer Persona
 - Bias toward carving out modules aggressively while guarding behavior: no feature changes, no silent regressions.
@@ -83,15 +85,155 @@
 
 | Phase | Description | Status |
 | --- | --- | --- |
+| Phase 1 | Detect rpm-ostree + route Bazzite to `fedora-ostree` without changing mutable Fedora behavior. | Completed |
+| Phase 2 | Implement rpm-ostree dependency flow (no rpm/dnf checks, prompt/--yes, flatpak-aware). | Completed |
+| Phase 3 | Add command logging, docs updates, and validation coverage. | Completed |
 
 ## Phase Details
 
-### Phase N: Title Placeholder
-- Describe the extraction/decoupling goal for this phase.
-- Note the APIs you intend to introduce and the behaviors that must remain unchanged.
-- Call out edge cases and invariants that need tests before and after the move.
-- Risks: list potential regressions unique to this phase.
-- Mitigations: planned tests, flags, and rollout steps to contain those risks.
+### Phase 1: rpm-ostree detection and profile routing
+- Goal: detect rpm-ostree systems reliably and map `ID=bazzite` to `fedora-ostree`.
+- Behavior that must remain unchanged: existing Fedora (dnf) installs on mutable systems.
+- Edge cases/invariants: `/run/ostree-booted` is the primary signal; do not infer ostree from Fedora-like IDs alone.
+- Risks: mis-detecting mutable Fedora as ostree; missing Bazzite IDs in os-release parsing.
+- Mitigations: add targeted detection tests and keep mapping limited to Bazzite.
+
+| Stage | Description | Status |
+| --- | --- | --- |
+| 1.1 | Add rpm-ostree detection helper and Bazzite routing logic. | Completed |
+| 1.2 | Add `fedora-ostree` profile in `scripts/install_matrix.json`. | Completed |
+| 1.3 | Add/adjust tests for detection + profile mapping. | Completed |
+
+#### Phase 1 Plan
+
+Stage 1.1 (rpm-ostree detection + routing)
+- Touch points: `scripts/install_linux.sh`.
+- Steps:
+  1) Add a small helper (e.g., `is_ostree_system`) that checks `/run/ostree-booted`; allow a test override path via env to avoid touching `/run` in tests.
+  2) In `auto_detect_profile`, if ostree is detected and `ID=bazzite`, route to `fedora-ostree` before the generic matrix match.
+  3) Preserve manual `--profile` overrides and existing `PROFILE_SOURCE` behavior.
+- Tests: add coverage in Stage 1.3, then run `python -m pytest tests/test_install_linux.py -k ostree`.
+
+Stage 1.2 (add fedora-ostree profile)
+- Touch points: `scripts/install_matrix.json`.
+- Steps:
+  1) Add a new `fedora-ostree` entry under `distros` with `match.ids` set to `["bazzite"]` only.
+  2) Mirror Fedora package lists for now; keep overrides empty until validated in Phase 2.
+- Tests: rely on JSON parsing in existing tests; no new runtime behavior yet.
+
+Stage 1.3 (tests for detection + profile mapping)
+- Touch points: `tests/test_install_linux.py`.
+- Steps:
+  1) Add a test that simulates `/run/ostree-booted` (via env override) + `ID=bazzite`, then asserts `PROFILE_ID=fedora-ostree`.
+  2) Add a test that confirms Fedora without the ostree marker still resolves to `fedora`.
+- Tests: `python -m pytest tests/test_install_linux.py -k ostree`.
+
+#### Phase 1 Results
+- Added an ostree detection helper with test overrides and routed Bazzite to `fedora-ostree` in `scripts/install_linux.sh`.
+- Added a `fedora-ostree` distro profile for `ID=bazzite` in `scripts/install_matrix.json` using rpm-ostree install commands.
+- Added tests for Bazzite (ostree) and Fedora (non-ostree) profile selection in `tests/test_install_linux.py`.
+
+### Phase 2: rpm-ostree dependency install flow
+- Goal: provide a safe dependency path on ostree without rpm/dnf checks.
+- Behavior that must remain unchanged: dnf/rpm checks on mutable Fedora; Flatpak EDMC installs keep working.
+- Edge cases/invariants: hard skip rpm/dnf checks on ostree; prompt for rpm-ostree layering unless `--yes`.
+- Risks: hanging on rpm/dnf calls; user confusion on reboot requirements.
+- Mitigations: explicit prompts, clear logging, and skip/exit choices when layering is declined.
+
+| Stage | Description | Status |
+| --- | --- | --- |
+| 2.1 | Gate rpm/dnf checks behind ostree detection (hard skip on ostree). | Completed |
+| 2.2 | Implement rpm-ostree layering flow with prompt + non-interactive auto-approve. | Completed |
+| 2.3 | Handle decline path (skip deps with warning or exit). | Completed |
+| 2.4 | Ensure Flatpak EDMC installs remain supported in the ostree path. | Completed |
+
+#### Phase 2 Plan
+
+Stage 2.1 (skip rpm/dnf checks on ostree)
+- Touch points: `scripts/install_linux.sh`.
+- Steps:
+  1) Add a guard in the dependency evaluation path to bypass `classify_package_statuses` when `is_ostree_system` is true.
+  2) Ensure the guard is scoped to rpm-ostree only so mutable Fedora still runs full package checks.
+  3) Log a clear message that status checks are skipped on ostree (no fallback/timeouts).
+- Tests: add a bash-sourced test that sets the ostree marker and asserts package status checks are skipped.
+
+Stage 2.2 (rpm-ostree layering flow)
+- Touch points: `scripts/install_linux.sh`.
+- Steps:
+  1) Add a dedicated install path for `fedora-ostree` that runs `rpm-ostree install` with the computed package list.
+  2) Prompt before layering; auto-approve in non-interactive mode and when `--yes` is supplied.
+  3) Print guidance about the required reboot after layering completes.
+- Tests: add a test that verifies the rpm-ostree install command is selected for `fedora-ostree` and that `--yes` skips the prompt.
+
+Stage 2.3 (decline flow)
+- Touch points: `scripts/install_linux.sh`.
+- Steps:
+  1) If the user declines rpm-ostree layering, prompt to either skip dependency installation (with a warning) or exit.
+  2) Ensure the skip path keeps the installer running while clearly stating missing dependencies.
+- Tests: add a non-interactive test path that simulates a decline and verifies the skip/exit behavior.
+
+Stage 2.4 (Flatpak support on ostree)
+- Touch points: `scripts/install_linux.sh`, `scripts/install_matrix.json`.
+- Steps:
+  1) Confirm `flatpak-spawn` stays in the `fedora-ostree` package list.
+  2) Ensure the Flatpak detection branch still adds Flatpak helper packages under `fedora-ostree`.
+- Tests: add coverage that `flatpak` packages are included for `fedora-ostree` when a Flatpak EDMC path is detected.
+
+#### Phase 2 Results
+- Skipped package status checks on rpm-ostree systems and treat all dependency packages as install candidates.
+- Added rpm-ostree-specific prompting (auto-approve in non-interactive/`--yes`) with a skip-or-exit decline path and reboot guidance.
+- Added tests to cover ostree skip behavior, non-interactive approvals, and Flatpak package inclusion in `tests/test_install_linux.py`.
+
+### Phase 3: logging, docs, and validation
+- Goal: improve troubleshooting and document Bazzite guidance.
+- Behavior that must remain unchanged: existing installer logs and docs not related to Bazzite.
+- Edge cases/invariants: log each installer command before execution; keep logs readable.
+- Risks: noisy logs or missing commands; doc drift from actual behavior.
+- Mitigations: small, consistent log lines and doc updates aligned with install flow.
+
+| Stage | Description | Status |
+| --- | --- | --- |
+| 3.1 | Log each installer command before execution. | Completed |
+| 3.2 | Update README/FAQ/wiki guidance for Bazzite/ostree. | Completed |
+| 3.3 | Add/adjust validation steps for rpm-ostree detection and non-hanging behavior. | Completed |
+
+#### Phase 3 Plan
+
+Stage 3.1 (command logging)
+- Touch points: `scripts/install_linux.sh`.
+- Steps:
+  1) Centralize command execution logging (e.g., wrap `run_package_install`/download steps) so each external command is logged before execution.
+  2) Ensure logs are written to the log file when `--log` is enabled.
+  3) Keep logs concise and include the resolved command line.
+- Tests: add a test that runs with `DRY_RUN=true` and asserts the command log output contains the expected command string.
+
+Stage 3.2 (docs updates)
+- Touch points: `README.md`, any FAQ/docs referenced by install instructions.
+- Steps:
+  1) Add a Bazzite/ostree section with rpm-ostree layering guidance and reboot requirement.
+  2) Document the non-interactive behavior (`--yes`) and the skip/exit prompts.
+  3) Note that Bazzite-only mapping is intentional for now.
+- Tests: n/a (docs).
+
+Stage 3.3 (validation checklist)
+- Touch points: `docs/plans/bazzite-support.md` (test plan), optionally `tests/`.
+- Steps:
+  1) Add a short validation checklist for Bazzite: detection, no rpm/dnf hangs, rpm-ostree prompt behavior, and Flatpak path.
+  2) Ensure tests mention non-interactive auto-approve and decline path.
+- Tests: update the Per-Iteration Test Plan notes with any new commands if needed.
+
+#### Phase 3 Results
+- Added command logging hooks for package installs, downloads, checksums, virtualenv setup, and rsync updates in `scripts/install_linux.sh`.
+- Updated README + FAQ with Bazzite/rpm-ostree install guidance and non-interactive notes.
+- Added a logging test for dry-run package installs in `tests/test_install_linux.py`.
+- Captured a Bazzite validation checklist below.
+
+#### Bazzite Validation Checklist
+- Auto-detect Bazzite with `/run/ostree-booted` + `ID=bazzite` and select `fedora-ostree`.
+- Ensure rpm/dnf status checks are skipped (no hangs).
+- Confirm rpm-ostree prompt appears, `--yes` auto-approves, and decline path offers skip/exit.
+- Verify Flatpak EDMC installs include `flatpak-spawn`.
+- Confirm command logs record package manager, rpm-ostree, and rsync/pip operations when `--log` is enabled.
 
 | Stage | Description | Status |
 | --- | --- | --- |

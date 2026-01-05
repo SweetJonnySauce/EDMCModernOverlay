@@ -2778,7 +2778,11 @@ def _controller_debug(message: str, *args: object) -> None:
 
 
 def set_log_level_hint(value: Optional[int], name: Optional[str] = None, source: str = "override") -> None:
-    """Test hook to override the controller log level without relying on env."""
+    """Set a log level override used when the controller logger initializes.
+
+    This is primarily a test hook and resets the cached logger so the new
+    hint is applied on next use.
+    """
 
     global _LOG_LEVEL_OVERRIDE_VALUE, _LOG_LEVEL_OVERRIDE_NAME, _LOG_LEVEL_OVERRIDE_SOURCE, _CONTROLLER_LOGGER
     _LOG_LEVEL_OVERRIDE_VALUE = value
@@ -2788,7 +2792,7 @@ def set_log_level_hint(value: Optional[int], name: Optional[str] = None, source:
 
 
 def launch() -> None:
-    """Entry point used by other modules."""
+    """Launch the overlay controller UI and record startup metadata."""
 
     root_path = Path(__file__).resolve().parents[1]
     _controller_debug("Launching overlay controller: python=%s cwd=%s", sys.executable, Path.cwd())

@@ -464,6 +464,8 @@ class _GroupingUpdate:
 
 
 class _PluginGroupingStore:
+    """Read/write access to overlay_groupings.json for plugin grouping updates."""
+
     def __init__(self, path: Path) -> None:
         self._path = path
         self._lock = RLock()

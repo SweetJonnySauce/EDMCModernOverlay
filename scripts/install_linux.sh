@@ -165,6 +165,20 @@ format_command() {
     printf '%s' "${formatted# }"
 }
 
+log_command() {
+    log_verbose "Executing command: $(format_command "$@")"
+}
+
+log_command_in_dir() {
+    local dir="$1"
+    shift
+    log_verbose "Executing command in '${dir}': $(format_command "$@")"
+}
+
+log_dry_run_command() {
+    log_verbose "[dry-run] Would execute: $(format_command "$@")"
+}
+
 format_list_or_none() {
     if (($# == 0)); then
         printf 'none'
@@ -355,6 +369,11 @@ select_profile_by_id() {
     return 1
 }
 
+is_ostree_system() {
+    local marker="${MODERN_OVERLAY_OSTREE_BOOTED_PATH:-/run/ostree-booted}"
+    [[ -e "$marker" ]]
+}
+
 ensure_distro_profile() {
     if (( PROFILE_SELECTED )); then
         return
@@ -372,14 +391,33 @@ ensure_distro_profile() {
 auto_detect_profile() {
     local os_id="unknown"
     local os_like=""
-    if [[ -r /etc/os-release ]]; then
+    local os_release_path="${MODERN_OVERLAY_OS_RELEASE_PATH:-/etc/os-release}"
+    if [[ -r "$os_release_path" ]]; then
         # shellcheck disable=SC1091
-        . /etc/os-release
+        . "$os_release_path"
         os_id="${ID:-unknown}"
         os_like="${ID_LIKE:-}"
     fi
+    local ostree_detected=0
+    if is_ostree_system; then
+        ostree_detected=1
+    fi
+    local output=""
+    if (( ostree_detected )) && [[ "${os_id,,}" == "bazzite" ]]; then
+        output="$(matrix_helper by-id "fedora-ostree")"
+        if [[ -n "$output" ]]; then
+            eval "$output"
+            if [[ "${PROFILE_FOUND:-0}" -eq 1 ]]; then
+                PROFILE_SELECTED=1
+                PROFILE_SOURCE="auto"
+                return
+            fi
+        fi
+    elif [[ "${os_id,,}" == "bazzite" ]]; then
+        os_id="unknown"
+        os_like=""
+    fi
     local like_csv="${os_like// /,}"
-    local output
     output="$(matrix_helper match "${os_id,,}" "${like_csv,,}")"
     if [[ -n "$output" ]]; then
         eval "$output"
@@ -457,7 +495,9 @@ run_package_install() {
         echo "ℹ️  Updating package index before installing ${label}..."
         if [[ "$DRY_RUN" == true ]]; then
             echo "📝 [dry-run] $(format_command "${PKG_UPDATE_CMD[@]}")"
+            log_dry_run_command "${PKG_UPDATE_CMD[@]}"
         else
+            log_command "${PKG_UPDATE_CMD[@]}"
             if ! "${PKG_UPDATE_CMD[@]}"; then
                 local update_status=$?
                 handle_dependency_install_failure "refresh the package index" "$update_status" "${packages[@]}"
@@ -468,9 +508,9 @@ run_package_install() {
     echo "ℹ️  Installing ${label} via ${PKG_INSTALL_CMD[1]:-package manager}..."
     if [[ "$DRY_RUN" == true ]]; then
         echo "📝 [dry-run] $(format_command "${PKG_INSTALL_CMD[@]}" "${packages[@]}")"
-        log_verbose "[dry-run] Would execute: $(format_command "${PKG_INSTALL_CMD[@]}" "${packages[@]}") for ${label}"
+        log_dry_run_command "${PKG_INSTALL_CMD[@]}" "${packages[@]}"
     else
-        log_verbose "Executing command: $(format_command "${PKG_INSTALL_CMD[@]}" "${packages[@]}") for ${label}"
+        log_command "${PKG_INSTALL_CMD[@]}" "${packages[@]}"
         if ! "${PKG_INSTALL_CMD[@]}" "${packages[@]}"; then
             local install_status=$?
             handle_dependency_install_failure "install ${label}" "$install_status" "${packages[@]}"
@@ -1180,13 +1220,16 @@ download_with_tool() {
     local dest="$2"
     if [[ "$DRY_RUN" == true ]]; then
         echo "📝 [dry-run] Would download '$url' into '$dest'."
+        log_verbose "[dry-run] Would download '${url}' into '${dest}'."
         return 0
     fi
     if command -v curl >/dev/null 2>&1; then
+        log_command curl -fsSL "$url" -o "$dest"
         curl -fsSL "$url" -o "$dest"
         return $?
     fi
     if command -v wget >/dev/null 2>&1; then
+        log_command wget -qO "$dest" "$url"
         wget -qO "$dest" "$url"
         return $?
     fi
@@ -1240,8 +1283,10 @@ install_eurocaps_font() {
         return 1
     fi
     if command -v install >/dev/null 2>&1; then
+        log_command install -m 644 "$tmp_file" "$font_path"
         install -m 644 "$tmp_file" "$font_path"
     else
+        log_command cp "$tmp_file" "$font_path"
         cp "$tmp_file" "$font_path"
         chmod 644 "$font_path" >/dev/null 2>&1 || true
     fi
@@ -1382,6 +1427,7 @@ verify_checksums() {
         sha_flags+=(--quiet)
     fi
     local sha_output
+    log_command_in_dir "$base_dir" sha256sum "${sha_flags[@]}" -c "$manifest_path"
     if sha_output="$(cd "$base_dir" && sha256sum "${sha_flags[@]}" -c "$manifest_path" 2>&1)"; then
         if [[ "$LOG_ENABLED" == true && -n "$sha_output" ]]; then
             printf '%s\n' "$sha_output"
@@ -1826,6 +1872,10 @@ ensure_system_packages() {
     update_cmd="$(format_list_or_none "${PKG_UPDATE_CMD[@]}")"
     install_cmd="$(format_list_or_none "${PKG_INSTALL_CMD[@]}")"
     log_verbose "Package commands: update=(${update_cmd}), install=(${install_cmd})"
+    local ostree_detected=0
+    if is_ostree_system; then
+        ostree_detected=1
+    fi
     local packages=("${PROFILE_PACKAGES_CORE[@]}" "${PROFILE_PACKAGES_QT[@]}")
     local fallback_notice="python3 python3-venv python3-pip rsync libxcb-cursor0 libxkbcommon-x11-0"
     if [[ "$session_stack" == "wayland" && ${#PROFILE_PACKAGES_WAYLAND[@]} > 0 ]]; then
@@ -1863,10 +1913,21 @@ ensure_system_packages() {
     package_list="$(format_list_or_none "${packages[@]}")"
     log_verbose "Packages to evaluate: ${package_list}"
 
-    classify_package_statuses "${packages[@]}"
-
-    if (( ! PACKAGE_STATUS_CHECK_SUPPORTED )); then
-        echo "ℹ️  Detailed package status checks are unavailable for this package manager; requesting installation for all listed packages."
+    if (( ostree_detected )); then
+        echo "ℹ️  rpm-ostree system detected; skipping package status checks and requesting installation for all packages."
+        log_verbose "rpm-ostree marker present; skipping package status checks."
+        reset_package_status_tracking
+        PACKAGE_STATUS_CHECK_SUPPORTED=0
+        PACKAGES_TO_INSTALL=("${packages[@]}")
+        local pkg
+        for pkg in "${packages[@]}"; do
+            PACKAGE_STATUS_DETAILS["$pkg"]="status check skipped on rpm-ostree"
+        done
+    else
+        classify_package_statuses "${packages[@]}"
+        if (( ! PACKAGE_STATUS_CHECK_SUPPORTED )); then
+            echo "ℹ️  Detailed package status checks are unavailable for this package manager; requesting installation for all listed packages."
+        fi
     fi
 
     if ((${#PACKAGES_ALREADY_OK[@]} > 0)); then
@@ -1896,17 +1957,45 @@ ensure_system_packages() {
         return
     fi
 
-    local prompt_message="Install / upgrade ${#action_packages[@]} package(s) now?"
-    if ! prompt_yes_no "$prompt_message"; then
-        echo "❌ Installation cannot continue without required system packages." >&2
-        local declined_list
-        declined_list="$(format_list_or_none "${action_packages[@]}")"
-        log_verbose "User declined package installation for: ${declined_list}"
-        exit 1
+    if (( ostree_detected )); then
+        echo "ℹ️  rpm-ostree installs layer packages into the system image and require a reboot."
+        local prompt_message="Layer ${#action_packages[@]} package(s) now via rpm-ostree?"
+        local install_approved=0
+        if [[ "$ASSUME_YES" == true ]]; then
+            echo "${prompt_message} [Y/n]: y (auto-approved)"
+            install_approved=1
+        elif [[ ! -t 0 ]]; then
+            echo "${prompt_message} [Y/n]: y (non-interactive)"
+            install_approved=1
+        else
+            if prompt_yes_no "$prompt_message"; then
+                install_approved=1
+            fi
+        fi
+        if (( ! install_approved )); then
+            echo "⚠️  rpm-ostree install declined."
+            if prompt_yes_no_default_no "Skip dependency installation and continue?"; then
+                echo "⚠️  Continuing without installing dependencies; you must install them manually."
+                return
+            fi
+            echo "❌ Installation aborted due to missing dependencies." >&2
+            exit 1
+        fi
+        require_command sudo "sudo"
+        run_package_install "rpm-ostree dependencies" "${action_packages[@]}"
+        echo "ℹ️  Reboot is required after rpm-ostree installs complete."
+    else
+        local prompt_message="Install / upgrade ${#action_packages[@]} package(s) now?"
+        if ! prompt_yes_no "$prompt_message"; then
+            echo "❌ Installation cannot continue without required system packages." >&2
+            local declined_list
+            declined_list="$(format_list_or_none "${action_packages[@]}")"
+            log_verbose "User declined package installation for: ${declined_list}"
+            exit 1
+        fi
+        require_command sudo "sudo"
+        run_package_install "core dependencies" "${action_packages[@]}"
     fi
-
-    require_command sudo "sudo"
-    run_package_install "core dependencies" "${action_packages[@]}"
 }
 
 create_venv_and_install() {
@@ -1942,19 +2031,23 @@ create_venv_and_install() {
 
     if [[ ! -d overlay_client/.venv ]]; then
         echo "🐍 Creating Python virtual environment..."
+        log_command python3 -m venv overlay_client/.venv
         python3 -m venv overlay_client/.venv
     fi
 
     # shellcheck disable=SC1091
     source overlay_client/.venv/bin/activate
     echo "📦 Installing overlay client requirements..."
+    log_command pip install --upgrade pip
     pip install --upgrade pip >/dev/null
+    log_command pip install -r overlay_client/requirements/base.txt
     pip install -r overlay_client/requirements/base.txt
 
     local session_stack
     session_stack="$(detect_display_stack)"
     if [[ "$session_stack" == "wayland" ]]; then
         echo "📦 Installing Wayland-specific Python helpers into the virtualenv..."
+        log_command pip install -r overlay_client/requirements/wayland.txt
         pip install -r overlay_client/requirements/wayland.txt
     else
         echo "ℹ️  Skipping Wayland-specific Python helpers (session type: ${session_stack:-unknown})."
@@ -1974,6 +2067,7 @@ copy_initial_install() {
         echo "📝 [dry-run] Would copy '$(basename "$src")' into '$plugin_root' and set up overlay_client/.venv."
         return
     fi
+    log_command cp -a "$src" "$plugin_root"
     cp -a "$src" "$plugin_root"
     local target="${plugin_root}/$(basename "$src")"
     verify_checksums "$plugin_root" "installed plugin files"
@@ -2000,6 +2094,7 @@ rsync_update_plugin() {
     )
 
     echo "🔄 Updating existing Modern Overlay installation..."
+    log_command rsync -av --delete "${excludes[@]}" "$src"/ "$dest"/
     rsync -av --delete "${excludes[@]}" "$src"/ "$dest"/
     log_verbose "rsync update completed for '$dest'."
     verify_checksums "$(dirname "$dest")" "updated plugin files"
