@@ -138,7 +138,7 @@ When running under X11/Wayland the overlay lets the compositor manage its window
 
 Modern Overlay now ships with compositor-aware helpers and multiple fallbacks. The plugin publishes the detected session type/compositor in every `OverlayConfig` message, and all decisions are logged when EDMC logging is set to DEBUG. To get the most out of the Wayland path:
 
-- **wlroots compositors (Sway, Wayfire, Hyprland):** Install `pywayland>=0.4.15` inside `overlay_client/.venv` and ensure `swaymsg`/`hyprctl` are available on `PATH`. The client requests a layer-shell surface so the HUD stays above fullscreen apps and uses compositor-side input suppression.
+- **wlroots compositors (Sway, Wayfire, Hyprland):** The installer pulls in `pywayland>=0.4.15` inside `overlay_client/.venv` on Wayland; ensure `swaymsg`/`hyprctl` are available on `PATH`. The client requests a layer-shell surface so the HUD stays above fullscreen apps and uses compositor-side input suppression. If you skipped the installer or need to reinstall manually:
   ```bash
   cd /path/to/EDMCModernOverlay
   source overlay_client/.venv/bin/activate
