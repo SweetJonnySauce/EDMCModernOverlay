@@ -36,6 +36,14 @@
 - Prioritize by file size, churn, and user-facing impact (entrypoints first).
 - Define a short style guide snippet for docstrings used in this repo.
 
+**Docstring style snippet (Phase 1.3 draft)**
+- Follow PEP 257: one-line summary, blank line, then details only when needed.
+- Prefer intent + side effects over restating implementation.
+- Use EDMC terminology already present in the codebase; avoid new jargon.
+- Call out threading/IO/UI constraints that affect EDMC safety or UX.
+- Document params/returns only when non-obvious or side-effectful (plain PEP prose).
+- Keep docstrings short on helpers; expand only where behavior is subtle or error-prone.
+
 | Stage | Description | Status |
 | --- | --- | --- |
 | 1.1 | Scan for exported/public functions lacking docstrings | Planned |
