@@ -820,6 +820,9 @@ class ControlSurfaceMixin:
                 self._payload_model,
                 _CLIENT_LOGGER.debug,
             )
+            self._last_visible_overlay_bounds_for_target = {}
+            self._last_overlay_bounds_for_target = {}
+            self._last_transform_by_group = {}
             self._mark_legacy_cache_dirty()
             self._request_repaint("override_reload", immediate=True)
             _CLIENT_LOGGER.debug("Override reload handled (nonce=%s)", nonce or "none")
@@ -845,6 +848,9 @@ class ControlSurfaceMixin:
                 mgr._controller_active_nonce = nonce_val  # type: ignore[attr-defined]
                 mgr._controller_active_nonce_ts = time.time()  # type: ignore[attr-defined]
             mgr.apply_override_payload(overrides_map, nonce_val)
+            self._last_visible_overlay_bounds_for_target = {}
+            self._last_overlay_bounds_for_target = {}
+            self._last_transform_by_group = {}
             self._mark_legacy_cache_dirty()
             self._request_repaint("override_payload", immediate=True)
             _CLIENT_LOGGER.debug("Override payload applied (nonce=%s)", nonce_val or "none")
