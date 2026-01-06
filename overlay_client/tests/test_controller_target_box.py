@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import overlay_client.render_surface as rs
+from overlay_client.control_surface import ControlSurfaceMixin
 from overlay_client.viewport_helper import ViewportTransform, ScaleMode
 
 
@@ -22,6 +23,10 @@ class _PainterStub:
 
 
 class _WindowStub(rs.RenderSurfaceMixin):
+    pass
+
+
+class _WindowControlStub(ControlSurfaceMixin, rs.RenderSurfaceMixin):
     pass
 
 
@@ -533,3 +538,143 @@ def test_cache_transform_rejected_when_timestamp_stale():
     assert bounds.min_x == 10.0
     assert bounds.min_y == 5.0
     assert token == "nw"
+
+
+def _setup_window_with_stale_target_bounds(preview_mode: str) -> _WindowControlStub:
+    window = _WindowControlStub()
+    window._controller_active_group = ("PluginB", "G1")
+    window._controller_active_anchor = None
+    window._controller_active_nonce = ""
+    window._controller_active_nonce_ts = 0.0
+    window._controller_override_ts = 0.0
+    window.controller_mode_state = lambda: "active"
+    stale_bounds = rs._OverlayBounds(min_x=0, min_y=0, max_x=100, max_y=50)
+    window._last_visible_overlay_bounds_for_target = {("PluginB", "G1"): stale_bounds}
+    window._last_overlay_bounds_for_target = {("PluginB", "G1"): stale_bounds}
+    window._last_transform_by_group = {}
+    window._resolve_bounds_for_active_group = lambda ag, bm: bm.get(ag)
+    window._fallback_bounds_from_cache = lambda ag, mapper=None, anchor_override=None, **kwargs: rs.RenderSurfaceMixin._fallback_bounds_from_cache(  # type: ignore[misc]
+        window, ag, mapper, anchor_override=anchor_override, **kwargs
+    )
+    window._line_width = lambda key: 1
+    window._compute_legacy_mapper = lambda: _make_mapper(1.0)
+    window._overlay_bounds_to_rect = lambda b, m: rs.QRect(
+        int(b.min_x), int(b.min_y), int(b.max_x - b.min_x), int(b.max_y - b.min_y)
+    )
+    window._overlay_point_to_screen = lambda pt, m: (int(pt[0]), int(pt[1]))
+    window._overlay_bounds_from_cache_entry = lambda entry, prefer_transformed=True: rs.RenderSurfaceMixin._overlay_bounds_from_cache_entry(  # type: ignore[misc]
+        entry, prefer_transformed=prefer_transformed
+    )
+    window._build_bounds_with_anchor = lambda w, h, token, ax, ay: rs._OverlayBounds(
+        min_x=ax, min_y=ay, max_x=ax + w, max_y=ay + h
+    )
+    window._anchor_from_overlay_bounds = lambda bounds, token: (bounds.min_x, bounds.min_y)
+    cache_entry = {
+        "base": {
+            "base_min_x": 0.0,
+            "base_min_y": 0.0,
+            "base_max_x": 100.0,
+            "base_max_y": 50.0,
+            "base_width": 100.0,
+            "base_height": 50.0,
+        },
+        "last_visible_transformed": {
+            "base_min_x": 0.0,
+            "base_min_y": 0.0,
+            "base_max_x": 100.0,
+            "base_max_y": 50.0,
+            "base_width": 100.0,
+            "base_height": 50.0,
+        },
+        "max_transformed": {
+            "base_min_x": 0.0,
+            "base_min_y": 0.0,
+            "base_max_x": 100.0,
+            "base_max_y": 50.0,
+            "base_width": 100.0,
+            "base_height": 50.0,
+        },
+        "last_updated": 200.0,
+    }
+    window._group_cache = SimpleNamespace(
+        get_group=lambda plugin, suffix: cache_entry if (plugin, suffix) == ("PluginB", "G1") else None,
+        _state={"groups": {"PluginB": {"G1": cache_entry}}},
+    )
+
+    class _OverrideStub:
+        def __init__(self, mode):
+            self._mode = mode
+            self._offset_x = 0.0
+            self._offset_y = 0.0
+
+        def group_offsets(self, plugin, suffix):
+            return (self._offset_x, self._offset_y)
+
+        def group_preserve_fill_aspect(self, plugin, suffix):
+            return True, "nw"
+
+        def group_controller_preview_box_mode(self, plugin, suffix):
+            return self._mode
+
+        def apply_override_payload(self, overrides, nonce):  # noqa: ARG002
+            if not isinstance(overrides, dict):
+                return None
+            plugin_entry = overrides.get("PluginB")
+            if not isinstance(plugin_entry, dict):
+                return None
+            groups = plugin_entry.get("idPrefixGroups")
+            if not isinstance(groups, dict):
+                return None
+            group_entry = groups.get("G1")
+            if not isinstance(group_entry, dict):
+                return None
+            raw_x = group_entry.get("offsetX")
+            raw_y = group_entry.get("offsetY")
+            try:
+                self._offset_x = float(raw_x)
+            except (TypeError, ValueError):
+                pass
+            try:
+                self._offset_y = float(raw_y)
+            except (TypeError, ValueError):
+                pass
+            return None
+
+        def current_override_nonce(self):
+            return ""
+
+        def override_generation_timestamp(self):
+            return 0.0
+
+    window._override_manager = _OverrideStub(preview_mode)
+    window._mark_legacy_cache_dirty = lambda: None
+    window._request_repaint = lambda *args, **kwargs: None
+    return window
+
+
+def _assert_target_rect_origin(window: _WindowControlStub, expected_x: int, expected_y: int) -> None:
+    painter = _PainterStub()
+    rs.RenderSurfaceMixin._paint_controller_target_box(window, painter)  # type: ignore[misc]
+    rects = [d for d in painter.draws if d[0] == "rect"]
+    assert rects
+    rect = rects[0]
+    assert rect[1] == expected_x
+    assert rect[2] == expected_y
+
+
+def test_target_box_moves_after_override_payload_last():
+    window = _setup_window_with_stale_target_bounds("last")
+    _assert_target_rect_origin(window, 0, 0)
+    window.apply_override_payload(
+        {"overrides": {"PluginB": {"idPrefixGroups": {"G1": {"offsetX": 20.0, "offsetY": 10.0}}}}, "nonce": "n1"}
+    )
+    _assert_target_rect_origin(window, 20, 10)
+
+
+def test_target_box_moves_after_override_payload_max():
+    window = _setup_window_with_stale_target_bounds("max")
+    _assert_target_rect_origin(window, 0, 0)
+    window.apply_override_payload(
+        {"overrides": {"PluginB": {"idPrefixGroups": {"G1": {"offsetX": 20.0, "offsetY": 10.0}}}}, "nonce": "n1"}
+    )
+    _assert_target_rect_origin(window, 20, 10)
