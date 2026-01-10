@@ -207,7 +207,7 @@ expand_dynamic_packages() {
     local pkg minor=""
     for pkg in "$@"; do
         case "$pkg" in
-            python3.<minor>-devel)
+            'python3.<minor>-devel')
                 if [[ -z "$minor" ]]; then
                     minor="$(get_python_minor_version)" || minor=""
                 fi
