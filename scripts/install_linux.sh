@@ -1897,7 +1897,7 @@ ensure_system_packages() {
 
     if [[ "$session_stack" == "wayland" && ${#PROFILE_PACKAGES_WAYLAND[@]} > 0 ]]; then
         echo "ℹ️  Wayland session detected; including helper packages with the core dependencies."
-        echo "ℹ️  Wayland-specific Python dependencies install inside overlay_client/.venv when detected; no system package is required."
+        echo "ℹ️  Wayland-specific Python dependencies install inside overlay_client/.venv; some distros require extra Wayland dev packages."
     elif [[ "$session_stack" == "x11" && ${#PROFILE_PACKAGES_WAYLAND[@]} > 0 ]]; then
         echo "ℹ️  X11 session detected; skipping Wayland helper packages."
     elif [[ "$session_stack" == "unknown" && ${#PROFILE_PACKAGES_WAYLAND[@]} > 0 ]]; then
@@ -2049,6 +2049,11 @@ create_venv_and_install() {
         echo "📦 Installing Wayland-specific Python helpers into the virtualenv..."
         log_command pip install -r overlay_client/requirements/wayland.txt
         pip install -r overlay_client/requirements/wayland.txt
+        if [[ "$PROFILE_ID" == "fedora-ostree" ]]; then
+            echo "📦 Installing Bazzite Wayland build helpers into the virtualenv..."
+            log_command pip install pywayland PyQt6-Qt6
+            pip install pywayland PyQt6-Qt6
+        fi
     else
         echo "ℹ️  Skipping Wayland-specific Python helpers (session type: ${session_stack:-unknown})."
     fi
