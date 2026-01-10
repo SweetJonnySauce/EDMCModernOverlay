@@ -188,6 +188,42 @@ format_list_or_none() {
     printf '%s' "$*"
 }
 
+get_python_minor_version() {
+    local version major minor
+    version="$(python3 - <<'PY' 2>/dev/null
+import sys
+print(f"{sys.version_info.major}.{sys.version_info.minor}")
+PY
+)"
+    IFS='.' read -r major minor <<<"$version"
+    if [[ -z "$major" || -z "$minor" ]]; then
+        log_verbose "Unable to determine python3 minor version (raw='${version:-empty}')."
+        return 1
+    fi
+    printf '%s' "$minor"
+}
+
+expand_dynamic_packages() {
+    local pkg minor=""
+    for pkg in "$@"; do
+        case "$pkg" in
+            python3.<minor>-devel)
+                if [[ -z "$minor" ]]; then
+                    minor="$(get_python_minor_version)" || minor=""
+                fi
+                if [[ -n "$minor" ]]; then
+                    printf '%s\n' "python3.${minor}-devel"
+                else
+                    printf '%s\n' "$pkg"
+                fi
+                ;;
+            *)
+                printf '%s\n' "$pkg"
+                ;;
+        esac
+    done
+}
+
 print_breaking_change_warning() {
     cat <<'EOF'
 ⚠️  Breaking upgrade notice
@@ -1888,6 +1924,9 @@ ensure_system_packages() {
         packages+=("${PROFILE_PACKAGES_FLATPAK[@]}")
         fallback_notice+=" flatpak-spawn"
     fi
+    if [[ "$PROFILE_ID" == "fedora-ostree" ]]; then
+        mapfile -t packages < <(expand_dynamic_packages "${packages[@]}")
+    fi
     if ((${#packages[@]} == 0)); then
         echo "⚠️  Automatic dependency installation is disabled for profile '$PROFILE_LABEL'."
         echo "    Ensure these packages (or their equivalents) are installed manually: ${fallback_notice}"
@@ -1914,7 +1953,7 @@ ensure_system_packages() {
     log_verbose "Packages to evaluate: ${package_list}"
 
     if (( ostree_detected )); then
-        echo "ℹ️  rpm-ostree system detected; skipping package status checks and requesting installation for all packages."
+        echo "ℹ️  rpm-ostree system detected; skipping package status checks and requesting installation for all packages. rpm-ostree will skip (inactivate) any packages already provided during installation."
         log_verbose "rpm-ostree marker present; skipping package status checks."
         reset_package_status_tracking
         PACKAGE_STATUS_CHECK_SUPPORTED=0

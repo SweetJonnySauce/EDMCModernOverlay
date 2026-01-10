@@ -101,10 +101,7 @@
         ],
         "wayland": [
           "xwininfo",
-          "xprop",
-          "plasma-wayland-protocols",
-          "wayland-devel",
-          "python3.14-devel"
+          "xprop"
         ],
         "flatpak": [
           "flatpak-spawn"
@@ -143,7 +140,10 @@
         ],
         "wayland": [
           "xwininfo",
-          "xprop"
+          "xprop",
+          "plasma-wayland-protocols",
+          "wayland-devel",
+          "python3.<minor>-devel"
         ],
         "flatpak": [
           "flatpak-spawn"
