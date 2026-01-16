@@ -24,15 +24,17 @@ A clear and concise description of what you expected to happen.
 If applicable, add screenshots to help explain your problem.
 
 **Desktop (please complete the following information):**
- - OS: [e.g. iOS]
- - Browser [e.g. chrome, safari]
- - Version [e.g. 22]
+This information is important for troubleshooting EDMCModernOverlay issues since it is cross-platform. If you are on Linux, please make sure to include what distribution you are running.
+ - OS: [e.g. Windows 10, Windows 11, Linux distribution]
 
-**Smartphone (please complete the following information):**
- - Device: [e.g. iPhone6]
- - OS: [e.g. iOS8.1]
- - Browser [e.g. stock browser, safari]
- - Version [e.g. 22]
+**Logs**
+In almost every case it is important to see your `EDMarketConnector-debug.log` with EDMC Log Level set to DEBUG. Follow these steps and then attach the log. Additional logs may be asked for but are not needed for initial troubleshooting.
+
+Steps to get logs:
+1) Start EDMC and go in to File > Settings
+2) On the Configuration tab, set Log Level to `DEBUG`
+3) Restart EDMC
+4) Gather the `EDMarketConnector-debug.log` and attach it to this case.
 
 **Additional context**
 Add any other context about the problem here.
