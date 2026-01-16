@@ -2,7 +2,7 @@
 [![Github All Releases](https://img.shields.io/github/downloads/SweetJonnySauce/EDMCModernOverlay/total.svg)](https://github.com/SweetJonnySauce/EDMCModernOverlay/releases/latest)
 [![GitHub Latest Version](https://img.shields.io/github/v/release/SweetJonnySauce/EDMCModernOverlay)](https://github.com/SweetJonnySauce/EDMCModernOverlay/releases/latest)
 [![Build Status][build-badge]][build-url]
-[![VirusTotal](https://img.shields.io/badge/VirusTotal-clean-brightgreen.svg)](https://www.virustotal.com/gui/file/b3327b732c00d7d604938e31a9b7825b55b3b04ca7f2d069ef139df215612c7c)
+[![VirusTotal](https://img.shields.io/badge/VirusTotal-clean-brightgreen.svg)](https://www.virustotal.com/gui/file/91eda0c93c5f54259afcd2244021bf7a690d1e1203b0e249cef16cd94051b506)
 
 [build-badge]: https://github.com/SweetJonnySauce/EDMCModernOverlay/actions/workflows/ci.yml/badge.svg?branch=main
 [build-url]: https://github.com/SweetJonnySauce/EDMCModernOverlay/actions/workflows/ci.yml
@@ -30,8 +30,6 @@ Plugin authors can leverage EDMC Modern Overlay's flexible payload grouping syst
 ## Installation
 See the [Wiki for Prerequisites and Installation](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Installation). Refer to the [Installation FAQ](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Installation-FAQs) for more OS and distro specific details.
 
-On Bazzite (rpm-ostree), the Linux installer layers dependencies with `rpm-ostree install` and requires a reboot after the packages are applied. Use `--yes` for non-interactive installs, or choose to skip dependency installation if you prefer to manage packages manually.
-
 ## Upgrades
 See the [Wiki for Upgrading](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Upgrading)
 
@@ -39,7 +37,6 @@ See the [Wiki for Upgrading](https://github.com/SweetJonnySauce/EDMCModernOverla
 See the [Wiki for Usage](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Usage) for how to run the game with the HUD and configure settings.
 
 See the [Wiki for Overlay Controller ](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Overlay-Controller) for how to modify where overlays are placed on the game screen.
-
    
 # Support
 Best way to get support for this plugin is to create a github issue in this repo. This is a side project for me. As such, support is best effort only and there is no guarantee I'll be able to fix or fully address your issue/request. You can occassionally find me on [EDCD Discord](https://edcd.github.io/) in the `#edmc-plugins` channel.
