@@ -111,6 +111,10 @@ class SetupSurfaceMixin:
         self._base_width: int = int(BASE_WIDTH)
         self._log_retention: int = max(1, int(initial.client_log_retention))
         self._force_render: bool = bool(getattr(initial, "force_render", False))
+        self._obs_capture_friendly: bool = bool(getattr(initial, "obs_capture_friendly", False))
+        if not sys.platform.startswith("win"):
+            self._obs_capture_friendly = False
+        self._obs_capture_icon_handles: Tuple[Optional[int], Optional[int]] = (None, None)
         self._physical_clamp_enabled: bool = bool(getattr(initial, "physical_clamp_enabled", False))
         self._physical_clamp_overrides: Dict[str, float] = dict(
             getattr(initial, "physical_clamp_overrides", {}) or {}
@@ -154,7 +158,7 @@ class SetupSurfaceMixin:
             clear_transient_parent_ids_fn=self._clear_transient_parent_ids,
             window_handle_fn=lambda: self.windowHandle(),
             set_widget_attribute_fn=lambda attr, enabled: self.setAttribute(attr, enabled),
-            set_window_flag_fn=lambda flag, enabled: self.setWindowFlag(flag, enabled),
+            set_window_flag_fn=self._set_window_flag,
             ensure_visible_fn=lambda: self.show() if not self.isVisible() else None,
             raise_fn=lambda: self.raise_() if self.isVisible() else None,
             set_children_attr_fn=lambda transparent: self._set_children_click_through(transparent),
@@ -406,6 +410,47 @@ class SetupSurfaceMixin:
             "values": values,
         }
 
+    def _set_window_flag(self, flag: Qt.WindowType, enabled: bool) -> None:
+        apply_enabled = enabled
+        if flag == Qt.WindowType.Tool and self._obs_capture_friendly and sys.platform.startswith("win"):
+            apply_enabled = False
+        try:
+            self.setWindowFlag(flag, apply_enabled)
+        except Exception as exc:
+            _CLIENT_LOGGER.debug("Failed to set window flag %s=%s: %s", flag, apply_enabled, exc)
+
+    # Set up experimental feature to have overlay run as a separate app for screen grab with OBS
+    def _apply_obs_capture_window_identity(self) -> None:
+        if not self._obs_capture_friendly or not sys.platform.startswith("win"):
+            return
+        if self.windowHandle() is None:
+            return
+        try:
+            hwnd = int(self.winId())
+        except Exception as exc:
+            _CLIENT_LOGGER.debug("Failed to acquire window handle for OBS icon update: %s", exc)
+            return
+        try:
+            from overlay_client.windows_icon import apply_window_icons, destroy_window_icons
+        except Exception as exc:
+            _CLIENT_LOGGER.debug("Failed to load Windows icon helper: %s", exc)
+            return
+        old_handles = self._obs_capture_icon_handles
+        new_big, new_small = apply_window_icons(hwnd, logger=_CLIENT_LOGGER)
+        if new_big is None and new_small is None:
+            return
+        old_big, old_small = old_handles
+        destroy_window_icons(
+            (
+                old_big if new_big is not None else None,
+                old_small if new_small is not None else None,
+            ),
+            logger=_CLIENT_LOGGER,
+        )
+        effective_big = new_big if new_big is not None else old_big
+        effective_small = new_small if new_small is not None else old_small
+        self._obs_capture_icon_handles = (effective_big, effective_small)
+
     def _handle_show_event(self) -> None:
         self._apply_legacy_scale()
         self._platform_controller.prepare_window(self.windowHandle())
@@ -416,6 +461,7 @@ class SetupSurfaceMixin:
             self._platform_context.force_xwayland,
         )
         self._platform_controller.apply_click_through(True)
+        self._apply_obs_capture_window_identity()
         screen = self.windowHandle().screen() if self.windowHandle() else None
         if screen is None:
             screen = QGuiApplication.primaryScreen()

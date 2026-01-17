@@ -9,6 +9,8 @@ from typing import Any, Dict, Optional
 import json
 import logging
 
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import QApplication
 
 from overlay_client.client_config import InitialClientSettings, load_initial_settings
@@ -17,6 +19,36 @@ from overlay_client.debug_config import DEBUG_CONFIG_ENABLED, load_dev_settings,
 from overlay_client.developer_helpers import DeveloperHelperController
 from overlay_client.overlay_client import CLIENT_DIR, DEV_MODE_ENV_VAR, OverlayWindow, _CLIENT_LOGGER, apply_log_level_hint
 from overlay_client.window_tracking import create_elite_window_tracker
+
+APP_NAME = "EDMC Modern Overlay"
+APP_ICON_TEXT = "MO"
+APP_ICON_PATH = CLIENT_DIR / "assets" / "EDMCModernOverlay.ico"
+
+
+def _build_app_icon(text: str = APP_ICON_TEXT) -> QIcon:
+    icon = QIcon()
+    for size in (256, 128, 64, 32):
+        pixmap = QPixmap(size, size)
+        pixmap.fill(QColor(18, 18, 18))
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(QColor(245, 245, 245))
+        font = QFont()
+        font.setBold(True)
+        font.setPixelSize(int(size * 0.5))
+        painter.setFont(font)
+        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, text)
+        painter.end()
+        icon.addPixmap(pixmap)
+    return icon
+
+
+def _load_app_icon() -> QIcon:
+    if APP_ICON_PATH.is_file():
+        icon = QIcon(str(APP_ICON_PATH))
+        if not icon.isNull():
+            return icon
+    return _build_app_icon()
 
 
 def resolve_port_file(args_port: Optional[str]) -> Path:
@@ -176,6 +208,13 @@ def main(argv: Optional[list[str]] = None) -> int:
             "dev_settings.json ignored (release mode). Export %s=1 or use a -dev version to enable dev helpers.",
             DEV_MODE_ENV_VAR,
         )
+    if sys.platform.startswith("win") and getattr(initial_settings, "obs_capture_friendly", False):
+        try:
+            from overlay_client.windows_icon import apply_app_user_model_id
+
+            apply_app_user_model_id(logger=_CLIENT_LOGGER)
+        except Exception as exc:
+            _CLIENT_LOGGER.debug("Failed to apply AppUserModelID for OBS capture mode: %s", exc)
     helper = DeveloperHelperController(_CLIENT_LOGGER, CLIENT_DIR, initial_settings)
     if troubleshooting_config.overlay_logs_to_keep is not None:
         helper.set_log_retention(troubleshooting_config.overlay_logs_to_keep)
@@ -194,8 +233,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         _CLIENT_LOGGER.debug("Debug tracing enabled (payload_ids=%s)", payload_filter)
 
     app = QApplication(sys.argv)
+    app.setApplicationName(APP_NAME)
+    app.setApplicationDisplayName(APP_NAME)
+    app_icon = _load_app_icon()
+    app.setWindowIcon(app_icon)
     data_client = OverlayDataClient(port_file)
     window = OverlayWindow(initial_settings, dev_settings)
+    window.setWindowTitle(APP_NAME)
+    window.setWindowIcon(app_icon)
     window.set_data_client(data_client)
     helper.apply_initial_window_state(window, initial_settings)
     tracker = create_elite_window_tracker(_CLIENT_LOGGER, monitor_provider=window.monitor_snapshots)

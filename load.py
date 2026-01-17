@@ -46,6 +46,8 @@ if __package__:
         schedule_config_rebroadcasts,
         schedule_version_notice_rebroadcasts,
     )
+    from .overlay_plugin.obs_capture_support import obs_capture_preference_value
+    from .overlay_plugin.overlay_config_payload import build_overlay_config_payload
     from .overlay_plugin.preferences import (
         CLIENT_LOG_RETENTION_MAX,
         CLIENT_LOG_RETENTION_MIN,
@@ -96,6 +98,8 @@ else:  # pragma: no cover - EDMC loads as top-level module
         schedule_config_rebroadcasts,
         schedule_version_notice_rebroadcasts,
     )
+    from overlay_plugin.obs_capture_support import obs_capture_preference_value
+    from overlay_plugin.overlay_config_payload import build_overlay_config_payload
     from overlay_plugin.preferences import (
         CLIENT_LOG_RETENTION_MAX,
         CLIENT_LOG_RETENTION_MIN,
@@ -284,6 +288,9 @@ def _edmc_debug_logging_active() -> bool:
 def _dev_override_active() -> bool:
     """Return True when Modern Overlay is running in dev mode."""
 
+    prefs = globals().get("_preferences")
+    if prefs is not None:
+        return bool(getattr(prefs, "dev_mode", DEV_BUILD))
     return bool(DEV_BUILD)
 
 
@@ -1403,13 +1410,14 @@ class _PluginRuntime:
         LOGGER.debug(
             "Applying updated preferences: show_connection_status=%s "
             "client_log_retention=%d gridlines_enabled=%s gridline_spacing=%d overlay_opacity=%.2f "
-            "force_render=%s force_xwayland=%s debug_overlay=%s cycle_payload_ids=%s font_min=%.1f font_max=%.1f",
+            "force_render=%s obs_capture_friendly=%s force_xwayland=%s debug_overlay=%s cycle_payload_ids=%s font_min=%.1f font_max=%.1f",
             self._preferences.show_connection_status,
             self._resolve_client_log_retention(),
             self._preferences.gridlines_enabled,
             self._preferences.gridline_spacing,
             self._preferences.overlay_opacity,
             self._resolve_force_render(),
+            obs_capture_preference_value(self._preferences),
             self._preferences.force_xwayland,
             self._preferences.show_debug_overlay,
             self._preferences.cycle_payload_ids,
@@ -1658,6 +1666,12 @@ class _PluginRuntime:
             self._preferences.save()
         if broadcast:
             self._send_overlay_config()
+
+    def set_obs_capture_friendly_preference(self, value: bool) -> None:
+        with self._prefs_lock:
+            self._preferences.obs_capture_friendly = bool(value)
+            self._preferences.save()
+        self._send_overlay_config()
 
     def set_title_bar_compensation_preference(self, enabled: bool, height: int) -> None:
         with self._prefs_lock:
@@ -2353,39 +2367,18 @@ class _PluginRuntime:
     def _send_overlay_config(self, rebroadcast: bool = False) -> None:
         self._load_payload_debug_config()
         diagnostics_enabled = _diagnostic_logging_enabled()
-        show_debug_overlay = bool(self._preferences.show_debug_overlay and diagnostics_enabled)
-        payload = {
-            "event": "OverlayConfig",
-            "opacity": float(self._preferences.overlay_opacity),
-            "global_payload_opacity": int(getattr(self._preferences, "global_payload_opacity", 100)),
-            "show_status": bool(self._preferences.show_connection_status),
-            "debug_overlay_corner": str(self._preferences.debug_overlay_corner or "NW"),
-            "status_bottom_margin": int(self._preferences.status_bottom_margin()),
-            "client_log_retention": int(self._resolve_client_log_retention()),
-            "gridlines_enabled": bool(self._preferences.gridlines_enabled),
-            "gridline_spacing": int(self._preferences.gridline_spacing),
-            "force_render": self._resolve_force_render(),
-            "title_bar_enabled": bool(self._preferences.title_bar_enabled),
-            "title_bar_height": int(self._preferences.title_bar_height),
-            "show_debug_overlay": show_debug_overlay,
-            "physical_clamp_enabled": bool(getattr(self._preferences, "physical_clamp_enabled", False)),
-            "physical_clamp_overrides": dict(getattr(self._preferences, "physical_clamp_overrides", {}) or {}),
-            "min_font_point": float(self._preferences.min_font_point),
-            "max_font_point": float(self._preferences.max_font_point),
-            "legacy_font_step": int(getattr(self._preferences, "legacy_font_step", 2)),
-            "cycle_payload_ids": bool(self._preferences.cycle_payload_ids),
-            "copy_payload_id_on_cycle": bool(self._preferences.copy_payload_id_on_cycle),
-            "scale_mode": str(self._preferences.scale_mode or "fit"),
-            "nudge_overflow_payloads": bool(self._preferences.nudge_overflow_payloads),
-            "payload_nudge_gutter": int(self._preferences.payload_nudge_gutter),
-            "payload_log_delay_seconds": float(getattr(self._preferences, "payload_log_delay_seconds", 0.0)),
-            "platform_context": self._platform_context_payload(),
-        }
+        payload = build_overlay_config_payload(
+            self._preferences,
+            diagnostics_enabled=diagnostics_enabled,
+            force_render=self._resolve_force_render(),
+            client_log_retention=self._resolve_client_log_retention(),
+            platform_context=self._platform_context_payload(),
+        )
         self._last_config = dict(payload)
         self._publish_payload(payload)
         LOGGER.debug(
             "Published overlay config: opacity=%s global_payload_opacity=%s show_status=%s debug_overlay_corner=%s status_bottom_margin=%s client_log_retention=%d gridlines_enabled=%s "
-            "gridline_spacing=%d force_render=%s title_bar_enabled=%s title_bar_height=%d debug_overlay=%s physical_clamp=%s cycle_payload_ids=%s copy_payload_id_on_cycle=%s "
+            "gridline_spacing=%d force_render=%s obs_capture_friendly=%s title_bar_enabled=%s title_bar_height=%d debug_overlay=%s physical_clamp=%s cycle_payload_ids=%s copy_payload_id_on_cycle=%s "
             "nudge_overflow=%s payload_gutter=%d payload_log_delay=%.2f font_min=%.1f font_max=%.1f font_step=%d platform_context=%s clamp_overrides=%s",
             payload["opacity"],
             payload["global_payload_opacity"],
@@ -2396,6 +2389,7 @@ class _PluginRuntime:
             payload["gridlines_enabled"],
             payload["gridline_spacing"],
             payload["force_render"],
+            payload["obs_capture_friendly"],
             payload["title_bar_enabled"],
             payload["title_bar_height"],
             payload["show_debug_overlay"],
@@ -2807,6 +2801,7 @@ class _PluginRuntime:
         env["EDMC_OVERLAY_LOG_LEVEL"] = str(log_level_payload.get("value"))
         log_level_name = log_level_payload.get("name") or logging.getLevelName(logging.INFO)
         env["EDMC_OVERLAY_LOG_LEVEL_NAME"] = str(log_level_name)
+        env[DEV_MODE_ENV_VAR] = "1" if self._preferences.dev_mode else "0"
         env["EDMC_OVERLAY_SESSION_TYPE"] = session or "unknown"
         env["EDMC_OVERLAY_COMPOSITOR"] = compositor
         env["EDMC_OVERLAY_FORCE_XWAYLAND"] = "1" if force_xwayland else "0"
@@ -3031,6 +3026,7 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
         payload_nudge_callback = _plugin.set_payload_nudge_preference if _plugin else None
         payload_gutter_callback = _plugin.set_payload_nudge_gutter_preference if _plugin else None
         force_render_callback = _plugin.set_force_render_preference if _plugin else None
+        obs_capture_friendly_callback = _plugin.set_obs_capture_friendly_preference if _plugin else None
         title_bar_config_callback = _plugin.set_title_bar_compensation_preference if _plugin else None
         debug_overlay_callback = _plugin.set_debug_overlay_preference if _plugin else None
         payload_logging_callback = _plugin.set_payload_logging_preference if _plugin else None
@@ -3054,6 +3050,7 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
             diagnostics_state = _plugin.get_troubleshooting_panel_state()
         if launch_command_callback:
             LOGGER.debug("Attaching launch command callback with initial value=%s", _preferences.controller_launch_command)
+        dev_mode = _preferences.dev_mode if _preferences is not None else DEV_BUILD
         panel = PreferencesPanel(
             parent,
             _preferences,
@@ -3067,6 +3064,7 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
             payload_nudge_callback,
             payload_gutter_callback,
             force_render_callback,
+            obs_capture_friendly_callback,
             title_bar_config_callback,
             debug_overlay_callback,
             payload_logging_callback,
@@ -3082,7 +3080,7 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
             launch_command_callback,
             payload_opacity_callback,
             reset_group_cache_callback=reset_group_cache_callback,
-            dev_mode=DEV_BUILD,
+            dev_mode=dev_mode,
             plugin_version=MODERN_OVERLAY_VERSION,
             version_update_available=version_update_available,
             troubleshooting_state=diagnostics_state,
@@ -3122,13 +3120,14 @@ def prefs_changed(cmdr: str, is_beta: bool) -> None:  # pragma: no cover - save 
             LOGGER.debug(
                 "Preferences saved: show_connection_status=%s "
                 "client_log_retention=%d gridlines_enabled=%s gridline_spacing=%d "
-                "force_render=%s title_bar_enabled=%s title_bar_height=%d force_xwayland=%s "
+                "force_render=%s obs_capture_friendly=%s title_bar_enabled=%s title_bar_height=%d force_xwayland=%s "
                 "debug_overlay=%s cycle_payload_ids=%s copy_payload_id_on_cycle=%s font_min=%.1f font_max=%.1f",
                 _preferences.show_connection_status,
                 _plugin._resolve_client_log_retention() if _plugin else _preferences.client_log_retention,
                 _preferences.gridlines_enabled,
                 _preferences.gridline_spacing,
                 _plugin._resolve_force_render() if _plugin else bool(getattr(_preferences, "force_render", False)),
+                obs_capture_preference_value(_preferences),
                 _preferences.title_bar_enabled,
                 _preferences.title_bar_height,
                 _preferences.force_xwayland,
