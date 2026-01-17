@@ -1,1 +1,3 @@
 pydbus>=0.6.0          # Wayland/KDE click-through scripting (installed when Wayland detected)
+pywayland>=0.4.15      # wlroots layer-shell helpers
+PyQt6-Qt6>=6.5         # ensure Qt Wayland client bindings are available when supported
