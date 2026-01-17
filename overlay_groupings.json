@@ -331,6 +331,15 @@
         "markerLabelPosition": "below",
         "controllerPreviewBoxMode": "last",
         "backgroundColor": null
+      },
+      "EDR Mining": {
+        "idPrefixes": [
+          "edr-mining-"
+        ],
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last"
       }
     }
   },
