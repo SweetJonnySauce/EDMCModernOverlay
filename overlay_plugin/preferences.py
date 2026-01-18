@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import re
 import webbrowser
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,6 +42,7 @@ DEV_MODE_PREF_KEY = "dev_mode"
 CLIENT_LOG_RETENTION_MIN = 1
 CLIENT_LOG_RETENTION_MAX = 20
 DEFAULT_CLIENT_LOG_RETENTION = 5
+TOGGLE_ARGUMENT_DEFAULT = "t"
 PHYSICAL_CLAMP_SCALE_MIN = 0.5
 PHYSICAL_CLAMP_SCALE_MAX = 3.0
 FONT_BOUND_MIN = 6.0
@@ -479,6 +481,50 @@ def _normalise_launch_command(value: str) -> str:
     return text
 
 
+_TOGGLE_ARGUMENT_RE = re.compile(r"^[A-Za-z0-9]+$")
+
+
+def _parse_toggle_argument(value: Any) -> tuple[str, Optional[str], bool]:
+    try:
+        text = str(value or "")
+    except Exception:
+        return "", "Toggle argument must be text.", False
+    text = text.strip()
+    if not text:
+        return "", None, True
+    if not _TOGGLE_ARGUMENT_RE.fullmatch(text):
+        return "", "Toggle argument must be alphanumeric (A-Z, a-z, 0-9).", False
+    if text.isdigit():
+        return "", "Toggle argument cannot be numeric-only.", False
+    return text, None, False
+
+
+def _coerce_toggle_argument(value: Any, default: str) -> str:
+    text, error, is_empty = _parse_toggle_argument(value)
+    if is_empty or error:
+        return default
+    return text
+
+
+def _validate_toggle_argument(value: Any, *, default: str, previous: str) -> tuple[str, Optional[str]]:
+    text, error, is_empty = _parse_toggle_argument(value)
+    if is_empty:
+        return default, None
+    if error:
+        return previous, error
+    return text, None
+
+
+def _coerce_last_on_payload_opacity(value: Any, default: int) -> int:
+    try:
+        numeric = int(value)
+    except (TypeError, ValueError):
+        return default
+    if numeric <= 0 or numeric > 100:
+        return default
+    return numeric
+
+
 @dataclass
 class Preferences:
     """Simple JSON-backed preferences store."""
@@ -512,6 +558,8 @@ class Preferences:
     log_payloads: bool = False
     payload_log_delay_seconds: float = 0.5
     controller_launch_command: str = "!ovr"
+    controller_toggle_argument: str = TOGGLE_ARGUMENT_DEFAULT
+    last_on_payload_opacity: int = 100
 
     def __post_init__(self) -> None:
         self.plugin_dir = Path(self.plugin_dir)
@@ -630,6 +678,14 @@ class Preferences:
                 _config_key("controller_launch_command"),
                 self.controller_launch_command,
             ),
+            "controller_toggle_argument": _config_get_str(
+                _config_key("controller_toggle_argument"),
+                self.controller_toggle_argument,
+            ),
+            "last_on_payload_opacity": _config_get_int(
+                _config_key("last_on_payload_opacity"),
+                self.last_on_payload_opacity,
+            ),
         }
         self._apply_raw_data(payload)
 
@@ -727,6 +783,14 @@ class Preferences:
             self.controller_launch_command,
             transform=_normalise_launch_command,
         )
+        self.controller_toggle_argument = _coerce_toggle_argument(
+            data.get("controller_toggle_argument"),
+            self.controller_toggle_argument or TOGGLE_ARGUMENT_DEFAULT,
+        )
+        self.last_on_payload_opacity = _coerce_last_on_payload_opacity(
+            data.get("last_on_payload_opacity"),
+            self.last_on_payload_opacity,
+        )
 
     def save(self) -> None:
         """Persist preferences to EDMC config and the JSON shadow file."""
@@ -765,6 +829,8 @@ class Preferences:
             "log_payloads": bool(self.log_payloads),
             "payload_log_delay_seconds": float(self.payload_log_delay_seconds),
             "controller_launch_command": str(self.controller_launch_command or "!ovr"),
+            "controller_toggle_argument": str(self.controller_toggle_argument or TOGGLE_ARGUMENT_DEFAULT),
+            "last_on_payload_opacity": int(self.last_on_payload_opacity),
         }
 
     def _write_shadow_file(self) -> None:
@@ -806,6 +872,11 @@ class Preferences:
         _config_set_value(_config_key("log_payloads"), bool(self.log_payloads))
         _config_set_value(_config_key("payload_log_delay_seconds"), float(self.payload_log_delay_seconds))
         _config_set_value(_config_key("controller_launch_command"), str(self.controller_launch_command or "!ovr"))
+        _config_set_value(
+            _config_key("controller_toggle_argument"),
+            str(self.controller_toggle_argument or TOGGLE_ARGUMENT_DEFAULT),
+        )
+        _config_set_value(_config_key("last_on_payload_opacity"), int(self.last_on_payload_opacity))
         _config_set_value(CONFIG_VERSION_KEY, CONFIG_STATE_VERSION)
 
     def _ensure_state_version_mark(self) -> None:
@@ -850,6 +921,7 @@ class PreferencesPanel:
         cycle_payload_next_callback: Optional[Callable[[], None]] = None,
         restart_overlay_callback: Optional[Callable[[], None]] = None,
         set_launch_command_callback: Optional[Callable[[str], None]] = None,
+        set_toggle_argument_callback: Optional[Callable[[str], None]] = None,
         set_payload_opacity_callback: Optional[Callable[[int], None]] = None,
         reset_group_cache_callback: Optional[Callable[[], bool]] = None,
         dev_mode: bool = False,
@@ -905,6 +977,7 @@ class PreferencesPanel:
         self._var_cycle_payload = tk.BooleanVar(value=preferences.cycle_payload_ids)
         self._var_cycle_copy = tk.BooleanVar(value=preferences.copy_payload_id_on_cycle)
         self._var_launch_command = tk.StringVar(value=preferences.controller_launch_command)
+        self._var_toggle_argument = tk.StringVar(value=preferences.controller_toggle_argument)
         state = troubleshooting_state or TroubleshootingPanelState(
             diagnostics_enabled=False,
             capture_enabled=False,
@@ -954,6 +1027,7 @@ class PreferencesPanel:
         self._font_bounds_apply_in_progress = False
         self._font_step_apply_in_progress = False
         self._launch_command_apply_in_progress = False
+        self._toggle_argument_apply_in_progress = False
         self._payload_opacity_apply_in_progress = False
 
         self._send_test = send_test_callback
@@ -980,6 +1054,7 @@ class PreferencesPanel:
         self._cycle_next_callback = cycle_payload_next_callback
         self._restart_overlay = restart_overlay_callback
         self._set_launch_command = set_launch_command_callback
+        self._set_toggle_argument = set_toggle_argument_callback
         self._set_payload_opacity = set_payload_opacity_callback
         self._reset_group_cache = reset_group_cache_callback
         self._set_capture_override = set_capture_override_callback
@@ -1236,6 +1311,15 @@ class PreferencesPanel:
         launch_entry.bind("<FocusOut>", self._on_launch_command_event)
         launch_entry.bind("<Return>", self._on_launch_command_event)
         launch_row.grid(row=user_row, column=0, sticky="w", pady=ROW_PAD)
+        user_row += 1
+
+        toggle_row = ttk.Frame(user_section, style=self._frame_style)
+        nb.Label(toggle_row, text="Chat command argument to toggle overlay:").pack(side="left")
+        toggle_entry = nb.EntryMenu(toggle_row, width=10, textvariable=self._var_toggle_argument)
+        toggle_entry.pack(side="left", padx=(8, 0))
+        toggle_entry.bind("<FocusOut>", self._on_toggle_argument_event)
+        toggle_entry.bind("<Return>", self._on_toggle_argument_event)
+        toggle_row.grid(row=user_row, column=0, sticky="w", pady=ROW_PAD)
         user_row += 1
 
         payload_opacity_row = ttk.Frame(user_section, style=self._frame_style)
@@ -1845,6 +1929,9 @@ class PreferencesPanel:
     def _on_launch_command_event(self, _event=None) -> None:  # pragma: no cover - Tk event
         self._apply_launch_command()
 
+    def _on_toggle_argument_event(self, _event=None) -> None:  # pragma: no cover - Tk event
+        self._apply_toggle_argument()
+
     def _apply_launch_command(self) -> None:
         if self._launch_command_apply_in_progress:
             return
@@ -1877,6 +1964,39 @@ class PreferencesPanel:
         self._status_var.set(f"Overlay launch command set to {normalised}")
         LOGGER.info("Overlay Controller launch command updated (UI): %s -> %s", old_value, normalised)
         self._launch_command_apply_in_progress = False
+
+    def _apply_toggle_argument(self) -> None:
+        if self._toggle_argument_apply_in_progress:
+            return
+        self._toggle_argument_apply_in_progress = True
+        raw_value = self._var_toggle_argument.get()
+        normalised, error = _validate_toggle_argument(
+            raw_value,
+            default=TOGGLE_ARGUMENT_DEFAULT,
+            previous=self._preferences.controller_toggle_argument,
+        )
+        if error:
+            if normalised != self._var_toggle_argument.get():
+                self._var_toggle_argument.set(normalised)
+            self._status_var.set(error)
+            self._toggle_argument_apply_in_progress = False
+            return
+        if normalised != self._var_toggle_argument.get():
+            self._var_toggle_argument.set(normalised)
+        if normalised == self._preferences.controller_toggle_argument:
+            self._toggle_argument_apply_in_progress = False
+            return
+        old_value = self._preferences.controller_toggle_argument
+        self._preferences.controller_toggle_argument = normalised
+        self._preferences.save()
+        if callable(self._set_toggle_argument):
+            try:
+                self._set_toggle_argument(normalised)
+            except Exception:
+                LOGGER.debug("Failed to propagate toggle argument change", exc_info=True)
+        self._status_var.set(f"Overlay toggle argument set to {normalised}")
+        LOGGER.info("Overlay toggle argument updated (UI): %s -> %s", old_value, normalised)
+        self._toggle_argument_apply_in_progress = False
 
     def _open_release_link(self, _event=None) -> None:
         try:

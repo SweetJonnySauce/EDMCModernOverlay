@@ -142,7 +142,6 @@ def _build_payload_handler(helper: DeveloperHelperController, window: OverlayWin
         event = payload.get("event")
         if event == "OverlayConfig":
             helper.apply_config(window, payload)
-            window.maybe_warn_transparent_overlay()
             return
         if event == "OverlayControllerActiveGroup":
             window.set_active_controller_group(payload.get("plugin"), payload.get("label"), payload.get("anchor"), payload.get("edit_nonce"))
@@ -176,6 +175,10 @@ def _build_payload_handler(helper: DeveloperHelperController, window: OverlayWin
             window.display_message(str(message_text), ttl=ttl)
 
     return _handle_payload
+
+
+def _warn_transparent_on_startup(window: OverlayWindow) -> None:
+    window.maybe_warn_transparent_overlay()
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -243,6 +246,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     window.setWindowIcon(app_icon)
     window.set_data_client(data_client)
     helper.apply_initial_window_state(window, initial_settings)
+    _warn_transparent_on_startup(window)
     tracker = create_elite_window_tracker(_CLIENT_LOGGER, monitor_provider=window.monitor_snapshots)
     if tracker is not None:
         window.set_window_tracker(tracker)

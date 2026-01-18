@@ -7,7 +7,7 @@
   "client_log_retention": 5,
   "gridlines_enabled": true,
   "gridline_spacing": 120,
-  "force_render": false,
+  "force_render": true,
   "obs_capture_friendly": false,
   "force_xwayland": true,
   "physical_clamp_enabled": false,
@@ -27,5 +27,7 @@
   "status_message_gutter": 20,
   "log_payloads": true,
   "payload_log_delay_seconds": 0.5,
-  "controller_launch_command": "!ovr"
+  "controller_launch_command": "!ovr",
+  "controller_toggle_argument": "t",
+  "last_on_payload_opacity": 25
 }

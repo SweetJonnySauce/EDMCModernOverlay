@@ -14,6 +14,9 @@ class _DummyRuntime:
         self.controller_should_fail = False
         self.opacity_calls: list[int] = []
         self.opacity_enabled = True
+        self.toggle_calls = 0
+        self.toggle_enabled = True
+        self.toggle_should_fail = False
 
     def send_test_message(self, text: str, x: int | None = None, y: int | None = None) -> None:
         self.messages.append(text)
@@ -40,10 +43,26 @@ class _DummyRuntime:
             raise RuntimeError("disabled")
         self.opacity_calls.append(value)
 
+    def toggle_payload_opacity_preference(self) -> None:
+        if not self.toggle_enabled:
+            raise RuntimeError("disabled")
+        if self.toggle_should_fail:
+            raise RuntimeError("boom")
+        self.toggle_calls += 1
 
-def build_helper(runtime: _DummyRuntime | None = None) -> tuple[_DummyRuntime, object]:
+
+def build_helper(
+    runtime: _DummyRuntime | None = None,
+    *,
+    toggle_argument: str | None = None,
+) -> tuple[_DummyRuntime, object]:
     runtime = runtime or _DummyRuntime()
-    helper = build_command_helper(runtime, command_prefix="!overlay", legacy_prefixes=["!overlay"])
+    helper = build_command_helper(
+        runtime,
+        command_prefix="!overlay",
+        toggle_argument=toggle_argument,
+        legacy_prefixes=["!overlay"],
+    )
     return runtime, helper
 
 
@@ -124,6 +143,43 @@ def test_overlay_opacity_invalid_value_ignored():
     assert runtime.messages == []
 
 
+def test_overlay_toggle_argument():
+    runtime, helper = build_helper()
+    assert helper.handle_entry({"event": "SendText", "Message": "!overlay t"}) is True
+    assert runtime.toggle_calls == 1
+    assert runtime.opacity_calls == []
+    assert runtime.messages == []
+
+
+def test_overlay_toggle_argument_case_insensitive():
+    runtime, helper = build_helper()
+    assert helper.handle_entry({"event": "SendText", "Message": "!overlay T"}) is True
+    assert runtime.toggle_calls == 1
+
+
+def test_overlay_toggle_argument_multi_character():
+    runtime, helper = build_helper(toggle_argument="tog")
+    assert helper.handle_entry({"event": "SendText", "Message": "!overlay tog"}) is True
+    assert runtime.toggle_calls == 1
+
+
+def test_overlay_opacity_takes_precedence_over_toggle():
+    runtime, helper = build_helper()
+    assert helper.handle_entry({"event": "SendText", "Message": "!overlay t 60"}) is True
+    assert runtime.opacity_calls == [60]
+    assert runtime.toggle_calls == 0
+    assert helper.handle_entry({"event": "SendText", "Message": "!overlay 60 t"}) is True
+    assert runtime.opacity_calls == [60, 60]
+    assert runtime.toggle_calls == 0
+
+
+def test_overlay_toggle_ignored_when_invalid_opacity_present():
+    runtime, helper = build_helper()
+    assert helper.handle_entry({"event": "SendText", "Message": "!overlay t 101"}) is True
+    assert runtime.opacity_calls == []
+    assert runtime.toggle_calls == 0
+
+
 def test_overlay_cycle_disabled_message():
     runtime, helper = build_helper()
     runtime.cycle_enabled = False
@@ -145,6 +201,14 @@ def test_overlay_opacity_unavailable():
     runtime, helper = build_helper(runtime)
     assert helper.handle_entry({"event": "SendText", "Message": "!overlay 50"}) is True
     assert "opacity" in runtime.messages[-1].lower()
+
+
+def test_overlay_toggle_unavailable():
+    runtime = _DummyRuntime()
+    runtime.toggle_payload_opacity_preference = None  # type: ignore[assignment]
+    runtime, helper = build_helper(runtime)
+    assert helper.handle_entry({"event": "SendText", "Message": "!overlay t"}) is True
+    assert "toggle" in runtime.messages[-1].lower()
 
 
 def test_overlay_launch_failure():

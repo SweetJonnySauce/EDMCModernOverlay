@@ -67,9 +67,9 @@
 
 | Phase | Description | Status |
 | --- | --- | --- |
-| 1 | Preferences + validation for toggle argument | Planned |
-| 2 | Command handling + toggle behavior | Planned |
-| 3 | Unit tests + verification | Planned |
+| 1 | Preferences + validation for toggle argument | Completed |
+| 2 | Command handling + toggle behavior | Completed |
+| 3 | Unit tests + verification | In Progress |
 
 ## Phase Details
 
@@ -83,9 +83,39 @@
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 1.1 | Add preference fields + config/shadow persistence | Planned |
-| 1.2 | Add validation helper + preferences UI entry + status line errors | Planned |
-| 1.3 | Unit tests for validation + persistence | Planned |
+| 1.1 | Add preference fields + config/shadow persistence | Completed |
+| 1.2 | Add validation helper + preferences UI entry + status line errors | Completed |
+| 1.3 | Unit tests for validation + persistence | Completed |
+
+#### Stage 1.1 Details
+- Touch points: `overlay_plugin/preferences.py` (Preferences dataclass, load from EDMC config, shadow JSON merge, save to config + shadow).
+- Add new preference fields: `controller_toggle_argument` (default `t`) and `last_on_payload_opacity` (stores last non-zero opacity for restores).
+- Persistence rules: store both values in EDMC config and `overlay_settings.json` shadow file; load both on startup (with sane defaults if missing).
+- Decide representation for `last_on_payload_opacity`: use an int in [1..100] and treat missing/invalid as unset; restore default to 100 when unset.
+- If a schema exists for `overlay_settings.json`, update it to include the new fields.
+
+#### Stage 1.2 Details
+- Add a validation/normalization helper in `overlay_plugin/preferences.py`:
+- Trim whitespace; if empty -> default `t`.
+- Reject non-alphanumeric characters (error + keep previous value).
+- Reject numeric-only values (error + keep previous value).
+- Normalize to a stable value for storage (keep original case or lower-case; matching is case-insensitive).
+- Add a new UI entry under "Chat command to launch controller" for the toggle argument.
+- Surface validation failures via the existing status line (`_status_var.set(...)`) and do not persist invalid values.
+
+#### Stage 1.3 Details
+- Add unit tests for persistence in `tests/test_preferences_persistence.py`:
+- Save + reload `controller_toggle_argument` and `last_on_payload_opacity` through config + shadow JSON.
+- Validate defaulting behavior when values are missing or invalid in config/shadow.
+- Add unit tests for validation helper (new test module or expand an existing helper-test file):
+- Trimming behavior (`" t "` -> `t`), empty -> default `t`.
+- Non-alphanumeric rejected with error (e.g., `"t!"`, `"t t"`).
+- Numeric-only rejected with error (e.g., `"5"`), mixed alnum accepted (e.g., `"t5"`).
+
+#### Phase 1 Results
+- Added `controller_toggle_argument` + `last_on_payload_opacity` preference fields with config/shadow persistence.
+- Implemented toggle argument validation/normalization helpers and UI entry with status-line errors.
+- Added unit tests for persistence and toggle argument validation helpers.
 
 ### Phase 2: Command handling + toggle behavior
 - Extend the journal command helper to accept a configurable toggle argument (case-insensitive match).
@@ -98,10 +128,35 @@
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 2.1 | Wire toggle argument into command helper/runtime | Planned |
-| 2.2 | Implement toggle logic + last-on persistence | Planned |
-| 2.3 | Update help text / messaging for toggle (if applicable) | Planned |
+| 2.1 | Wire toggle argument into command helper/runtime | Completed |
+| 2.2 | Implement toggle logic + last-on persistence | Completed |
+| 2.3 | Update help text / messaging for toggle (if applicable) | Completed |
 
+#### Stage 2.1 Details
+- Touch points: `overlay_plugin/journal_commands.py`, `load.py` (runtime wiring), `overlay_plugin/preferences.py` (toggle argument preference).
+- Extend `build_command_helper` to accept a toggle argument value from runtime/preferences.
+- Update `JournalCommandHelper` to recognize the toggle argument in `handle_entry` / `_handle_overlay_command`.
+- Ensure case-insensitive matching for the toggle argument and allow multi-character tokens.
+- Precedence: if any valid opacity argument is present, ignore toggle regardless of order.
+- If opacity argument is invalid and toggle is present, ignore all input (no action).
+
+#### Stage 2.2 Details
+- Add a runtime helper (likely in `load.py`) to toggle payload opacity:
+- Read current `global_payload_opacity`; treat >0 as on.
+- When toggling off, store the current opacity into `last_on_payload_opacity`, then set opacity to 0.
+- When toggling on, restore `last_on_payload_opacity` (default 100 if unset/invalid).
+- Persist both `global_payload_opacity` and `last_on_payload_opacity` through Preferences + config/shadow.
+- Make sure toggle updates emit the overlay config update (same path used by `set_payload_opacity_preference`).
+
+#### Stage 2.3 Details
+- Update help text in `overlay_plugin/journal_commands.py` to mention the toggle argument (using the configured value).
+- Decide whether to send a chat response on successful toggle (or remain silent like opacity changes).
+- Ensure error messaging aligns with the existing opacity command behavior (invalid opacity + toggle -> ignore).
+
+#### Phase 2 Results
+- Journal command helper now accepts a configurable toggle argument and parses toggle vs. opacity with precedence rules.
+- Runtime toggles payload opacity, persisting `global_payload_opacity` and `last_on_payload_opacity`.
+- Preferences UI updates notify runtime so the command helper reflects the latest toggle argument.
 ### Phase 3: Unit tests + verification
 - Add/extend unit tests to validate all requirements:
 - `tests/test_journal_commands.py`: toggle argument triggers toggle callback; case-insensitive match; multi-character toggle works; opacity args take precedence; invalid opacity + toggle ignores all input.
@@ -112,6 +167,61 @@
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 3.1 | Implement unit tests for command parsing + toggle behavior | Planned |
-| 3.2 | Implement unit tests for preferences persistence + validation | Planned |
-| 3.3 | Run targeted pytest selections | Planned |
+| 3.1 | Implement unit tests for command parsing + toggle behavior | Completed |
+| 3.2 | Implement unit tests for preferences persistence + validation | Completed |
+| 3.3 | Run targeted pytest selections | Skipped |
+
+#### Stage 3.1 Details
+- Extend `tests/test_journal_commands.py` to cover:
+- Toggle argument triggers toggle callback (default `t`).
+- Case-insensitive toggle matching (`T` == `t`).
+- Multi-character toggle argument works (e.g., `tog`).
+- Opacity argument takes precedence over toggle regardless of order (e.g., `t 50`, `50 t`).
+- Invalid opacity + toggle ignores all input (no toggle).
+
+#### Stage 3.2 Details
+- Ensure `tests/test_preferences_persistence.py` already covers:
+- `controller_toggle_argument` and `last_on_payload_opacity` saved/restored from config + shadow JSON.
+- Add helper validation tests in `tests/test_toggle_argument_validation.py` for trim, alnum-only, numeric-only reject, empty fallback.
+- Add a new unit test for `overlay_plugin/toggle_helpers.py` to assert:
+- Toggle from >0 sets opacity to 0 and stores last-on.
+- Toggle from 0 restores last-on (default 100).
+
+#### Stage 3.3 Details
+- Run: `python -m pytest tests/test_journal_commands.py tests/test_preferences_persistence.py tests/test_toggle_argument_validation.py tests/test_toggle_helpers.py`
+- Record any skips or environment constraints (e.g., GUI deps) if not run.
+
+#### Phase 3 Results
+- Added journal command tests for toggle parsing, precedence, and invalid opacity handling.
+- Added helper tests for toggle behavior and last-on restoration defaults.
+- Test execution skipped (not requested).
+
+## Troubleshooting
+
+### Transparency Warning Triggered On Toggle
+- Symptom: Transparency warning shows when toggling overlay off (opacity -> 0).
+- Root cause: `overlay_client/launcher.py` calls `window.maybe_warn_transparent_overlay()` on every `OverlayConfig` payload, including toggle updates.
+- Plan to fix:
+- Move the transparency warning to a startup-only path (after window init + initial settings).
+- Remove or guard the `OverlayConfig` handler call so config updates do not re-trigger the warning.
+- Add tests:
+- Verify `OverlayConfig` updates do not call the warning.
+- Verify startup path still triggers warning when initial opacity is below threshold.
+
+#### Plan Details
+- Touch points:
+- `overlay_client/launcher.py` (_build_payload_handler, initial startup flow)
+- `overlay_client/control_surface.py` (warning helper)
+- `overlay_client/tests/...` (new/updated tests)
+- Implementation steps:
+- Add a startup-only call to `maybe_warn_transparent_overlay()` after `OverlayWindow` init and initial settings are applied (one-time).
+- Remove or guard the call inside the `OverlayConfig` branch so subsequent config updates (including toggle changes) do not trigger warnings.
+- If needed, add a simple flag (e.g., `warn_on_startup`) in the handler or launcher to make the intent explicit.
+- Test plan:
+- New unit test that simulates an `OverlayConfig` payload and asserts the warning helper is not invoked.
+- New unit test that startup path invokes the warning once when initial opacity is below the threshold.
+
+#### Results
+- Startup-only warning trigger implemented in `overlay_client/launcher.py`.
+- `OverlayConfig` handler no longer triggers transparency warning.
+- Added tests covering startup warning and config-update behavior.

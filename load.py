@@ -56,8 +56,10 @@ if __package__:
         PreferencesPanel,
         STATUS_GUTTER_MAX,
         TroubleshootingPanelState,
+        TOGGLE_ARGUMENT_DEFAULT,
         _apply_font_bounds_edit,
         _apply_font_step_edit,
+        _coerce_toggle_argument,
         _normalise_launch_command,
     )
     from .overlay_plugin.spam_detection import (
@@ -75,6 +77,7 @@ if __package__:
         unregister_publisher,
     )
     from .overlay_plugin.journal_commands import build_command_helper
+    from .overlay_plugin.toggle_helpers import toggle_payload_opacity
     from .EDMCOverlay.edmcoverlay import normalise_legacy_payload
     from .group_cache import GroupPlacementCache
     from .overlay_client import env_overrides as env_overrides_helper
@@ -108,8 +111,10 @@ else:  # pragma: no cover - EDMC loads as top-level module
         PreferencesPanel,
         STATUS_GUTTER_MAX,
         TroubleshootingPanelState,
+        TOGGLE_ARGUMENT_DEFAULT,
         _apply_font_bounds_edit,
         _apply_font_step_edit,
+        _coerce_toggle_argument,
         _normalise_launch_command,
     )
     from overlay_plugin.spam_detection import (
@@ -127,6 +132,7 @@ else:  # pragma: no cover - EDMC loads as top-level module
         unregister_publisher,
     )
     from overlay_plugin.journal_commands import build_command_helper
+    from overlay_plugin.toggle_helpers import toggle_payload_opacity
     from EDMCOverlay.edmcoverlay import normalise_legacy_payload
     from group_cache import GroupPlacementCache
     import overlay_client.env_overrides as env_overrides_helper
@@ -1549,6 +1555,18 @@ class _PluginRuntime:
         self._command_helper_prefix = normalised
         LOGGER.info("Overlay Controller launch command preference updated to %s", normalised)
 
+    def set_toggle_argument_preference(self, value: str) -> None:
+        with self._prefs_lock:
+            current = getattr(self._preferences, "controller_toggle_argument", TOGGLE_ARGUMENT_DEFAULT)
+            normalised = _coerce_toggle_argument(value, current or TOGGLE_ARGUMENT_DEFAULT)
+            if normalised == current:
+                return
+            self._preferences.controller_toggle_argument = normalised
+            self._preferences.save()
+        current_prefix = self._command_helper_prefix or getattr(self._preferences, "controller_launch_command", "!ovr")
+        self._command_helper = self._build_command_helper(current_prefix, previous_prefix=current_prefix)
+        LOGGER.info("Overlay toggle argument preference updated to %s", normalised)
+
     def set_payload_opacity_preference(self, value: int) -> None:
         try:
             numeric = int(value)
@@ -1562,6 +1580,12 @@ class _PluginRuntime:
             self._preferences.save()
         self._send_overlay_config()
 
+    def toggle_payload_opacity_preference(self) -> None:
+        with self._prefs_lock:
+            toggle_payload_opacity(self._preferences)
+            self._preferences.save()
+        self._send_overlay_config()
+
     def _build_command_helper(self, prefix: str, previous_prefix: Optional[str] = None) -> Any:
         legacy: list[str] = []
         if prefix == "!overlay":
@@ -1572,7 +1596,15 @@ class _PluginRuntime:
                 previous_prefix,
                 prefix,
             )
-        helper = build_command_helper(self, LOGGER, command_prefix=prefix, legacy_prefixes=legacy)
+        prefs = getattr(self, "_preferences", None)
+        toggle_argument = getattr(prefs, "controller_toggle_argument", TOGGLE_ARGUMENT_DEFAULT)
+        helper = build_command_helper(
+            self,
+            LOGGER,
+            command_prefix=prefix,
+            toggle_argument=toggle_argument,
+            legacy_prefixes=legacy,
+        )
         LOGGER.debug(
             "Overlay Controller journal command helper configured: primary=%s legacy=%s",
             prefix,
@@ -3040,6 +3072,7 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
         cycle_next_callback = _plugin.cycle_payload_next if _plugin else None
         restart_overlay_callback = _plugin.restart_overlay_client if _plugin else None
         launch_command_callback = _plugin.set_launch_command_preference if _plugin else None
+        toggle_argument_callback = _plugin.set_toggle_argument_preference if _plugin else None
         payload_opacity_callback = _plugin.set_payload_opacity_preference if _plugin else None
         reset_group_cache_callback = _plugin.reset_group_cache if _plugin else None
         capture_override_callback = _plugin.set_capture_override_preference if _plugin else None
@@ -3078,6 +3111,7 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
             cycle_next_callback,
             restart_overlay_callback,
             launch_command_callback,
+            toggle_argument_callback,
             payload_opacity_callback,
             reset_group_cache_callback=reset_group_cache_callback,
             dev_mode=dev_mode,
