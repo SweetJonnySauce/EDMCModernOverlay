@@ -67,7 +67,7 @@ class _DummyControllerRuntime:
     def _emit_controller_active_notice(self):
         self._active_notice = True
 
-    def _emit_controller_message(self, text: str, ttl=None, persistent: bool = False):
+    def _emit_controller_message(self, text: str, ttl=None):
         self._emit_fail = True
 
     def _clear_controller_message(self):

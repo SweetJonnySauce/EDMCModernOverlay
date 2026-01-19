@@ -1964,7 +1964,7 @@ class _PluginRuntime:
         LOGGER.debug("Overlay Controller launched via chat command (pid=%s)", getattr(process, "pid", "?"))
         return process
 
-    def _emit_controller_message(self, text: str, ttl: Optional[float] = None, persistent: bool = False) -> None:
+    def _emit_controller_message(self, text: str, ttl: Optional[float] = None) -> None:
         payload = {
             "timestamp": datetime.now(UTC).isoformat(),
             "event": "LegacyOverlay",
@@ -1975,7 +1975,7 @@ class _PluginRuntime:
             "x": 40,
             "y": 40,
             "size": "normal",
-            "ttl": 0 if persistent else max(1.0, float(ttl or 2.0)),
+            "ttl": max(1.0, float(ttl or 2.0)),
         }
         self._publish_payload(payload)
 
@@ -1988,7 +1988,7 @@ class _PluginRuntime:
                 pid = handle.pid
         if pid is None:
             return
-        self._emit_controller_message("Overlay Controller is Active", ttl=0, persistent=True)
+        self._emit_controller_message("Overlay Controller is Active", ttl=20.0)
 
     def _clear_controller_message(self) -> None:
         payload = {

@@ -162,7 +162,8 @@ def process_legacy_payload(
         return False
 
     ttl = max(int(payload.get("ttl", 4)), 0)
-    expiry = None if ttl <= 0 else time.monotonic() + ttl
+    now = time.monotonic()
+    expiry = now + ttl if ttl > 0 else now
     plugin_name = _extract_plugin(payload)
 
     now_iso = datetime.now(UTC).isoformat()

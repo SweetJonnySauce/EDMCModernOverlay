@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Mapping
 
+import pytest
+
 from overlay_client.payload_model import PayloadModel
 
 
@@ -74,3 +76,30 @@ def test_override_generation_busts_dedupe() -> None:
     assert model.ingest(payload.copy(), override_generation=1, group_label="group-a") is True
     # Same payload but new override generation should not dedupe.
     assert model.ingest(payload.copy(), override_generation=2, group_label="group-a") is True
+
+
+def test_dedupe_refresh_respects_ttl_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    model = PayloadModel(_trace_logger)
+    payload = {
+        "id": "msg-ttl-zero",
+        "type": "message",
+        "text": "hello",
+        "color": "white",
+        "x": 10,
+        "y": 20,
+        "size": "normal",
+        "ttl": 0,
+    }
+    base_time = 1000.0
+    monkeypatch.setattr("overlay_client.payload_model.time.monotonic", lambda: base_time)
+    assert model.ingest(payload.copy(), override_generation=1, group_label="group-a") is True
+    item = model.store.get("msg-ttl-zero")
+    assert item is not None
+    assert item.expiry == base_time
+
+    later_time = 1000.5
+    monkeypatch.setattr("overlay_client.payload_model.time.monotonic", lambda: later_time)
+    assert model.ingest(payload.copy(), override_generation=1, group_label="group-a") is False
+    item = model.store.get("msg-ttl-zero")
+    assert item is not None
+    assert item.expiry == later_time

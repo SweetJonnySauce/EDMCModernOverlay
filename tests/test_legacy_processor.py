@@ -162,3 +162,51 @@ def test_ttl_purge(monkeypatch: pytest.MonkeyPatch):
     # Advance beyond expiry and purge
     assert store.purge_expired(base_time + 2.0) is True
     assert store.get("msg-ttl") is None
+
+
+def test_ttl_zero_expires_next_purge(monkeypatch: pytest.MonkeyPatch):
+    store = LegacyItemStore()
+
+    base_time = 1000.0
+    monkeypatch.setattr("legacy_processor.time.monotonic", lambda: base_time)
+
+    process_legacy_payload(
+        store,
+        {
+            "type": "message",
+            "id": "msg-ttl-zero",
+            "text": "Timed",
+            "ttl": 0,
+        },
+    )
+    item = store.get("msg-ttl-zero")
+    assert item is not None
+    assert item.expiry == base_time
+
+    assert store.purge_expired(base_time) is False
+    assert store.get("msg-ttl-zero") is not None
+    assert store.purge_expired(base_time + 0.01) is True
+    assert store.get("msg-ttl-zero") is None
+
+
+def test_negative_ttl_expires_next_purge(monkeypatch: pytest.MonkeyPatch):
+    store = LegacyItemStore()
+
+    base_time = 2000.0
+    monkeypatch.setattr("legacy_processor.time.monotonic", lambda: base_time)
+
+    process_legacy_payload(
+        store,
+        {
+            "type": "message",
+            "id": "msg-ttl-negative",
+            "text": "Timed",
+            "ttl": -5,
+        },
+    )
+    item = store.get("msg-ttl-negative")
+    assert item is not None
+    assert item.expiry == base_time
+
+    assert store.purge_expired(base_time + 0.01) is True
+    assert store.get("msg-ttl-negative") is None

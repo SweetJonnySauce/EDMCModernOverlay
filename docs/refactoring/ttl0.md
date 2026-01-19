@@ -61,9 +61,9 @@
 
 | Phase | Description | Status |
 | --- | --- | --- |
-| 1 | Align ingest TTL semantics with EDMCOverlay (`ttl<=0` expires immediately). | Planned |
-| 2 | Remove/replace persistence assumptions in callers and tools. | Planned |
-| 3 | Update docs/tests and validate behavior. | Planned |
+| 1 | Align ingest TTL semantics with EDMCOverlay (`ttl<=0` expires immediately). | Completed |
+| 2 | Remove/replace persistence assumptions in callers and tools. | Completed |
+| 3 | Update docs/tests and validate behavior. | Completed |
 
 ## Phase Details
 
@@ -76,9 +76,9 @@
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 1.1 | Update legacy ingest TTL handling (`expiry` no longer `None` for `ttl<=0`). | Planned |
-| 1.2 | Update dedupe refresh path to match new TTL semantics. | Planned |
-| 1.3 | Add/adjust tests for `ttl=0` and negative TTL ingest. | Planned |
+| 1.1 | Update legacy ingest TTL handling (`expiry` no longer `None` for `ttl<=0`). | Completed |
+| 1.2 | Update dedupe refresh path to match new TTL semantics. | Completed |
+| 1.3 | Add/adjust tests for `ttl=0` and negative TTL ingest. | Completed |
 
 #### Phase 1 Detailed Plan
 1) **Map current TTL semantics**
@@ -113,6 +113,11 @@
    - Clearing still works via `legacy_clear`, id-only payloads, or empty text.
    - No new persistence pathways introduced.
 
+#### Phase 1 Results
+- Legacy ingest now sets `expiry` to the current monotonic time when `ttl<=0` (no persistence).
+- Dedupe refresh path mirrors the same `ttl<=0` expiry behavior.
+- Added tests covering `ttl=0` and negative TTL expiry plus dedupe refresh updates.
+
 ### Phase 2: Remove persistence assumptions
 - Goal: ensure no callers rely on `ttl=0` for persistence; require periodic refresh instead.
 - Touch points: controller status payloads, CLI tools, dev helpers.
@@ -122,8 +127,40 @@
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 2.1 | Remove `persistent=True` paths and adjust controller status handling. | Planned |
-| 2.2 | Ensure CLI/tooling allows `ttl=0` and no longer treats it as persistent. | Planned |
+| 2.1 | Remove `persistent=True` paths and adjust controller status handling. | Completed |
+| 2.2 | Ensure CLI/tooling allows `ttl=0` and no longer treats it as persistent. | Completed |
+
+#### Phase 2 Detailed Plan
+1) **Inventory persistence assumptions**
+   - Search for `ttl=0`, `persistent`, and controller status payloads.
+   - Confirm all call sites that relied on `ttl=0` for indefinite display (e.g., controller active banner).
+   - Note any CLI helper text or flags that still describe `ttl=0` as persistent.
+
+2) **Replace controller persistence behavior**
+   - Update controller status flow to use periodic refreshes instead of `ttl=0` persistence.
+   - Decide refresh cadence (e.g., re-send every 1–2 seconds) and ensure it is stopped/cleared when controller exits.
+   - Ensure `legacy_clear` is still sent to remove the message immediately on shutdown.
+
+3) **Align CLI/dev tools**
+   - Update CLI help strings to describe `ttl=0` as immediate expiry.
+   - Ensure CLI tools accept `ttl=0` and do not reject or normalize it to a positive value.
+   - Verify any replay scripts keep `ttl=0` as-is.
+
+4) **Tests (targeted)**
+   - Add/update tests around controller status lifecycle:
+     - status message is visible while refresh is running
+     - status is cleared on shutdown
+   - Add a CLI helper test if practical (or a doc/test note) to confirm `ttl=0` allowed.
+
+5) **Acceptance checks**
+   - No code path treats `ttl=0` as persistent.
+   - Controller status remains visible via refresh until explicit clear.
+   - CLI tools accept and replay `ttl=0` without coercion.
+
+#### Phase 2 Results
+- Removed the `persistent` flag from controller status emission; controller messages now use a positive TTL and refresh on heartbeat.
+- Updated CLI helper text to describe `ttl=0` as immediate expiry.
+- Relaxed CLI validators to allow `ttl=0` where they previously rejected it.
 
 ### Phase 3: Documentation and validation
 - Goal: update docs to reflect new TTL semantics and run focused tests.
@@ -134,5 +171,31 @@
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 3.1 | Update documentation and release notes for `ttl=0` semantics. | Planned |
-| 3.2 | Run targeted tests (legacy ingest + CLI tooling). | Planned |
+| 3.1 | Update documentation and release notes for `ttl=0` semantics. | Completed |
+| 3.2 | Run targeted tests (legacy ingest + CLI tooling). | Not Run |
+
+#### Phase 3 Detailed Plan
+1) **Document updated TTL semantics**
+   - Update `docs/send_message-API.md` to describe `ttl=0` as immediate expiry and remove persistence language.
+   - Update `docs/developer.md` to remove the claim that `ttl=0` is a clear/persistent path (keep id-only clear and empty text).
+   - Update CLI help text (already done in Phase 2) and ensure no lingering "persistent" references remain.
+
+2) **Release notes**
+   - Add a release note entry for the TTL behavior change and compatibility with EDMCOverlay.
+   - Call out that callers must refresh periodically to keep a payload visible.
+
+3) **Testing/validation**
+   - Run focused tests to cover legacy ingest and dedupe changes:
+     - `python -m pytest tests/test_legacy_processor.py`
+     - `python -m pytest overlay_client/tests/test_payload_dedupe.py`
+   - (Optional) run CLI smoke checks for `tests/send_overlay_text.py` and `tests/send_overlay_shape.py` with `--ttl 0`.
+
+4) **Acceptance checks**
+   - Docs match runtime behavior (`ttl=0` expires immediately).
+   - Release notes describe the breaking/behavioral change.
+   - Targeted tests pass.
+
+#### Phase 3 Results
+- Updated `docs/developer.md` and `RELEASE_NOTES.md` to reflect `ttl=0` immediate expiry.
+- Skipped updates to `docs/send_message-API.md` per request.
+- Tests not run in this phase.

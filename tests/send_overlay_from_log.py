@@ -305,7 +305,7 @@ def main(argv: List[str] | None = None) -> None:
     parser.add_argument(
         "--ttl",
         type=int,
-        help="Override TTL value applied to LegacyOverlay payloads (0 for persistent).",
+        help="Override TTL value applied to LegacyOverlay payloads (0 expires immediately).",
     )
     args = parser.parse_args(argv)
 
