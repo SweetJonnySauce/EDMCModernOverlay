@@ -8,7 +8,8 @@
   - Added Overlay Controller launch command parameter to set opacity via in-game chat
   - Added an experimental Windows-only "OBS capture-friendly mode" preference so the overlay can be selected in OBS Window Capture (may appear in Alt-Tab/taskbar)
   - Added `rpm-ostree` installer logic to support Bazzite Linux distro
-  - Added chat command argument to toggle overlay on / off. Default is `!ovr t` and is configurable in settings. Behind the scenes, all this does is set opacity of the overlay.
+  - Added [chat command argument](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Chat-Command) to toggle overlay on / off. Default is `!ovr t` and is configurable in settings. Behind the scenes, all this does is set opacity of the overlay.
+  - Added [Getting Started](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Getting-Started) Wiki for Plugin developers
 ### Bug Fixes
   - Updates to payload tracing to help with Issue [#83](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/83) 
   - Changed client, controller, payload logs to UTC. Does not change the min version python3.10 contract.
