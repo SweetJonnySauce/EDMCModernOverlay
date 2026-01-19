@@ -10,6 +10,8 @@
   - Added [chat command argument](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Chat-Command) to set opacity via in-game chat
   - Added [chat command argument](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Chat-Command) to toggle overlay on / off. Default is `!ovr t` and is configurable in settings. Behind the scenes, all this does is set opacity of the overlay.
   - Added [Getting Started](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Getting-Started) Wiki for Plugin developers
+### Maintenance
+  - Restructured settings to have an Experimental tab. This is done both for conservation of real estate and also allow for the concept of "non-cross platform" features.
 ### Bug Fixes
   - Updates to payload tracing to help with Issue [#83](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/83) 
   - Changed client, controller, payload logs to UTC. Does not change the min version python3.10 contract.
