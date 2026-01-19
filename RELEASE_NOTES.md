@@ -16,7 +16,7 @@
   - Updates to payload tracing to help with Issue [#83](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/83) 
   - Changed client, controller, payload logs to UTC. Does not change the min version python3.10 contract.
   - Fixed [#101](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/101) where Overlay Controller preview boxes weren't respecting `controllerPreviewBoxMode="max"` settings
-  - Align legacy TTL handling with EDMCOverlay: `ttl=0` expires immediately and callers must refresh periodically to keep payloads visible.
+  - Fixed [[#143](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/143) Align legacy TTL handling with EDMCOverlay: `ttl=0` expires immediately and callers must refresh periodically to keep payloads visible.
 
 ## 0.7.6
 - Features
