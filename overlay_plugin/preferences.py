@@ -2813,6 +2813,7 @@ class PreferencesPanel:
         if overlay is None:
             return
         ttl = 10
+        # FDev media usage rules: https://forums.frontier.co.uk/threads/elite-dangerous-media-usage-rules.510879/
         disclaimer = (
             "The EDMCModernOverlay Test Overlay feature was created using assets and imagery from "
             "Elite Dangerous, with the permission of Frontier Developments plc, for non-commercial "
