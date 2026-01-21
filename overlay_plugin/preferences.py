@@ -1347,6 +1347,12 @@ class PreferencesPanel:
         payload_opacity_row.grid(row=user_row, column=0, sticky="w", pady=ROW_PAD)
         user_row += 1
 
+        test_overlay_row = ttk.Frame(user_section, style=self._frame_style)
+        test_overlay_btn = nb.Button(test_overlay_row, text="Test Overlay", command=self._on_test_overlay)
+        test_overlay_btn.pack(side="left")
+        test_overlay_row.grid(row=user_row, column=0, sticky="w", pady=ROW_PAD)
+        user_row += 1
+
         if self._diagnostics_enabled:
             diagnostics_label = nb.Label(user_section, text="Diagnostics")
             try:
@@ -2801,3 +2807,77 @@ class PreferencesPanel:
             self._status_var.set(f"Legacy rectangle failed: {exc}")
             return
         self._status_var.set("Legacy rectangle sent via edmcoverlay API.")
+
+    def _on_test_overlay(self) -> None:
+        overlay = self._legacy_overlay()
+        if overlay is None:
+            return
+        ttl = 10
+        disclaimer = (
+            "The EDMCModernOverlay Test Overlay feature was created using assets and imagery from "
+            "Elite Dangerous, with the permission of Frontier Developments plc, for non-commercial "
+            "purposes. It is not endorsed by nor reflects the views or opinions of Frontier "
+            "Developments and no employee of Frontier Developments was involved in the making of it."
+        )
+        plugin_dir = self._preferences.plugin_dir
+        log_path = plugin_dir / "payload_store" / "ed-logo-test.log"
+        try:
+            raw_lines = log_path.read_text(encoding="utf-8").splitlines()
+        except FileNotFoundError as exc:
+            self._status_var.set(f"Test overlay payloads not found: {log_path}")
+            return
+        except Exception as exc:
+            self._status_var.set(f"Failed to read test overlay payloads: {exc}")
+            return
+
+        sent = 0
+        try:
+            for line in raw_lines:
+                brace = line.find("{")
+                if brace == -1:
+                    continue
+                payload = json.loads(line[brace:])
+                payload_type = payload.get("type")
+                if payload_type == "message":
+                    overlay.send_message(
+                        str(payload.get("id") or ""),
+                        str(payload.get("text") or ""),
+                        str(payload.get("color") or "white"),
+                        int(payload.get("x", 0)),
+                        int(payload.get("y", 0)),
+                        ttl=ttl,
+                        size=str(payload.get("size") or "normal"),
+                    )
+                    sent += 1
+                    continue
+                if payload_type == "shape":
+                    shape = str(payload.get("shape") or "")
+                    base = {
+                        "id": str(payload.get("id") or ""),
+                        "shape": shape,
+                        "color": payload.get("color") or "white",
+                        "ttl": ttl,
+                    }
+                    if shape == "vect":
+                        base["vector"] = payload.get("vector") or []
+                        overlay.send_raw(base)
+                        sent += 1
+                        continue
+                    if shape == "rect":
+                        base.update(
+                            {
+                                "fill": payload.get("fill") or "#00000000",
+                                "x": int(payload.get("x", 0)),
+                                "y": int(payload.get("y", 0)),
+                                "w": int(payload.get("w", 0)),
+                                "h": int(payload.get("h", 0)),
+                            }
+                        )
+                        overlay.send_raw(base)
+                        sent += 1
+                        continue
+        except Exception as exc:
+            self._status_var.set(f"Test overlay failed: {exc}")
+            return
+
+        self._status_var.set(disclaimer)

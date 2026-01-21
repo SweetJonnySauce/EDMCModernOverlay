@@ -241,6 +241,15 @@
         "payloadJustification": "left",
         "markerLabelPosition": "below",
         "controllerPreviewBoxMode": "max"
+      },
+      "EDMCModernOverlay Logo Test": {
+        "idPrefixes": [
+          "edmcmodernoverlay-logo-test-"
+        ],
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last"
       }
     }
   },
