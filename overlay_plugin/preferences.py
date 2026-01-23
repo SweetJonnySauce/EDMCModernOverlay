@@ -1787,7 +1787,7 @@ class PreferencesPanel:
 
         self._update_cycle_button_state()
 
-        status_label = nb.Label(frame, textvariable=self._status_var, wraplength=400, justify="left")
+        status_label = nb.Label(frame, textvariable=self._status_var, wraplength=800, justify="left")
         status_label.grid(row=2, column=0, sticky="w", pady=ROW_PAD)
         frame.columnconfigure(0, weight=1)
 
@@ -2815,10 +2815,8 @@ class PreferencesPanel:
         ttl = 10
         # FDev media usage rules: https://forums.frontier.co.uk/threads/elite-dangerous-media-usage-rules.510879/
         disclaimer = (
-            "The EDMCModernOverlay Test Overlay feature was created using assets and imagery from "
-            "Elite Dangerous, with the permission of Frontier Developments plc, for non-commercial "
-            "purposes. It is not endorsed by nor reflects the views or opinions of Frontier "
-            "Developments and no employee of Frontier Developments was involved in the making of it."
+            "The EDMCModernOverlay Test Overlay feature was created using assets and imagery from Elite Dangerous, with the permission of Frontier Developments plc, for non-commercial "
+            "purposes. It is not endorsed by nor reflects the views or opinions of Frontier Developments and no employee of Frontier Developments was involved in the making of it."
         )
         plugin_dir = self._preferences.plugin_dir
         log_path = plugin_dir / "payload_store" / "ed-logo-test.log"
