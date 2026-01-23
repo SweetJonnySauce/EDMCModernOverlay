@@ -44,7 +44,7 @@ Best way to get support for this plugin is to create a github issue in this repo
 # Thanks
 Special thanks to [inorton](https://github.com/inorton) for the original [EDMCOverlay](https://github.com/inorton/EDMCOverlay) development.
 
-Thanks to [aussig](https://github.com/aussig/BGS-Tally), [Silarn](https://github.com/Silarn/EDMC-BioScan), [bgol](https://github.com/bgol/LandingPad), and [lekeno](https://github.com/lekeno/edr) for the on-going support and letting me use their discords for troubleshooting of the overlay with CMDRs.
+Thanks to [aussig](https://github.com/aussig/BGS-Tally), [Silarn](https://github.com/Silarn/EDMC-BioScan), [bgol](https://github.com/bgol/LandingPad), [navl](https://github.com/dwomble/EDMC-NeutronDancer), and [lekeno](https://github.com/lekeno/edr) for the on-going support and letting me use their discords for troubleshooting of the overlay with CMDRs.
 
 # Blame
 First and foremost, this EDMC plugin is a learning experiment in using AI for ground up development. The intent was never to get it to this point, but here we are. My goal was to avoid touching code and only use AI, and I've been very successful in reaching that goal. It was developed on VSCode using Codex (gpt-5-codex) for 99.999% of the code.
