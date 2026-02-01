@@ -51,11 +51,12 @@
         "idPrefixes": [
           "bgstally-msg-objectives-"
         ],
-        "idPrefixGroupAnchor": "nw",
+        "idPrefixGroupAnchor": "ne",
         "payloadJustification": "left",
         "backgroundColor": "none",
         "backgroundBorderColor": "none",
-        "backgroundBorderWidth": 3
+        "backgroundBorderWidth": 3,
+        "offsetX": -5.0
       },
       "BGS-Tally Tw": {
         "idPrefixes": [
@@ -201,7 +202,8 @@
     "idPrefixGroups": {
       "EDMC-Mining-Analytics": {
         "idPrefixes": [
-          "edmcma.metric."
+          "edmcma.metric.",
+          "edmcma.bar."
         ],
         "idPrefixGroupAnchor": "nw",
         "payloadJustification": "left",

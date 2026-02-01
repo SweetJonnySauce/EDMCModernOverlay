@@ -6,6 +6,7 @@ from .idprefix import IdPrefixGroupWidget
 from .justification import JustificationWidget
 from .offset import OffsetSelectorWidget
 from .tips import SidebarTipHelper
+from .tooltip import ToolTip
 
 __all__ = [
     "IdPrefixGroupWidget",
@@ -15,5 +16,6 @@ __all__ = [
     "JustificationWidget",
     "BackgroundWidget",
     "SidebarTipHelper",
+    "ToolTip",
     "alt_modifier_active",
 ]

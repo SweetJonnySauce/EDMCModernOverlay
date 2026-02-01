@@ -2822,7 +2822,7 @@ class PreferencesPanel:
         log_path = plugin_dir / "payload_store" / "ed-logo-test.log"
         try:
             raw_lines = log_path.read_text(encoding="utf-8").splitlines()
-        except FileNotFoundError as exc:
+        except FileNotFoundError:
             self._status_var.set(f"Test overlay payloads not found: {log_path}")
             return
         except Exception as exc:

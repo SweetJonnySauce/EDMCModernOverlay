@@ -344,6 +344,40 @@ class GroupStateService:
         if invalidate_cache:
             self._invalidate_group_cache_entry(plugin_name, label, edit_nonce=edit_nonce)
 
+    def reset_group_overrides(
+        self,
+        plugin_name: str,
+        label: str,
+        *,
+        edit_nonce: str = "",
+    ) -> None:
+        """Clear all user override fields for a group but keep an empty group entry."""
+
+        self._edit_nonce = edit_nonce
+        payload = self._load_user_groupings()
+        if not isinstance(payload, dict):
+            payload = {}
+        plugin_entry = payload.get(plugin_name)
+        if not isinstance(plugin_entry, dict):
+            plugin_entry = {}
+            payload[plugin_name] = plugin_entry
+        groups = plugin_entry.get("idPrefixGroups")
+        if not isinstance(groups, dict):
+            groups = {}
+            plugin_entry["idPrefixGroups"] = groups
+        groups[label] = {}
+        if edit_nonce:
+            payload["_edit_nonce"] = edit_nonce
+        self._write_user_groupings(payload)
+        try:
+            self._loader.load()
+            self._groupings_data = self._loader.merged()
+        except Exception:
+            try:
+                self._groupings_data = self._loader.merged()
+            except Exception:
+                pass
+
     def _load_groupings_cache(self) -> Dict[str, object]:
         try:
             payload = json.loads(self._cache_path.read_text(encoding="utf-8"))
@@ -354,6 +388,30 @@ class GroupStateService:
         groups = payload.get("groups") if isinstance(payload, dict) else None
         payload["groups"] = groups if isinstance(groups, dict) else {}
         return payload
+
+    def _load_user_groupings(self) -> Dict[str, object]:
+        try:
+            raw = self._user_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return {}
+        except OSError:
+            return {}
+        if not raw.strip():
+            return {}
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _write_user_groupings(self, payload: Dict[str, object]) -> None:
+        try:
+            text = json.dumps(payload, indent=2) + "\n"
+            tmp_path = self._user_path.with_suffix(self._user_path.suffix + ".tmp")
+            tmp_path.write_text(text, encoding="utf-8")
+            tmp_path.replace(self._user_path)
+        except Exception:
+            pass
 
     def _get_group_config(self, plugin_name: str, label: str) -> Dict[str, object]:
         entry = self._groupings_data.get(plugin_name) if isinstance(self._groupings_data, dict) else None

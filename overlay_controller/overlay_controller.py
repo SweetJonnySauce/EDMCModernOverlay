@@ -16,6 +16,7 @@ import time
 import traceback
 import logging
 import math
+import threading
 from math import ceil
 from pathlib import Path
 import tempfile
@@ -265,6 +266,7 @@ class OverlayConfigApp(tk.Tk):
             on_anchor_changed=self._handle_anchor_changed,
             on_justification_changed=self._handle_justification_changed,
             on_background_changed=self._handle_background_changed,
+            on_reset_clicked=self._handle_reset_clicked,
             load_idprefix_options=self._load_idprefix_options,
         )
         self.container = layout["container"]
@@ -285,6 +287,7 @@ class OverlayConfigApp(tk.Tk):
         self.justification_widget = layout["justification_widget"]
         self.background_widget = layout["background_widget"]
         self.tip_helper = layout["tip_helper"]
+        self.reset_button = layout["reset_button"]
         self._sidebar_focus_index = 0
         self.widget_select_mode = True
         self.sidebar.grid_propagate(True)
@@ -412,6 +415,10 @@ class OverlayConfigApp(tk.Tk):
     def report_callback_exception(self, exc, val, tb) -> None:  # type: ignore[override]
         """Ensure Tk errors are printed to stderr instead of being swallowed."""
 
+        try:
+            _controller_debug("Tk callback exception: %s", val)
+        except Exception:
+            pass
         traceback.print_exception(exc, val, tb, file=sys.stderr)
 
 
@@ -872,6 +879,12 @@ class OverlayConfigApp(tk.Tk):
                     setter(enabled)
                 except Exception:
                     continue
+        reset_button = getattr(self, "reset_button", None)
+        if reset_button is not None:
+            try:
+                reset_button.configure(state="normal" if enabled else "disabled")
+            except Exception:
+                pass
         if not enabled and not self.widget_select_mode and self.widget_focus_area == "sidebar":
             if getattr(self, "_sidebar_focus_index", 0) > 0:
                 self.exit_focus_mode()
@@ -1574,6 +1587,43 @@ class OverlayConfigApp(tk.Tk):
                 pass
         self._edit_nonce = f"{time.time():.6f}-{os.getpid()}"
         self._draw_preview()
+
+    def _handle_reset_clicked(self) -> None:
+        selection = self._get_current_group_selection()
+        if selection is None:
+            return
+        plugin_name, label = selection
+        self._edit_nonce = f"{time.time():.6f}-{os.getpid()}"
+        self._user_overrides_nonce = self._edit_nonce
+        state = safe_getattr(self, "_group_state")
+        if state is not None:
+            try:
+                state.reset_group_overrides(plugin_name, label, edit_nonce=self._edit_nonce)
+                self._groupings_data = getattr(state, "_groupings_data", self._groupings_data)
+            except Exception:
+                pass
+        self._group_snapshots.pop(selection, None)
+        self._last_preview_signature = None
+        self._offset_live_edit_until = 0.0
+        self._last_edit_ts = time.time()
+        timers = getattr(self, "_mode_timers", None)
+        if timers is not None:
+            try:
+                timers.record_edit()
+                setattr(timers, "_live_edit_until", 0.0)
+            except Exception:
+                pass
+        bridge = getattr(self, "_plugin_bridge", None)
+        if bridge is not None:
+            try:
+                bridge.reset_active_group_cache()
+            except Exception:
+                pass
+        self._last_active_group_sent = None
+        self._handle_idprefix_selected()
+        self._edit_controller._emit_override_reload_signal()
+        _controller_debug("Reset user overrides for %s/%s", plugin_name, label)
+
     def _handle_absolute_changed(self, axis: str) -> None:
         selection = self._get_current_group_selection()
         if selection is None or not hasattr(self, "absolute_widget"):
@@ -2622,6 +2672,17 @@ def _log_startup_failure(root_path: Path, exc: BaseException) -> None:
     )
 
 
+def _log_unhandled_exception(root_path: Path, context: str, exc: BaseException) -> None:
+    _append_controller_log(
+        root_path,
+        [
+            f"Unhandled exception ({context}):",
+            *traceback.format_exception(type(exc), exc, exc.__traceback__),
+        ],
+        announce=True,
+    )
+
+
 def _log_startup_event(root_path: Path, message: str) -> None:
     """Write a simple startup confirmation to the controller log."""
     _append_controller_log(root_path, [message], announce=True)
@@ -2647,6 +2708,60 @@ def _append_controller_log(root_path: Path, lines: list[str], *, announce: bool 
             sys.stderr.write(
                 f"[overlay-controller] log {'written' if wrote else 'failed'} at {log_path}\n"
             )
+        except Exception:
+            pass
+
+
+def _install_exception_hooks(root_path: Path) -> None:
+    def _handle(exc_type, exc, tb) -> None:
+        try:
+            _log_unhandled_exception(root_path, "sys.excepthook", exc)
+        except Exception:
+            pass
+        try:
+            traceback.print_exception(exc_type, exc, tb, file=sys.stderr)
+        except Exception:
+            pass
+
+    def _handle_thread(args) -> None:
+        try:
+            _log_unhandled_exception(root_path, "threading.excepthook", args.exc_value)
+        except Exception:
+            pass
+        try:
+            traceback.print_exception(args.exc_type, args.exc_value, args.exc_traceback, file=sys.stderr)
+        except Exception:
+            pass
+
+    try:
+        sys.excepthook = _handle
+    except Exception:
+        pass
+    try:
+        threading.excepthook = _handle_thread  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+
+def _show_startup_error_dialog(root_path: Path, exc: BaseException) -> None:
+    log_path = _resolve_controller_log_path(root_path)
+    message = (
+        "Overlay Controller failed to start.\n\n"
+        f"{exc}\n\n"
+        f"Log file: {log_path}"
+    )
+    try:
+        import tkinter.messagebox as messagebox
+
+        dialog = tk.Tk()
+        dialog.withdraw()
+        try:
+            messagebox.showerror("Overlay Controller Error", message)
+        finally:
+            dialog.destroy()
+    except Exception:
+        try:
+            sys.stderr.write(message + "\n")
         except Exception:
             pass
 
@@ -2795,6 +2910,7 @@ def launch() -> None:
     """Launch the overlay controller UI and record startup metadata."""
 
     root_path = Path(__file__).resolve().parents[1]
+    _install_exception_hooks(root_path)
     _controller_debug("Launching overlay controller: python=%s cwd=%s", sys.executable, Path.cwd())
     if _ENV_LOG_LEVEL_VALUE is not None or _ENV_LOG_LEVEL_NAME:
         _controller_debug(
@@ -2817,6 +2933,7 @@ def launch() -> None:
     except Exception as exc:
         _controller_debug("Overlay controller launch failed: %s", exc)
         _log_startup_failure(root_path, exc)
+        _show_startup_error_dialog(root_path, exc)
         raise
 
 
