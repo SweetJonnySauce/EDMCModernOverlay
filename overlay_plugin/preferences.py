@@ -43,6 +43,7 @@ CLIENT_LOG_RETENTION_MIN = 1
 CLIENT_LOG_RETENTION_MAX = 20
 DEFAULT_CLIENT_LOG_RETENTION = 5
 TOGGLE_ARGUMENT_DEFAULT = "t"
+TEST_OVERLAY_TTL_SECONDS = 10
 PHYSICAL_CLAMP_SCALE_MIN = 0.5
 PHYSICAL_CLAMP_SCALE_MAX = 3.0
 FONT_BOUND_MIN = 6.0
@@ -2812,7 +2813,7 @@ class PreferencesPanel:
         overlay = self._legacy_overlay()
         if overlay is None:
             return
-        ttl = 10
+        ttl = TEST_OVERLAY_TTL_SECONDS
         # FDev media usage rules: https://forums.frontier.co.uk/threads/elite-dangerous-media-usage-rules.510879/
         disclaimer = (
             "The EDMCModernOverlay Test Overlay feature was created using assets and imagery from Elite Dangerous, with the permission of Frontier Developments plc, for non-commercial "

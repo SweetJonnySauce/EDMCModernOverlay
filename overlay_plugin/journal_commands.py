@@ -32,6 +32,7 @@ class _OverlayCommandContext:
     launch_controller: Optional[Callable[[], None]] = None
     set_opacity: Optional[Callable[[int], None]] = None
     toggle_opacity: Optional[Callable[[], None]] = None
+    test_overlay: Optional[Callable[[], None]] = None
 
 
 def _normalise_prefix(value: str) -> str:
@@ -104,7 +105,7 @@ class JournalCommandHelper:
         self._help_text = (
             f"Overlay commands: {help_prefix} (launch controller), {help_prefix} {self._toggle_argument} "
             f"(toggle overlay), {help_prefix} next (cycle forward), {help_prefix} prev (cycle backward), "
-            f"{help_prefix} help"
+            f"{help_prefix} test (show test logo), {help_prefix} help"
         )
 
     # Public API ---------------------------------------------------------
@@ -152,6 +153,8 @@ class JournalCommandHelper:
         if action in {"prev", "previous", "p"}:
             self._invoke_cycle(self._ctx.cycle_prev, success_message="Overlay cycle: previous payload.")
             return True
+        if action in {"test"}:
+            return self._test_overlay()
 
         opacity = None
         invalid_opacity = False
@@ -233,6 +236,22 @@ class JournalCommandHelper:
         else:
             self._ctx.send_message(success_message)
 
+    def _test_overlay(self) -> bool:
+        callback = self._ctx.test_overlay
+        if callback is None:
+            self._ctx.send_message("Overlay test command unavailable.")
+            return True
+        try:
+            callback()
+        except RuntimeError as exc:
+            self._ctx.send_message(f"Overlay test failed: {exc}")
+        except Exception as exc:  # pragma: no cover - defensive guard
+            _LOGGER.warning("Overlay test overlay callback failed: %s", exc)
+            self._ctx.send_message("Overlay test failed; see EDMC log.")
+        else:
+            self._ctx.send_message("Overlay test logo sent.")
+        return True
+
 
 def build_command_helper(
     plugin_runtime: object,
@@ -259,6 +278,7 @@ def build_command_helper(
         launch_controller=getattr(plugin_runtime, "launch_overlay_controller", None),
         set_opacity=getattr(plugin_runtime, "set_payload_opacity_preference", None),
         toggle_opacity=getattr(plugin_runtime, "toggle_payload_opacity_preference", None),
+        test_overlay=getattr(plugin_runtime, "send_test_overlay", None),
     )
     legacy = legacy_prefixes if legacy_prefixes is not None else ["!overlay"]
     if command_prefix in legacy:

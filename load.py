@@ -56,6 +56,7 @@ if __package__:
         PreferencesPanel,
         STATUS_GUTTER_MAX,
         TroubleshootingPanelState,
+        TEST_OVERLAY_TTL_SECONDS,
         TOGGLE_ARGUMENT_DEFAULT,
         _apply_font_bounds_edit,
         _apply_font_step_edit,
@@ -78,6 +79,7 @@ if __package__:
     )
     from .overlay_plugin.journal_commands import build_command_helper
     from .overlay_plugin.toggle_helpers import toggle_payload_opacity
+    from .EDMCOverlay import edmcoverlay
     from .EDMCOverlay.edmcoverlay import normalise_legacy_payload
     from .group_cache import GroupPlacementCache
     from .overlay_client import env_overrides as env_overrides_helper
@@ -111,6 +113,7 @@ else:  # pragma: no cover - EDMC loads as top-level module
         PreferencesPanel,
         STATUS_GUTTER_MAX,
         TroubleshootingPanelState,
+        TEST_OVERLAY_TTL_SECONDS,
         TOGGLE_ARGUMENT_DEFAULT,
         _apply_font_bounds_edit,
         _apply_font_step_edit,
@@ -133,6 +136,7 @@ else:  # pragma: no cover - EDMC loads as top-level module
     )
     from overlay_plugin.journal_commands import build_command_helper
     from overlay_plugin.toggle_helpers import toggle_payload_opacity
+    from EDMCOverlay import edmcoverlay
     from EDMCOverlay.edmcoverlay import normalise_legacy_payload
     from group_cache import GroupPlacementCache
     import overlay_client.env_overrides as env_overrides_helper
@@ -468,6 +472,7 @@ class _PluginRuntime:
         )
         self.watchdog: Optional[OverlayWatchdog] = None
         self._legacy_tcp_server: Optional[LegacyOverlayTCPServer] = None
+        self._legacy_overlay_client = None
         self._lock = threading.Lock()
         self._lifecycle = LifecycleTracker(LOGGER)
         self._prefs_lock = threading.Lock()
@@ -1432,6 +1437,17 @@ class _PluginRuntime:
         )
         self._send_overlay_config()
 
+    def _legacy_overlay(self):
+        client = self._legacy_overlay_client
+        if client is not None:
+            return client
+        try:
+            client = edmcoverlay.Overlay()
+        except Exception as exc:
+            raise RuntimeError("Legacy API not available.") from exc
+        self._legacy_overlay_client = client
+        return client
+
     def send_test_message(self, message: str, x: Optional[int] = None, y: Optional[int] = None) -> None:
         text = message.strip()
         if not text:
@@ -1477,6 +1493,154 @@ class _PluginRuntime:
                 payload["ttl"],
                 payload["size"],
             )
+
+    def send_test_overlay(self) -> None:
+        if not self._running:
+            raise RuntimeError("Overlay is not running")
+        log_path = self.plugin_dir / "payload_store" / "ed-logo-test.log"
+        try:
+            raw_lines = log_path.read_text(encoding="utf-8").splitlines()
+        except FileNotFoundError as exc:
+            raise RuntimeError(f"Test overlay payloads not found: {log_path}") from exc
+        except Exception as exc:
+            raise RuntimeError(f"Failed to read test overlay payloads: {exc}") from exc
+
+        overlay = self._legacy_overlay()
+        ttl = int(TEST_OVERLAY_TTL_SECONDS)
+        sent = 0
+        rect_bounds: Optional[tuple[int, int, int, int]] = None
+        vector_bounds: Optional[tuple[int, int, int, int]] = None
+        label_anchor: Optional[tuple[int, int, str]] = None
+
+        def _merge_bounds(bounds: Optional[tuple[int, int, int, int]], new_bounds: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+            if bounds is None:
+                return new_bounds
+            return (
+                min(bounds[0], new_bounds[0]),
+                min(bounds[1], new_bounds[1]),
+                max(bounds[2], new_bounds[2]),
+                max(bounds[3], new_bounds[3]),
+            )
+
+        try:
+            for line in raw_lines:
+                brace = line.find("{")
+                if brace == -1:
+                    continue
+                payload = json.loads(line[brace:])
+                payload_type = payload.get("type")
+                if payload_type == "message":
+                    text_value = str(payload.get("text") or "")
+                    color_value = str(payload.get("color") or "white")
+                    x_val = int(payload.get("x", 0))
+                    y_val = int(payload.get("y", 0))
+                    size_value = str(payload.get("size") or "normal")
+                    overlay.send_message(
+                        str(payload.get("id") or ""),
+                        text_value,
+                        color_value,
+                        x_val,
+                        y_val,
+                        ttl=ttl,
+                        size=size_value,
+                    )
+                    if text_value.strip().lower() == "edmc modern overlay":
+                        label_anchor = (x_val, y_val, color_value)
+                    sent += 1
+                    continue
+                if payload_type == "shape":
+                    shape = str(payload.get("shape") or "")
+                    base = {
+                        "id": str(payload.get("id") or ""),
+                        "shape": shape,
+                        "color": payload.get("color") or "white",
+                        "ttl": ttl,
+                    }
+                    if shape == "vect":
+                        vector = payload.get("vector") or []
+                        base["vector"] = vector
+                        min_x = min_y = None
+                        max_x = max_y = None
+                        if isinstance(vector, list):
+                            for entry in vector:
+                                if not isinstance(entry, Mapping):
+                                    continue
+                                try:
+                                    x_val = int(entry.get("x", 0))
+                                    y_val = int(entry.get("y", 0))
+                                except (TypeError, ValueError):
+                                    continue
+                                min_x = x_val if min_x is None else min(min_x, x_val)
+                                min_y = y_val if min_y is None else min(min_y, y_val)
+                                max_x = x_val if max_x is None else max(max_x, x_val)
+                                max_y = y_val if max_y is None else max(max_y, y_val)
+                        if min_x is not None and min_y is not None and max_x is not None and max_y is not None:
+                            vector_bounds = _merge_bounds(vector_bounds, (min_x, min_y, max_x, max_y))
+                        overlay.send_raw(base)
+                        sent += 1
+                        continue
+                    if shape == "rect":
+                        x_val = int(payload.get("x", 0))
+                        y_val = int(payload.get("y", 0))
+                        w_val = int(payload.get("w", 0))
+                        h_val = int(payload.get("h", 0))
+                        base.update(
+                            {
+                                "fill": payload.get("fill") or "#00000000",
+                                "x": x_val,
+                                "y": y_val,
+                                "w": w_val,
+                                "h": h_val,
+                            }
+                        )
+                        rect_bounds = _merge_bounds(rect_bounds, (x_val, y_val, x_val + w_val, y_val + h_val))
+                        overlay.send_raw(base)
+                        sent += 1
+                        continue
+        except Exception as exc:
+            raise RuntimeError(f"Test overlay failed: {exc}") from exc
+
+        version_text = f"v{PLUGIN_VERSION}".strip()
+        if version_text:
+            try:
+                if label_anchor is not None:
+                    anchor_x, anchor_y, anchor_color = label_anchor
+                    line_height = 16
+                    y_pos = anchor_y + line_height
+                    overlay.send_message(
+                        f"{PLUGIN_NAME}-logo-version",
+                        version_text,
+                        anchor_color,
+                        int(anchor_x),
+                        int(y_pos),
+                        ttl=ttl,
+                        size="normal",
+                    )
+                    sent += 1
+                else:
+                    bounds = rect_bounds or vector_bounds
+                    if bounds is not None:
+                        padding = 6
+                        approx_char_width = 8
+                        approx_line_height = 16
+                        approx_text_width = len(version_text) * approx_char_width
+                        x_pos = max(bounds[0], bounds[2] - padding - approx_text_width)
+                        y_pos = max(bounds[1], bounds[3] - padding - approx_line_height)
+                        overlay.send_message(
+                            f"{PLUGIN_NAME}-logo-version",
+                            version_text,
+                            "#f5821f",
+                            int(x_pos),
+                            int(y_pos),
+                            ttl=ttl,
+                            size="normal",
+                        )
+                        sent += 1
+            except Exception as exc:
+                raise RuntimeError(f"Failed to send test overlay version: {exc}") from exc
+
+        if not sent:
+            raise RuntimeError("No test overlay payloads were sent.")
 
     def preview_font_sizes(self) -> None:
         if not self._running:
