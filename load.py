@@ -46,7 +46,7 @@ if __package__:
         schedule_config_rebroadcasts,
         schedule_version_notice_rebroadcasts,
     )
-    from .overlay_plugin.obs_capture_support import obs_capture_preference_value
+    from .overlay_plugin.standalone_support import standalone_mode_preference_value
     from .overlay_plugin.overlay_config_payload import build_overlay_config_payload
     from .overlay_plugin.preferences import (
         CLIENT_LOG_RETENTION_MAX,
@@ -103,7 +103,7 @@ else:  # pragma: no cover - EDMC loads as top-level module
         schedule_config_rebroadcasts,
         schedule_version_notice_rebroadcasts,
     )
-    from overlay_plugin.obs_capture_support import obs_capture_preference_value
+    from overlay_plugin.standalone_support import standalone_mode_preference_value
     from overlay_plugin.overlay_config_payload import build_overlay_config_payload
     from overlay_plugin.preferences import (
         CLIENT_LOG_RETENTION_MAX,
@@ -1421,14 +1421,14 @@ class _PluginRuntime:
         LOGGER.debug(
             "Applying updated preferences: show_connection_status=%s "
             "client_log_retention=%d gridlines_enabled=%s gridline_spacing=%d overlay_opacity=%.2f "
-            "force_render=%s obs_capture_friendly=%s force_xwayland=%s debug_overlay=%s cycle_payload_ids=%s font_min=%.1f font_max=%.1f",
+            "force_render=%s standalone_mode=%s force_xwayland=%s debug_overlay=%s cycle_payload_ids=%s font_min=%.1f font_max=%.1f",
             self._preferences.show_connection_status,
             self._resolve_client_log_retention(),
             self._preferences.gridlines_enabled,
             self._preferences.gridline_spacing,
             self._preferences.overlay_opacity,
             self._resolve_force_render(),
-            obs_capture_preference_value(self._preferences),
+            standalone_mode_preference_value(self._preferences),
             self._preferences.force_xwayland,
             self._preferences.show_debug_overlay,
             self._preferences.cycle_payload_ids,
@@ -1863,9 +1863,9 @@ class _PluginRuntime:
         if broadcast:
             self._send_overlay_config()
 
-    def set_obs_capture_friendly_preference(self, value: bool) -> None:
+    def set_standalone_mode_preference(self, value: bool) -> None:
         with self._prefs_lock:
-            self._preferences.obs_capture_friendly = bool(value)
+            self._preferences.standalone_mode = bool(value)
             self._preferences.save()
         self._send_overlay_config()
 
@@ -2574,7 +2574,7 @@ class _PluginRuntime:
         self._publish_payload(payload)
         LOGGER.debug(
             "Published overlay config: opacity=%s global_payload_opacity=%s show_status=%s debug_overlay_corner=%s status_bottom_margin=%s client_log_retention=%d gridlines_enabled=%s "
-            "gridline_spacing=%d force_render=%s obs_capture_friendly=%s title_bar_enabled=%s title_bar_height=%d debug_overlay=%s physical_clamp=%s cycle_payload_ids=%s copy_payload_id_on_cycle=%s "
+            "gridline_spacing=%d force_render=%s standalone_mode=%s title_bar_enabled=%s title_bar_height=%d debug_overlay=%s physical_clamp=%s cycle_payload_ids=%s copy_payload_id_on_cycle=%s "
             "nudge_overflow=%s payload_gutter=%d payload_log_delay=%.2f font_min=%.1f font_max=%.1f font_step=%d platform_context=%s clamp_overrides=%s",
             payload["opacity"],
             payload["global_payload_opacity"],
@@ -2585,7 +2585,7 @@ class _PluginRuntime:
             payload["gridlines_enabled"],
             payload["gridline_spacing"],
             payload["force_render"],
-            payload["obs_capture_friendly"],
+            payload["standalone_mode"],
             payload["title_bar_enabled"],
             payload["title_bar_height"],
             payload["show_debug_overlay"],
@@ -3222,7 +3222,7 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
         payload_nudge_callback = _plugin.set_payload_nudge_preference if _plugin else None
         payload_gutter_callback = _plugin.set_payload_nudge_gutter_preference if _plugin else None
         force_render_callback = _plugin.set_force_render_preference if _plugin else None
-        obs_capture_friendly_callback = _plugin.set_obs_capture_friendly_preference if _plugin else None
+        standalone_mode_callback = _plugin.set_standalone_mode_preference if _plugin else None
         title_bar_config_callback = _plugin.set_title_bar_compensation_preference if _plugin else None
         debug_overlay_callback = _plugin.set_debug_overlay_preference if _plugin else None
         payload_logging_callback = _plugin.set_payload_logging_preference if _plugin else None
@@ -3261,7 +3261,7 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
             payload_nudge_callback,
             payload_gutter_callback,
             force_render_callback,
-            obs_capture_friendly_callback,
+            standalone_mode_callback,
             title_bar_config_callback,
             debug_overlay_callback,
             payload_logging_callback,
@@ -3318,14 +3318,14 @@ def prefs_changed(cmdr: str, is_beta: bool) -> None:  # pragma: no cover - save 
             LOGGER.debug(
                 "Preferences saved: show_connection_status=%s "
                 "client_log_retention=%d gridlines_enabled=%s gridline_spacing=%d "
-                "force_render=%s obs_capture_friendly=%s title_bar_enabled=%s title_bar_height=%d force_xwayland=%s "
+                "force_render=%s standalone_mode=%s title_bar_enabled=%s title_bar_height=%d force_xwayland=%s "
                 "debug_overlay=%s cycle_payload_ids=%s copy_payload_id_on_cycle=%s font_min=%.1f font_max=%.1f",
                 _preferences.show_connection_status,
                 _plugin._resolve_client_log_retention() if _plugin else _preferences.client_log_retention,
                 _preferences.gridlines_enabled,
                 _preferences.gridline_spacing,
                 _plugin._resolve_force_render() if _plugin else bool(getattr(_preferences, "force_render", False)),
-                obs_capture_preference_value(_preferences),
+                standalone_mode_preference_value(_preferences),
                 _preferences.title_bar_enabled,
                 _preferences.title_bar_height,
                 _preferences.force_xwayland,

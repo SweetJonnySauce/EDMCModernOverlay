@@ -1,15 +1,15 @@
-## Goal: Add support to make the overlay capturable by OBS.
+## Goal: Add support to make the overlay capturable by capture tools.
 
 ## Findings (Issue #108)
-- The overlay window is forced into `Qt.WindowType.Tool` whenever click-through is applied, and click-through is applied on startup because drag is disabled by default. Tool windows are commonly hidden from OBS Window Capture on Windows, matching the "not selectable" report.
-- Windows click-through sets `WS_EX_LAYERED | WS_EX_TRANSPARENT`, which can also cause OBS to ignore or fail to capture the window depending on capture method.
+- The overlay window is forced into `Qt.WindowType.Tool` whenever click-through is applied, and click-through is applied on startup because drag is disabled by default. Tool windows are commonly hidden from stand-alone window capture on Windows, matching the "not selectable" report.
+- Windows click-through sets `WS_EX_LAYERED | WS_EX_TRANSPARENT`, which can also cause capture tools to ignore or fail to capture the window depending on capture method.
 
 ## Requirements (Draft)
-- Provide a capture-friendly mode that allows OBS Window Capture to see/select the overlay window on Windows.
-- Keep click-through enabled in capture-friendly mode (no in-game input interference).
+- Provide a stand-alone mode that allows stand-alone window capture to see/select the overlay window on Windows.
+- Keep click-through enabled in stand-alone mode (no in-game input interference).
 - Allow users to opt into the mode without altering default behavior for existing users.
 - Ensure this mode can be toggled without affecting overlay positioning/follow behavior.
-- Enable capture-friendly mode via a preferences pane setting.
+- Enable stand-alone mode via a preferences pane setting.
 - Preferences pane control is Windows-only (shown but disabled/greyed out on non-Windows OSs).
 
 ## Questions (Draft)
@@ -63,13 +63,13 @@
 | Phase | Description | Status |
 | --- | --- | --- |
 | 1 | Preferences + config plumbing (Windows-only toggle) | Completed |
-| 2 | Windows windowing behavior changes for capture-friendly mode | Completed |
+| 2 | Windows windowing behavior changes for stand-alone mode | Completed |
 | 3 | Validation + docs | In Progress |
 
 ## Phase Details
 
 ### Phase 1: Preferences + Config Plumbing (Windows-only toggle)
-- Goal: introduce a preferences pane toggle that persists a capture-friendly mode flag and is disabled on non-Windows OSs.
+- Goal: introduce a preferences pane toggle that persists a stand-alone mode flag and is disabled on non-Windows OSs.
 - Behavior invariants: default behavior unchanged when toggle is off; click-through remains enabled when toggle is on.
 - Edge cases: missing/invalid config values; OS detection for disabling the control; existing configs with no new key.
 - Risks: incorrect default or config wiring silently enabling the mode.
@@ -80,7 +80,7 @@
 | 1.1 | Define the new preference key and default value (off) in settings schema/config models. | Completed |
 | 1.2 | Wire preference persistence to overlay config payloads (read/write) without changing defaults. | Completed |
 | 1.3 | Add preferences UI control: visible but disabled on non-Windows, with short help text. | Completed |
-| 1.4 | Extract OBS helpers + overlay config payload building into helper modules to keep `load.py`/preferences lighter. | Completed |
+| 1.4 | Extract capture tools helpers + overlay config payload building into helper modules to keep `load.py`/preferences lighter. | Completed |
 
 #### Phase 1 Plan (Detail)
 - Scope: preferences only (no runtime behavior changes yet).
@@ -92,7 +92,7 @@
   - New boolean setting key (name TBD) with default `false`.
   - UI binds directly to the new key and writes through existing config plumbing.
 - UI requirements:
-  - Label should mention OBS and Windows-only behavior.
+  - Label should mention capture tools and Windows-only behavior.
   - Disabled on non-Windows with a brief hint (e.g., "Windows only").
 - Acceptance criteria:
   - New toggle appears in preferences on Windows and is enabled.
@@ -104,13 +104,13 @@
   - Optional UI test or manual check to confirm disablement on non-Windows.
 
 #### Phase 1 Results
-- Added `obs_capture_friendly` preference (default off) across settings persistence and overlay config payloads.
-- Preferences pane now shows "OBS capture-friendly mode (Windows only)" and disables it on non-Windows OSs.
+- Added `standalone_mode` preference (default off) across settings persistence and overlay config payloads.
+- Preferences pane now shows "stand-alone mode mode (Windows only)" and disables it on non-Windows OSs.
 - Added persistence coverage in preferences tests for the new boolean setting.
-- Refactored OBS support strings/platform gating and overlay config payload assembly into helper modules.
+- Refactored capture tools support strings/platform gating and overlay config payload assembly into helper modules.
 
 ### Phase 2: Windows Windowing Behavior Changes
-- Goal: make the overlay window selectable in OBS Window Capture when capture-friendly mode is enabled on Windows.
+- Goal: make the overlay window selectable in stand-alone window capture when stand-alone mode is enabled on Windows.
 - Behavior invariants: click-through remains enabled; overlay remains always-on-top and positioned correctly; non-Windows behavior unchanged.
 - Edge cases: drag-enabled mode toggling; interaction controller reapplying window flags; startup apply-drag-state overwriting flags.
 - Risks: breaking overlay input behavior or causing focus/activation issues on Windows.
@@ -118,8 +118,8 @@
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 2.1 | Introduce a capture-friendly flag in the overlay client state and ensure it is Windows-only. | Completed |
-| 2.2 | Adjust window flag application to skip `Qt.WindowType.Tool` when capture-friendly is enabled on Windows. | Completed |
+| 2.1 | Introduce a stand-alone flag in the overlay client state and ensure it is Windows-only. | Completed |
+| 2.2 | Adjust window flag application to skip `Qt.WindowType.Tool` when stand-alone is enabled on Windows. | Completed |
 | 2.3 | Ensure click-through stays enabled while avoiding regressions in drag/move handling. | Completed |
 
 #### Phase 2 Plan (Detail)
@@ -129,62 +129,62 @@
   - Window flag application path (`overlay_client/interaction_controller.py`, possibly `overlay_client/setup_surface.py`).
   - Windows click-through integration (`overlay_client/platform_integration.py`) if needed.
 - Proposed behavior:
-  - When `obs_capture_friendly` is true on Windows, avoid applying `Qt.WindowType.Tool` so the overlay appears as a standard window for OBS Window Capture.
+  - When `standalone_mode` is true on Windows, avoid applying `Qt.WindowType.Tool` so the overlay appears as a standard window for stand-alone window capture.
   - Keep click-through enabled; do not change opacity or z-order behavior.
 - Acceptance criteria:
-  - On Windows with capture-friendly enabled, OBS Window Capture lists the overlay window.
-  - On Windows with capture-friendly disabled, behavior matches current baseline.
+  - On Windows with stand-alone enabled, stand-alone window capture lists the overlay window.
+  - On Windows with stand-alone disabled, behavior matches current baseline.
   - Non-Windows behavior remains unchanged and pref is ignored.
   - No regression in drag-enabled mode or follow positioning.
   - Window flag application failures are logged and do not crash the overlay.
 - Implementation notes:
-  - Gate any flag changes behind the `obs_capture_friendly` preference and a Windows platform check.
+  - Gate any flag changes behind the `standalone_mode` preference and a Windows platform check.
   - Ensure flag changes are re-applied during drag state changes (because `_apply_drag_state()` is called on startup and toggles flags).
   - Handle missing window handles or flag application errors with a log + safe no-op.
 - Tests (targeted, Phase 2):
   - Unit test to verify window flag decision logic (if extracted to a helper).
-  - Manual validation on Windows + OBS Window Capture.
+  - Manual validation on Windows + stand-alone window capture.
 
 #### Phase 2 Results
-- Added Windows-only capture-friendly state to the overlay client and applied it via config updates.
-- Window flag application now clears the Tool flag when capture-friendly is enabled on Windows, keeping click-through intact.
+- Added Windows-only stand-alone state to the overlay client and applied it via config updates.
+- Window flag application now clears the Tool flag when stand-alone is enabled on Windows, keeping click-through intact.
 - Added error handling for window flag application to avoid crashes on flag/handle failures.
 
 ### Phase 3: Validation + Docs
 - Goal: verify the new mode on Windows and document usage/limitations.
 - Behavior invariants: no regression in default mode; toggle is disabled on non-Windows.
-- Risks: OBS capture still failing due to other window styles (e.g., layered/transparent).
-- Mitigations: document known limitations and add a follow-up note if further OBS tuning is needed.
+- Risks: capture tools capture still failing due to other window styles (e.g., layered/transparent).
+- Mitigations: document known limitations and add a follow-up note if further capture tools tuning is needed.
 
 | Stage | Description | Status |
 | --- | --- | --- |
 | 3.1 | Add/adjust unit tests for config parsing/defaults and flag gating (where feasible). | Completed |
-| 3.2 | Manual validation checklist for Windows + OBS Window Capture (note exact steps). | Pending |
+| 3.2 | Manual validation checklist for Windows + stand-alone window capture (note exact steps). | Pending |
 | 3.3 | Update README/RELEASE_NOTES with the new preference and Windows-only behavior. | Completed |
 
 #### Phase 3 Plan (Detail)
 - Scope: validation + documentation only (no feature changes).
 - Validation checklist (Windows):
-  - Enable “OBS capture-friendly mode” in preferences.
+  - Enable “stand-alone mode mode” in preferences.
   - Restart overlay client.
-  - In OBS, add Window Capture source and verify the overlay window is selectable.
+  - In capture tools, add Window Capture source and verify the overlay window is selectable.
   - Confirm overlay remains click-through and always-on-top during gameplay.
   - Disable the toggle and confirm previous behavior returns.
 - Documentation updates:
   - Note Windows-only behavior and that the overlay may appear in Alt-Tab/taskbar.
-  - Describe the OBS Window Capture flow and any known limitations (e.g., transparency handling).
+  - Describe the stand-alone window capture flow and any known limitations (e.g., transparency handling).
 - Acceptance criteria:
   - Manual checklist completed on Windows.
   - Release notes and README mention the new preference and its Windows-only scope.
   - Tests (if added) pass.
 
 #### Phase 3 Results
-- Added unit coverage for OBS capture preference gating.
-- Documented OBS capture-friendly mode in README and release notes.
+- Added unit coverage for capture tools capture preference gating.
+- Documented stand-alone mode mode in README and release notes.
 - Manual validation checklist recorded in this plan (pending execution).
-- Tests: `python3 -m pytest tests/test_obs_capture_support.py tests/test_preferences_persistence.py`
+- Tests: `python3 -m pytest tests/test_standalone_support.py tests/test_preferences_persistence.py`
 
 #### Manual Tests (To Run)
-- Windows: enable “OBS capture-friendly mode”, restart overlay, confirm OBS Window Capture can select the overlay window.
+- Windows: enable “stand-alone mode mode”, restart overlay, confirm stand-alone window capture can select the overlay window.
 - Windows: verify overlay remains click-through and always-on-top during gameplay.
-- Windows: disable the toggle and confirm prior behavior returns (overlay no longer selectable in OBS Window Capture).
+- Windows: disable the toggle and confirm prior behavior returns (overlay no longer selectable in stand-alone window capture).

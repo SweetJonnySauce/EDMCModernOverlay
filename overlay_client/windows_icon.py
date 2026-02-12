@@ -54,7 +54,7 @@ def apply_window_icons(
     path = icon_path or _DEFAULT_ICON_PATH
     log = logger or logging.getLogger("EDMC.ModernOverlay.Client")
     if not path.is_file():
-        log.debug("OBS capture icon missing at %s; skipping Windows icon update.", path)
+        log.debug("Stand-alone mode icon missing at %s; skipping Windows icon update.", path)
         return None, None
     try:
         import ctypes
@@ -84,7 +84,7 @@ def apply_window_icons(
     hicon_big = load_image(None, str(path), IMAGE_ICON, big_w, big_h, LR_LOADFROMFILE)
     hicon_small = load_image(None, str(path), IMAGE_ICON, small_w, small_h, LR_LOADFROMFILE)
     if not hicon_big and not hicon_small:
-        log.debug("Failed to load icon from %s for OBS capture window.", path)
+        log.debug("Failed to load icon from %s for stand-alone window.", path)
         return None, None
 
     if hicon_small:

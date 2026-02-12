@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Mapping
 
-from overlay_plugin.obs_capture_support import obs_capture_preference_value
+from overlay_plugin.standalone_support import standalone_mode_preference_value
 
 
 def build_overlay_config_payload(
@@ -27,7 +27,7 @@ def build_overlay_config_payload(
         "gridlines_enabled": bool(getattr(preferences, "gridlines_enabled", False)),
         "gridline_spacing": int(getattr(preferences, "gridline_spacing", 120)),
         "force_render": bool(force_render),
-        "obs_capture_friendly": obs_capture_preference_value(preferences),
+        "standalone_mode": standalone_mode_preference_value(preferences),
         "title_bar_enabled": bool(getattr(preferences, "title_bar_enabled", False)),
         "title_bar_height": int(getattr(preferences, "title_bar_height", 0)),
         "show_debug_overlay": show_debug_overlay,

@@ -10,11 +10,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 
-from overlay_plugin.obs_capture_support import (
-    OBS_CAPTURE_LABEL,
-    OBS_CAPTURE_PREF_KEY,
-    OBS_CAPTURE_TOOLTIP,
-    obs_capture_supported,
+from overlay_plugin.standalone_support import (
+    STANDALONE_MODE_LABEL,
+    STANDALONE_MODE_PREF_KEY,
+    STANDALONE_MODE_TOOLTIP,
+    standalone_mode_supported,
 )
 
 try:
@@ -548,7 +548,7 @@ class Preferences:
     gridlines_enabled: bool = False
     gridline_spacing: int = 120
     force_render: bool = False
-    obs_capture_friendly: bool = False
+    standalone_mode: bool = False
     force_xwayland: bool = False
     physical_clamp_enabled: bool = False
     physical_clamp_overrides: Dict[str, float] = field(default_factory=dict)
@@ -641,9 +641,9 @@ class Preferences:
             "gridlines_enabled": _config_get_bool(_config_key("gridlines_enabled"), self.gridlines_enabled),
             "gridline_spacing": _config_get_locale_number(_config_key("gridline_spacing"), self.gridline_spacing),
             "force_render": _config_get_bool(_config_key("force_render"), self.force_render),
-            "obs_capture_friendly": _config_get_bool(
-                _config_key(OBS_CAPTURE_PREF_KEY),
-                self.obs_capture_friendly,
+            "standalone_mode": _config_get_bool(
+                _config_key(STANDALONE_MODE_PREF_KEY),
+                self.standalone_mode,
             ),
             "force_xwayland": _config_get_bool(_config_key("force_xwayland"), self.force_xwayland),
             "physical_clamp_enabled": _config_get_bool(
@@ -722,9 +722,9 @@ class Preferences:
         self.gridlines_enabled = _coerce_bool(data.get("gridlines_enabled"), self.gridlines_enabled)
         self.gridline_spacing = _coerce_int(data.get("gridline_spacing"), self.gridline_spacing, minimum=10)
         self.force_render = _coerce_bool(data.get("force_render"), self.force_render)
-        self.obs_capture_friendly = _coerce_bool(
-            data.get(OBS_CAPTURE_PREF_KEY),
-            self.obs_capture_friendly,
+        self.standalone_mode = _coerce_bool(
+            data.get(STANDALONE_MODE_PREF_KEY),
+            self.standalone_mode,
         )
         self.force_xwayland = _coerce_bool(data.get("force_xwayland"), self.force_xwayland)
         self.physical_clamp_enabled = _coerce_bool(
@@ -818,7 +818,7 @@ class Preferences:
             "gridlines_enabled": bool(self.gridlines_enabled),
             "gridline_spacing": int(self.gridline_spacing),
             "force_render": bool(self.force_render),
-            OBS_CAPTURE_PREF_KEY: bool(self.obs_capture_friendly),
+            STANDALONE_MODE_PREF_KEY: bool(self.standalone_mode),
             "force_xwayland": bool(self.force_xwayland),
             "physical_clamp_enabled": bool(self.physical_clamp_enabled),
             "physical_clamp_overrides": dict(self.physical_clamp_overrides or {}),
@@ -858,7 +858,7 @@ class Preferences:
         _config_set_value(_config_key("gridlines_enabled"), bool(self.gridlines_enabled))
         _config_set_value(_config_key("gridline_spacing"), int(self.gridline_spacing))
         _config_set_value(_config_key("force_render"), bool(self.force_render))
-        _config_set_value(_config_key(OBS_CAPTURE_PREF_KEY), bool(self.obs_capture_friendly))
+        _config_set_value(_config_key(STANDALONE_MODE_PREF_KEY), bool(self.standalone_mode))
         _config_set_value(_config_key("force_xwayland"), bool(self.force_xwayland))
         _config_set_value(_config_key("physical_clamp_enabled"), bool(self.physical_clamp_enabled))
         try:
@@ -916,7 +916,7 @@ class PreferencesPanel:
         set_payload_nudge_callback: Optional[Callable[[bool], None]] = None,
         set_payload_gutter_callback: Optional[Callable[[int], None]] = None,
         set_force_render_callback: Optional[Callable[[bool], None]] = None,
-        set_obs_capture_friendly_callback: Optional[Callable[[bool], None]] = None,
+        set_standalone_mode_callback: Optional[Callable[[bool], None]] = None,
         set_title_bar_config_callback: Optional[Callable[[bool, int], None]] = None,
         set_debug_overlay_callback: Optional[Callable[[bool], None]] = None,
         set_payload_logging_callback: Optional[Callable[[bool], None]] = None,
@@ -967,7 +967,7 @@ class PreferencesPanel:
         self._var_payload_nudge = tk.BooleanVar(value=preferences.nudge_overflow_payloads)
         self._var_payload_gutter = tk.IntVar(value=max(0, int(preferences.payload_nudge_gutter)))
         self._var_force_render = tk.BooleanVar(value=preferences.force_render)
-        self._var_obs_capture_friendly = tk.BooleanVar(value=preferences.obs_capture_friendly)
+        self._var_standalone_mode = tk.BooleanVar(value=preferences.standalone_mode)
         self._var_physical_clamp = tk.BooleanVar(value=preferences.physical_clamp_enabled)
         self._var_physical_clamp_overrides = tk.StringVar(
             value=_format_physical_clamp_overrides(preferences.physical_clamp_overrides)
@@ -1049,7 +1049,7 @@ class PreferencesPanel:
         self._set_payload_nudge = set_payload_nudge_callback
         self._set_payload_gutter = set_payload_gutter_callback
         self._set_force_render = set_force_render_callback
-        self._set_obs_capture_friendly = set_obs_capture_friendly_callback
+        self._set_standalone_mode = set_standalone_mode_callback
         self._set_title_bar_config = set_title_bar_config_callback
         self._set_debug_overlay = set_debug_overlay_callback
         self._set_payload_logging = set_payload_logging_callback
@@ -1580,24 +1580,24 @@ class PreferencesPanel:
         dev_mode_checkbox.pack(side="left")
         dev_mode_row.grid(row=experimental_row, column=0, sticky="w", pady=ROW_PAD)
         experimental_row += 1
-        obs_row = ttk.Frame(experimental_tab, style=self._frame_style)
-        obs_checkbox = nb.Checkbutton(
-            obs_row,
-            text=OBS_CAPTURE_LABEL,
-            variable=self._var_obs_capture_friendly,
+        standalone_row = ttk.Frame(experimental_tab, style=self._frame_style)
+        standalone_checkbox = nb.Checkbutton(
+            standalone_row,
+            text=STANDALONE_MODE_LABEL,
+            variable=self._var_standalone_mode,
             onvalue=True,
             offvalue=False,
-            command=self._on_obs_capture_friendly_toggle,
+            command=self._on_standalone_mode_toggle,
         )
         _attach_tooltip(
-            obs_checkbox,
-            OBS_CAPTURE_TOOLTIP,
+            standalone_checkbox,
+            STANDALONE_MODE_TOOLTIP,
             nb_module=nb,
         )
-        obs_checkbox.pack(side="left")
-        if not obs_capture_supported():
-            obs_checkbox.state(["disabled"])
-        obs_row.grid(row=experimental_row, column=0, sticky="w", pady=ROW_PAD)
+        standalone_checkbox.pack(side="left")
+        if not standalone_mode_supported():
+            standalone_checkbox.state(["disabled"])
+        standalone_row.grid(row=experimental_row, column=0, sticky="w", pady=ROW_PAD)
         experimental_row += 1
 
         clamp_row = ttk.Frame(experimental_tab, style=self._frame_style)
@@ -2409,16 +2409,16 @@ class PreferencesPanel:
             self._preferences.force_render = value
             self._preferences.save()
 
-    def _on_obs_capture_friendly_toggle(self) -> None:
-        value = bool(self._var_obs_capture_friendly.get())
-        if self._set_obs_capture_friendly:
+    def _on_standalone_mode_toggle(self) -> None:
+        value = bool(self._var_standalone_mode.get())
+        if self._set_standalone_mode:
             try:
-                self._set_obs_capture_friendly(value)
+                self._set_standalone_mode(value)
             except Exception as exc:
-                self._status_var.set(f"Failed to update OBS capture-friendly mode: {exc}")
+                self._status_var.set(f"Failed to update stand-alone mode: {exc}")
                 return
         else:
-            self._preferences.obs_capture_friendly = value
+            self._preferences.standalone_mode = value
             self._preferences.save()
 
     def _on_physical_clamp_toggle(self) -> None:

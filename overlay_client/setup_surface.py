@@ -111,10 +111,10 @@ class SetupSurfaceMixin:
         self._base_width: int = int(BASE_WIDTH)
         self._log_retention: int = max(1, int(initial.client_log_retention))
         self._force_render: bool = bool(getattr(initial, "force_render", False))
-        self._obs_capture_friendly: bool = bool(getattr(initial, "obs_capture_friendly", False))
+        self._standalone_mode: bool = bool(getattr(initial, "standalone_mode", False))
         if not sys.platform.startswith("win"):
-            self._obs_capture_friendly = False
-        self._obs_capture_icon_handles: Tuple[Optional[int], Optional[int]] = (None, None)
+            self._standalone_mode = False
+        self._standalone_icon_handles: Tuple[Optional[int], Optional[int]] = (None, None)
         self._physical_clamp_enabled: bool = bool(getattr(initial, "physical_clamp_enabled", False))
         self._physical_clamp_overrides: Dict[str, float] = dict(
             getattr(initial, "physical_clamp_overrides", {}) or {}
@@ -412,30 +412,30 @@ class SetupSurfaceMixin:
 
     def _set_window_flag(self, flag: Qt.WindowType, enabled: bool) -> None:
         apply_enabled = enabled
-        if flag == Qt.WindowType.Tool and self._obs_capture_friendly and sys.platform.startswith("win"):
+        if flag == Qt.WindowType.Tool and self._standalone_mode and sys.platform.startswith("win"):
             apply_enabled = False
         try:
             self.setWindowFlag(flag, apply_enabled)
         except Exception as exc:
             _CLIENT_LOGGER.debug("Failed to set window flag %s=%s: %s", flag, apply_enabled, exc)
 
-    # Set up experimental feature to have overlay run as a separate app for screen grab with OBS
-    def _apply_obs_capture_window_identity(self) -> None:
-        if not self._obs_capture_friendly or not sys.platform.startswith("win"):
+    # Set up experimental feature to run the overlay as a stand-alone window for capture tools.
+    def _apply_standalone_window_identity(self) -> None:
+        if not self._standalone_mode or not sys.platform.startswith("win"):
             return
         if self.windowHandle() is None:
             return
         try:
             hwnd = int(self.winId())
         except Exception as exc:
-            _CLIENT_LOGGER.debug("Failed to acquire window handle for OBS icon update: %s", exc)
+            _CLIENT_LOGGER.debug("Failed to acquire window handle for stand-alone mode icon update: %s", exc)
             return
         try:
             from overlay_client.windows_icon import apply_window_icons, destroy_window_icons
         except Exception as exc:
             _CLIENT_LOGGER.debug("Failed to load Windows icon helper: %s", exc)
             return
-        old_handles = self._obs_capture_icon_handles
+        old_handles = self._standalone_icon_handles
         new_big, new_small = apply_window_icons(hwnd, logger=_CLIENT_LOGGER)
         if new_big is None and new_small is None:
             return
@@ -449,7 +449,7 @@ class SetupSurfaceMixin:
         )
         effective_big = new_big if new_big is not None else old_big
         effective_small = new_small if new_small is not None else old_small
-        self._obs_capture_icon_handles = (effective_big, effective_small)
+        self._standalone_icon_handles = (effective_big, effective_small)
 
     def _handle_show_event(self) -> None:
         self._apply_legacy_scale()
@@ -461,7 +461,7 @@ class SetupSurfaceMixin:
             self._platform_context.force_xwayland,
         )
         self._platform_controller.apply_click_through(True)
-        self._apply_obs_capture_window_identity()
+        self._apply_standalone_window_identity()
         screen = self.windowHandle().screen() if self.windowHandle() else None
         if screen is None:
             screen = QGuiApplication.primaryScreen()
