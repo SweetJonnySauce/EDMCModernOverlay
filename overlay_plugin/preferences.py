@@ -26,6 +26,14 @@ except Exception:  # pragma: no cover - running outside EDMC
     EDMC_CONFIG = None
     _edmc_number_from_string = None
 
+try:  # pragma: no cover - prefer package-relative import when available
+    from ..version import __version__ as MODERN_OVERLAY_VERSION  # type: ignore
+except Exception:  # pragma: no cover - running outside package layout
+    try:
+        from version import __version__ as MODERN_OVERLAY_VERSION  # type: ignore
+    except Exception:
+        MODERN_OVERLAY_VERSION = ""
+
 
 PREFERENCES_FILE = "overlay_settings.json"
 STATUS_BASE_MARGIN = 20
@@ -2831,6 +2839,7 @@ class PreferencesPanel:
             return
 
         sent = 0
+        label_anchor: Optional[tuple[int, int, str]] = None
         try:
             for line in raw_lines:
                 brace = line.find("{")
@@ -2839,15 +2848,22 @@ class PreferencesPanel:
                 payload = json.loads(line[brace:])
                 payload_type = payload.get("type")
                 if payload_type == "message":
+                    text_value = str(payload.get("text") or "")
+                    color_value = str(payload.get("color") or "white")
+                    x_val = int(payload.get("x", 0))
+                    y_val = int(payload.get("y", 0))
+                    size_value = str(payload.get("size") or "normal")
                     overlay.send_message(
                         str(payload.get("id") or ""),
-                        str(payload.get("text") or ""),
-                        str(payload.get("color") or "white"),
-                        int(payload.get("x", 0)),
-                        int(payload.get("y", 0)),
+                        text_value,
+                        color_value,
+                        x_val,
+                        y_val,
                         ttl=ttl,
-                        size=str(payload.get("size") or "normal"),
+                        size=size_value,
                     )
+                    if text_value.strip().lower() == "edmc modern overlay":
+                        label_anchor = (x_val, y_val, color_value)
                     sent += 1
                     continue
                 if payload_type == "shape":
@@ -2879,5 +2895,24 @@ class PreferencesPanel:
         except Exception as exc:
             self._status_var.set(f"Test overlay failed: {exc}")
             return
+
+        version_text = f"v{MODERN_OVERLAY_VERSION}".strip()
+        if version_text and label_anchor is not None:
+            try:
+                anchor_x, anchor_y, anchor_color = label_anchor
+                line_height = 16
+                overlay.send_message(
+                    f"{OVERLAY_ID_PREFIX.lower()}logo-version",
+                    version_text,
+                    anchor_color or "#f5821f",
+                    int(anchor_x),
+                    int(anchor_y + line_height),
+                    ttl=ttl,
+                    size="normal",
+                )
+                sent += 1
+            except Exception as exc:
+                self._status_var.set(f"Test overlay failed: {exc}")
+                return
 
         self._status_var.set(disclaimer)
