@@ -10,7 +10,7 @@
   - Added [chat command argument](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Chat-Command) to set opacity via in-game chat
   - Added [chat command argument](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Chat-Command) to toggle overlay on / off. Default is `!ovr t` and is configurable in settings. Behind the scenes, all this does is set opacity of the overlay.
   - Added a "`test`" arguement to the chat launch command (`!ovr`) so `!ovr test` displays a test overlay for troubleshooting purposes.
-  - Added [Getting Started](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Getting-Started) Wiki for Plugin developers
+  - Added [Getting Started](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Getting-Started) Wiki for Plugin developers and made the CMDR [Troubleshooting](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Troubleshooting) guide more user focused.
   - Added a Reset button to the Overlay Controller to reset the placement to plugin defaults. **Note to Plugin Developers**: When troubleshooting overlay issues with CMDRs, make sure to have them reset the placement to defaults to avoid a layering of multiple issues.
 ### Maintenance
   - Restructured settings to have an Experimental tab. This is done both for conservation of real estate and also allow for the concept of "non-cross platform" features (like standalone mode) being introduced.
