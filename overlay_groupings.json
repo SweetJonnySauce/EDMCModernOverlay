@@ -253,8 +253,8 @@
         "payloadJustification": "left",
         "markerLabelPosition": "below",
         "controllerPreviewBoxMode": "last",
-        "backgroundColor": null,
-        "backgroundBorderColor": null
+        "backgroundColor": "black",
+        "backgroundBorderColor": "blue"
       }
     }
   },
