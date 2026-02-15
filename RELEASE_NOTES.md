@@ -16,12 +16,15 @@
   - Restructured settings to have an Experimental tab. This is done both for conservation of real estate and also allow for the concept of "non-cross platform" features (like standalone mode) being introduced.
   - Improved Overlay Controller error handling
   - Merged in [PR #145](https://github.com/SweetJonnySauce/EDMCModernOverlay/pull/145) to copy python rather than symlinking
+  - Changed Bioscan Radar marker label position default to "below"
 ### Bug Fixes
   - Updates to payload tracing to help with Issue [#83](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/83) 
   - Changed client, controller, payload logs to UTC. Does not change the min version python3.10 contract.
   - Fixed [#101](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/101) where Overlay Controller preview boxes weren't respecting `controllerPreviewBoxMode="max"` settings
   - Fixed [#143](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/143) Align legacy TTL handling with EDMCOverlay: `ttl=0` expires immediately and callers must refresh periodically to keep payloads visible.
   - Fixed [#150](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/150) Set default marker label text size to 'normal' to match EDMCOverlay defaults
+  - Changed Bioscan Radar marker label position default to "below"
+  - Fixed test logo background. I had it at the CMDR setting level and not a the plugin level.
 
 ## 0.7.6
 - Features
