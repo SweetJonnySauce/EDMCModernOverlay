@@ -147,7 +147,7 @@
         ],
         "idPrefixGroupAnchor": "nw",
         "payloadJustification": "left",
-        "markerLabelPosition": "centered",
+        "markerLabelPosition": "below",
         "backgroundColor": null
       },
       "Bioscan Summary": {
