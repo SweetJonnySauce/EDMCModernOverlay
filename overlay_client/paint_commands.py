@@ -160,7 +160,8 @@ class _QtVectorPainterAdapter(VectorPainterAdapter):
         self._window._apply_font_fallbacks(font)
         mapper = self._window._compute_legacy_mapper()
         state = self._window._viewport_state()
-        font.setPointSizeF(self._window._legacy_preset_point_size("small", state, mapper))
+        
+        font.setPointSizeF(self._window._legacy_preset_point_size("normal", state, mapper))
         font.setWeight(QFont.Weight.Normal)
         return font
 
