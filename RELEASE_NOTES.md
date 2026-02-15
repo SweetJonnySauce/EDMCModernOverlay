@@ -5,15 +5,15 @@
 ### Features
   - New plugin groups added for Pioneer, Canonn, LandingPad, and EDR-Mining
   - Added a warning on startup if the opacity setting is less than 10% (90% transparent)
-  - Added an experimental Windows-only "OBS capture-friendly mode" preference so the overlay can be selected in OBS Window Capture (may appear in Alt-Tab/taskbar)
+  - Added an experimental Windows-only "standalone mode" preference so the overlay can be selected as a separate app. This allows the overlay to work in [OBS](https://obsproject.com/) (A CMDR feature request) and potentially VR.
   - Added `rpm-ostree` installer logic to support Bazzite Linux distro
   - Added [chat command argument](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Chat-Command) to set opacity via in-game chat
   - Added [chat command argument](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Chat-Command) to toggle overlay on / off. Default is `!ovr t` and is configurable in settings. Behind the scenes, all this does is set opacity of the overlay.
+  - Added a "`test`" arguement to the chat launch command (`!ovr`) so `!ovr test` displays a test overlay for troubleshooting purposes.
   - Added [Getting Started](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Getting-Started) Wiki for Plugin developers
   - Added a Reset button to the Overlay Controller to reset the placement to plugin defaults. **Note to Plugin Developers**: When troubleshooting overlay issues with CMDRs, make sure to have them reset the placement to defaults to avoid a layering of multiple issues.
-  - Added a "`test`" arguement to the chat launch command (`!ovr`) so `!ovr test` displays a test overlay for troubleshooting purposes.
 ### Maintenance
-  - Restructured settings to have an Experimental tab. This is done both for conservation of real estate and also allow for the concept of "non-cross platform" features.
+  - Restructured settings to have an Experimental tab. This is done both for conservation of real estate and also allow for the concept of "non-cross platform" features (like standalone mode) being introduced.
   - Improved Overlay Controller error handling
 ### Bug Fixes
   - Updates to payload tracing to help with Issue [#83](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/83) 
