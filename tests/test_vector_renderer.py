@@ -43,6 +43,33 @@ class FakeAdapter(VectorPainterAdapter):
         return width, self._text_height
 
 
+class SizeAwareAdapter(VectorPainterAdapter):
+    def __init__(self, *, text_height: int = 10) -> None:
+        self.text_calls: List[Tuple[int, int, str, str, str | None]] = []
+        self.measure_calls: List[Tuple[str, str | None]] = []
+        self._text_height = text_height
+
+    def set_pen(self, color: str, *, width: int = 2) -> None:
+        return None
+
+    def draw_line(self, x1: int, y1: int, x2: int, y2: int) -> None:
+        return None
+
+    def draw_circle_marker(self, x: int, y: int, radius: int, color: str) -> None:
+        return None
+
+    def draw_cross_marker(self, x: int, y: int, size: int, color: str) -> None:
+        return None
+
+    def draw_text(self, x: int, y: int, text: str, color: str, *, text_size: str | None = None) -> None:
+        self.text_calls.append((x, y, text, color, text_size))
+
+    def measure_text_block(self, text: str, *, text_size: str | None = None) -> tuple[int, int]:
+        self.measure_calls.append((text, text_size))
+        width = len(text) * 6
+        return width, self._text_height
+
+
 def test_render_vector_generates_lines_and_markers():
     adapter = FakeAdapter()
     data = {
@@ -155,3 +182,70 @@ def test_render_vector_multiline_text_uses_block_height_for_position():
     text = next(val for op, val in adapter.operations if op == "text")
     assert text[1] == 19
     assert text[2] == "Line1\nLine2"
+
+
+def test_render_vector_text_size_defaults_to_normal():
+    adapter = SizeAwareAdapter()
+    data = {
+        "base_color": "#ffffff",
+        "points": [
+            {"x": 0, "y": 10, "text": "Label"},
+            {"x": 10, "y": 10},
+        ],
+    }
+    render_vector(adapter, data, scale_x=1.0, scale_y=1.0)
+    assert adapter.text_calls[0][4] == "normal"
+
+
+def test_render_vector_text_size_point_override_beats_payload_default():
+    adapter = SizeAwareAdapter()
+    data = {
+        "base_color": "#ffffff",
+        "text_size": "small",
+        "points": [
+            {"x": 0, "y": 10, "text": "Label", "size": "large"},
+            {"x": 10, "y": 10},
+        ],
+    }
+    render_vector(adapter, data, scale_x=1.0, scale_y=1.0)
+    assert adapter.text_calls[0][4] == "large"
+
+
+def test_render_vector_text_size_payload_default_used_when_point_missing():
+    adapter = SizeAwareAdapter()
+    data = {
+        "base_color": "#ffffff",
+        "size": "huge",
+        "points": [
+            {"x": 0, "y": 10, "text": "Label"},
+            {"x": 10, "y": 10},
+        ],
+    }
+    render_vector(adapter, data, scale_x=1.0, scale_y=1.0)
+    assert adapter.text_calls[0][4] == "huge"
+
+
+def test_render_vector_text_size_ignored_on_points_without_text():
+    adapter = SizeAwareAdapter()
+    data = {
+        "base_color": "#ffffff",
+        "points": [
+            {"x": 0, "y": 10, "size": "huge"},
+            {"x": 10, "y": 10, "text": "Label"},
+        ],
+    }
+    render_vector(adapter, data, scale_x=1.0, scale_y=1.0)
+    assert adapter.text_calls[0][4] == "normal"
+
+
+def test_render_vector_text_size_falls_back_for_legacy_adapters():
+    adapter = FakeAdapter(text_height=10)
+    data = {
+        "base_color": "#ffffff",
+        "points": [
+            {"x": 0, "y": 10, "text": "Label", "size": "large"},
+            {"x": 10, "y": 10},
+        ],
+    }
+    render_vector(adapter, data, scale_x=1.0, scale_y=1.0, marker_label_position="above")
+    assert any(op == "text" for op, _ in adapter.operations)

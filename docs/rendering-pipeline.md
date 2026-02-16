@@ -28,7 +28,10 @@ This document explains how a payload travels from EDMC into the Modern Overlay c
 1. `process_legacy_payload()` (in `overlay_client/legacy_processor.py`) normalises each payload type:
    - `message` → text payload with color/position/size metadata.
    - `shape:rect` → rectangle payload with fill/border data.
-   - `shape:vect` → vector payload with ordered points, optional markers/text.
+   - `shape:vect` → vector payload with ordered points, optional markers/text. Marker label `size` accepts
+     legacy presets (`small`, `normal`, `large`, `huge`); payload-level `size`/`text_size` provides the
+     default, per-point `size` overrides it, missing/invalid values fall back to `normal`, and `size` is
+     ignored for points without `text`.
    - Other shapes/raw payloads are stored for future handling.
 2. The helper emits trace events such as:
    - `legacy_processor:vector_single_point_extended`

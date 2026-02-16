@@ -1570,10 +1570,14 @@ class _PluginRuntime:
                                     y_val = int(entry.get("y", 0))
                                 except (TypeError, ValueError):
                                     continue
-                                min_x = x_val if min_x is None else min(min_x, x_val)
-                                min_y = y_val if min_y is None else min(min_y, y_val)
-                                max_x = x_val if max_x is None else max(max_x, x_val)
-                                max_y = y_val if max_y is None else max(max_y, y_val)
+                                if min_x is None or x_val < min_x:
+                                    min_x = x_val
+                                if min_y is None or y_val < min_y:
+                                    min_y = y_val
+                                if max_x is None or x_val > max_x:
+                                    max_x = x_val
+                                if max_y is None or y_val > max_y:
+                                    max_y = y_val
                         if min_x is not None and min_y is not None and max_x is not None and max_y is not None:
                             vector_bounds = _merge_bounds(vector_bounds, (min_x, min_y, max_x, max_y))
                         overlay.send_raw(base)

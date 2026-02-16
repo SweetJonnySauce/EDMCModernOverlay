@@ -7,6 +7,7 @@
   - Added a warning on startup if the opacity setting is less than 10% (90% transparent)
   - Added an experimental Windows-only "standalone mode" preference so the overlay can be selected as a separate app. This allows the overlay to work in [OBS](https://obsproject.com/) (A CMDR feature request) and potentially VR.
   - Added `rpm-ostree` installer logic to support Bazzite Linux distro
+  - Vector marker labels now accept `size` presets (`small`/`normal`/`large`/`huge`) via payload defaults or per-point overrides (defaults to `normal`). **Note to plugin developers:** This feature is not backwards compatible. 
   - Added [chat command argument](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Chat-Command) to set opacity via in-game chat
   - Added [chat command argument](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Chat-Command) to toggle overlay on / off. Default is `!ovr t` and is configurable in settings. Behind the scenes, all this does is set opacity of the overlay.
   - Added a "`test`" arguement to the chat launch command (`!ovr`) so `!ovr test` displays a test overlay for troubleshooting purposes.
