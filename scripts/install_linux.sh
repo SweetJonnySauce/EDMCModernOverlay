@@ -2164,7 +2164,7 @@ create_venv_and_install() {
     if [[ ! -d overlay_client/.venv ]]; then
         echo "🐍 Creating Python virtual environment..."
         log_command python3 -m venv overlay_client/.venv
-        python3 -m venv overlay_client/.venv
+        python3 -m venv overlay_client/.venv --copies
     fi
 
     # shellcheck disable=SC1091
