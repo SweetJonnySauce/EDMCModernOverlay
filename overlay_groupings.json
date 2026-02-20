@@ -255,6 +255,20 @@
         "controllerPreviewBoxMode": "last",
         "backgroundColor": "black",
         "backgroundBorderColor": "blue"
+      },
+      "EDMCModernOverlay Plugin Status": {
+        "idPrefixes": [
+          "edmcmodernoverlay-plugin-status-"
+        ],
+        "idPrefixGroupAnchor": "center",
+        "offsetX": 640,
+        "offsetY": 480,
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last",
+        "backgroundColor": "black",
+        "backgroundBorderColor": "blue",
+        "backgroundBorderWidth": 10
       }
     }
   },
@@ -502,6 +516,23 @@
         "controllerPreviewBoxMode": "max",
         "backgroundColor": null,
         "backgroundBorderColor": null
+      }
+    }
+  },
+  "NeutronDancer": {
+    "matchingPrefixes": [
+      "neutrondancer-"
+    ],
+    "idPrefixGroups": {
+      "Default": {
+        "idPrefixes": [
+          "neutrondancer-default-"
+        ],
+        "idPrefixGroupAnchor": "nw",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last",
+        "backgroundColor": "#00000000",
+        "backgroundBorderWidth": 2
       }
     }
   }

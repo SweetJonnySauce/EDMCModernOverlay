@@ -18,6 +18,7 @@
   - Improved Overlay Controller error handling
   - Merged in [PR #145](https://github.com/SweetJonnySauce/EDMCModernOverlay/pull/145) to copy python rather than symlinking
   - Changed Bioscan Radar marker label position default to "below"
+  - Added an undocumented argument to the chat command. `!ovr plugins` shows which plugins the CMDR has installed and if the overlay is enabled.
 ### Bug Fixes
   - Updates to payload tracing to help with Issue [#83](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/83) 
   - Changed client, controller, payload logs to UTC. Does not change the min version python3.10 contract.

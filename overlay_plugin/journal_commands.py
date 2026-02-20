@@ -4,7 +4,7 @@ The overlay plugin does not receive keyboard/mouse focus while Elite Dangerous
 is running, so the only ergonomic way to trigger quick actions while playing is
 through Elite's chat system. This module mirrors the pattern used by plugins
 like EDR: watch for ``SendText`` journal events authored by the local CMDR,
-carve out a small namespace of bang-prefixed commands (``!overlay …``), and
+carve out a small namespace of bang-prefixed commands (``!ovr …``), and
 translate them into overlay actions.
 
 Only a couple of workflow-driven commands are implemented for now. Handling the
@@ -18,6 +18,8 @@ from dataclasses import dataclass
 import logging
 from typing import Callable, Mapping, Optional
 
+from .plugin_scan_services import report_plugins as default_report_plugins
+
 
 _LOGGER = logging.getLogger("EDMC.ModernOverlay.Commands")
 
@@ -30,6 +32,7 @@ class _OverlayCommandContext:
     cycle_next: Optional[Callable[[], None]] = None
     cycle_prev: Optional[Callable[[], None]] = None
     launch_controller: Optional[Callable[[], None]] = None
+    report_plugins: Optional[Callable[[], None]] = None
     set_opacity: Optional[Callable[[int], None]] = None
     toggle_opacity: Optional[Callable[[], None]] = None
     test_overlay: Optional[Callable[[], None]] = None
@@ -96,7 +99,7 @@ class JournalCommandHelper:
         legacy_prefixes: Optional[list[str]] = None,
     ) -> None:
         self._ctx = context
-        primary = _normalise_prefix(command_prefix or "!overlay")
+        primary = _normalise_prefix(command_prefix or "!ovr")
         extras = [p for p in (legacy_prefixes or []) if p]
         self._prefixes = [primary] + [p for p in (_normalise_prefix(p) for p in extras) if p != primary]
         _LOGGER.debug("Configured overlay command prefixes: %s", ", ".join(self._prefixes))
@@ -105,7 +108,8 @@ class JournalCommandHelper:
         self._help_text = (
             f"Overlay commands: {help_prefix} (launch controller), {help_prefix} {self._toggle_argument} "
             f"(toggle overlay), {help_prefix} next (cycle forward), {help_prefix} prev (cycle backward), "
-            f"{help_prefix} test (show test logo), {help_prefix} help"
+            f"{help_prefix} test (show test logo), {help_prefix} plugins (log installed plugins), "
+            f"{help_prefix} help"
         )
 
     # Public API ---------------------------------------------------------
@@ -155,6 +159,8 @@ class JournalCommandHelper:
             return True
         if action in {"test"}:
             return self._test_overlay()
+        if action in {"plugins", "plugin"}:
+            return self._report_plugins()
 
         opacity = None
         invalid_opacity = False
@@ -177,6 +183,19 @@ class JournalCommandHelper:
         _LOGGER.debug("Ignoring unknown overlay command: %s", action)
         return True
 
+    def _report_plugins(self) -> bool:
+        callback = self._ctx.report_plugins
+        if callback is None:
+            self._ctx.send_message("Overlay plugins command unavailable.")
+            return True
+        try:
+            callback()
+        except Exception as exc:  # pragma: no cover - defensive guard
+            _LOGGER.warning("Overlay plugin scan failed: %s", exc, exc_info=exc)
+            self._ctx.send_message("Overlay plugin scan failed; see EDMC log.")
+        else:
+            self._ctx.send_message("Overlay plugin scan logged to EDMC debug log.")
+        return True
     def _emit_help(self) -> None:
         self._ctx.send_message(self._help_text)
 
@@ -257,9 +276,10 @@ def build_command_helper(
     plugin_runtime: object,
     logger: Optional[logging.Logger] = None,
     *,
-    command_prefix: str = "!overlay",
+    command_prefix: str = "!ovr",
     toggle_argument: Optional[str] = None,
     legacy_prefixes: Optional[list[str]] = None,
+    report_plugins: Optional[Callable[[], None]] = None,
 ) -> JournalCommandHelper:
     """Construct a :class:`JournalCommandHelper` for the active plugin runtime."""
 
@@ -271,16 +291,18 @@ def build_command_helper(
         except Exception as exc:  # pragma: no cover - defensive guard
             log.warning("Failed to send overlay response '%s': %s", text, exc)
 
+    report_callback = report_plugins or default_report_plugins
     context = _OverlayCommandContext(
         send_message=_send_overlay_message,
         cycle_next=getattr(plugin_runtime, "cycle_payload_next", None),
         cycle_prev=getattr(plugin_runtime, "cycle_payload_prev", None),
         launch_controller=getattr(plugin_runtime, "launch_overlay_controller", None),
+        report_plugins=report_callback,
         set_opacity=getattr(plugin_runtime, "set_payload_opacity_preference", None),
         toggle_opacity=getattr(plugin_runtime, "toggle_payload_opacity_preference", None),
         test_overlay=getattr(plugin_runtime, "send_test_overlay", None),
     )
-    legacy = legacy_prefixes if legacy_prefixes is not None else ["!overlay"]
+    legacy = legacy_prefixes if legacy_prefixes is not None else []
     if command_prefix in legacy:
         legacy = [p for p in legacy if p != command_prefix]
     return JournalCommandHelper(

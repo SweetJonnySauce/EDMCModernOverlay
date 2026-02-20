@@ -1756,9 +1756,7 @@ class _PluginRuntime:
 
     def _build_command_helper(self, prefix: str, previous_prefix: Optional[str] = None) -> Any:
         legacy: list[str] = []
-        if prefix == "!overlay":
-            legacy = ["!overlay"]
-        elif previous_prefix and previous_prefix != prefix:
+        if previous_prefix and previous_prefix != prefix:
             LOGGER.debug(
                 "Removing legacy Overlay Controller launch prefix %s; active prefix now %s",
                 previous_prefix,
