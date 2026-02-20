@@ -41,3 +41,16 @@ These are EDMC best practices. Evaluate the code to make sure it's adhering to t
 
 ## Exceptions
 - None
+
+## Current compliance assessment (2026-02-20)
+
+Review scope: full repo code inspection (plugin + overlay client/controller + scripts/tests). No automated tests or the EDMC Python baseline check were run in this review.
+
+| Item | Status | Notes/Actions |
+| --- | --- | --- |
+| Stay aligned with EDMC core (PLUGINS.md:12/24/297/41) | Yes | Plugin entrypoint is `plugin_start3` in `load.py:3166`, with `load.py` at the plugin root; baseline Python version is pinned in `docs/compliance/edmc_python_version.txt` and enforced by `scripts/check_edmc_python.py`; release/discussion review is tracked in `.github/pull_request_template.md`. |
+| Use only supported plugin API/helpers (PLUGINS.md:74/85/113/128/156/452) | Yes | Journal handling gates on `monitor.game_running()`/`monitor.is_live_galaxy()` (`load.py:614-626`); HTTP uses `timeout_session.new_session`, `config.user_agent`, and `config.debug_senders` (`overlay_plugin/version_helper.py:20-191`); settings persist via namespaced `config.get_*` helpers with JSON shadow for the external client (`overlay_plugin/preferences.py:60-220`). |
+| Logging/versioning patterns (PLUGINS.md:168/212/230/263) | Yes | Logger name/tag matches `EDMCModernOverlay` (`load.py:147-389`); plugin uses `LOGGER.exception`/`exc_info` for tracebacks (`load.py:628-631`, `load.py:3292-3343`); version-specific behavior gates on `config.appversion` in the release check helper (`overlay_plugin/version_helper.py:82-169`). |
+| Responsive & Tk-safe runtime (PLUGINS.md:335/349/362/397/599) | Yes | Long-running work runs on threads (prefs worker, watchdog, broadcaster, version check, timers), and network I/O uses `requests` via `timeout_session`; Tk usage is confined to `PreferencesPanel` on the main thread (see `overlay_plugin/preferences.py`). |
+| Prefs/UI hooks (PLUGINS.md:417/452/455/530/585/587) | Yes | `plugin_prefs`/`prefs_changed` are implemented and return a `myNotebook`-styled frame (`load.py:3192-3343`, `overlay_plugin/preferences.py:946-1885`); config reads use `config.get_int/str/bool/list` and `number_from_string` for locale-safe numeric parsing. |
+| Dependencies & HTTP debug (PLUGINS.md:1323/1346/1358/1378/1387/1391) | Yes | Plugin directory is importable (`EDMCModernOverlay`), and overlay client dependencies are isolated in its own venv; HTTP debug routing honors `config.debug_senders` (`overlay_plugin/version_helper.py:165-183`). |
