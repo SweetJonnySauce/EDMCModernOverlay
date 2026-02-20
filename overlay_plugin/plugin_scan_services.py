@@ -76,6 +76,7 @@ class PluginScanService:
                 known_count += 1
 
         statuses: list[PluginStatus] = []
+        enabled_count = 0
         for plugin in plugins:
             spec, matched_key = _match_known_spec(plugin.name, known_plugins)
             if _is_ignored_spec(spec):
@@ -100,6 +101,8 @@ class PluginScanService:
                         raw_value,
                         plugin.path,
                     )
+                if status == "enabled":
+                    enabled_count += 1
             statuses.append(PluginStatus(name=plugin.name, status=status))
 
         if statuses:
@@ -110,7 +113,7 @@ class PluginScanService:
             list_start = header_height + (2 * large_height)
             self._display_status_message([header], color="#ffffff", ttl_seconds=10, size=header_size)
             self._display_status_message(
-                [f"Total plugins: {len(plugins)}"],
+                [f"Enabled plugins: {enabled_count}"],
                 color="#ffffff",
                 ttl_seconds=10,
                 size="large",
