@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from overlay_plugin import preferences as prefs
+from overlay_plugin.standalone_support import STANDALONE_MODE_PREF_KEY
 
 
 class DummyConfig:
@@ -51,6 +52,9 @@ def test_preferences_save_persists_config_and_shadow(plugin_dir: Path, monkeypat
     preferences.title_bar_height = 25
     preferences.payload_nudge_gutter = 40
     preferences.physical_clamp_overrides = {"DisplayPort-2": 1.0}
+    preferences.standalone_mode = True
+    preferences.controller_toggle_argument = "tog"
+    preferences.last_on_payload_opacity = 80
     preferences.save()
 
     shadow = _shadow(plugin_dir / prefs.PREFERENCES_FILE)
@@ -58,11 +62,17 @@ def test_preferences_save_persists_config_and_shadow(plugin_dir: Path, monkeypat
     assert shadow["title_bar_height"] == 25
     assert shadow["payload_nudge_gutter"] == 40
     assert shadow["physical_clamp_overrides"] == {"DisplayPort-2": 1.0}
+    assert shadow["standalone_mode"] is True
+    assert shadow["controller_toggle_argument"] == "tog"
+    assert shadow["last_on_payload_opacity"] == 80
 
     assert config.store[prefs._config_key("status_message_gutter")] == 30
     assert config.store[prefs._config_key("title_bar_height")] == 25
     assert config.store[prefs._config_key("payload_nudge_gutter")] == 40
     assert json.loads(config.store[prefs._config_key("physical_clamp_overrides")]) == {"DisplayPort-2": 1.0}
+    assert config.store[prefs._config_key(STANDALONE_MODE_PREF_KEY)] is True
+    assert config.store[prefs._config_key("controller_toggle_argument")] == "tog"
+    assert config.store[prefs._config_key("last_on_payload_opacity")] == 80
 
 
 def test_preferences_reload_merges_shadow_when_config_empty(plugin_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -74,6 +84,9 @@ def test_preferences_reload_merges_shadow_when_config_empty(plugin_dir: Path, mo
     first.title_bar_height = 25
     first.payload_nudge_gutter = 40
     first.physical_clamp_overrides = {"DisplayPort-2": 1.0, "HDMI-0": 1.25}
+    first.standalone_mode = True
+    first.controller_toggle_argument = "toggle"
+    first.last_on_payload_opacity = 75
     first.save()
 
     # Simulate a restart where EDMC's config lost the values but the shadow JSON still exists.
@@ -85,6 +98,9 @@ def test_preferences_reload_merges_shadow_when_config_empty(plugin_dir: Path, mo
     assert reloaded.title_bar_height == 25
     assert reloaded.payload_nudge_gutter == 40
     assert reloaded.physical_clamp_overrides == {"DisplayPort-2": 1.0, "HDMI-0": 1.25}
+    assert reloaded.standalone_mode is True
+    assert reloaded.controller_toggle_argument == "toggle"
+    assert reloaded.last_on_payload_opacity == 75
 
     # After merge, values should be written back into EDMC config as well.
     assert reloaded_config.store[prefs._config_key("status_message_gutter")] == 30
@@ -94,6 +110,9 @@ def test_preferences_reload_merges_shadow_when_config_empty(plugin_dir: Path, mo
         "DisplayPort-2": 1.0,
         "HDMI-0": 1.25,
     }
+    assert reloaded_config.store[prefs._config_key(STANDALONE_MODE_PREF_KEY)] is True
+    assert reloaded_config.store[prefs._config_key("controller_toggle_argument")] == "toggle"
+    assert reloaded_config.store[prefs._config_key("last_on_payload_opacity")] == 75
 
 
 def test_preferences_locale_numbers_from_config(plugin_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:

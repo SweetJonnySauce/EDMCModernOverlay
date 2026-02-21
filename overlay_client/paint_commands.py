@@ -155,17 +155,20 @@ class _QtVectorPainterAdapter(VectorPainterAdapter):
         self._window = window
         self._painter = painter
 
-    def _text_font(self) -> QFont:
+    def _text_font(self, text_size: Optional[str] = None) -> QFont:
         font = QFont(self._window._font_family)
         self._window._apply_font_fallbacks(font)
         mapper = self._window._compute_legacy_mapper()
         state = self._window._viewport_state()
-        font.setPointSizeF(self._window._legacy_preset_point_size("small", state, mapper))
+        size_token = (text_size or "normal").strip().lower()
+        if size_token not in {"small", "normal", "large", "huge"}:
+            size_token = "normal"
+        font.setPointSizeF(self._window._legacy_preset_point_size(size_token, state, mapper))
         font.setWeight(QFont.Weight.Normal)
         return font
 
-    def measure_text_block(self, text: str) -> tuple[int, int]:
-        font = self._text_font()
+    def measure_text_block(self, text: str, text_size: Optional[str] = None) -> tuple[int, int]:
+        font = self._text_font(text_size)
         metrics = QFontMetrics(font)
         normalised = str(text).replace("\r\n", "\n").replace("\r", "\n")
         lines = normalised.split("\n") or [""]
@@ -211,14 +214,14 @@ class _QtVectorPainterAdapter(VectorPainterAdapter):
         self._painter.drawLine(x - size, y - size, x + size, y + size)
         self._painter.drawLine(x - size, y + size, x + size, y - size)
 
-    def draw_text(self, x: int, y: int, text: str, color: str) -> None:
+    def draw_text(self, x: int, y: int, text: str, color: str, text_size: Optional[str] = None) -> None:
         q_color = QColor(color)
         if not q_color.isValid():
             q_color = QColor("white")
         q_color = self._window._apply_payload_opacity_color(q_color)
         pen = QPen(q_color)
         self._painter.setPen(pen)
-        font = self._text_font()
+        font = self._text_font(text_size)
         self._painter.setFont(font)
         metrics = QFontMetrics(font)
         normalised = str(text).replace("\r\n", "\n").replace("\r", "\n")

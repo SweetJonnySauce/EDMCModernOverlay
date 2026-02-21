@@ -184,13 +184,13 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--y", type=int, default=200, help="Start Y coordinate (virtual pixels)")
     parser.add_argument("--length", type=int, default=180, help="Arrow length in virtual pixels")
     parser.add_argument("--angle", type=float, default=0.0, help="Arrow angle in degrees (0=right, 90=down)")
-    parser.add_argument("--ttl", type=int, default=10, help="Time-to-live in seconds")
+    parser.add_argument("--ttl", type=int, default=10, help="Time-to-live in seconds (0 expires immediately)")
     args = parser.parse_args(argv)
 
     if args.length <= 0:
         _fail("Arrow length must be positive")
-    if args.ttl <= 0:
-        _fail("TTL must be positive")
+    if args.ttl < 0:
+        _fail("TTL must be zero or positive")
 
     _print_step(f"Using plugin root: {PLUGIN_ROOT}")
     _load_json(SETTINGS_PATH)

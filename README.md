@@ -7,9 +7,7 @@
 [build-badge]: https://github.com/SweetJonnySauce/EDMCModernOverlay/actions/workflows/ci.yml/badge.svg?branch=main
 [build-url]: https://github.com/SweetJonnySauce/EDMCModernOverlay/actions/workflows/ci.yml
 
-🔥🔥🔥0.7.6 has been released. Get it [here](https://github.com/SweetJonnySauce/EDMCModernOverlay/releases/latest)🔥🔥🔥
-
-0.7.7 Beta #2 is now available. Bugs may be present. Get it [here](https://github.com/SweetJonnySauce/EDMCModernOverlay/releases/tag/0.7.7-b2)
+🔥🔥🔥0.7.7 has been released. Get it [here](https://github.com/SweetJonnySauce/EDMCModernOverlay/releases/latest)🔥🔥🔥
 
 EDMC Modern Overlay (packaged as `EDMCModernOverlay`) is a drop-in replacement for [EDMCOverlay](https://github.com/inorton/EDMCOverlay) and [edmcoverlay2](https://github.com/pan-mroku/edmcoverlay2). It is a cross-platform (Windows and Linux), two-part implementation (plugin and overlay client) for Elite Dangerous Market Connector ([EDMC](https://github.com/EDCD/EDMarketConnector)). It streams data from EDMC plugins over a lightweight TCP socket and displays a transparent, click-through PyQt6 heads-up display on the Elite Dangerous game. It runs in both fullscreen borderless and windowed mode on any display size. The [plugin releases](https://github.com/SweetJonnySauce/EDMC-ModernOverlay/releases/latest) ship with both Windows and Linux installers.
 
@@ -25,7 +23,7 @@ Plugin authors can leverage EDMC Modern Overlay's flexible payload grouping syst
 - Supports Debian/Ubuntu, Fedora (dnf), openSUSE, Arch, and Bazzite (rpm-ostree)
 - Supports host and Flatpak installs of EDMC on Linux
 - Code is 100% Python
-- Numerous development features for EDMC Plugin Developers
+- Numerous development features for EDMC Plugin DevelopersS
 
 # Installation & Upgrades
 
@@ -45,6 +43,8 @@ Best way to get support for this plugin is to create a github issue in this repo
 
 # Thanks
 Special thanks to [inorton](https://github.com/inorton) for the original [EDMCOverlay](https://github.com/inorton/EDMCOverlay) development.
+
+Thanks to [aussig](https://github.com/aussig/BGS-Tally), [Silarn](https://github.com/Silarn/EDMC-BioScan), [bgol](https://github.com/bgol/LandingPad), [navl](https://github.com/dwomble/EDMC-NeutronDancer), and [lekeno](https://github.com/lekeno/edr) for the on-going support and letting me use their discords for troubleshooting of the overlay with CMDRs.
 
 # Blame
 First and foremost, this EDMC plugin is a learning experiment in using AI for ground up development. The intent was never to get it to this point, but here we are. My goal was to avoid touching code and only use AI, and I've been very successful in reaching that goal. It was developed on VSCode using Codex (gpt-5-codex) for 99.999% of the code.

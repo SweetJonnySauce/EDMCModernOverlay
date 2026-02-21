@@ -188,6 +188,68 @@ format_list_or_none() {
     printf '%s' "$*"
 }
 
+parse_rpm_ostree_requested_packages() {
+    local log_file="$1"
+    if [[ ! -f "$log_file" ]]; then
+        return
+    fi
+    grep -oE "Package/capability '[^']+' is already requested" "$log_file" \
+        | sed -E "s/.*'([^']+)'.*/\\1/" \
+        | sort -u
+}
+
+get_python_minor_version() {
+    local version major minor
+    version="$(python3 - <<'PY' 2>/dev/null
+import sys
+print(f"{sys.version_info.major}.{sys.version_info.minor}")
+PY
+)"
+    IFS='.' read -r major minor <<<"$version"
+    if [[ -z "$major" || -z "$minor" ]]; then
+        log_verbose "Unable to determine python3 minor version (raw='${version:-empty}')."
+        return 1
+    fi
+    printf '%s' "$minor"
+}
+
+expand_dynamic_packages() {
+    local pkg minor=""
+    for pkg in "$@"; do
+        case "$pkg" in
+            'python3.<minor>-devel')
+                if [[ -z "$minor" ]]; then
+                    minor="$(get_python_minor_version)" || minor=""
+                fi
+                if [[ -n "$minor" ]]; then
+                    printf '%s\n' "python3.${minor}-devel"
+                else
+                    printf '%s\n' "$pkg"
+                fi
+                ;;
+            *)
+                printf '%s\n' "$pkg"
+                ;;
+        esac
+    done
+}
+
+ensure_wayland_protocol_file() {
+    local protocol_path="/usr/share/wayland/wayland.xml"
+    if [[ -f "$protocol_path" ]]; then
+        return 0
+    fi
+    echo "⚠️  Missing Wayland protocol file: ${protocol_path}"
+    if is_ostree_system; then
+        echo "    rpm-ostree applies Wayland protocol packages after a reboot."
+        echo "    Please reboot, then re-run the installer to finish the Wayland setup."
+    else
+        echo "    Install your distro's Wayland protocol packages (e.g., wayland-protocols/wayland-devel) and re-run."
+    fi
+    log_verbose "Wayland protocol file missing at ${protocol_path}"
+    return 1
+}
+
 print_breaking_change_warning() {
     cat <<'EOF'
 ⚠️  Breaking upgrade notice
@@ -510,12 +572,79 @@ run_package_install() {
         echo "📝 [dry-run] $(format_command "${PKG_INSTALL_CMD[@]}" "${packages[@]}")"
         log_dry_run_command "${PKG_INSTALL_CMD[@]}" "${packages[@]}"
     else
-        log_command "${PKG_INSTALL_CMD[@]}" "${packages[@]}"
-        if ! "${PKG_INSTALL_CMD[@]}" "${packages[@]}"; then
-            local install_status=$?
-            handle_dependency_install_failure "install ${label}" "$install_status" "${packages[@]}"
-        fi
-        log_verbose "Package installation command completed for ${label}"
+        local -a packages_to_install=("${packages[@]}")
+        local attempt=0
+        while :; do
+            ((++attempt))
+            log_command "${PKG_INSTALL_CMD[@]}" "${packages_to_install[@]}"
+            local output_file
+            output_file="$(mktemp)"
+            local install_status=0
+            if [[ "${PKG_INSTALL_CMD[1]:-}" == "rpm-ostree" ]]; then
+                local suppress_regex="Package/capability '[^']+' is already requested|rpm-ostree reports already requested packages:"
+                set +e
+                "${PKG_INSTALL_CMD[@]}" "${packages_to_install[@]}" 2>&1 \
+                    | tee "$output_file" \
+                    | grep -Ev "$suppress_regex" || true
+                install_status=${PIPESTATUS[0]}
+                set -e
+                if [[ "$LOG_ENABLED" == true && -n "${LOG_FILE:-}" ]]; then
+                    if grep -Eq "$suppress_regex" "$output_file"; then
+                        {
+                            echo "[rpm-ostree suppressed output]"
+                            grep -E "$suppress_regex" "$output_file"
+                        } >>"$LOG_FILE"
+                    fi
+                fi
+            else
+                if "${PKG_INSTALL_CMD[@]}" "${packages_to_install[@]}" 2>&1 | tee "$output_file"; then
+                    rm -f "$output_file"
+                    log_verbose "Package installation command completed for ${label}"
+                    return
+                fi
+                install_status=${PIPESTATUS[0]}
+            fi
+            if (( install_status == 0 )); then
+                rm -f "$output_file"
+                log_verbose "Package installation command completed for ${label}"
+                return
+            fi
+            if [[ "${PKG_INSTALL_CMD[1]:-}" == "rpm-ostree" ]]; then
+                local -a already_requested=()
+                mapfile -t already_requested < <(parse_rpm_ostree_requested_packages "$output_file")
+                if ((${#already_requested[@]} > 0)); then
+                    local -a filtered=()
+                    local pkg skip
+                    for pkg in "${packages_to_install[@]}"; do
+                        skip=0
+                        for requested in "${already_requested[@]}"; do
+                            if [[ "$pkg" == "$requested" ]]; then
+                                skip=1
+                                break
+                            fi
+                        done
+                        if (( ! skip )); then
+                            filtered+=("$pkg")
+                        fi
+                    done
+                    rm -f "$output_file"
+                    if ((${#filtered[@]} == 0)); then
+                        echo "ℹ️  rpm-ostree reports requested packages already present; skipping install."
+                        log_verbose "rpm-ostree install skipped; already requested: ${already_requested[*]}"
+                        return
+                    fi
+                    if ((${#filtered[@]} < ${#packages_to_install[@]})); then
+                        echo "ℹ️  rpm-ostree reports some packages already requested; retrying without duplicates."
+                        log_verbose "rpm-ostree reports already requested packages: ${already_requested[*]}"
+                        packages_to_install=("${filtered[@]}")
+                        continue
+                    fi
+                fi
+            fi
+            rm -f "$output_file"
+            handle_dependency_install_failure "install ${label}" "$install_status" "${packages_to_install[@]}"
+            return
+        done
     fi
 }
 
@@ -1888,6 +2017,9 @@ ensure_system_packages() {
         packages+=("${PROFILE_PACKAGES_FLATPAK[@]}")
         fallback_notice+=" flatpak-spawn"
     fi
+    if [[ "$PROFILE_ID" == "fedora-ostree" ]]; then
+        mapfile -t packages < <(expand_dynamic_packages "${packages[@]}")
+    fi
     if ((${#packages[@]} == 0)); then
         echo "⚠️  Automatic dependency installation is disabled for profile '$PROFILE_LABEL'."
         echo "    Ensure these packages (or their equivalents) are installed manually: ${fallback_notice}"
@@ -1897,7 +2029,7 @@ ensure_system_packages() {
 
     if [[ "$session_stack" == "wayland" && ${#PROFILE_PACKAGES_WAYLAND[@]} > 0 ]]; then
         echo "ℹ️  Wayland session detected; including helper packages with the core dependencies."
-        echo "ℹ️  Wayland-specific Python dependencies install inside overlay_client/.venv when detected; no system package is required."
+        echo "ℹ️  Wayland-specific Python dependencies install inside overlay_client/.venv; some distros require extra Wayland dev packages."
     elif [[ "$session_stack" == "x11" && ${#PROFILE_PACKAGES_WAYLAND[@]} > 0 ]]; then
         echo "ℹ️  X11 session detected; skipping Wayland helper packages."
     elif [[ "$session_stack" == "unknown" && ${#PROFILE_PACKAGES_WAYLAND[@]} > 0 ]]; then
@@ -1914,7 +2046,7 @@ ensure_system_packages() {
     log_verbose "Packages to evaluate: ${package_list}"
 
     if (( ostree_detected )); then
-        echo "ℹ️  rpm-ostree system detected; skipping package status checks and requesting installation for all packages."
+        echo "ℹ️  rpm-ostree system detected; skipping package status checks and requesting installation for all packages. rpm-ostree will skip (inactivate) any packages already provided during installation."
         log_verbose "rpm-ostree marker present; skipping package status checks."
         reset_package_status_tracking
         PACKAGE_STATUS_CHECK_SUPPORTED=0
@@ -2046,9 +2178,18 @@ create_venv_and_install() {
     local session_stack
     session_stack="$(detect_display_stack)"
     if [[ "$session_stack" == "wayland" ]]; then
+        if ! ensure_wayland_protocol_file; then
+            deactivate
+            exit 1
+        fi
         echo "📦 Installing Wayland-specific Python helpers into the virtualenv..."
         log_command pip install -r overlay_client/requirements/wayland.txt
         pip install -r overlay_client/requirements/wayland.txt
+        if [[ "$PROFILE_ID" == "fedora-ostree" ]]; then
+            echo "📦 Installing Bazzite Wayland build helpers into the virtualenv..."
+            log_command pip install pywayland PyQt6-Qt6
+            pip install pywayland PyQt6-Qt6
+        fi
     else
         echo "ℹ️  Skipping Wayland-specific Python helpers (session type: ${session_stack:-unknown})."
     fi

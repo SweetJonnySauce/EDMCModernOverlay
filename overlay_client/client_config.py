@@ -15,6 +15,7 @@ class InitialClientSettings:
     client_log_retention: int = 5
     global_payload_opacity: int = 100
     force_render: bool = False
+    standalone_mode: bool = False
     force_xwayland: bool = False
     physical_clamp_enabled: bool = False
     physical_clamp_overrides: Dict[str, float] = field(default_factory=dict)
@@ -50,6 +51,7 @@ class DeveloperHelperConfig:
     gridline_spacing: Optional[int] = None
     show_status: Optional[bool] = None
     force_render: Optional[bool] = None
+    standalone_mode: Optional[bool] = None
     force_xwayland: Optional[bool] = None
     show_debug_overlay: Optional[bool] = None
     min_font_point: Optional[float] = None
@@ -123,6 +125,7 @@ class DeveloperHelperConfig:
             gridline_spacing=_int(payload.get("gridline_spacing"), None),
             show_status=_bool(payload.get("show_status"), None),
             force_render=_bool(payload.get("force_render"), None),
+            standalone_mode=_bool(payload.get("standalone_mode"), None),
             force_xwayland=_bool(payload.get("force_xwayland"), None),
             show_debug_overlay=_bool(payload.get("show_debug_overlay"), None),
             min_font_point=_float(payload.get("min_font_point"), None),
@@ -167,6 +170,7 @@ def load_initial_settings(settings_path: Path) -> InitialClientSettings:
         payload_opacity = defaults.global_payload_opacity
     payload_opacity = max(0, min(payload_opacity, 100))
     force_render = bool(data.get("force_render", defaults.force_render))
+    standalone_mode = bool(data.get("standalone_mode", defaults.standalone_mode))
     force_xwayland = bool(data.get("force_xwayland", defaults.force_xwayland))
     physical_clamp_enabled = bool(data.get("physical_clamp_enabled", defaults.physical_clamp_enabled))
     show_debug_overlay = bool(data.get("show_debug_overlay", defaults.show_debug_overlay))
@@ -241,6 +245,7 @@ def load_initial_settings(settings_path: Path) -> InitialClientSettings:
         client_log_retention=max(1, retention),
         global_payload_opacity=payload_opacity,
         force_render=force_render,
+        standalone_mode=standalone_mode,
         force_xwayland=force_xwayland,
         show_debug_overlay=show_debug_overlay,
         min_font_point=min_font,

@@ -4,10 +4,18 @@ from __future__ import annotations
 import json
 import logging
 import math
+import re
 import webbrowser
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
+
+from overlay_plugin.standalone_support import (
+    STANDALONE_MODE_LABEL,
+    STANDALONE_MODE_PREF_KEY,
+    STANDALONE_MODE_TOOLTIP,
+    standalone_mode_supported,
+)
 
 try:
     import config as _edmc_config_module  # type: ignore
@@ -17,6 +25,14 @@ except Exception:  # pragma: no cover - running outside EDMC
     _edmc_config_module = None
     EDMC_CONFIG = None
     _edmc_number_from_string = None
+
+try:  # pragma: no cover - prefer package-relative import when available
+    from ..version import __version__ as MODERN_OVERLAY_VERSION  # type: ignore
+except Exception:  # pragma: no cover - running outside package layout
+    try:
+        from version import __version__ as MODERN_OVERLAY_VERSION  # type: ignore
+    except Exception:
+        MODERN_OVERLAY_VERSION = ""
 
 
 PREFERENCES_FILE = "overlay_settings.json"
@@ -30,9 +46,12 @@ OVERLAY_ID_PREFIX = "EDMCModernOverlay-"
 CONFIG_PREFIX = "edmc_modern_overlay."
 CONFIG_STATE_VERSION = 1
 CONFIG_VERSION_KEY = f"{CONFIG_PREFIX}state_version"
+DEV_MODE_PREF_KEY = "dev_mode"
 CLIENT_LOG_RETENTION_MIN = 1
 CLIENT_LOG_RETENTION_MAX = 20
 DEFAULT_CLIENT_LOG_RETENTION = 5
+TOGGLE_ARGUMENT_DEFAULT = "t"
+TEST_OVERLAY_TTL_SECONDS = 10
 PHYSICAL_CLAMP_SCALE_MIN = 0.5
 PHYSICAL_CLAMP_SCALE_MAX = 3.0
 FONT_BOUND_MIN = 6.0
@@ -471,6 +490,50 @@ def _normalise_launch_command(value: str) -> str:
     return text
 
 
+_TOGGLE_ARGUMENT_RE = re.compile(r"^[A-Za-z0-9]+$")
+
+
+def _parse_toggle_argument(value: Any) -> tuple[str, Optional[str], bool]:
+    try:
+        text = str(value or "")
+    except Exception:
+        return "", "Toggle argument must be text.", False
+    text = text.strip()
+    if not text:
+        return "", None, True
+    if not _TOGGLE_ARGUMENT_RE.fullmatch(text):
+        return "", "Toggle argument must be alphanumeric (A-Z, a-z, 0-9).", False
+    if text.isdigit():
+        return "", "Toggle argument cannot be numeric-only.", False
+    return text, None, False
+
+
+def _coerce_toggle_argument(value: Any, default: str) -> str:
+    text, error, is_empty = _parse_toggle_argument(value)
+    if is_empty or error:
+        return default
+    return text
+
+
+def _validate_toggle_argument(value: Any, *, default: str, previous: str) -> tuple[str, Optional[str]]:
+    text, error, is_empty = _parse_toggle_argument(value)
+    if is_empty:
+        return default, None
+    if error:
+        return previous, error
+    return text, None
+
+
+def _coerce_last_on_payload_opacity(value: Any, default: int) -> int:
+    try:
+        numeric = int(value)
+    except (TypeError, ValueError):
+        return default
+    if numeric <= 0 or numeric > 100:
+        return default
+    return numeric
+
+
 @dataclass
 class Preferences:
     """Simple JSON-backed preferences store."""
@@ -485,6 +548,7 @@ class Preferences:
     gridlines_enabled: bool = False
     gridline_spacing: int = 120
     force_render: bool = False
+    standalone_mode: bool = False
     force_xwayland: bool = False
     physical_clamp_enabled: bool = False
     physical_clamp_overrides: Dict[str, float] = field(default_factory=dict)
@@ -503,6 +567,8 @@ class Preferences:
     log_payloads: bool = False
     payload_log_delay_seconds: float = 0.5
     controller_launch_command: str = "!ovr"
+    controller_toggle_argument: str = TOGGLE_ARGUMENT_DEFAULT
+    last_on_payload_opacity: int = 100
 
     def __post_init__(self) -> None:
         self.plugin_dir = Path(self.plugin_dir)
@@ -563,6 +629,7 @@ class Preferences:
         except Exception:
             pass
         payload: Dict[str, Any] = {
+            "dev_mode": _config_get_bool(_config_key(DEV_MODE_PREF_KEY), self.dev_mode),
             "overlay_opacity": _config_get_locale_number(_config_key("overlay_opacity"), self.overlay_opacity),
             "global_payload_opacity": _config_get_int(
                 _config_key("global_payload_opacity"),
@@ -574,6 +641,10 @@ class Preferences:
             "gridlines_enabled": _config_get_bool(_config_key("gridlines_enabled"), self.gridlines_enabled),
             "gridline_spacing": _config_get_locale_number(_config_key("gridline_spacing"), self.gridline_spacing),
             "force_render": _config_get_bool(_config_key("force_render"), self.force_render),
+            "standalone_mode": _config_get_bool(
+                _config_key(STANDALONE_MODE_PREF_KEY),
+                self.standalone_mode,
+            ),
             "force_xwayland": _config_get_bool(_config_key("force_xwayland"), self.force_xwayland),
             "physical_clamp_enabled": _config_get_bool(
                 _config_key("physical_clamp_enabled"),
@@ -616,10 +687,19 @@ class Preferences:
                 _config_key("controller_launch_command"),
                 self.controller_launch_command,
             ),
+            "controller_toggle_argument": _config_get_str(
+                _config_key("controller_toggle_argument"),
+                self.controller_toggle_argument,
+            ),
+            "last_on_payload_opacity": _config_get_int(
+                _config_key("last_on_payload_opacity"),
+                self.last_on_payload_opacity,
+            ),
         }
         self._apply_raw_data(payload)
 
     def _apply_raw_data(self, data: Mapping[str, Any]) -> None:
+        self.dev_mode = _coerce_bool(data.get("dev_mode"), self.dev_mode)
         self.overlay_opacity = _coerce_float(data.get("overlay_opacity"), self.overlay_opacity, minimum=0.0, maximum=1.0)
         self.global_payload_opacity = _coerce_int(
             data.get("global_payload_opacity"),
@@ -642,6 +722,10 @@ class Preferences:
         self.gridlines_enabled = _coerce_bool(data.get("gridlines_enabled"), self.gridlines_enabled)
         self.gridline_spacing = _coerce_int(data.get("gridline_spacing"), self.gridline_spacing, minimum=10)
         self.force_render = _coerce_bool(data.get("force_render"), self.force_render)
+        self.standalone_mode = _coerce_bool(
+            data.get(STANDALONE_MODE_PREF_KEY),
+            self.standalone_mode,
+        )
         self.force_xwayland = _coerce_bool(data.get("force_xwayland"), self.force_xwayland)
         self.physical_clamp_enabled = _coerce_bool(
             data.get("physical_clamp_enabled"),
@@ -708,6 +792,14 @@ class Preferences:
             self.controller_launch_command,
             transform=_normalise_launch_command,
         )
+        self.controller_toggle_argument = _coerce_toggle_argument(
+            data.get("controller_toggle_argument"),
+            self.controller_toggle_argument or TOGGLE_ARGUMENT_DEFAULT,
+        )
+        self.last_on_payload_opacity = _coerce_last_on_payload_opacity(
+            data.get("last_on_payload_opacity"),
+            self.last_on_payload_opacity,
+        )
 
     def save(self) -> None:
         """Persist preferences to EDMC config and the JSON shadow file."""
@@ -717,6 +809,7 @@ class Preferences:
 
     def _shadow_payload(self) -> Dict[str, Any]:
         return {
+            "dev_mode": bool(self.dev_mode),
             "overlay_opacity": float(self.overlay_opacity),
             "global_payload_opacity": int(self.global_payload_opacity),
             "show_connection_status": bool(self.show_connection_status),
@@ -725,6 +818,7 @@ class Preferences:
             "gridlines_enabled": bool(self.gridlines_enabled),
             "gridline_spacing": int(self.gridline_spacing),
             "force_render": bool(self.force_render),
+            STANDALONE_MODE_PREF_KEY: bool(self.standalone_mode),
             "force_xwayland": bool(self.force_xwayland),
             "physical_clamp_enabled": bool(self.physical_clamp_enabled),
             "physical_clamp_overrides": dict(self.physical_clamp_overrides or {}),
@@ -744,6 +838,8 @@ class Preferences:
             "log_payloads": bool(self.log_payloads),
             "payload_log_delay_seconds": float(self.payload_log_delay_seconds),
             "controller_launch_command": str(self.controller_launch_command or "!ovr"),
+            "controller_toggle_argument": str(self.controller_toggle_argument or TOGGLE_ARGUMENT_DEFAULT),
+            "last_on_payload_opacity": int(self.last_on_payload_opacity),
         }
 
     def _write_shadow_file(self) -> None:
@@ -753,6 +849,7 @@ class Preferences:
     def _persist_to_config(self) -> None:
         if not self._config_enabled:
             return
+        _config_set_value(_config_key(DEV_MODE_PREF_KEY), bool(self.dev_mode))
         _config_set_value(_config_key("overlay_opacity"), float(self.overlay_opacity))
         _config_set_value(_config_key("global_payload_opacity"), int(self.global_payload_opacity))
         _config_set_value(_config_key("show_connection_status"), bool(self.show_connection_status))
@@ -761,6 +858,7 @@ class Preferences:
         _config_set_value(_config_key("gridlines_enabled"), bool(self.gridlines_enabled))
         _config_set_value(_config_key("gridline_spacing"), int(self.gridline_spacing))
         _config_set_value(_config_key("force_render"), bool(self.force_render))
+        _config_set_value(_config_key(STANDALONE_MODE_PREF_KEY), bool(self.standalone_mode))
         _config_set_value(_config_key("force_xwayland"), bool(self.force_xwayland))
         _config_set_value(_config_key("physical_clamp_enabled"), bool(self.physical_clamp_enabled))
         try:
@@ -783,6 +881,11 @@ class Preferences:
         _config_set_value(_config_key("log_payloads"), bool(self.log_payloads))
         _config_set_value(_config_key("payload_log_delay_seconds"), float(self.payload_log_delay_seconds))
         _config_set_value(_config_key("controller_launch_command"), str(self.controller_launch_command or "!ovr"))
+        _config_set_value(
+            _config_key("controller_toggle_argument"),
+            str(self.controller_toggle_argument or TOGGLE_ARGUMENT_DEFAULT),
+        )
+        _config_set_value(_config_key("last_on_payload_opacity"), int(self.last_on_payload_opacity))
         _config_set_value(CONFIG_VERSION_KEY, CONFIG_STATE_VERSION)
 
     def _ensure_state_version_mark(self) -> None:
@@ -813,6 +916,7 @@ class PreferencesPanel:
         set_payload_nudge_callback: Optional[Callable[[bool], None]] = None,
         set_payload_gutter_callback: Optional[Callable[[int], None]] = None,
         set_force_render_callback: Optional[Callable[[bool], None]] = None,
+        set_standalone_mode_callback: Optional[Callable[[bool], None]] = None,
         set_title_bar_config_callback: Optional[Callable[[bool, int], None]] = None,
         set_debug_overlay_callback: Optional[Callable[[bool], None]] = None,
         set_payload_logging_callback: Optional[Callable[[bool], None]] = None,
@@ -826,6 +930,7 @@ class PreferencesPanel:
         cycle_payload_next_callback: Optional[Callable[[], None]] = None,
         restart_overlay_callback: Optional[Callable[[], None]] = None,
         set_launch_command_callback: Optional[Callable[[str], None]] = None,
+        set_toggle_argument_callback: Optional[Callable[[str], None]] = None,
         set_payload_opacity_callback: Optional[Callable[[int], None]] = None,
         reset_group_cache_callback: Optional[Callable[[], bool]] = None,
         dev_mode: bool = False,
@@ -862,6 +967,7 @@ class PreferencesPanel:
         self._var_payload_nudge = tk.BooleanVar(value=preferences.nudge_overflow_payloads)
         self._var_payload_gutter = tk.IntVar(value=max(0, int(preferences.payload_nudge_gutter)))
         self._var_force_render = tk.BooleanVar(value=preferences.force_render)
+        self._var_standalone_mode = tk.BooleanVar(value=preferences.standalone_mode)
         self._var_physical_clamp = tk.BooleanVar(value=preferences.physical_clamp_enabled)
         self._var_physical_clamp_overrides = tk.StringVar(
             value=_format_physical_clamp_overrides(preferences.physical_clamp_overrides)
@@ -880,6 +986,7 @@ class PreferencesPanel:
         self._var_cycle_payload = tk.BooleanVar(value=preferences.cycle_payload_ids)
         self._var_cycle_copy = tk.BooleanVar(value=preferences.copy_payload_id_on_cycle)
         self._var_launch_command = tk.StringVar(value=preferences.controller_launch_command)
+        self._var_toggle_argument = tk.StringVar(value=preferences.controller_toggle_argument)
         state = troubleshooting_state or TroubleshootingPanelState(
             diagnostics_enabled=False,
             capture_enabled=False,
@@ -925,9 +1032,11 @@ class PreferencesPanel:
         self._var_log_retention_override_active = tk.BooleanVar(value=state.log_retention_override is not None)
         self._var_log_retention_value = tk.IntVar(value=int(retention_value))
         self._var_payload_exclude = tk.StringVar(value=", ".join(state.exclude_plugins))
+        self._var_dev_mode = tk.BooleanVar(value=preferences.dev_mode)
         self._font_bounds_apply_in_progress = False
         self._font_step_apply_in_progress = False
         self._launch_command_apply_in_progress = False
+        self._toggle_argument_apply_in_progress = False
         self._payload_opacity_apply_in_progress = False
 
         self._send_test = send_test_callback
@@ -940,6 +1049,7 @@ class PreferencesPanel:
         self._set_payload_nudge = set_payload_nudge_callback
         self._set_payload_gutter = set_payload_gutter_callback
         self._set_force_render = set_force_render_callback
+        self._set_standalone_mode = set_standalone_mode_callback
         self._set_title_bar_config = set_title_bar_config_callback
         self._set_debug_overlay = set_debug_overlay_callback
         self._set_payload_logging = set_payload_logging_callback
@@ -953,6 +1063,7 @@ class PreferencesPanel:
         self._cycle_next_callback = cycle_payload_next_callback
         self._restart_overlay = restart_overlay_callback
         self._set_launch_command = set_launch_command_callback
+        self._set_toggle_argument = set_toggle_argument_callback
         self._set_payload_opacity = set_payload_opacity_callback
         self._reset_group_cache = reset_group_cache_callback
         self._set_capture_override = set_capture_override_callback
@@ -1030,9 +1141,17 @@ class PreferencesPanel:
                 )
                 warning_label.grid(row=1, column=0, sticky="e", pady=(2, 0))
 
-        user_section = ttk.Frame(frame, style=self._frame_style)
-        user_section.grid(row=1, column=0, sticky="we")
+        tabs = nb.Notebook(frame)
+        overlay_tab = nb.Frame(tabs)
+        experimental_tab = nb.Frame(tabs)
+        tabs.add(overlay_tab, text="Overlay")
+        tabs.add(experimental_tab, text="Experimental")
+        tabs.grid(row=1, column=0, sticky="we")
+
+        user_section = ttk.Frame(overlay_tab, style=self._frame_style)
+        user_section.grid(row=0, column=0, sticky="we")
         user_section.columnconfigure(0, weight=1)
+        overlay_tab.columnconfigure(0, weight=1)
         user_row = 0
 
         status_row = ttk.Frame(user_section, style=self._frame_style)
@@ -1203,6 +1322,15 @@ class PreferencesPanel:
         launch_row.grid(row=user_row, column=0, sticky="w", pady=ROW_PAD)
         user_row += 1
 
+        toggle_row = ttk.Frame(user_section, style=self._frame_style)
+        nb.Label(toggle_row, text="Chat command argument to toggle overlay:").pack(side="left")
+        toggle_entry = nb.EntryMenu(toggle_row, width=10, textvariable=self._var_toggle_argument)
+        toggle_entry.pack(side="left", padx=(8, 0))
+        toggle_entry.bind("<FocusOut>", self._on_toggle_argument_event)
+        toggle_entry.bind("<Return>", self._on_toggle_argument_event)
+        toggle_row.grid(row=user_row, column=0, sticky="w", pady=ROW_PAD)
+        user_row += 1
+
         payload_opacity_row = ttk.Frame(user_section, style=self._frame_style)
         payload_opacity_label = nb.Label(payload_opacity_row, text="Overlay payload opacity:")
         _attach_tooltip(
@@ -1228,55 +1356,10 @@ class PreferencesPanel:
         payload_opacity_row.grid(row=user_row, column=0, sticky="w", pady=ROW_PAD)
         user_row += 1
 
-        clamp_row = ttk.Frame(user_section, style=self._frame_style)
-        clamp_checkbox = nb.Checkbutton(
-            clamp_row,
-            text="Clamp fractional desktop scaling (physical clamp)",
-            variable=self._var_physical_clamp,
-            onvalue=True,
-            offvalue=False,
-            command=self._on_physical_clamp_toggle,
-        )
-        clamp_checkbox.pack(side="left")
-        clamp_row.grid(row=user_row, column=0, sticky="w", pady=ROW_PAD)
-        user_row += 1
-
-        clamp_override_row = ttk.Frame(user_section, style=self._frame_style)
-        clamp_override_row.columnconfigure(1, weight=1)
-        nb.Label(
-            clamp_override_row,
-            text="Per-monitor clamp overrides (name=scale, comma-separated):",
-        ).grid(row=0, column=0, sticky="w")
-        clamp_override_entry = nb.EntryMenu(
-            clamp_override_row,
-            width=40,
-            textvariable=self._var_physical_clamp_overrides,
-        )
-        clamp_override_entry.grid(row=0, column=1, padx=(8, 0), sticky="we")
-        clamp_override_entry.bind("<Return>", self._on_physical_clamp_overrides_event)
-        clamp_override_entry.bind("<FocusOut>", self._on_physical_clamp_overrides_event)
-        clamp_override_apply = nb.Button(
-            clamp_override_row,
-            text="Apply",
-            command=self._on_physical_clamp_overrides_apply,
-        )
-        clamp_override_apply.grid(row=0, column=2, padx=(8, 0), sticky="e")
-        helper_label = nb.Label(
-            clamp_override_row,
-            text="Example: DisplayPort-2=1.0, HDMI-0=1.25 (empty to clear)",
-        )
-        helper_label.grid(row=1, column=0, columnspan=3, sticky="w", pady=(ROW_PAD[0], 0))
-        clamp_override_row.grid(row=user_row, column=0, sticky="we", pady=ROW_PAD)
-        user_row += 1
-
-        cache_row = ttk.Frame(user_section, style=self._frame_style)
-        cache_label = nb.Label(cache_row, text="Overlay group cache:")
-        cache_label.pack(side="left")
-        reset_cache_btn = nb.Button(cache_row, text="Reset cached values", command=self._on_reset_group_cache)
-        if self._reset_group_cache is None:
-            reset_cache_btn.configure(state="disabled")
-        reset_cache_btn.pack(side="left", padx=(8, 0))
-        cache_row.grid(row=user_row, column=0, sticky="w", pady=ROW_PAD)
+        test_overlay_row = ttk.Frame(user_section, style=self._frame_style)
+        test_overlay_btn = nb.Button(test_overlay_row, text="Test Overlay", command=self._on_test_overlay)
+        test_overlay_btn.pack(side="left")
+        test_overlay_row.grid(row=user_row, column=0, sticky="w", pady=ROW_PAD)
         user_row += 1
 
         if self._diagnostics_enabled:
@@ -1464,9 +1547,111 @@ class PreferencesPanel:
             self._update_payload_spam_controls_state()
             user_row += 1
 
-        next_row = 2
+        experimental_tab.columnconfigure(0, weight=1)
+        experimental_row = 0
+        disclaimer_label = nb.Label(
+            experimental_tab,
+            text="Experimental settings are unstable, unsupported, and may change without notice.",
+            wraplength=640,
+            justify="left",
+        )
+        try:
+            disclaimer_font = tkfont.Font(root=parent, font=disclaimer_label.cget("font"))
+        except Exception:
+            disclaimer_font = None
+        else:
+            try:
+                disclaimer_font.configure(weight="bold")
+                self._managed_fonts.append(disclaimer_font)
+                disclaimer_label.configure(font=disclaimer_font)
+            except Exception:
+                pass
+        disclaimer_label.grid(row=experimental_row, column=0, sticky="w", pady=ROW_PAD)
+        experimental_row += 1
+        dev_mode_row = ttk.Frame(experimental_tab, style=self._frame_style)
+        dev_mode_checkbox = nb.Checkbutton(
+            dev_mode_row,
+            text="Enable dev mode (requires restart)",
+            variable=self._var_dev_mode,
+            onvalue=True,
+            offvalue=False,
+            command=self._on_dev_mode_toggle,
+        )
+        dev_mode_checkbox.pack(side="left")
+        dev_mode_row.grid(row=experimental_row, column=0, sticky="w", pady=ROW_PAD)
+        experimental_row += 1
+        standalone_row = ttk.Frame(experimental_tab, style=self._frame_style)
+        standalone_checkbox = nb.Checkbutton(
+            standalone_row,
+            text=STANDALONE_MODE_LABEL,
+            variable=self._var_standalone_mode,
+            onvalue=True,
+            offvalue=False,
+            command=self._on_standalone_mode_toggle,
+        )
+        _attach_tooltip(
+            standalone_checkbox,
+            STANDALONE_MODE_TOOLTIP,
+            nb_module=nb,
+        )
+        standalone_checkbox.pack(side="left")
+        if not standalone_mode_supported():
+            standalone_checkbox.state(["disabled"])
+        standalone_row.grid(row=experimental_row, column=0, sticky="w", pady=ROW_PAD)
+        experimental_row += 1
+
+        clamp_row = ttk.Frame(experimental_tab, style=self._frame_style)
+        clamp_checkbox = nb.Checkbutton(
+            clamp_row,
+            text="Clamp fractional desktop scaling (physical clamp)",
+            variable=self._var_physical_clamp,
+            onvalue=True,
+            offvalue=False,
+            command=self._on_physical_clamp_toggle,
+        )
+        clamp_checkbox.pack(side="left")
+        clamp_row.grid(row=experimental_row, column=0, sticky="w", pady=ROW_PAD)
+        experimental_row += 1
+
+        clamp_override_row = ttk.Frame(experimental_tab, style=self._frame_style)
+        clamp_override_row.columnconfigure(1, weight=1)
+        nb.Label(
+            clamp_override_row,
+            text="Per-monitor clamp overrides (name=scale, comma-separated):",
+        ).grid(row=0, column=0, sticky="w")
+        clamp_override_entry = nb.EntryMenu(
+            clamp_override_row,
+            width=40,
+            textvariable=self._var_physical_clamp_overrides,
+        )
+        clamp_override_entry.grid(row=0, column=1, padx=(8, 0), sticky="we")
+        clamp_override_entry.bind("<Return>", self._on_physical_clamp_overrides_event)
+        clamp_override_entry.bind("<FocusOut>", self._on_physical_clamp_overrides_event)
+        clamp_override_apply = nb.Button(
+            clamp_override_row,
+            text="Apply",
+            command=self._on_physical_clamp_overrides_apply,
+        )
+        clamp_override_apply.grid(row=0, column=2, padx=(8, 0), sticky="e")
+        helper_label = nb.Label(
+            clamp_override_row,
+            text="Example: DisplayPort-2=1.0, HDMI-0=1.25 (empty to clear)",
+        )
+        helper_label.grid(row=1, column=0, columnspan=3, sticky="w", pady=(ROW_PAD[0], 0))
+        clamp_override_row.grid(row=experimental_row, column=0, sticky="we", pady=ROW_PAD)
+        experimental_row += 1
+
+        cache_row = ttk.Frame(experimental_tab, style=self._frame_style)
+        cache_label = nb.Label(cache_row, text="Overlay group cache:")
+        cache_label.pack(side="left")
+        reset_cache_btn = nb.Button(cache_row, text="Reset cached values", command=self._on_reset_group_cache)
+        if self._reset_group_cache is None:
+            reset_cache_btn.configure(state="disabled")
+        reset_cache_btn.pack(side="left", padx=(8, 0))
+        cache_row.grid(row=experimental_row, column=0, sticky="w", pady=ROW_PAD)
+        experimental_row += 1
         if self._dev_mode:
-            dev_label = nb.Label(frame, text="Developer Settings")
+            dev_label = nb.Label(experimental_tab, text="Developer Settings")
             try:
                 dev_font = tkfont.Font(root=parent, font=dev_label.cget("font"))
             except Exception:
@@ -1479,12 +1664,12 @@ class PreferencesPanel:
                 except Exception:
                     pass
             dev_frame = ttk.LabelFrame(
-                frame,
+                experimental_tab,
                 labelwidget=dev_label,
                 padding=(8, 8),
                 style=self._labelframe_style,
             )
-            dev_frame.grid(row=next_row, column=0, sticky="we", pady=ROW_PAD)
+            dev_frame.grid(row=experimental_row, column=0, sticky="we", pady=ROW_PAD)
             dev_frame.columnconfigure(0, weight=1)
             dev_row = 0
 
@@ -1607,12 +1792,12 @@ class PreferencesPanel:
             legacy_row.grid(row=dev_row, column=0, sticky="w", pady=ROW_PAD)
             dev_row += 1
 
-            next_row += 1
+            experimental_row += 1
 
         self._update_cycle_button_state()
 
-        status_label = nb.Label(frame, textvariable=self._status_var, wraplength=400, justify="left")
-        status_label.grid(row=next_row, column=0, sticky="w", pady=ROW_PAD)
+        status_label = nb.Label(frame, textvariable=self._status_var, wraplength=800, justify="left")
+        status_label.grid(row=2, column=0, sticky="w", pady=ROW_PAD)
         frame.columnconfigure(0, weight=1)
 
         self._frame = frame
@@ -1721,6 +1906,13 @@ class PreferencesPanel:
             return
         self._status_var.set("Cached overlay values reset.")
 
+    def _on_dev_mode_toggle(self) -> None:
+        value = bool(self._var_dev_mode.get())
+        self._preferences.dev_mode = value
+        self._preferences.save()
+        self._dev_mode = value
+        self._status_var.set("Dev mode updated. Restart EDMC to apply.")
+
     def _on_show_status_toggle(self) -> None:
         value = bool(self._var_show_status.get())
         self._preferences.show_connection_status = value
@@ -1751,6 +1943,9 @@ class PreferencesPanel:
 
     def _on_launch_command_event(self, _event=None) -> None:  # pragma: no cover - Tk event
         self._apply_launch_command()
+
+    def _on_toggle_argument_event(self, _event=None) -> None:  # pragma: no cover - Tk event
+        self._apply_toggle_argument()
 
     def _apply_launch_command(self) -> None:
         if self._launch_command_apply_in_progress:
@@ -1784,6 +1979,39 @@ class PreferencesPanel:
         self._status_var.set(f"Overlay launch command set to {normalised}")
         LOGGER.info("Overlay Controller launch command updated (UI): %s -> %s", old_value, normalised)
         self._launch_command_apply_in_progress = False
+
+    def _apply_toggle_argument(self) -> None:
+        if self._toggle_argument_apply_in_progress:
+            return
+        self._toggle_argument_apply_in_progress = True
+        raw_value = self._var_toggle_argument.get()
+        normalised, error = _validate_toggle_argument(
+            raw_value,
+            default=TOGGLE_ARGUMENT_DEFAULT,
+            previous=self._preferences.controller_toggle_argument,
+        )
+        if error:
+            if normalised != self._var_toggle_argument.get():
+                self._var_toggle_argument.set(normalised)
+            self._status_var.set(error)
+            self._toggle_argument_apply_in_progress = False
+            return
+        if normalised != self._var_toggle_argument.get():
+            self._var_toggle_argument.set(normalised)
+        if normalised == self._preferences.controller_toggle_argument:
+            self._toggle_argument_apply_in_progress = False
+            return
+        old_value = self._preferences.controller_toggle_argument
+        self._preferences.controller_toggle_argument = normalised
+        self._preferences.save()
+        if callable(self._set_toggle_argument):
+            try:
+                self._set_toggle_argument(normalised)
+            except Exception:
+                LOGGER.debug("Failed to propagate toggle argument change", exc_info=True)
+        self._status_var.set(f"Overlay toggle argument set to {normalised}")
+        LOGGER.info("Overlay toggle argument updated (UI): %s -> %s", old_value, normalised)
+        self._toggle_argument_apply_in_progress = False
 
     def _open_release_link(self, _event=None) -> None:
         try:
@@ -2181,6 +2409,18 @@ class PreferencesPanel:
             self._preferences.force_render = value
             self._preferences.save()
 
+    def _on_standalone_mode_toggle(self) -> None:
+        value = bool(self._var_standalone_mode.get())
+        if self._set_standalone_mode:
+            try:
+                self._set_standalone_mode(value)
+            except Exception as exc:
+                self._status_var.set(f"Failed to update stand-alone mode: {exc}")
+                return
+        else:
+            self._preferences.standalone_mode = value
+            self._preferences.save()
+
     def _on_physical_clamp_toggle(self) -> None:
         self._preferences.physical_clamp_enabled = bool(self._var_physical_clamp.get())
         try:
@@ -2576,3 +2816,103 @@ class PreferencesPanel:
             self._status_var.set(f"Legacy rectangle failed: {exc}")
             return
         self._status_var.set("Legacy rectangle sent via edmcoverlay API.")
+
+    def _on_test_overlay(self) -> None:
+        overlay = self._legacy_overlay()
+        if overlay is None:
+            return
+        ttl = TEST_OVERLAY_TTL_SECONDS
+        # FDev media usage rules: https://forums.frontier.co.uk/threads/elite-dangerous-media-usage-rules.510879/
+        disclaimer = (
+            "The EDMCModernOverlay Test Overlay feature was created using assets and imagery from Elite Dangerous, with the permission of Frontier Developments plc, for non-commercial "
+            "purposes. It is not endorsed by nor reflects the views or opinions of Frontier Developments and no employee of Frontier Developments was involved in the making of it."
+        )
+        plugin_dir = self._preferences.plugin_dir
+        log_path = plugin_dir / "payload_store" / "ed-logo-test.log"
+        try:
+            raw_lines = log_path.read_text(encoding="utf-8").splitlines()
+        except FileNotFoundError:
+            self._status_var.set(f"Test overlay payloads not found: {log_path}")
+            return
+        except Exception as exc:
+            self._status_var.set(f"Failed to read test overlay payloads: {exc}")
+            return
+
+        sent = 0
+        label_anchor: Optional[tuple[int, int, str]] = None
+        try:
+            for line in raw_lines:
+                brace = line.find("{")
+                if brace == -1:
+                    continue
+                payload = json.loads(line[brace:])
+                payload_type = payload.get("type")
+                if payload_type == "message":
+                    text_value = str(payload.get("text") or "")
+                    color_value = str(payload.get("color") or "white")
+                    x_val = int(payload.get("x", 0))
+                    y_val = int(payload.get("y", 0))
+                    size_value = str(payload.get("size") or "normal")
+                    overlay.send_message(
+                        str(payload.get("id") or ""),
+                        text_value,
+                        color_value,
+                        x_val,
+                        y_val,
+                        ttl=ttl,
+                        size=size_value,
+                    )
+                    if text_value.strip().lower() == "edmc modern overlay":
+                        label_anchor = (x_val, y_val, color_value)
+                    sent += 1
+                    continue
+                if payload_type == "shape":
+                    shape = str(payload.get("shape") or "")
+                    base = {
+                        "id": str(payload.get("id") or ""),
+                        "shape": shape,
+                        "color": payload.get("color") or "white",
+                        "ttl": ttl,
+                    }
+                    if shape == "vect":
+                        base["vector"] = payload.get("vector") or []
+                        overlay.send_raw(base)
+                        sent += 1
+                        continue
+                    if shape == "rect":
+                        base.update(
+                            {
+                                "fill": payload.get("fill") or "#00000000",
+                                "x": int(payload.get("x", 0)),
+                                "y": int(payload.get("y", 0)),
+                                "w": int(payload.get("w", 0)),
+                                "h": int(payload.get("h", 0)),
+                            }
+                        )
+                        overlay.send_raw(base)
+                        sent += 1
+                        continue
+        except Exception as exc:
+            self._status_var.set(f"Test overlay failed: {exc}")
+            return
+
+        version_text = f"v{MODERN_OVERLAY_VERSION}".strip()
+        if version_text and label_anchor is not None:
+            try:
+                anchor_x, anchor_y, anchor_color = label_anchor
+                line_height = 16
+                overlay.send_message(
+                    f"{OVERLAY_ID_PREFIX.lower()}logo-version",
+                    version_text,
+                    anchor_color or "#f5821f",
+                    int(anchor_x),
+                    int(anchor_y + line_height),
+                    ttl=ttl,
+                    size="normal",
+                )
+                sent += 1
+            except Exception as exc:
+                self._status_var.set(f"Test overlay failed: {exc}")
+                return
+
+        self._status_var.set(disclaimer)

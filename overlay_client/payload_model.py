@@ -62,7 +62,8 @@ class PayloadModel:
                     last_snapshot, last_generation = None, None
                 if last_snapshot == snapshot and (last_generation == override_generation or override_generation is None):
                     ttl = max(int(payload.get("ttl", 4)), 0)
-                    expiry = None if ttl <= 0 else time.monotonic() + ttl
+                    now = time.monotonic()
+                    expiry = now + ttl if ttl > 0 else now
                     existing = self._store.get(item_id)
                     if existing is not None:
                         existing.expiry = expiry

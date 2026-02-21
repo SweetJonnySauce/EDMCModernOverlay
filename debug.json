@@ -1,9 +1,9 @@
 {
-  "capture_client_stderrout": false,
+  "capture_client_stderrout": true,
   "overlay_logs_to_keep": 5,
   "payload_logging": {
     "exclude_plugins": [],
-    "overlay_payload_log_enabled": false
+    "overlay_payload_log_enabled": true
   },
   "payload_spam_detection": {
     "enabled": false,

@@ -4,7 +4,7 @@ The overlay plugin does not receive keyboard/mouse focus while Elite Dangerous
 is running, so the only ergonomic way to trigger quick actions while playing is
 through Elite's chat system. This module mirrors the pattern used by plugins
 like EDR: watch for ``SendText`` journal events authored by the local CMDR,
-carve out a small namespace of bang-prefixed commands (``!overlay …``), and
+carve out a small namespace of bang-prefixed commands (``!ovr …``), and
 translate them into overlay actions.
 
 Only a couple of workflow-driven commands are implemented for now. Handling the
@@ -18,6 +18,8 @@ from dataclasses import dataclass
 import logging
 from typing import Callable, Mapping, Optional
 
+from .plugin_scan_services import report_plugins as default_report_plugins
+
 
 _LOGGER = logging.getLogger("EDMC.ModernOverlay.Commands")
 
@@ -30,13 +32,23 @@ class _OverlayCommandContext:
     cycle_next: Optional[Callable[[], None]] = None
     cycle_prev: Optional[Callable[[], None]] = None
     launch_controller: Optional[Callable[[], None]] = None
+    report_plugins: Optional[Callable[[], None]] = None
     set_opacity: Optional[Callable[[int], None]] = None
+    toggle_opacity: Optional[Callable[[], None]] = None
+    test_overlay: Optional[Callable[[], None]] = None
 
 
 def _normalise_prefix(value: str) -> str:
     text = (value or "").strip()
     if not text.startswith("!"):
         text = "!" + text
+    return text.lower()
+
+
+def _normalise_toggle_argument(value: Optional[str]) -> str:
+    text = (value or "").strip()
+    if not text:
+        return "t"
     return text.lower()
 
 
@@ -56,19 +68,48 @@ def _parse_opacity_argument(value: str) -> Optional[int]:
     return None
 
 
+def _parse_opacity_token(value: str) -> tuple[Optional[int], bool]:
+    text = (value or "").strip()
+    if not text:
+        return None, False
+    had_percent = text.endswith("%")
+    if had_percent:
+        text = text[:-1].strip()
+        if not text:
+            return None, True
+    if text.isdigit():
+        opacity = int(text)
+        if 0 <= opacity <= 100:
+            return opacity, False
+        return None, True
+    if had_percent:
+        return None, True
+    return None, False
+
+
 class JournalCommandHelper:
     """Parse journal ``SendText`` events and dispatch overlay commands."""
 
-    def __init__(self, context: _OverlayCommandContext, command_prefix: str, legacy_prefixes: Optional[list[str]] = None) -> None:
+    def __init__(
+        self,
+        context: _OverlayCommandContext,
+        command_prefix: str,
+        *,
+        toggle_argument: Optional[str] = None,
+        legacy_prefixes: Optional[list[str]] = None,
+    ) -> None:
         self._ctx = context
-        primary = _normalise_prefix(command_prefix or "!overlay")
+        primary = _normalise_prefix(command_prefix or "!ovr")
         extras = [p for p in (legacy_prefixes or []) if p]
         self._prefixes = [primary] + [p for p in (_normalise_prefix(p) for p in extras) if p != primary]
         _LOGGER.debug("Configured overlay command prefixes: %s", ", ".join(self._prefixes))
         help_prefix = self._prefixes[0]
+        self._toggle_argument = _normalise_toggle_argument(toggle_argument)
         self._help_text = (
-            f"Overlay commands: {help_prefix} (launch controller), {help_prefix} next (cycle forward), "
-            f"{help_prefix} prev (cycle backward), {help_prefix} help"
+            f"Overlay commands: {help_prefix} (launch controller), {help_prefix} {self._toggle_argument} "
+            f"(toggle overlay), {help_prefix} next (cycle forward), {help_prefix} prev (cycle backward), "
+            f"{help_prefix} test (show test logo), {help_prefix} plugins (log installed plugins), "
+            f"{help_prefix} help"
         )
 
     # Public API ---------------------------------------------------------
@@ -104,11 +145,6 @@ class JournalCommandHelper:
         if not args:
             return self._launch_controller()
 
-        if len(args) == 1:
-            opacity = _parse_opacity_argument(args[0])
-            if opacity is not None:
-                return self._set_opacity(opacity)
-
         action = args[0].lower()
         if action in {"launch", "open", "controller", "config"}:
             return self._launch_controller()
@@ -121,10 +157,45 @@ class JournalCommandHelper:
         if action in {"prev", "previous", "p"}:
             self._invoke_cycle(self._ctx.cycle_prev, success_message="Overlay cycle: previous payload.")
             return True
+        if action in {"test"}:
+            return self._test_overlay()
+        if action in {"plugins", "plugin"}:
+            return self._report_plugins()
+
+        opacity = None
+        invalid_opacity = False
+        for token in args:
+            candidate, invalid = _parse_opacity_token(token)
+            if candidate is not None:
+                opacity = candidate
+                break
+            if invalid:
+                invalid_opacity = True
+        toggle_present = any(token.lower() == self._toggle_argument for token in args)
+        if opacity is not None:
+            return self._set_opacity(opacity)
+        if invalid_opacity and toggle_present:
+            _LOGGER.debug("Ignoring toggle command due to invalid opacity token: %s", " ".join(args))
+            return True
+        if toggle_present:
+            return self._toggle_opacity()
 
         _LOGGER.debug("Ignoring unknown overlay command: %s", action)
         return True
 
+    def _report_plugins(self) -> bool:
+        callback = self._ctx.report_plugins
+        if callback is None:
+            self._ctx.send_message("Overlay plugins command unavailable.")
+            return True
+        try:
+            callback()
+        except Exception as exc:  # pragma: no cover - defensive guard
+            _LOGGER.warning("Overlay plugin scan failed: %s", exc, exc_info=exc)
+            self._ctx.send_message("Overlay plugin scan failed; see EDMC log.")
+        else:
+            self._ctx.send_message("Overlay plugin scan logged to EDMC debug log.")
+        return True
     def _emit_help(self) -> None:
         self._ctx.send_message(self._help_text)
 
@@ -156,6 +227,20 @@ class JournalCommandHelper:
             self._ctx.send_message("Overlay Controller launch failed; see EDMC log.")
         return True
 
+    def _toggle_opacity(self) -> bool:
+        callback = self._ctx.toggle_opacity
+        if callback is None:
+            self._ctx.send_message("Overlay toggle command unavailable.")
+            return True
+        try:
+            callback()
+        except RuntimeError as exc:
+            self._ctx.send_message(f"Overlay toggle unavailable: {exc}")
+        except Exception as exc:  # pragma: no cover - defensive guard
+            _LOGGER.warning("Overlay toggle callback failed: %s", exc)
+            self._ctx.send_message("Overlay toggle failed; see EDMC log.")
+        return True
+
     def _invoke_cycle(self, callback: Optional[Callable[[], None]], *, success_message: str) -> None:
         if callback is None:
             self._ctx.send_message("Overlay cycle commands are unavailable right now.")
@@ -170,13 +255,31 @@ class JournalCommandHelper:
         else:
             self._ctx.send_message(success_message)
 
+    def _test_overlay(self) -> bool:
+        callback = self._ctx.test_overlay
+        if callback is None:
+            self._ctx.send_message("Overlay test command unavailable.")
+            return True
+        try:
+            callback()
+        except RuntimeError as exc:
+            self._ctx.send_message(f"Overlay test failed: {exc}")
+        except Exception as exc:  # pragma: no cover - defensive guard
+            _LOGGER.warning("Overlay test overlay callback failed: %s", exc)
+            self._ctx.send_message("Overlay test failed; see EDMC log.")
+        else:
+            self._ctx.send_message("Overlay test logo sent.")
+        return True
+
 
 def build_command_helper(
     plugin_runtime: object,
     logger: Optional[logging.Logger] = None,
     *,
-    command_prefix: str = "!overlay",
+    command_prefix: str = "!ovr",
+    toggle_argument: Optional[str] = None,
     legacy_prefixes: Optional[list[str]] = None,
+    report_plugins: Optional[Callable[[], None]] = None,
 ) -> JournalCommandHelper:
     """Construct a :class:`JournalCommandHelper` for the active plugin runtime."""
 
@@ -188,14 +291,23 @@ def build_command_helper(
         except Exception as exc:  # pragma: no cover - defensive guard
             log.warning("Failed to send overlay response '%s': %s", text, exc)
 
+    report_callback = report_plugins or default_report_plugins
     context = _OverlayCommandContext(
         send_message=_send_overlay_message,
         cycle_next=getattr(plugin_runtime, "cycle_payload_next", None),
         cycle_prev=getattr(plugin_runtime, "cycle_payload_prev", None),
         launch_controller=getattr(plugin_runtime, "launch_overlay_controller", None),
+        report_plugins=report_callback,
         set_opacity=getattr(plugin_runtime, "set_payload_opacity_preference", None),
+        toggle_opacity=getattr(plugin_runtime, "toggle_payload_opacity_preference", None),
+        test_overlay=getattr(plugin_runtime, "send_test_overlay", None),
     )
-    legacy = legacy_prefixes if legacy_prefixes is not None else ["!overlay"]
+    legacy = legacy_prefixes if legacy_prefixes is not None else []
     if command_prefix in legacy:
         legacy = [p for p in legacy if p != command_prefix]
-    return JournalCommandHelper(context, command_prefix, legacy_prefixes=legacy)
+    return JournalCommandHelper(
+        context,
+        command_prefix,
+        toggle_argument=toggle_argument,
+        legacy_prefixes=legacy,
+    )

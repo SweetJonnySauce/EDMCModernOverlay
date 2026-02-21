@@ -13,6 +13,7 @@ from overlay_controller.widgets import (
     OffsetSelectorWidget,
     SidebarTipHelper,
 )
+from overlay_controller.widgets.tooltip import ToolTip
 
 
 class LayoutBuilder:
@@ -44,6 +45,7 @@ class LayoutBuilder:
         on_anchor_changed: Callable[[str, bool], None],
         on_justification_changed: Callable[[str], None],
         on_background_changed: Callable[[Optional[str], Optional[str], Optional[int]], None],
+        on_reset_clicked: Callable[[], None],
         load_idprefix_options: Callable[[], list[str]],
     ) -> dict[str, object]:
         app = self.app
@@ -140,6 +142,7 @@ class LayoutBuilder:
         justification_widget = None
         background_widget = None
         tip_helper = None
+        reset_button = None
 
         for index, (label_text, weight, is_selectable) in enumerate(sections):
             default_height = 120 if label_text == "anchor selector" else 80
@@ -217,8 +220,23 @@ class LayoutBuilder:
                 if is_selectable and focus_index is not None:
                     focus_widgets[("sidebar", focus_index)] = background_widget
             else:
-                tip_helper = SidebarTipHelper(frame)
-                tip_helper.pack(fill="both", expand=True, padx=2, pady=2)
+                tip_wrapper = tk.Frame(frame, bd=0, highlightthickness=0, bg=frame.cget("background"))
+                tip_wrapper.grid(row=0, column=0, sticky="nsew")
+                tip_wrapper.grid_rowconfigure(0, weight=1)
+                tip_wrapper.grid_columnconfigure(0, weight=1)
+                tip_wrapper.grid_columnconfigure(1, weight=0)
+
+                tip_helper = SidebarTipHelper(tip_wrapper)
+                tip_helper.grid(row=0, column=0, sticky="nsew", padx=(2, 4), pady=(2, 4))
+
+                reset_button = tk.Button(
+                    tip_wrapper,
+                    text="Reset",
+                    command=on_reset_clicked,
+                    width=6,
+                )
+                reset_button.grid(row=0, column=1, sticky="ne", padx=(0, 4), pady=(2, 0))
+                ToolTip(reset_button, "Reset returns the overlay to the plugin defaults")
 
             if is_selectable and focus_index is not None:
                 frame.bind("<Button-1>", lambda _e, idx=focus_index: on_sidebar_click(idx), add="+")
@@ -256,6 +274,7 @@ class LayoutBuilder:
             "justification_widget": justification_widget,
             "background_widget": background_widget,
             "tip_helper": tip_helper,
+            "reset_button": reset_button,
             "sidebar_selectable": sidebar_selectable,
             "placement_min_width": placement_min_width,
             "preview_canvas_padding": preview_canvas_padding,

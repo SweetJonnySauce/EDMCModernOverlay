@@ -46,6 +46,8 @@ if __package__:
         schedule_config_rebroadcasts,
         schedule_version_notice_rebroadcasts,
     )
+    from .overlay_plugin.standalone_support import standalone_mode_preference_value
+    from .overlay_plugin.overlay_config_payload import build_overlay_config_payload
     from .overlay_plugin.preferences import (
         CLIENT_LOG_RETENTION_MAX,
         CLIENT_LOG_RETENTION_MIN,
@@ -54,8 +56,11 @@ if __package__:
         PreferencesPanel,
         STATUS_GUTTER_MAX,
         TroubleshootingPanelState,
+        TEST_OVERLAY_TTL_SECONDS,
+        TOGGLE_ARGUMENT_DEFAULT,
         _apply_font_bounds_edit,
         _apply_font_step_edit,
+        _coerce_toggle_argument,
         _normalise_launch_command,
     )
     from .overlay_plugin.spam_detection import (
@@ -73,6 +78,8 @@ if __package__:
         unregister_publisher,
     )
     from .overlay_plugin.journal_commands import build_command_helper
+    from .overlay_plugin.toggle_helpers import toggle_payload_opacity
+    from .EDMCOverlay import edmcoverlay
     from .EDMCOverlay.edmcoverlay import normalise_legacy_payload
     from .group_cache import GroupPlacementCache
     from .overlay_client import env_overrides as env_overrides_helper
@@ -96,6 +103,8 @@ else:  # pragma: no cover - EDMC loads as top-level module
         schedule_config_rebroadcasts,
         schedule_version_notice_rebroadcasts,
     )
+    from overlay_plugin.standalone_support import standalone_mode_preference_value
+    from overlay_plugin.overlay_config_payload import build_overlay_config_payload
     from overlay_plugin.preferences import (
         CLIENT_LOG_RETENTION_MAX,
         CLIENT_LOG_RETENTION_MIN,
@@ -104,8 +113,11 @@ else:  # pragma: no cover - EDMC loads as top-level module
         PreferencesPanel,
         STATUS_GUTTER_MAX,
         TroubleshootingPanelState,
+        TEST_OVERLAY_TTL_SECONDS,
+        TOGGLE_ARGUMENT_DEFAULT,
         _apply_font_bounds_edit,
         _apply_font_step_edit,
+        _coerce_toggle_argument,
         _normalise_launch_command,
     )
     from overlay_plugin.spam_detection import (
@@ -123,6 +135,8 @@ else:  # pragma: no cover - EDMC loads as top-level module
         unregister_publisher,
     )
     from overlay_plugin.journal_commands import build_command_helper
+    from overlay_plugin.toggle_helpers import toggle_payload_opacity
+    from EDMCOverlay import edmcoverlay
     from EDMCOverlay.edmcoverlay import normalise_legacy_payload
     from group_cache import GroupPlacementCache
     import overlay_client.env_overrides as env_overrides_helper
@@ -284,6 +298,9 @@ def _edmc_debug_logging_active() -> bool:
 def _dev_override_active() -> bool:
     """Return True when Modern Overlay is running in dev mode."""
 
+    prefs = globals().get("_preferences")
+    if prefs is not None:
+        return bool(getattr(prefs, "dev_mode", DEV_BUILD))
     return bool(DEV_BUILD)
 
 
@@ -455,6 +472,7 @@ class _PluginRuntime:
         )
         self.watchdog: Optional[OverlayWatchdog] = None
         self._legacy_tcp_server: Optional[LegacyOverlayTCPServer] = None
+        self._legacy_overlay_client = None
         self._lock = threading.Lock()
         self._lifecycle = LifecycleTracker(LOGGER)
         self._prefs_lock = threading.Lock()
@@ -1403,13 +1421,14 @@ class _PluginRuntime:
         LOGGER.debug(
             "Applying updated preferences: show_connection_status=%s "
             "client_log_retention=%d gridlines_enabled=%s gridline_spacing=%d overlay_opacity=%.2f "
-            "force_render=%s force_xwayland=%s debug_overlay=%s cycle_payload_ids=%s font_min=%.1f font_max=%.1f",
+            "force_render=%s standalone_mode=%s force_xwayland=%s debug_overlay=%s cycle_payload_ids=%s font_min=%.1f font_max=%.1f",
             self._preferences.show_connection_status,
             self._resolve_client_log_retention(),
             self._preferences.gridlines_enabled,
             self._preferences.gridline_spacing,
             self._preferences.overlay_opacity,
             self._resolve_force_render(),
+            standalone_mode_preference_value(self._preferences),
             self._preferences.force_xwayland,
             self._preferences.show_debug_overlay,
             self._preferences.cycle_payload_ids,
@@ -1417,6 +1436,17 @@ class _PluginRuntime:
             self._preferences.max_font_point,
         )
         self._send_overlay_config()
+
+    def _legacy_overlay(self):
+        client = self._legacy_overlay_client
+        if client is not None:
+            return client
+        try:
+            client = edmcoverlay.Overlay()
+        except Exception as exc:
+            raise RuntimeError("Legacy API not available.") from exc
+        self._legacy_overlay_client = client
+        return client
 
     def send_test_message(self, message: str, x: Optional[int] = None, y: Optional[int] = None) -> None:
         text = message.strip()
@@ -1463,6 +1493,158 @@ class _PluginRuntime:
                 payload["ttl"],
                 payload["size"],
             )
+
+    def send_test_overlay(self) -> None:
+        if not self._running:
+            raise RuntimeError("Overlay is not running")
+        log_path = self.plugin_dir / "payload_store" / "ed-logo-test.log"
+        try:
+            raw_lines = log_path.read_text(encoding="utf-8").splitlines()
+        except FileNotFoundError as exc:
+            raise RuntimeError(f"Test overlay payloads not found: {log_path}") from exc
+        except Exception as exc:
+            raise RuntimeError(f"Failed to read test overlay payloads: {exc}") from exc
+
+        overlay = self._legacy_overlay()
+        ttl = int(TEST_OVERLAY_TTL_SECONDS)
+        sent = 0
+        rect_bounds: Optional[tuple[int, int, int, int]] = None
+        vector_bounds: Optional[tuple[int, int, int, int]] = None
+        label_anchor: Optional[tuple[int, int, str]] = None
+
+        def _merge_bounds(bounds: Optional[tuple[int, int, int, int]], new_bounds: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+            if bounds is None:
+                return new_bounds
+            return (
+                min(bounds[0], new_bounds[0]),
+                min(bounds[1], new_bounds[1]),
+                max(bounds[2], new_bounds[2]),
+                max(bounds[3], new_bounds[3]),
+            )
+
+        try:
+            for line in raw_lines:
+                brace = line.find("{")
+                if brace == -1:
+                    continue
+                payload = json.loads(line[brace:])
+                payload_type = payload.get("type")
+                if payload_type == "message":
+                    text_value = str(payload.get("text") or "")
+                    color_value = str(payload.get("color") or "white")
+                    x_val = int(payload.get("x", 0))
+                    y_val = int(payload.get("y", 0))
+                    size_value = str(payload.get("size") or "normal")
+                    overlay.send_message(
+                        str(payload.get("id") or ""),
+                        text_value,
+                        color_value,
+                        x_val,
+                        y_val,
+                        ttl=ttl,
+                        size=size_value,
+                    )
+                    if text_value.strip().lower() == "edmc modern overlay":
+                        label_anchor = (x_val, y_val, color_value)
+                    sent += 1
+                    continue
+                if payload_type == "shape":
+                    shape = str(payload.get("shape") or "")
+                    base = {
+                        "id": str(payload.get("id") or ""),
+                        "shape": shape,
+                        "color": payload.get("color") or "white",
+                        "ttl": ttl,
+                    }
+                    if shape == "vect":
+                        vector = payload.get("vector") or []
+                        base["vector"] = vector
+                        min_x = min_y = None
+                        max_x = max_y = None
+                        if isinstance(vector, list):
+                            for entry in vector:
+                                if not isinstance(entry, Mapping):
+                                    continue
+                                try:
+                                    x_val = int(entry.get("x", 0))
+                                    y_val = int(entry.get("y", 0))
+                                except (TypeError, ValueError):
+                                    continue
+                                if min_x is None or x_val < min_x:
+                                    min_x = x_val
+                                if min_y is None or y_val < min_y:
+                                    min_y = y_val
+                                if max_x is None or x_val > max_x:
+                                    max_x = x_val
+                                if max_y is None or y_val > max_y:
+                                    max_y = y_val
+                        if min_x is not None and min_y is not None and max_x is not None and max_y is not None:
+                            vector_bounds = _merge_bounds(vector_bounds, (min_x, min_y, max_x, max_y))
+                        overlay.send_raw(base)
+                        sent += 1
+                        continue
+                    if shape == "rect":
+                        x_val = int(payload.get("x", 0))
+                        y_val = int(payload.get("y", 0))
+                        w_val = int(payload.get("w", 0))
+                        h_val = int(payload.get("h", 0))
+                        base.update(
+                            {
+                                "fill": payload.get("fill") or "#00000000",
+                                "x": x_val,
+                                "y": y_val,
+                                "w": w_val,
+                                "h": h_val,
+                            }
+                        )
+                        rect_bounds = _merge_bounds(rect_bounds, (x_val, y_val, x_val + w_val, y_val + h_val))
+                        overlay.send_raw(base)
+                        sent += 1
+                        continue
+        except Exception as exc:
+            raise RuntimeError(f"Test overlay failed: {exc}") from exc
+
+        version_text = f"v{PLUGIN_VERSION}".strip()
+        if version_text:
+            try:
+                if label_anchor is not None:
+                    anchor_x, anchor_y, anchor_color = label_anchor
+                    line_height = 16
+                    y_pos = anchor_y + line_height
+                    overlay.send_message(
+                        f"{PLUGIN_NAME}-logo-version",
+                        version_text,
+                        anchor_color,
+                        int(anchor_x),
+                        int(y_pos),
+                        ttl=ttl,
+                        size="normal",
+                    )
+                    sent += 1
+                else:
+                    bounds = rect_bounds or vector_bounds
+                    if bounds is not None:
+                        padding = 6
+                        approx_char_width = 8
+                        approx_line_height = 16
+                        approx_text_width = len(version_text) * approx_char_width
+                        x_pos = max(bounds[0], bounds[2] - padding - approx_text_width)
+                        y_pos = max(bounds[1], bounds[3] - padding - approx_line_height)
+                        overlay.send_message(
+                            f"{PLUGIN_NAME}-logo-version",
+                            version_text,
+                            "#f5821f",
+                            int(x_pos),
+                            int(y_pos),
+                            ttl=ttl,
+                            size="normal",
+                        )
+                        sent += 1
+            except Exception as exc:
+                raise RuntimeError(f"Failed to send test overlay version: {exc}") from exc
+
+        if not sent:
+            raise RuntimeError("No test overlay payloads were sent.")
 
     def preview_font_sizes(self) -> None:
         if not self._running:
@@ -1541,6 +1723,18 @@ class _PluginRuntime:
         self._command_helper_prefix = normalised
         LOGGER.info("Overlay Controller launch command preference updated to %s", normalised)
 
+    def set_toggle_argument_preference(self, value: str) -> None:
+        with self._prefs_lock:
+            current = getattr(self._preferences, "controller_toggle_argument", TOGGLE_ARGUMENT_DEFAULT)
+            normalised = _coerce_toggle_argument(value, current or TOGGLE_ARGUMENT_DEFAULT)
+            if normalised == current:
+                return
+            self._preferences.controller_toggle_argument = normalised
+            self._preferences.save()
+        current_prefix = self._command_helper_prefix or getattr(self._preferences, "controller_launch_command", "!ovr")
+        self._command_helper = self._build_command_helper(current_prefix, previous_prefix=current_prefix)
+        LOGGER.info("Overlay toggle argument preference updated to %s", normalised)
+
     def set_payload_opacity_preference(self, value: int) -> None:
         try:
             numeric = int(value)
@@ -1554,17 +1748,29 @@ class _PluginRuntime:
             self._preferences.save()
         self._send_overlay_config()
 
+    def toggle_payload_opacity_preference(self) -> None:
+        with self._prefs_lock:
+            toggle_payload_opacity(self._preferences)
+            self._preferences.save()
+        self._send_overlay_config()
+
     def _build_command_helper(self, prefix: str, previous_prefix: Optional[str] = None) -> Any:
         legacy: list[str] = []
-        if prefix == "!overlay":
-            legacy = ["!overlay"]
-        elif previous_prefix and previous_prefix != prefix:
+        if previous_prefix and previous_prefix != prefix:
             LOGGER.debug(
                 "Removing legacy Overlay Controller launch prefix %s; active prefix now %s",
                 previous_prefix,
                 prefix,
             )
-        helper = build_command_helper(self, LOGGER, command_prefix=prefix, legacy_prefixes=legacy)
+        prefs = getattr(self, "_preferences", None)
+        toggle_argument = getattr(prefs, "controller_toggle_argument", TOGGLE_ARGUMENT_DEFAULT)
+        helper = build_command_helper(
+            self,
+            LOGGER,
+            command_prefix=prefix,
+            toggle_argument=toggle_argument,
+            legacy_prefixes=legacy,
+        )
         LOGGER.debug(
             "Overlay Controller journal command helper configured: primary=%s legacy=%s",
             prefix,
@@ -1658,6 +1864,12 @@ class _PluginRuntime:
             self._preferences.save()
         if broadcast:
             self._send_overlay_config()
+
+    def set_standalone_mode_preference(self, value: bool) -> None:
+        with self._prefs_lock:
+            self._preferences.standalone_mode = bool(value)
+            self._preferences.save()
+        self._send_overlay_config()
 
     def set_title_bar_compensation_preference(self, enabled: bool, height: int) -> None:
         with self._prefs_lock:
@@ -1918,7 +2130,7 @@ class _PluginRuntime:
         LOGGER.debug("Overlay Controller launched via chat command (pid=%s)", getattr(process, "pid", "?"))
         return process
 
-    def _emit_controller_message(self, text: str, ttl: Optional[float] = None, persistent: bool = False) -> None:
+    def _emit_controller_message(self, text: str, ttl: Optional[float] = None) -> None:
         payload = {
             "timestamp": datetime.now(UTC).isoformat(),
             "event": "LegacyOverlay",
@@ -1929,7 +2141,7 @@ class _PluginRuntime:
             "x": 40,
             "y": 40,
             "size": "normal",
-            "ttl": 0 if persistent else max(1.0, float(ttl or 2.0)),
+            "ttl": max(1.0, float(ttl or 2.0)),
         }
         self._publish_payload(payload)
 
@@ -1942,7 +2154,7 @@ class _PluginRuntime:
                 pid = handle.pid
         if pid is None:
             return
-        self._emit_controller_message("Overlay Controller is Active", ttl=0, persistent=True)
+        self._emit_controller_message("Overlay Controller is Active", ttl=20.0)
 
     def _clear_controller_message(self) -> None:
         payload = {
@@ -2353,39 +2565,18 @@ class _PluginRuntime:
     def _send_overlay_config(self, rebroadcast: bool = False) -> None:
         self._load_payload_debug_config()
         diagnostics_enabled = _diagnostic_logging_enabled()
-        show_debug_overlay = bool(self._preferences.show_debug_overlay and diagnostics_enabled)
-        payload = {
-            "event": "OverlayConfig",
-            "opacity": float(self._preferences.overlay_opacity),
-            "global_payload_opacity": int(getattr(self._preferences, "global_payload_opacity", 100)),
-            "show_status": bool(self._preferences.show_connection_status),
-            "debug_overlay_corner": str(self._preferences.debug_overlay_corner or "NW"),
-            "status_bottom_margin": int(self._preferences.status_bottom_margin()),
-            "client_log_retention": int(self._resolve_client_log_retention()),
-            "gridlines_enabled": bool(self._preferences.gridlines_enabled),
-            "gridline_spacing": int(self._preferences.gridline_spacing),
-            "force_render": self._resolve_force_render(),
-            "title_bar_enabled": bool(self._preferences.title_bar_enabled),
-            "title_bar_height": int(self._preferences.title_bar_height),
-            "show_debug_overlay": show_debug_overlay,
-            "physical_clamp_enabled": bool(getattr(self._preferences, "physical_clamp_enabled", False)),
-            "physical_clamp_overrides": dict(getattr(self._preferences, "physical_clamp_overrides", {}) or {}),
-            "min_font_point": float(self._preferences.min_font_point),
-            "max_font_point": float(self._preferences.max_font_point),
-            "legacy_font_step": int(getattr(self._preferences, "legacy_font_step", 2)),
-            "cycle_payload_ids": bool(self._preferences.cycle_payload_ids),
-            "copy_payload_id_on_cycle": bool(self._preferences.copy_payload_id_on_cycle),
-            "scale_mode": str(self._preferences.scale_mode or "fit"),
-            "nudge_overflow_payloads": bool(self._preferences.nudge_overflow_payloads),
-            "payload_nudge_gutter": int(self._preferences.payload_nudge_gutter),
-            "payload_log_delay_seconds": float(getattr(self._preferences, "payload_log_delay_seconds", 0.0)),
-            "platform_context": self._platform_context_payload(),
-        }
+        payload = build_overlay_config_payload(
+            self._preferences,
+            diagnostics_enabled=diagnostics_enabled,
+            force_render=self._resolve_force_render(),
+            client_log_retention=self._resolve_client_log_retention(),
+            platform_context=self._platform_context_payload(),
+        )
         self._last_config = dict(payload)
         self._publish_payload(payload)
         LOGGER.debug(
             "Published overlay config: opacity=%s global_payload_opacity=%s show_status=%s debug_overlay_corner=%s status_bottom_margin=%s client_log_retention=%d gridlines_enabled=%s "
-            "gridline_spacing=%d force_render=%s title_bar_enabled=%s title_bar_height=%d debug_overlay=%s physical_clamp=%s cycle_payload_ids=%s copy_payload_id_on_cycle=%s "
+            "gridline_spacing=%d force_render=%s standalone_mode=%s title_bar_enabled=%s title_bar_height=%d debug_overlay=%s physical_clamp=%s cycle_payload_ids=%s copy_payload_id_on_cycle=%s "
             "nudge_overflow=%s payload_gutter=%d payload_log_delay=%.2f font_min=%.1f font_max=%.1f font_step=%d platform_context=%s clamp_overrides=%s",
             payload["opacity"],
             payload["global_payload_opacity"],
@@ -2396,6 +2587,7 @@ class _PluginRuntime:
             payload["gridlines_enabled"],
             payload["gridline_spacing"],
             payload["force_render"],
+            payload["standalone_mode"],
             payload["title_bar_enabled"],
             payload["title_bar_height"],
             payload["show_debug_overlay"],
@@ -2807,6 +2999,7 @@ class _PluginRuntime:
         env["EDMC_OVERLAY_LOG_LEVEL"] = str(log_level_payload.get("value"))
         log_level_name = log_level_payload.get("name") or logging.getLevelName(logging.INFO)
         env["EDMC_OVERLAY_LOG_LEVEL_NAME"] = str(log_level_name)
+        env[DEV_MODE_ENV_VAR] = "1" if self._preferences.dev_mode else "0"
         env["EDMC_OVERLAY_SESSION_TYPE"] = session or "unknown"
         env["EDMC_OVERLAY_COMPOSITOR"] = compositor
         env["EDMC_OVERLAY_FORCE_XWAYLAND"] = "1" if force_xwayland else "0"
@@ -3031,6 +3224,7 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
         payload_nudge_callback = _plugin.set_payload_nudge_preference if _plugin else None
         payload_gutter_callback = _plugin.set_payload_nudge_gutter_preference if _plugin else None
         force_render_callback = _plugin.set_force_render_preference if _plugin else None
+        standalone_mode_callback = _plugin.set_standalone_mode_preference if _plugin else None
         title_bar_config_callback = _plugin.set_title_bar_compensation_preference if _plugin else None
         debug_overlay_callback = _plugin.set_debug_overlay_preference if _plugin else None
         payload_logging_callback = _plugin.set_payload_logging_preference if _plugin else None
@@ -3044,6 +3238,7 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
         cycle_next_callback = _plugin.cycle_payload_next if _plugin else None
         restart_overlay_callback = _plugin.restart_overlay_client if _plugin else None
         launch_command_callback = _plugin.set_launch_command_preference if _plugin else None
+        toggle_argument_callback = _plugin.set_toggle_argument_preference if _plugin else None
         payload_opacity_callback = _plugin.set_payload_opacity_preference if _plugin else None
         reset_group_cache_callback = _plugin.reset_group_cache if _plugin else None
         capture_override_callback = _plugin.set_capture_override_preference if _plugin else None
@@ -3054,6 +3249,7 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
             diagnostics_state = _plugin.get_troubleshooting_panel_state()
         if launch_command_callback:
             LOGGER.debug("Attaching launch command callback with initial value=%s", _preferences.controller_launch_command)
+        dev_mode = _preferences.dev_mode if _preferences is not None else DEV_BUILD
         panel = PreferencesPanel(
             parent,
             _preferences,
@@ -3067,6 +3263,7 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
             payload_nudge_callback,
             payload_gutter_callback,
             force_render_callback,
+            standalone_mode_callback,
             title_bar_config_callback,
             debug_overlay_callback,
             payload_logging_callback,
@@ -3080,9 +3277,10 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
             cycle_next_callback,
             restart_overlay_callback,
             launch_command_callback,
+            toggle_argument_callback,
             payload_opacity_callback,
             reset_group_cache_callback=reset_group_cache_callback,
-            dev_mode=DEV_BUILD,
+            dev_mode=dev_mode,
             plugin_version=MODERN_OVERLAY_VERSION,
             version_update_available=version_update_available,
             troubleshooting_state=diagnostics_state,
@@ -3122,13 +3320,14 @@ def prefs_changed(cmdr: str, is_beta: bool) -> None:  # pragma: no cover - save 
             LOGGER.debug(
                 "Preferences saved: show_connection_status=%s "
                 "client_log_retention=%d gridlines_enabled=%s gridline_spacing=%d "
-                "force_render=%s title_bar_enabled=%s title_bar_height=%d force_xwayland=%s "
+                "force_render=%s standalone_mode=%s title_bar_enabled=%s title_bar_height=%d force_xwayland=%s "
                 "debug_overlay=%s cycle_payload_ids=%s copy_payload_id_on_cycle=%s font_min=%.1f font_max=%.1f",
                 _preferences.show_connection_status,
                 _plugin._resolve_client_log_retention() if _plugin else _preferences.client_log_retention,
                 _preferences.gridlines_enabled,
                 _preferences.gridline_spacing,
                 _plugin._resolve_force_render() if _plugin else bool(getattr(_preferences, "force_render", False)),
+                standalone_mode_preference_value(_preferences),
                 _preferences.title_bar_enabled,
                 _preferences.title_bar_height,
                 _preferences.force_xwayland,

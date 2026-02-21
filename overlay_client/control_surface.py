@@ -60,6 +60,17 @@ class ControlSurfaceMixin:
             ):
                 self._update_follow_visibility(False)
 
+    def set_standalone_mode(self, enabled: Optional[bool]) -> None:
+        flag = bool(enabled)
+        if not sys.platform.startswith("win"):
+            flag = False
+        if flag == getattr(self, "_standalone_mode", False):
+            return
+        self._standalone_mode = flag
+        _CLIENT_LOGGER.debug("Stand-alone mode %s", "enabled" if flag else "disabled")
+        self._apply_drag_state()
+        self._apply_standalone_window_identity()
+
     def set_physical_clamp_enabled(self, enabled: bool) -> None:
         flag = bool(enabled)
         if flag == getattr(self, "_physical_clamp_enabled", False):

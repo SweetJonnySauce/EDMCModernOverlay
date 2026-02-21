@@ -206,8 +206,8 @@ def _extract_payload(
         )
         return None
     ttl_value = payload.get("ttl")
-    if isinstance(ttl_value, (int, float)) and ttl_value <= 0:
-        _print_step(f"Skipping line {line_no}: ttl <= 0 ({ttl_value}).")
+    if isinstance(ttl_value, (int, float)) and ttl_value < 0:
+        _print_step(f"Skipping line {line_no}: ttl < 0 ({ttl_value}).")
         return None
     event = payload.get("event")
     if not isinstance(event, str) or not event:
@@ -305,7 +305,7 @@ def main(argv: List[str] | None = None) -> None:
     parser.add_argument(
         "--ttl",
         type=int,
-        help="Override TTL value applied to LegacyOverlay payloads.",
+        help="Override TTL value applied to LegacyOverlay payloads (0 expires immediately).",
     )
     args = parser.parse_args(argv)
 
@@ -327,8 +327,8 @@ def main(argv: List[str] | None = None) -> None:
     _print_step(f"ModernOverlay broadcaster port resolved to {port}.")
 
     ttl_override = args.ttl
-    if ttl_override is not None and ttl_override <= 0:
-        _fail("--ttl must be positive when provided.")
+    if ttl_override is not None and ttl_override < 0:
+        _fail("--ttl must be zero or positive when provided.")
 
     messages: List[Dict[str, Any]] = []
     for message in _iter_cli_messages(log_path, ttl_override):

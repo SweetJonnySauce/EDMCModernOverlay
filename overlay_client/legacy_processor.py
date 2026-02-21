@@ -11,6 +11,17 @@ from overlay_client.legacy_store import LegacyItem, LegacyItemStore
 
 LOGGER = logging.getLogger("EDMC.ModernOverlay.LegacyProcessor")
 
+_MARKER_TEXT_SIZE_CHOICES = {"small", "normal", "large", "huge"}
+
+
+def _normalise_marker_text_size(value: Any) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    token = value.strip().lower()
+    if token in _MARKER_TEXT_SIZE_CHOICES:
+        return token
+    return None
+
 
 def _hashable_payload_snapshot(item_type: str, payload: Mapping[str, Any]) -> tuple:
     if item_type == "message":
@@ -38,22 +49,36 @@ def _hashable_payload_snapshot(item_type: str, payload: Mapping[str, Any]) -> tu
         if shape_name == "vect":
             vector = payload.get("vector") or []
             points = []
+            payload_size = _normalise_marker_text_size(payload.get("size"))
+            has_text = False
             if isinstance(vector, list):
                 for entry in vector:
                     if not isinstance(entry, Mapping):
                         continue
+                    text_value = entry.get("text", "")
+                    if text_value is None:
+                        text_value = ""
+                    text_value = str(text_value)
+                    if text_value != "":
+                        has_text = True
+                    size_value = ""
+                    if text_value != "":
+                        size_value = _normalise_marker_text_size(entry.get("size")) or ""
                     points.append(
                         (
                             entry.get("x", 0),
                             entry.get("y", 0),
                             entry.get("color", ""),
                             (entry.get("marker") or "").lower(),
-                            entry.get("text", ""),
+                            text_value,
+                            size_value,
                         )
                     )
+            payload_size_value = payload_size if has_text else ""
             return (
                 shape_name,
                 payload.get("color", ""),
+                payload_size_value,
                 tuple(points),
                 payload.get("__mo_transform__", None),
             )
@@ -162,7 +187,8 @@ def process_legacy_payload(
         return False
 
     ttl = max(int(payload.get("ttl", 4)), 0)
-    expiry = None if ttl <= 0 else time.monotonic() + ttl
+    now = time.monotonic()
+    expiry = now + ttl if ttl > 0 else now
     plugin_name = _extract_plugin(payload)
 
     now_iso = datetime.now(UTC).isoformat()
@@ -254,6 +280,7 @@ def process_legacy_payload(
                 LOGGER.warning("Dropping vect payload with invalid vector list: id=%s vector=%s", item_id, vector)
                 return False
             points = []
+            payload_size = _normalise_marker_text_size(message.get("size"))
             for entry in vector:
                 if not isinstance(entry, Mapping):
                     continue
@@ -270,8 +297,12 @@ def process_legacy_payload(
                     point["color"] = str(entry["color"])
                 if entry.get("marker"):
                     point["marker"] = str(entry["marker"]).lower()
-                if entry.get("text"):
-                    point["text"] = str(entry["text"])
+                text = entry.get("text")
+                if text is not None and str(text) != "":
+                    point["text"] = str(text)
+                    size_token = _normalise_marker_text_size(entry.get("size"))
+                    if size_token:
+                        point["size"] = size_token
                 points.append(point)
             if not points:
                 if trace_fn:
@@ -303,6 +334,8 @@ def process_legacy_payload(
                 "base_color": message.get("color", "white"),
                 "points": points,
             }
+            if payload_size:
+                data["text_size"] = payload_size
             data["__mo_ttl__"] = ttl
             if trace_fn:
                 snapshot = _hashable_payload_snapshot("shape", payload)

@@ -32,7 +32,7 @@
           "bgstally-msg-cmdr_info-"
         ],
         "idPrefixGroupAnchor": "top",
-        "payloadJustification": "center",
+        "payloadJustification": "left",
         "backgroundColor": "None",
         "backgroundBorderColor": "None",
         "backgroundBorderWidth": 3
@@ -51,7 +51,8 @@
         "idPrefixes": [
           "bgstally-msg-objectives-"
         ],
-        "idPrefixGroupAnchor": "nw",
+        "idPrefixGroupAnchor": "ne",
+        "offsetX": -5,
         "payloadJustification": "left",
         "backgroundColor": "none",
         "backgroundBorderColor": "none",
@@ -83,7 +84,7 @@
           "bgstally-msg-system_info-"
         ],
         "idPrefixGroupAnchor": "top",
-        "payloadJustification": "center",
+        "payloadJustification": "left",
         "backgroundColor": "None",
         "backgroundBorderColor": "None",
         "backgroundBorderWidth": 3
@@ -119,7 +120,7 @@
           "bgstally-msg-warning-"
         ],
         "idPrefixGroupAnchor": "center",
-        "payloadJustification": "center",
+        "payloadJustification": "left",
         "backgroundColor": "red",
         "backgroundBorderColor": "red",
         "backgroundBorderWidth": 3
@@ -146,7 +147,7 @@
         ],
         "idPrefixGroupAnchor": "nw",
         "payloadJustification": "left",
-        "markerLabelPosition": "centered",
+        "markerLabelPosition": "below",
         "backgroundColor": null
       },
       "Bioscan Summary": {
@@ -201,7 +202,8 @@
     "idPrefixGroups": {
       "EDMC-Mining-Analytics": {
         "idPrefixes": [
-          "edmcma.metric."
+          "edmcma.metric.",
+          "edmcma.bar."
         ],
         "idPrefixGroupAnchor": "nw",
         "payloadJustification": "left",
@@ -241,6 +243,32 @@
         "payloadJustification": "left",
         "markerLabelPosition": "below",
         "controllerPreviewBoxMode": "max"
+      },
+      "EDMCModernOverlay Logo Test": {
+        "idPrefixes": [
+          "edmcmodernoverlay-logo-test-",
+          "edmcmodernoverlay-logo-"
+        ],
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last",
+        "backgroundColor": "black",
+        "backgroundBorderColor": "blue"
+      },
+      "EDMCModernOverlay Plugin Status": {
+        "idPrefixes": [
+          "edmcmodernoverlay-plugin-status-"
+        ],
+        "idPrefixGroupAnchor": "center",
+        "offsetX": 640,
+        "offsetY": 480,
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last",
+        "backgroundColor": "black",
+        "backgroundBorderColor": "blue",
+        "backgroundBorderWidth": 10
       }
     }
   },
@@ -331,6 +359,15 @@
         "markerLabelPosition": "below",
         "controllerPreviewBoxMode": "last",
         "backgroundColor": null
+      },
+      "EDR Mining": {
+        "idPrefixes": [
+          "edr-mining-"
+        ],
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last"
       }
     }
   },
@@ -479,6 +516,23 @@
         "controllerPreviewBoxMode": "max",
         "backgroundColor": null,
         "backgroundBorderColor": null
+      }
+    }
+  },
+  "NeutronDancer": {
+    "matchingPrefixes": [
+      "neutrondancer-"
+    ],
+    "idPrefixGroups": {
+      "Default": {
+        "idPrefixes": [
+          "neutrondancer-default-"
+        ],
+        "idPrefixGroupAnchor": "nw",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last",
+        "backgroundColor": "#00000000",
+        "backgroundBorderWidth": 2
       }
     }
   }

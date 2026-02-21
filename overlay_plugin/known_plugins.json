@@ -1,0 +1,77 @@
+{
+  "BGS-Tally": {
+    "config_key": "bgst_enableoverlay",
+    "enabled_values": [
+      "Yes"
+    ]
+  },
+  "EDMC-Bioscan": {
+    "config_key": "bioscan_overlay",
+    "enabled_values": [
+      "True"
+    ]
+  },
+  "LandingPad": {
+    "config_key": "landingpad_use_overlay",
+    "enabled_values": [
+      "True"
+    ]
+  },
+  "EDMC-Navroute": {
+    "config_key": "navroute_overlay",
+    "enabled_values": [
+      "True"
+    ]
+  },
+  "EDMC-Mining-Analytics": {
+    "config_key": "edmc_mining_overlay_enabled",
+    "enabled_values": [
+      "1"
+    ]
+  },
+  "EDMC-PlanetPOI": {
+    "config_key": "planetpoi_show_gui_info",
+    "enabled_values": [
+      "1"
+    ]
+  },
+  "EDMC-Pioneer": {
+    "config_key": "pioneer_overlay",
+    "enabled_values": [
+      "True"
+    ]
+  },
+  "EDMC-Canonn": {
+    "config_key": "enableoverlay",
+    "enabled_values": [
+      "1"
+    ]
+  },
+  "ExploData": {
+    "ignore": true
+  },
+  "FCDN": {
+    "ignore": true
+  },
+  "EDMC-LogEventMiner": {
+    "ignore": true
+  },
+  "NeutronDancer": {
+    "config_key": "neutrondancer_overlay",
+    "enabled_substrings": [
+      "\"enabled\": true"
+    ],
+    "aliases": [
+      "Neutron Dancer",
+      "Neutron-Dancer",
+      "EDMC-NeutronDancer",
+      "EDMC-Neutron-Dancer"
+    ]
+  },
+  "EDR": {
+    "config_key": "edrvisualfeedback2",
+    "enabled_values": [
+      "Enabled"
+    ]
+  }
+}

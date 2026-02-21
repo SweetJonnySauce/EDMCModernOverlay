@@ -164,7 +164,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("text", nargs="?", default=DEFAULT_MESSAGE, help="Message text to display on the overlay")
     parser.add_argument("--x", type=int, default=120, help="Overlay X coordinate (virtual pixels)")
     parser.add_argument("--y", type=int, default=160, help="Overlay Y coordinate (virtual pixels)")
-    parser.add_argument("--ttl", type=int, default=8, help="Time-to-live in seconds")
+    parser.add_argument("--ttl", type=int, default=8, help="Time-to-live in seconds (0 expires immediately)")
     args = parser.parse_args(argv)
 
     _print_step(f"Using plugin root: {PLUGIN_ROOT}")

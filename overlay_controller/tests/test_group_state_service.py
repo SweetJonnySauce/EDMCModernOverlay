@@ -326,3 +326,54 @@ def test_cache_changed_ignores_timestamp_churn(tmp_path: Path) -> None:
 
     new_cache["groups"]["PluginA"]["G1"]["base"]["v"] = 2
     assert service.cache_changed(new_cache) is True
+
+
+def test_reset_group_overrides_keeps_empty_group(tmp_path: Path) -> None:
+    shipped = tmp_path / "overlay_groupings.json"
+    user = tmp_path / "overlay_groupings.user.json"
+    cache = tmp_path / "overlay_group_cache.json"
+
+    shipped.write_text(
+        json.dumps(
+            {
+                "PluginA": {
+                    "idPrefixGroups": {
+                        "Group1": {"offsetX": 5},
+                        "Group2": {},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    user_payload = {
+        "PluginA": {
+            "disabled": True,
+            "idPrefixGroups": {
+                "Group1": {"offsetX": 1, "payloadJustification": "center"},
+                "Group2": {"offsetY": 2},
+            },
+        },
+        "_edit_nonce": "old",
+    }
+    user.write_text(json.dumps(user_payload, indent=2), encoding="utf-8")
+    cache_payload = {
+        "groups": {
+            "PluginA": {
+                "Group1": {
+                    "base": {"base_min_x": 0, "base_min_y": 0, "base_max_x": 1, "base_max_y": 1}
+                }
+            }
+        }
+    }
+    cache.write_text(json.dumps(cache_payload), encoding="utf-8")
+
+    service = GroupStateService(shipped_path=shipped, user_groupings_path=user, cache_path=cache)
+    service.reset_group_overrides("PluginA", "Group1", edit_nonce="new")
+
+    updated = json.loads(user.read_text(encoding="utf-8"))
+    assert updated["PluginA"]["idPrefixGroups"]["Group1"] == {}
+    assert updated["PluginA"]["idPrefixGroups"]["Group2"] == {"offsetY": 2}
+    assert updated["PluginA"]["disabled"] is True
+    assert updated["_edit_nonce"] == "new"
+    assert json.loads(cache.read_text(encoding="utf-8")) == cache_payload

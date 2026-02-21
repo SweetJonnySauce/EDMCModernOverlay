@@ -3,13 +3,30 @@
 ## 0.7.7
 
 ### Features
-  - New plugin groups added for Pioneer & Canonn
+  - New plugin groups added for Pioneer, Canonn, LandingPad, and EDR-Mining
   - Added a warning on startup if the opacity setting is less than 10% (90% transparent)
-  - Added Overlay Controller launch command parameter to set opacity via in-game chat
+  - Added an experimental Windows-only "standalone mode" preference so the overlay can be selected as a separate app. This allows the overlay to work in [OBS](https://obsproject.com/) (A CMDR feature request) and potentially VR. See the [FAQ](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/FAQs#does-edmcmodernoverlay-support-vr) for how to enable this feature.
+  - Added `rpm-ostree` installer logic to support Bazzite Linux distro
+  - Vector marker labels now accept `size` presets (`small`/`normal`/`large`/`huge`) via payload defaults or per-point overrides (defaults to `normal`). **Note to plugin developers:** This feature is not backwards compatible. 
+  - Added [chat command argument](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Chat-Command) to set opacity via in-game chat
+  - Added [chat command argument](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Chat-Command) to toggle overlay on / off. Default is `!ovr t` and is configurable in settings. Behind the scenes, all this does is set opacity of the overlay.
+  - Added a "`test`" arguement to the chat launch command (`!ovr`) so `!ovr test` displays a test overlay for troubleshooting purposes.
+  - Added [Getting Started](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Getting-Started) Wiki for Plugin developers and made the CMDR [Troubleshooting](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Troubleshooting) guide more user focused.
+  - Added a Reset button to the Overlay Controller to reset the placement to plugin defaults. **Note to Plugin Developers**: When troubleshooting overlay issues with CMDRs, make sure to have them reset the placement to defaults to avoid a layering of multiple issues.
+### Maintenance
+  - Restructured settings to have an Experimental tab. This is done both for conservation of real estate and also allow for the concept of "non-cross platform" features (like standalone mode) being introduced.
+  - Improved Overlay Controller error handling
+  - Merged in [PR #145](https://github.com/SweetJonnySauce/EDMCModernOverlay/pull/145) to copy python rather than symlinking
+  - Changed Bioscan Radar marker label position default to "below"
+  - Added an undocumented argument to the chat command. `!ovr plugins` shows which plugins the CMDR has installed and if the overlay is enabled.
 ### Bug Fixes
   - Updates to payload tracing to help with Issue [#83](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/83) 
   - Changed client, controller, payload logs to UTC. Does not change the min version python3.10 contract.
   - Fixed [#101](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/101) where Overlay Controller preview boxes weren't respecting `controllerPreviewBoxMode="max"` settings
+  - Fixed [#143](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/143) Align legacy TTL handling with EDMCOverlay: `ttl=0` expires immediately and callers must refresh periodically to keep payloads visible.
+  - Fixed [#150](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/150) Set default marker label text size to 'normal' to match EDMCOverlay defaults
+  - Changed Bioscan Radar marker label position default to "below"
+  - Fixed test logo background. I had it at the CMDR setting level and not a the plugin level.
 
 ## 0.7.6
 - Features
