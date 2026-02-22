@@ -46,8 +46,8 @@ def version_key(version: str) -> tuple[int, int, int]:
     return int(parts[0]), int(parts[1]), int(parts[2])
 
 
-def select_latest(versions: list[str]) -> str:
-    stable = []
+def filter_stable_versions(versions: list[str]) -> list[str]:
+    stable: list[str] = []
     for ver in versions:
         try:
             major, minor, patch = version_key(ver)
@@ -58,10 +58,27 @@ def select_latest(versions: list[str]) -> str:
         if (major, minor) < (3, 10):
             continue
         stable.append(ver)
+    stable.sort(key=version_key, reverse=True)
+    return stable
+
+
+def has_installer(version: str, listing_html: str) -> bool:
+    filename = f"python-{version}-{ARCH}.exe"
+    return filename in listing_html
+
+
+def select_latest_with_installer(versions: list[str]) -> str:
+    stable = filter_stable_versions(versions)
     if not stable:
         raise RuntimeError("No stable Python 3.10+ releases found in index.")
-    stable.sort(key=version_key)
-    return stable[-1]
+    for ver in stable:
+        try:
+            listing = fetch_text(f"{PYTHON_FTP_INDEX}{ver}/")
+        except Exception:
+            continue
+        if has_installer(ver, listing):
+            return ver
+    raise RuntimeError("No Python release with a Windows amd64 installer was found.")
 
 
 def build_table(version: str, url: str, sha256: str) -> str:
@@ -101,7 +118,7 @@ def main() -> int:
         raise FileNotFoundError(f"pyproject.toml not found at {pyproject_path}")
 
     index_html = fetch_text(PYTHON_FTP_INDEX)
-    version = select_latest(parse_versions(index_html))
+    version = select_latest_with_installer(parse_versions(index_html))
     installer_url = f"{PYTHON_FTP_INDEX}{version}/python-{version}-{ARCH}.exe"
 
     with tempfile.TemporaryDirectory() as tmpdir:
