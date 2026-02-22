@@ -490,15 +490,56 @@ begin
   end;
 end;
 
+function OnPythonInstallerDownloadProgress(const Url, FileName: string; const Progress, ProgressMax: Int64): Boolean;
+begin
+  Result := True;
+end;
+
 function DownloadFileWithPowerShell(const Url, Dest: string): Boolean;
 var
-  params: string;
-  resultCode: Integer;
+  downloadPage: TDownloadWizardPage;
+  localFileName: string;
+  downloadedPath: string;
 begin
-  params := Format('-NoProfile -ExecutionPolicy Bypass -Command "try { Invoke-WebRequest -Uri ''%s'' -OutFile ''%s'' -UseBasicParsing -ErrorAction Stop } catch { exit 1 }"', [Url, Dest]);
-  Result := Exec('powershell', params, '', SW_HIDE, ewWaitUntilTerminated, resultCode);
-  if (not Result) or (resultCode <> 0) then
+  localFileName := ExtractFileName(Dest);
+  if localFileName = '' then
+    localFileName := 'python-installer.exe';
+  downloadedPath := ExpandConstant('{tmp}') + '\\' + localFileName;
+
+  if FileExists(downloadedPath) then
+    DeleteFile(downloadedPath);
+
+  downloadPage := CreateDownloadPage(
+    'Downloading Python',
+    'Downloading Python installer. Please wait...',
+    @OnPythonInstallerDownloadProgress
+  );
+
+  downloadPage.Show;
+  try
+    try
+      downloadPage.Clear;
+      downloadPage.Add(Url, localFileName, '');
+      downloadPage.Download;
+      Result := FileExists(downloadedPath);
+      if not Result then
+        Log('Python installer download completed but expected file was not found: ' + downloadedPath);
+    except
+      if downloadPage.AbortedByUser then
+        Log('Python installer download canceled by user.')
+      else
+        Log('Python installer download failed: ' + GetExceptionMessage());
+      Result := False;
+    end;
+  finally
+    downloadPage.Hide;
+  end;
+
+  if (Result) and (CompareText(downloadedPath, Dest) <> 0) then
+  begin
+    Log(Format('Python download destination differs from requested path (%s vs %s).', [downloadedPath, Dest]));
     Result := False;
+  end;
 end;
 
 function VerifySha256(const FilePath, Expected: string): Boolean;
@@ -837,3 +878,4 @@ begin
   if not RunAndCheck(pythonForChecks, Format('"%s" --verify --root "%s" --manifest "%s" --excludes "%s"%s', [checksumScriptPath, appRoot, manifest, excludesPath, includeArg]), '', 'Checksum validation') then
     exit;
 end;
+
