@@ -504,7 +504,7 @@ begin
   localFileName := ExtractFileName(Dest);
   if localFileName = '' then
     localFileName := 'python-installer.exe';
-  downloadedPath := ExpandConstant('{tmp}') + '\\' + localFileName;
+  downloadedPath := ExpandConstant('{tmp}') + '\' + localFileName;
 
   if FileExists(downloadedPath) then
     DeleteFile(downloadedPath);
@@ -878,4 +878,5 @@ begin
   if not RunAndCheck(pythonForChecks, Format('"%s" --verify --root "%s" --manifest "%s" --excludes "%s"%s', [checksumScriptPath, appRoot, manifest, excludesPath, includeArg]), '', 'Checksum validation') then
     exit;
 end;
+
 
