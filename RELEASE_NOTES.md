@@ -1,5 +1,14 @@
 # Release Notes
 
+## 0.7.8
+
+### Features
+
+### Maintenance
+- Added capability to Windows .exe installer to download python if 3.10+ is not available or accessible. 
+
+### Bug Fixes
+
 ## 0.7.7
 
 ### Features
