@@ -199,7 +199,7 @@ Mitigations: clear user prompts and error messages, strict SHA-256 validation, a
 | 2.5 | Log detected/installed Python version | Completed |
 
 Phase 2 Detailed Plan
-1. Add a metadata reader in `scripts/installer.iss` to parse `[tool.windows_python_install]` values (version, url, sha256, templates).
+1. Add a metadata reader in `scripts/installer.iss` to parse `[tool.windows_python_install]` values (version, url, sha256, templates) from a standalone `windows_python_install.toml`.
 2. Implement a detection helper:
    - Check `python.exe` on PATH (`python --version`, `python -c ...`).
    - If not found or version < 3.10, check deterministic path `%LOCALAPPDATA%\Programs\Python\Python{MAJOR}{MINOR}\python.exe`.
@@ -251,9 +251,9 @@ Phase 3 Results
 ## End-to-End Logic Summary
 1. **Release build pins Python metadata** (`scripts/resolve_windows_python.py` + `.github/workflows/release.yml`):
    - Resolve latest stable Python.
-   - Compute SHA-256 and write `[tool.windows_python_install]` into `pyproject.toml`.
+   - Compute SHA-256 and write `[tool.windows_python_install]` into `pyproject.toml` and `windows_python_install.toml`.
 2. **Installer reads pinned metadata** (`scripts/installer.iss`):
-   - Parse `version`, `url`, `sha256`, and deterministic path templates from `pyproject.toml`.
+   - Parse `version`, `url`, `sha256`, and deterministic path templates from `windows_python_install.toml`.
 3. **Detection order (build mode)** (`scripts/installer.iss`):
    - Check `python` on PATH for 3.10+.
    - If missing/too old, check deterministic `%LOCALAPPDATA%\Programs\Python\Python{MAJOR}{MINOR}\python.exe`.

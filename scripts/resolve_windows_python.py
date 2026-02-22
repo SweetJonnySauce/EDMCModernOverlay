@@ -1,4 +1,4 @@
-"""Resolve latest stable Windows Python installer metadata and update pyproject.toml."""
+"""Resolve latest stable Windows Python installer metadata for release builds."""
 from __future__ import annotations
 
 import argparse
@@ -108,14 +108,27 @@ def update_pyproject(path: pathlib.Path, table_block: str) -> None:
     path.write_text(updated, encoding="utf-8")
 
 
+def write_metadata_file(path: pathlib.Path, table_block: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(table_block, encoding="utf-8")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--pyproject", default="pyproject.toml", help="Path to pyproject.toml")
+    parser.add_argument(
+        "--metadata-output",
+        default="windows_python_install.toml",
+        help="Path to write the standalone Windows Python installer metadata file.",
+    )
     args = parser.parse_args()
 
     pyproject_path = pathlib.Path(args.pyproject)
     if not pyproject_path.exists():
         raise FileNotFoundError(f"pyproject.toml not found at {pyproject_path}")
+    metadata_path = pathlib.Path(args.metadata_output)
+    if not metadata_path.is_absolute():
+        metadata_path = pyproject_path.parent / metadata_path
 
     index_html = fetch_text(PYTHON_FTP_INDEX)
     version = select_latest_with_installer(parse_versions(index_html))
@@ -128,10 +141,12 @@ def main() -> int:
 
     table_block = build_table(version, installer_url, sha256)
     update_pyproject(pyproject_path, table_block)
+    write_metadata_file(metadata_path, table_block)
 
     print(f"Resolved Python version: {version}")
     print(f"Installer URL: {installer_url}")
     print(f"SHA-256: {sha256}")
+    print(f"Wrote metadata file: {metadata_path}")
     return 0
 
 

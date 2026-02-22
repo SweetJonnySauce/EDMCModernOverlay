@@ -310,9 +310,9 @@ begin
     Result := True;
 end;
 
-function GetPyprojectPath(): string;
+function GetWindowsPythonMetadataPath(): string;
 begin
-  Result := ExpandConstant('{app}') + '\EDMCModernOverlay\pyproject.toml';
+  Result := ExpandConstant('{app}') + '\EDMCModernOverlay\windows_python_install.toml';
 end;
 
 function ParseWindowsPythonMetadata(var Version, Url, Sha, TargetTemplate, ExeTemplate: string): Boolean;
@@ -330,9 +330,9 @@ begin
   TargetTemplate := '';
   ExeTemplate := '';
 
-  if not LoadStringFromFile(GetPyprojectPath(), contentAnsi) then
+  if not LoadStringFromFile(GetWindowsPythonMetadataPath(), contentAnsi) then
   begin
-    Log('Failed to read pyproject.toml for Windows Python metadata.');
+    Log('Failed to read windows_python_install.toml for Windows Python metadata.');
     exit;
   end;
 
@@ -377,7 +377,7 @@ begin
 
   Result := (Version <> '') and (Url <> '') and (Sha <> '') and (TargetTemplate <> '') and (ExeTemplate <> '');
   if not Result then
-    Log('Incomplete Windows Python metadata found in pyproject.toml.');
+    Log('Incomplete Windows Python metadata found in windows_python_install.toml.');
 end;
 
 function HasCmdLineSwitch(const Switch: string): Boolean;
@@ -658,7 +658,7 @@ begin
 
     if not ParseWindowsPythonMetadata(metaVersion, metaUrl, metaSha, metaTargetTemplate, metaExeTemplate) then
     begin
-      MsgBox('Python installer metadata could not be read from pyproject.toml. Cannot continue.', mbError, MB_OK);
+      MsgBox('Python installer metadata could not be read from windows_python_install.toml. Cannot continue.', mbError, MB_OK);
       exit;
     end;
 
