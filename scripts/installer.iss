@@ -380,6 +380,15 @@ begin
     Log('Incomplete Windows Python metadata found in pyproject.toml.');
 end;
 
+function HasCmdLineSwitch(const Switch: string): Boolean;
+var
+  tail, needle: string;
+begin
+  tail := ' ' + Lowercase(GetCmdTail()) + ' ';
+  needle := ' /' + Lowercase(Switch) + ' ';
+  Result := Pos(needle, tail) > 0;
+end;
+
 function ExpandPythonTemplate(const Template, Version: string): string;
 var
   major, minor, patch: Integer;
@@ -645,7 +654,7 @@ begin
   else if IsBuildMode() then
   begin
     Log(Format('Build mode selected. Existing venv: %s (exists=%s)', [venvPython, BoolToStr(hasExistingVenv, True)]));
-    forceInstall := CmdLineParamExists('ForcePythonInstall');
+    forceInstall := HasCmdLineSwitch('ForcePythonInstall');
 
     if not ParseWindowsPythonMetadata(metaVersion, metaUrl, metaSha, metaTargetTemplate, metaExeTemplate) then
     begin
