@@ -51,7 +51,7 @@
         "idPrefixes": [
           "bgstally-msg-objectives-"
         ],
-        "idPrefixGroupAnchor": "ne",
+        "idPrefixGroupAnchor": "nw",
         "offsetX": -5,
         "payloadJustification": "left",
         "backgroundColor": "none",

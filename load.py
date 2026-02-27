@@ -77,6 +77,7 @@ if __package__:
         unregister_grouping_store,
         unregister_publisher,
     )
+    from .overlay_plugin.hotkeys import HotkeysManager
     from .overlay_plugin.journal_commands import build_command_helper
     from .overlay_plugin.toggle_helpers import toggle_payload_opacity
     from .EDMCOverlay import edmcoverlay
@@ -134,6 +135,7 @@ else:  # pragma: no cover - EDMC loads as top-level module
         unregister_grouping_store,
         unregister_publisher,
     )
+    from overlay_plugin.hotkeys import HotkeysManager
     from overlay_plugin.journal_commands import build_command_helper
     from overlay_plugin.toggle_helpers import toggle_payload_opacity
     from EDMCOverlay import edmcoverlay
@@ -532,6 +534,13 @@ class _PluginRuntime:
         self._last_launch_log_time: float = 0.0
         self._command_helper_prefix: Optional[str] = None
         self._controller_active_group: Optional[Tuple[str, str]] = None
+        self._hotkeys = HotkeysManager(
+            is_running=lambda: self._running,
+            get_payload_opacity=self._current_payload_opacity,
+            toggle_payload_opacity=self.toggle_payload_opacity_preference,
+            logger=LOGGER,
+            plugin_name=PLUGIN_NAME,
+        )
         self._prefs_worker = PrefsWorker(self._lifecycle, LOGGER)
         register_grouping_store(self.plugin_dir / "overlay_groupings.json")
         threading.Thread(
@@ -574,6 +583,7 @@ class _PluginRuntime:
         self._start_force_render_monitor_if_needed()
         self._start_version_status_check()
         register_publisher(self._publish_external)
+        self._hotkeys.start()
         self._start_legacy_tcp_server()
         self._send_overlay_config(rebroadcast=True)
         self._maybe_emit_version_update_notice()
@@ -583,9 +593,11 @@ class _PluginRuntime:
     def stop(self) -> None:
         with self._lock:
             if not self._running:
+                self._hotkeys.stop()
                 self._stop_prefs_worker()
                 return
             self._running = False
+        self._hotkeys.stop()
         unregister_publisher()
         unregister_grouping_store()
         _log("Plugin stopping")
@@ -1753,6 +1765,14 @@ class _PluginRuntime:
             toggle_payload_opacity(self._preferences)
             self._preferences.save()
         self._send_overlay_config()
+
+    def _current_payload_opacity(self) -> int:
+        with self._prefs_lock:
+            try:
+                numeric = int(getattr(self._preferences, "global_payload_opacity", 100))
+            except (TypeError, ValueError):
+                numeric = 100
+        return max(0, min(100, numeric))
 
     def _build_command_helper(self, prefix: str, previous_prefix: Optional[str] = None) -> Any:
         legacy: list[str] = []
