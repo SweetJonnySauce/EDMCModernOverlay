@@ -18,6 +18,7 @@ If something is not clear, ask clarifying questions.
 - Retry applies to EDMC-Hotkeys import failures and `register_action == false` responses.
 - Retry does not apply to registration exceptions or action-build/API-shape failures.
 - Action labels shown to users should be human-readable: `Overlay On` and `Overlay Off`.
+- Action registration metadata should be explicit for these actions: `thread_policy="main"` and `cardinality="single"`.
 
 ## Current Reuse Surface
 - Existing chat command path already routes to runtime methods:
@@ -177,7 +178,7 @@ If something is not clear, ask clarifying questions.
 - Data contract for actions:
 - label: `Overlay On` and `Overlay Off`.
 - callback: bound runtime methods for on/off behavior.
-- `enabled=True`, `thread_policy="main"`, `plugin=PLUGIN_NAME`.
+- `enabled=True`, `thread_policy="main"`, `cardinality="single"`, `plugin=PLUGIN_NAME`.
 - ID strategy:
 - keep deterministic ids (internal), but user-facing labels remain human-readable as required.
 - Risks:
@@ -630,6 +631,7 @@ If something is not clear, ask clarifying questions.
 - `register_action == false` now retries with the same backoff/cap.
 - registration exceptions now fail fast (logged) and do not retry.
 - removed partial-registration rollback behavior on registration failure.
+- action registrations now include explicit metadata: `thread_policy="main"` and `cardinality="single"` for `Overlay On` / `Overlay Off`.
 - Updated tests in `tests/test_hotkeys.py`:
 - replaced no-retry expectation with `register_action == false` retry expectation.
 - added explicit assertion that registration exceptions do not retry.

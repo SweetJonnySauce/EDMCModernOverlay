@@ -119,6 +119,7 @@ class HotkeysManager:
                 plugin=self._plugin_name,
                 callback=self._overlay_on_callback,
                 thread_policy="main",
+                cardinality="single",
                 enabled=True,
             ),
             action_cls(
@@ -127,6 +128,7 @@ class HotkeysManager:
                 plugin=self._plugin_name,
                 callback=self._overlay_off_callback,
                 thread_policy="main",
+                cardinality="single",
                 enabled=True,
             ),
         ]

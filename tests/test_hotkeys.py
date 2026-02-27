@@ -31,6 +31,7 @@ class _FakeAction:
         self.plugin = kwargs.get("plugin")
         self.callback = kwargs.get("callback")
         self.thread_policy = kwargs.get("thread_policy")
+        self.cardinality = kwargs.get("cardinality")
         self.enabled = kwargs.get("enabled")
 
 
@@ -84,6 +85,7 @@ def test_hotkeys_start_registers_overlay_actions(monkeypatch):
         hotkeys.HOTKEYS_OVERLAY_OFF_ACTION_ID,
     ]
     assert [action.thread_policy for action in api.registered] == ["main", "main"]
+    assert [action.cardinality for action in api.registered] == ["single", "single"]
 
 
 def test_hotkeys_callbacks_enforce_noop_boundaries():
