@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from types import SimpleNamespace
 from typing import Any, List
 
 from overlay_plugin import hotkeys
@@ -38,7 +37,6 @@ class _FakeAction:
 class _FakeHotkeysApi:
     def __init__(self, register_results: List[Any] | None = None) -> None:
         self.registered: List[_FakeAction] = []
-        self.unregistered: List[str] = []
         self._register_results = list(register_results or [])
 
     def register_action(self, action: _FakeAction) -> bool:
@@ -50,10 +48,6 @@ class _FakeHotkeysApi:
             return bool(result)
         return True
 
-    def unregister_action(self, action_id: str) -> None:
-        self.unregistered.append(action_id)
-
-
 def _make_manager(state: _HostState) -> hotkeys.HotkeysManager:
     return hotkeys.HotkeysManager(
         is_running=state.is_running,
@@ -64,19 +58,33 @@ def _make_manager(state: _HostState) -> hotkeys.HotkeysManager:
     )
 
 
+def _patch_hotkeys_imports(
+    monkeypatch,
+    *,
+    api: Any | None = None,
+    api_error: Exception | None = None,
+    action_error: Exception | None = None,
+) -> None:
+    def _fake_import_hotkeys_api_module():
+        if api_error is not None:
+            raise api_error
+        return api
+
+    def _fake_import_hotkeys_action_class():
+        if action_error is not None:
+            raise action_error
+        return _FakeAction
+
+    monkeypatch.setattr(hotkeys, "_import_hotkeys_api_module", _fake_import_hotkeys_api_module)
+    monkeypatch.setattr(hotkeys, "_import_hotkeys_action_class", _fake_import_hotkeys_action_class)
+
+
 def test_hotkeys_start_registers_overlay_actions(monkeypatch):
     state = _HostState()
     manager = _make_manager(state)
     api = _FakeHotkeysApi()
 
-    def _fake_import_module(name: str):
-        if name == hotkeys.HOTKEYS_IMPORT_MODULE:
-            return api
-        if name == hotkeys.HOTKEYS_REGISTRY_MODULE:
-            return SimpleNamespace(Action=_FakeAction)
-        raise ModuleNotFoundError(name)
-
-    monkeypatch.setattr(hotkeys.importlib, "import_module", _fake_import_module)
+    _patch_hotkeys_imports(monkeypatch, api=api)
 
     assert manager.start() is True
     assert [action.label for action in api.registered] == ["Overlay On", "Overlay Off"]
@@ -135,15 +143,8 @@ def test_import_failures_schedule_exponential_retry(monkeypatch):
         def fire(self):
             self.function(*self.args, **self.kwargs)
 
-    def _fake_import_module(name: str):
-        if name == hotkeys.HOTKEYS_IMPORT_MODULE:
-            raise ModuleNotFoundError(name)
-        if name == hotkeys.HOTKEYS_REGISTRY_MODULE:
-            return SimpleNamespace(Action=_FakeAction)
-        raise ModuleNotFoundError(name)
-
     monkeypatch.setattr(hotkeys.threading, "Timer", _FakeTimer)
-    monkeypatch.setattr(hotkeys.importlib, "import_module", _fake_import_module)
+    _patch_hotkeys_imports(monkeypatch, api_error=ModuleNotFoundError("EDMCHotkeys"))
 
     assert manager.start() is False
     idx = 0
@@ -178,15 +179,8 @@ def test_registration_false_schedules_retry(monkeypatch):
         def fire(self):
             self.function(*self.args, **self.kwargs)
 
-    def _fake_import_module(name: str):
-        if name == hotkeys.HOTKEYS_IMPORT_MODULE:
-            return api
-        if name == hotkeys.HOTKEYS_REGISTRY_MODULE:
-            return SimpleNamespace(Action=_FakeAction)
-        raise ModuleNotFoundError(name)
-
     monkeypatch.setattr(hotkeys.threading, "Timer", _FakeTimer)
-    monkeypatch.setattr(hotkeys.importlib, "import_module", _fake_import_module)
+    _patch_hotkeys_imports(monkeypatch, api=api)
 
     assert manager.start() is False
     assert [timer.interval for timer in created_timers] == [hotkeys.HOTKEYS_RETRY_DELAYS_SECONDS[0]]
@@ -213,21 +207,14 @@ def test_registration_exception_does_not_retry(monkeypatch):
         def cancel(self):
             return
 
-    def _fake_import_module(name: str):
-        if name == hotkeys.HOTKEYS_IMPORT_MODULE:
-            return api
-        if name == hotkeys.HOTKEYS_REGISTRY_MODULE:
-            return SimpleNamespace(Action=_FakeAction)
-        raise ModuleNotFoundError(name)
-
     monkeypatch.setattr(hotkeys.threading, "Timer", _FakeTimer)
-    monkeypatch.setattr(hotkeys.importlib, "import_module", _fake_import_module)
+    _patch_hotkeys_imports(monkeypatch, api=api)
 
     assert manager.start() is False
     assert created_timers == []
 
 
-def test_stop_cancels_retry_and_unregisters_actions(monkeypatch):
+def test_stop_cancels_retry_and_leaves_registrations_managed(monkeypatch):
     state = _HostState()
     manager = _make_manager(state)
     created_timers: List[Any] = []
@@ -245,17 +232,14 @@ def test_stop_cancels_retry_and_unregisters_actions(monkeypatch):
         def cancel(self):
             self.cancelled = True
 
-    def _fake_import_module(name: str):
-        if name == hotkeys.HOTKEYS_IMPORT_MODULE:
-            if fail_import["value"]:
-                raise ModuleNotFoundError(name)
-            return api
-        if name == hotkeys.HOTKEYS_REGISTRY_MODULE:
-            return SimpleNamespace(Action=_FakeAction)
-        raise ModuleNotFoundError(name)
+    def _fake_import_hotkeys_api_module():
+        if fail_import["value"]:
+            raise ModuleNotFoundError("EDMCHotkeys")
+        return api
 
     monkeypatch.setattr(hotkeys.threading, "Timer", _FakeTimer)
-    monkeypatch.setattr(hotkeys.importlib, "import_module", _fake_import_module)
+    monkeypatch.setattr(hotkeys, "_import_hotkeys_api_module", _fake_import_hotkeys_api_module)
+    monkeypatch.setattr(hotkeys, "_import_hotkeys_action_class", lambda: _FakeAction)
 
     # First start schedules a retry timer due to import failure.
     assert manager.start() is False
@@ -263,10 +247,10 @@ def test_stop_cancels_retry_and_unregisters_actions(monkeypatch):
     manager.stop()
     assert created_timers[0].cancelled is True
 
-    # Second start succeeds and stop unregisters actions.
+    # Second start succeeds and stop keeps local registration state intact.
     fail_import["value"] = False
     assert manager.start() is True
     manager.stop()
-    assert sorted(api.unregistered) == sorted(
+    assert sorted(manager._registered_action_ids) == sorted(
         [hotkeys.HOTKEYS_OVERLAY_ON_ACTION_ID, hotkeys.HOTKEYS_OVERLAY_OFF_ACTION_ID]
     )

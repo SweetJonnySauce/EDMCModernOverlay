@@ -1,4 +1,4 @@
-## Goal: Register Modern Overlay actions with EDMC-Hotkeys
+## Goal: Register Modern Overlay actions with EDMCHotkeys
 
 Follow persona details in `AGENTS.md`.
 Document implementation results in the Implementation Results section.
@@ -7,15 +7,15 @@ When all stages in a phase are complete, change phase status to Completed.
 If something is not clear, ask clarifying questions.
 
 ## Requirements (Reviewed)
-- EDMCModernOverlay will register actions with `EDMC-Hotkeys`.
+- EDMCModernOverlay will register actions with `EDMCHotkeys`.
 - Register two actions:
 - `overlay on`: if current opacity is `0`, restore previous visible opacity; if current opacity is already `>0`, no-op.
 - `overlay off`: if current opacity is `>0`, set opacity to `0`; if current opacity is already `0`, no-op.
 - Reuse the existing in-game chat-command behavior and logic; do not duplicate toggle/opacity rules in a separate path.
 - Keep action callbacks safe for UI/main-thread expectations (`thread_policy="main"`).
-- Use retry with exponential backoff and a max-attempt cap when EDMC-Hotkeys import fails.
+- Use retry with exponential backoff and a max-attempt cap when EDMCHotkeys import fails.
 - Retry policy: 5 retries, each with a longer wait than the previous attempt (exponential backoff).
-- Retry applies to EDMC-Hotkeys import failures and `register_action == false` responses.
+- Retry applies to EDMCHotkeys import failures and `register_action == false` responses.
 - Retry does not apply to registration exceptions or action-build/API-shape failures.
 - Action labels shown to users should be human-readable: `Overlay On` and `Overlay Off`.
 - Action registration metadata should be explicit for these actions: `thread_policy="main"` and `cardinality="single"`.
@@ -31,14 +31,14 @@ If something is not clear, ask clarifying questions.
 
 ## Design Approach
 - Add hotkeys registration to plugin runtime lifecycle (start/stop), not module-global hook code.
-- Use dynamic imports (`importlib`) for EDMC-Hotkeys APIs so Modern Overlay remains optional-compatible when the hotkeys plugin is not installed.
+- Use direct imports (`import` / `from ... import ...`) for EDMCHotkeys APIs so Modern Overlay remains optional-compatible when the hotkeys plugin is not installed.
 - Keep hotkey callbacks thin: they should delegate to existing runtime opacity/toggle methods.
 - Add a small runtime helper for explicit on/off semantics so callbacks and any future callers share one behavior.
 
 ## Open Questions
 - Resolved: `overlay on` is a no-op when current opacity is already `>0`.
 - Resolved: `overlay off` is a no-op when current opacity is already `0`.
-- Resolved: add exponential-backoff retry when importing EDMC-Hotkeys fails.
+- Resolved: add exponential-backoff retry when importing EDMCHotkeys fails.
 - Resolved: retry path includes import failures plus `register_action == false`.
 - Resolved: action labels are `Overlay On` and `Overlay Off`.
 - Resolved: retry will perform 5 attempts with progressively longer waits (exponential backoff).
@@ -58,7 +58,7 @@ If something is not clear, ask clarifying questions.
 ## Phase Details
 
 ### Phase 1: Behavior contract + integration seams
-- Confirm explicit on/off behavior and fallback expectations when EDMC-Hotkeys is unavailable.
+- Confirm explicit on/off behavior and fallback expectations when EDMCHotkeys is unavailable.
 - Lock in where registration/unregistration occurs in runtime lifecycle (`start`/`stop`).
 - Keep behavior unchanged for existing journal/chat command flows.
 - Risks: retry cadence too aggressive (log spam/startup overhead) or too weak (misses late plugin availability).
@@ -114,12 +114,12 @@ If something is not clear, ask clarifying questions.
 - best-effort unregister hotkey actions if API provides unregister support.
 - if unregister is unavailable or fails, log and continue shutdown (no hard failure).
 - Invariants:
-- startup remains successful even when EDMC-Hotkeys is absent.
+- startup remains successful even when EDMCHotkeys is absent.
 - no duplicate registrations when `start()` is called while already running.
 - retries stop once registration succeeds or plugin begins stopping.
 
 #### Stage 1.3 Decision Record: retry/backoff contract
-- Retry scope: import failures from `importlib.import_module("EDMC-Hotkeys.load")` only.
+- Retry scope: import failures from `import EDMCHotkeys` only.
 - Max retries: 5.
 - Backoff schedule (seconds): `0.5`, `1.0`, `2.0`, `4.0`, `8.0`.
 - Timer model: schedule one retry at a time; do not queue all timers upfront.
@@ -137,8 +137,8 @@ If something is not clear, ask clarifying questions.
 ### Phase 2: Runtime hotkeys registration + callbacks
 - Status note: this phase was implemented directly in `load.py`, but is now superseded by Phase 2A addendum to reduce monolith growth.
 - Add runtime hotkeys registration helpers in `load.py`:
-- `_register_hotkeys_actions()` to import EDMC-Hotkeys API and register two actions.
-- `_unregister_hotkeys_actions()` (if supported by EDMC-Hotkeys API) for clean stop.
+- `_register_hotkeys_actions()` to import EDMCHotkeys API and register two actions.
+- `_unregister_hotkeys_actions()` (if supported by EDMCHotkeys API) for clean stop.
 - `_hotkey_overlay_on(...)` / `_hotkey_overlay_off(...)` callbacks that delegate to runtime opacity helpers.
 - Action IDs and labels (proposed):
 - `Overlay On` / `Overlay On`
@@ -154,7 +154,7 @@ If something is not clear, ask clarifying questions.
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 2.1 | Add dynamic EDMC-Hotkeys import + action registration helper(s) | Completed |
+| 2.1 | Add dynamic EDMCHotkeys import + action registration helper(s) | Completed |
 | 2.2 | Add `overlay on/off` callback methods that reuse existing opacity/toggle logic | Completed |
 | 2.3 | Wire register/unregister into runtime start/stop lifecycle | Completed |
 
@@ -164,7 +164,7 @@ If something is not clear, ask clarifying questions.
 - `load.py` imports: add safe optional import for `Action` from `edmc_hotkeys.registry` with fallback handling.
 - `_PluginRuntime` fields: add state for hotkeys API/module handle, registered action ids, retry attempt counter, retry timer handle, and retry-active flag.
 - New runtime helpers in `load.py`:
-- `_import_hotkeys_api() -> Optional[Any]`: imports `EDMC-Hotkeys.load`; returns module or `None`.
+- `_import_hotkeys_api() -> Optional[Any]`: imports `EDMCHotkeys`; returns module or `None`.
 - `_build_hotkeys_actions() -> list[Any]`: creates two action objects (`Overlay On`, `Overlay Off`) with `thread_policy="main"`.
 - `_register_hotkeys_actions() -> bool`: imports API, builds actions, registers each action, stores registration state on success.
 - `_schedule_hotkeys_retry(attempt: int) -> None`: schedules one retry timer using the Phase 1 backoff schedule.
@@ -199,7 +199,7 @@ If something is not clear, ask clarifying questions.
 - `overlay off`: read current opacity; if `>0` call `toggle_payload_opacity_preference()`, else no-op.
 - logging includes source/hotkey/payload and branch (`applied`/`no-op`) at debug level.
 - error handling:
-- callback wraps internal calls and logs exceptions; no exception escapes to EDMC-Hotkeys caller.
+- callback wraps internal calls and logs exceptions; no exception escapes to EDMCHotkeys caller.
 - no-op path:
 - must not call save or `_send_overlay_config`.
 - Invariants:
@@ -373,7 +373,7 @@ If something is not clear, ask clarifying questions.
 - run `py -3 -m py_compile load.py overlay_plugin/hotkeys.py` and record limitation.
 
 ### Phase 3: Automated tests (moduleized architecture)
-- Add focused tests for `overlay_plugin/hotkeys.py` without requiring EDMC-Hotkeys installed.
+- Add focused tests for `overlay_plugin/hotkeys.py` without requiring EDMCHotkeys installed.
 - Use import monkeypatching and fake hotkeys API objects to validate manager behavior deterministically.
 - Validate behavior:
 - registration succeeds when API is present and both actions are registered with expected labels/IDs/thread policy.
@@ -395,7 +395,7 @@ If something is not clear, ask clarifying questions.
 - Test architecture:
 - primary module tests live in `tests/test_hotkeys.py`.
 - lifecycle integration assertions live in `tests/test_lifecycle_tracking.py`.
-- no tests require EDMC-Hotkeys to be installed; all external dependencies are mocked.
+- no tests require EDMCHotkeys to be installed; all external dependencies are mocked.
 
 #### Stage 3.1 Detailed Plan: registration and retry behavior
 - Files:
@@ -451,7 +451,7 @@ If something is not clear, ask clarifying questions.
 #### Phase 3 Acceptance Criteria
 - `tests/test_hotkeys.py` covers registration, retry, callback semantics, and stop behavior.
 - lifecycle tie-in test confirms `load.py` remains thin for hotkeys integration.
-- tests remain deterministic and dependency-free (no EDMC-Hotkeys installation required).
+- tests remain deterministic and dependency-free (no EDMCHotkeys installation required).
 - any environment constraint (e.g., missing pytest) is recorded in Phase 3/4 results.
 
 ### Phase 4: Verification and docs
@@ -510,7 +510,7 @@ If something is not clear, ask clarifying questions.
 - `Phase 4 Results` provides enough evidence for handoff/review without re-reading terminal output.
 
 ### Phase 5: Registration retry scope expansion
-- Context: runtime logs showed import eventually succeeded, but registration was rejected while EDMC-Hotkeys had not fully started yet.
+- Context: runtime logs showed import eventually succeeded, but registration was rejected while EDMCHotkeys had not fully started yet.
 - Goal: keep current import retry behavior and add bounded retry for `register_action == false` so startup ordering races self-heal.
 - Updated retry contract:
 - retry remains capped at 5 attempts with delays `0.5`, `1.0`, `2.0`, `4.0`, `8.0`.
@@ -570,7 +570,7 @@ If something is not clear, ask clarifying questions.
 
 ### Phase 2 Addendum Results
 - Implemented `overlay_plugin/hotkeys.py` with a dedicated `HotkeysManager` that now owns:
-- EDMC-Hotkeys import/register/unregister workflow.
+- EDMCHotkeys import/register/unregister workflow.
 - import-failure-only retry scheduling with delays `0.5`, `1.0`, `2.0`, `4.0`, `8.0`.
 - `Overlay On` / `Overlay Off` callbacks with no-op boundary semantics.
 - best-effort rollback of partially registered actions when registration fails mid-sequence.
