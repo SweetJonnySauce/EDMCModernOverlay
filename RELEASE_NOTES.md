@@ -11,7 +11,7 @@
 
 ### Maintenance
 - Added capability to Windows .exe installer to download python if 3.10+ is not available or accessible. 
-- `define_plugin_group` now supports canonical API argument names alongside legacy compatibility aliases.
+- Plugin Developers: `define_plugin_group` now supports canonical API argument names alongside legacy compatibility aliases. Warning messages are logged once per plugin per legacy parameter used. See [[`define_plugin_group API`]](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/define_plugin_group-API) wiki for more info. 
 - Legacy alias usage emits a compatibility warning once per process per legacy argument per calling plugin.
 - No storage/schema key migration is required; persisted `overlay_groupings.json` structure is unchanged.
 
