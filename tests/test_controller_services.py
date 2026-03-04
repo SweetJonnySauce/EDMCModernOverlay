@@ -51,6 +51,11 @@ class _DummyControllerRuntime:
         self._emit_fail = False
         self._capture = False
         self._lifecycle = _DummyLifecycle()
+        self._countdown_calls = 0
+        self._launch_sources = []
+
+    def _overlay_controller_launch_sequence(self, source: controller_services.LaunchSource = "chat"):
+        self._launch_sources.append(source)
 
     def _controller_python_command(self, env):
         return ["python"]
@@ -59,7 +64,7 @@ class _DummyControllerRuntime:
         return {}
 
     def _controller_countdown(self):
-        return
+        self._countdown_calls += 1
 
     def _spawn_overlay_controller_process(self, python_command, launch_env, capture_output: bool):
         return _DummyProcess(capture=self._capture)
@@ -98,6 +103,7 @@ def test_controller_launch_sequence_success():
     assert runtime._controller_process is None
     assert runtime._active_notice is True
     assert runtime._cleared is True
+    assert runtime._countdown_calls == 1
     assert runtime._lifecycle.tracked  # process was tracked
 
 
@@ -115,6 +121,43 @@ def test_controller_launch_sequence_failure_sets_thread_none(monkeypatch):
 
     assert runtime._controller_launch_thread is None
     assert runtime._emit_fail is True
+
+
+def test_controller_launch_sequence_hotkey_skips_countdown():
+    runtime = _DummyControllerRuntime()
+    logger = logging.getLogger("test")
+
+    controller_services.controller_launch_sequence(runtime, logger, source="hotkey")
+
+    assert runtime._controller_process is None
+    assert runtime._active_notice is True
+    assert runtime._cleared is True
+    assert runtime._countdown_calls == 0
+    assert runtime._lifecycle.tracked
+
+
+def test_launch_controller_passes_source_to_launch_thread(monkeypatch):
+    runtime = _DummyControllerRuntime()
+    logger = logging.getLogger("test")
+
+    class _FakeThread:
+        def __init__(self, *, target, args=(), name=None, daemon=None):
+            self._target = target
+            self._args = args
+            self.name = name
+            self.daemon = daemon
+
+        def start(self):
+            self._target(*self._args)
+
+        def is_alive(self):
+            return False
+
+    monkeypatch.setattr(controller_services.threading, "Thread", _FakeThread)
+
+    controller_services.launch_controller(runtime, logger, source="settings")
+
+    assert runtime._launch_sources == ["settings"]
 
 
 def test_terminate_controller_process_uses_os_kill(monkeypatch):

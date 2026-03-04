@@ -1,13 +1,19 @@
 # Release Notes
 
-## 0.7.8
+## 0.8.0
 
 ### Features
+- Added a dedicated `Controller` tab in plugin settings (positioned after `Overlay`).
+- Added `Launch Controller` button as the first option on the `Controller` tab.
+- Moved `Chat command to launch controller` and `Chat command argument to toggle overlay` to the new `Controller` tab.
+- Added EDMCHotkeys action: `Launch Overlay Controller`.
+- Settings button and hotkey launch paths now start the Overlay Controller immediately (no 3-second countdown).
 
 ### Maintenance
 - Added capability to Windows .exe installer to download python if 3.10+ is not available or accessible. 
 
 ### Bug Fixes
+- Preserved existing in-game chat launch behavior (`!ovr` and aliases) while adding new launch entrypoints.
 
 ## 0.7.7
 

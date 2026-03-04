@@ -8,6 +8,8 @@ from typing import Any, Callable, List, Optional, Set, Tuple
 HOTKEYS_RETRY_DELAYS_SECONDS: Tuple[float, ...] = (0.5, 1.0, 2.0, 4.0, 8.0)
 HOTKEYS_OVERLAY_ON_ACTION_ID = "edmcmodernoverlay.hotkeys.on"
 HOTKEYS_OVERLAY_OFF_ACTION_ID = "edmcmodernoverlay.hotkeys.off"
+HOTKEYS_LAUNCH_CONTROLLER_ACTION_ID = "edmcmodernoverlay.hotkeys.launch_controller"
+HOTKEYS_LAUNCH_CONTROLLER_LABEL = "Launch Overlay Controller"
 
 
 def _import_hotkeys_api_module() -> Any:
@@ -31,12 +33,14 @@ class HotkeysManager:
         is_running: Callable[[], bool],
         get_payload_opacity: Callable[[], int],
         toggle_payload_opacity: Callable[[], None],
+        launch_controller: Callable[[], None],
         logger: logging.Logger,
         plugin_name: str,
     ) -> None:
         self._is_running = is_running
         self._get_payload_opacity = get_payload_opacity
         self._toggle_payload_opacity = toggle_payload_opacity
+        self._launch_controller = launch_controller
         self._logger = logger
         self._plugin_name = plugin_name
         self._lock = threading.RLock()
@@ -108,6 +112,18 @@ class HotkeysManager:
             numeric = 100
         return max(0, min(100, numeric))
 
+    def _launch_controller_callback(self, *, payload: Any = None, source: str = "hotkey", hotkey: Any = None) -> None:
+        self._logger.debug(
+            "Hotkey Launch Controller requested: source=%s hotkey=%s payload=%s",
+            source,
+            hotkey,
+            payload,
+        )
+        try:
+            self._launch_controller()
+        except Exception as exc:  # pragma: no cover - defensive guard
+            self._logger.warning("Hotkey Launch Controller failed: %s", exc, exc_info=exc)
+
     def _import_hotkeys_api(self) -> Tuple[Optional[Any], Optional[Exception]]:
         try:
             module = _import_hotkeys_api_module()
@@ -134,6 +150,15 @@ class HotkeysManager:
                 label="Overlay Off",
                 plugin=self._plugin_name,
                 callback=self._overlay_off_callback,
+                thread_policy="main",
+                cardinality="single",
+                enabled=True,
+            ),
+            action_cls(
+                id=HOTKEYS_LAUNCH_CONTROLLER_ACTION_ID,
+                label=HOTKEYS_LAUNCH_CONTROLLER_LABEL,
+                plugin=self._plugin_name,
+                callback=self._launch_controller_callback,
                 thread_policy="main",
                 cardinality="single",
                 enabled=True,

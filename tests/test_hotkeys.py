@@ -11,6 +11,8 @@ class _HostState:
         self.opacity = opacity
         self.running = running
         self.toggle_calls = 0
+        self.launch_calls = 0
+        self.launch_should_fail = False
 
     def is_running(self) -> bool:
         return self.running
@@ -21,6 +23,11 @@ class _HostState:
     def toggle_payload_opacity(self) -> None:
         self.toggle_calls += 1
         self.opacity = 0 if self.opacity > 0 else 64
+
+    def launch_controller(self) -> None:
+        if self.launch_should_fail:
+            raise RuntimeError("boom")
+        self.launch_calls += 1
 
 
 class _FakeAction:
@@ -53,6 +60,7 @@ def _make_manager(state: _HostState) -> hotkeys.HotkeysManager:
         is_running=state.is_running,
         get_payload_opacity=state.get_payload_opacity,
         toggle_payload_opacity=state.toggle_payload_opacity,
+        launch_controller=state.launch_controller,
         logger=logging.getLogger("test-hotkeys"),
         plugin_name="EDMCModernOverlay",
     )
@@ -87,13 +95,37 @@ def test_hotkeys_start_registers_overlay_actions(monkeypatch):
     _patch_hotkeys_imports(monkeypatch, api=api)
 
     assert manager.start() is True
-    assert [action.label for action in api.registered] == ["Overlay On", "Overlay Off"]
+    assert [action.label for action in api.registered] == [
+        "Overlay On",
+        "Overlay Off",
+        hotkeys.HOTKEYS_LAUNCH_CONTROLLER_LABEL,
+    ]
     assert [action.id for action in api.registered] == [
         hotkeys.HOTKEYS_OVERLAY_ON_ACTION_ID,
         hotkeys.HOTKEYS_OVERLAY_OFF_ACTION_ID,
+        hotkeys.HOTKEYS_LAUNCH_CONTROLLER_ACTION_ID,
     ]
-    assert [action.thread_policy for action in api.registered] == ["main", "main"]
-    assert [action.cardinality for action in api.registered] == ["single", "single"]
+    assert [action.thread_policy for action in api.registered] == ["main", "main", "main"]
+    assert [action.cardinality for action in api.registered] == ["single", "single", "single"]
+
+
+def test_hotkeys_launch_controller_callback_delegates():
+    state = _HostState()
+    manager = _make_manager(state)
+
+    manager._launch_controller_callback()
+
+    assert state.launch_calls == 1
+
+
+def test_hotkeys_launch_controller_callback_handles_errors():
+    state = _HostState()
+    state.launch_should_fail = True
+    manager = _make_manager(state)
+
+    manager._launch_controller_callback()
+
+    assert state.launch_calls == 0
 
 
 def test_hotkeys_callbacks_enforce_noop_boundaries():
@@ -160,7 +192,7 @@ def test_registration_false_schedules_retry(monkeypatch):
     state = _HostState()
     manager = _make_manager(state)
     created_timers: List[Any] = []
-    api = _FakeHotkeysApi(register_results=[False, True, True])
+    api = _FakeHotkeysApi(register_results=[False, True, True, True])
 
     class _FakeTimer:
         def __init__(self, interval, function, args=None, kwargs=None):
@@ -188,6 +220,7 @@ def test_registration_false_schedules_retry(monkeypatch):
     assert set(manager._registered_action_ids) == {
         hotkeys.HOTKEYS_OVERLAY_ON_ACTION_ID,
         hotkeys.HOTKEYS_OVERLAY_OFF_ACTION_ID,
+        hotkeys.HOTKEYS_LAUNCH_CONTROLLER_ACTION_ID,
     }
 
 
@@ -252,5 +285,9 @@ def test_stop_cancels_retry_and_leaves_registrations_managed(monkeypatch):
     assert manager.start() is True
     manager.stop()
     assert sorted(manager._registered_action_ids) == sorted(
-        [hotkeys.HOTKEYS_OVERLAY_ON_ACTION_ID, hotkeys.HOTKEYS_OVERLAY_OFF_ACTION_ID]
+        [
+            hotkeys.HOTKEYS_OVERLAY_ON_ACTION_ID,
+            hotkeys.HOTKEYS_OVERLAY_OFF_ACTION_ID,
+            hotkeys.HOTKEYS_LAUNCH_CONTROLLER_ACTION_ID,
+        ]
     )

@@ -64,6 +64,12 @@ SPAM_MAX_PAYLOADS_MIN = 1
 SPAM_MAX_PAYLOADS_MAX = 5000
 SPAM_WARN_COOLDOWN_MIN = 0.0
 SPAM_WARN_COOLDOWN_MAX = 600.0
+PREFERENCES_TAB_OVERLAY = "Overlay"
+PREFERENCES_TAB_CONTROLLER = "Controller"
+PREFERENCES_TAB_EXPERIMENTAL = "Experimental"
+CONTROLLER_TAB_CONTROL_LAUNCH_BUTTON = "launch_controller"
+CONTROLLER_TAB_CONTROL_LAUNCH_COMMAND = "launch_command"
+CONTROLLER_TAB_CONTROL_TOGGLE_ARGUMENT = "toggle_argument"
 
 LOGGER = logging.getLogger(__name__)
 
@@ -78,6 +84,22 @@ class TroubleshootingPanelState:
     payload_spam_window_seconds: float = 2.0
     payload_spam_max_payloads: int = 200
     payload_spam_warn_cooldown_seconds: float = 30.0
+
+
+def _preferences_tab_order() -> tuple[str, str, str]:
+    return (
+        PREFERENCES_TAB_OVERLAY,
+        PREFERENCES_TAB_CONTROLLER,
+        PREFERENCES_TAB_EXPERIMENTAL,
+    )
+
+
+def _controller_tab_control_order() -> tuple[str, str, str]:
+    return (
+        CONTROLLER_TAB_CONTROL_LAUNCH_BUTTON,
+        CONTROLLER_TAB_CONTROL_LAUNCH_COMMAND,
+        CONTROLLER_TAB_CONTROL_TOGGLE_ARGUMENT,
+    )
 
 
 def _config_getter(name: str) -> Optional[Callable[..., Any]]:
@@ -929,6 +951,7 @@ class PreferencesPanel:
         cycle_payload_prev_callback: Optional[Callable[[], None]] = None,
         cycle_payload_next_callback: Optional[Callable[[], None]] = None,
         restart_overlay_callback: Optional[Callable[[], None]] = None,
+        launch_controller_callback: Optional[Callable[[], None]] = None,
         set_launch_command_callback: Optional[Callable[[str], None]] = None,
         set_toggle_argument_callback: Optional[Callable[[str], None]] = None,
         set_payload_opacity_callback: Optional[Callable[[int], None]] = None,
@@ -1062,6 +1085,7 @@ class PreferencesPanel:
         self._cycle_prev_callback = cycle_payload_prev_callback
         self._cycle_next_callback = cycle_payload_next_callback
         self._restart_overlay = restart_overlay_callback
+        self._launch_controller = launch_controller_callback
         self._set_launch_command = set_launch_command_callback
         self._set_toggle_argument = set_toggle_argument_callback
         self._set_payload_opacity = set_payload_opacity_callback
@@ -1143,15 +1167,56 @@ class PreferencesPanel:
 
         tabs = nb.Notebook(frame)
         overlay_tab = nb.Frame(tabs)
+        controller_tab = nb.Frame(tabs)
         experimental_tab = nb.Frame(tabs)
-        tabs.add(overlay_tab, text="Overlay")
-        tabs.add(experimental_tab, text="Experimental")
+        overlay_tab_label, controller_tab_label, experimental_tab_label = _preferences_tab_order()
+        tabs.add(overlay_tab, text=overlay_tab_label)
+        tabs.add(controller_tab, text=controller_tab_label)
+        tabs.add(experimental_tab, text=experimental_tab_label)
         tabs.grid(row=1, column=0, sticky="we")
+
+        self._controller_tab_control_order = _controller_tab_control_order()
 
         user_section = ttk.Frame(overlay_tab, style=self._frame_style)
         user_section.grid(row=0, column=0, sticky="we")
         user_section.columnconfigure(0, weight=1)
         overlay_tab.columnconfigure(0, weight=1)
+        controller_section = ttk.Frame(controller_tab, style=self._frame_style)
+        controller_section.grid(row=0, column=0, sticky="we")
+        controller_section.columnconfigure(0, weight=1)
+        controller_tab.columnconfigure(0, weight=1)
+        controller_row = 0
+
+        launch_controller_row = ttk.Frame(controller_section, style=self._frame_style)
+        launch_controller_btn = nb.Button(
+            launch_controller_row,
+            text="Launch Controller",
+            command=self._on_launch_controller,
+        )
+        if self._launch_controller is None:
+            launch_controller_btn.configure(state="disabled")
+        launch_controller_btn.pack(side="left")
+        launch_controller_row.grid(row=controller_row, column=0, sticky="w", pady=ROW_PAD)
+        controller_row += 1
+
+        launch_row = ttk.Frame(controller_section, style=self._frame_style)
+        nb.Label(launch_row, text="Chat command to launch controller:").pack(side="left")
+        launch_entry = nb.EntryMenu(launch_row, width=10, textvariable=self._var_launch_command)
+        launch_entry.pack(side="left", padx=(8, 0))
+        launch_entry.bind("<FocusOut>", self._on_launch_command_event)
+        launch_entry.bind("<Return>", self._on_launch_command_event)
+        launch_row.grid(row=controller_row, column=0, sticky="w", pady=ROW_PAD)
+        controller_row += 1
+
+        toggle_row = ttk.Frame(controller_section, style=self._frame_style)
+        nb.Label(toggle_row, text="Chat command argument to toggle overlay:").pack(side="left")
+        toggle_entry = nb.EntryMenu(toggle_row, width=10, textvariable=self._var_toggle_argument)
+        toggle_entry.pack(side="left", padx=(8, 0))
+        toggle_entry.bind("<FocusOut>", self._on_toggle_argument_event)
+        toggle_entry.bind("<Return>", self._on_toggle_argument_event)
+        toggle_row.grid(row=controller_row, column=0, sticky="w", pady=ROW_PAD)
+        controller_row += 1
+
         user_row = 0
 
         status_row = ttk.Frame(user_section, style=self._frame_style)
@@ -1311,24 +1376,6 @@ class PreferencesPanel:
         self._payload_gutter_spin = gutter_spin
         self._update_payload_gutter_spin_state()
         nudge_row.grid(row=user_row, column=0, sticky="w", pady=ROW_PAD)
-        user_row += 1
-
-        launch_row = ttk.Frame(user_section, style=self._frame_style)
-        nb.Label(launch_row, text="Chat command to launch controller:").pack(side="left")
-        launch_entry = nb.EntryMenu(launch_row, width=10, textvariable=self._var_launch_command)
-        launch_entry.pack(side="left", padx=(8, 0))
-        launch_entry.bind("<FocusOut>", self._on_launch_command_event)
-        launch_entry.bind("<Return>", self._on_launch_command_event)
-        launch_row.grid(row=user_row, column=0, sticky="w", pady=ROW_PAD)
-        user_row += 1
-
-        toggle_row = ttk.Frame(user_section, style=self._frame_style)
-        nb.Label(toggle_row, text="Chat command argument to toggle overlay:").pack(side="left")
-        toggle_entry = nb.EntryMenu(toggle_row, width=10, textvariable=self._var_toggle_argument)
-        toggle_entry.pack(side="left", padx=(8, 0))
-        toggle_entry.bind("<FocusOut>", self._on_toggle_argument_event)
-        toggle_entry.bind("<Return>", self._on_toggle_argument_event)
-        toggle_row.grid(row=user_row, column=0, sticky="w", pady=ROW_PAD)
         user_row += 1
 
         payload_opacity_row = ttk.Frame(user_section, style=self._frame_style)
@@ -2396,6 +2443,15 @@ class PreferencesPanel:
             self._status_var.set(f"Failed to restart overlay: {exc}")
             return
         self._status_var.set("Overlay restart requested.")
+
+    def _on_launch_controller(self) -> None:
+        callback = self._launch_controller
+        if callback is None:
+            return
+        try:
+            callback()
+        except Exception as exc:  # pragma: no cover - defensive UI handler
+            LOGGER.debug("Controller launch callback failed from preferences UI: %s", exc, exc_info=True)
 
     def _on_force_render_toggle(self) -> None:
         value = bool(self._var_force_render.get())

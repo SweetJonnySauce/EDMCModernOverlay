@@ -6,7 +6,9 @@ import signal
 import subprocess
 import threading
 from pathlib import Path
-from typing import Optional, Protocol
+from typing import Literal, Optional, Protocol
+
+LaunchSource = Literal["chat", "settings", "hotkey"]
 
 
 class _ControllerRuntime(Protocol):  # type: ignore[name-defined]
@@ -18,7 +20,7 @@ class _ControllerRuntime(Protocol):  # type: ignore[name-defined]
     _last_override_reload_nonce: Optional[str]
     _lifecycle: object
 
-    def _overlay_controller_launch_sequence(self) -> None: ...
+    def _overlay_controller_launch_sequence(self, source: LaunchSource = "chat") -> None: ...
     def _controller_python_command(self, overlay_env: dict[str, str]) -> list[str]: ...
     def _build_overlay_environment(self) -> dict[str, str]: ...
     def _controller_countdown(self) -> None: ...
@@ -35,7 +37,11 @@ class _ControllerRuntime(Protocol):  # type: ignore[name-defined]
     def _capture_enabled(self) -> bool: ...
 
 
-def launch_controller(runtime: _ControllerRuntime, logger: logging.Logger) -> None:
+def _should_run_countdown(source: str) -> bool:
+    return source not in {"settings", "hotkey"}
+
+
+def launch_controller(runtime: _ControllerRuntime, logger: logging.Logger, *, source: LaunchSource = "chat") -> None:
     with runtime._controller_launch_lock:
         if runtime._controller_launch_thread and runtime._controller_launch_thread.is_alive():
             raise RuntimeError("Overlay Controller launch already in progress.")
@@ -44,6 +50,7 @@ def launch_controller(runtime: _ControllerRuntime, logger: logging.Logger) -> No
         logger.debug("Overlay Controller launch requested; preparing launch thread.")
         thread = threading.Thread(
             target=runtime._overlay_controller_launch_sequence,
+            args=(source,),
             name="OverlayControllerLaunch",
             daemon=True,
         )
@@ -51,7 +58,7 @@ def launch_controller(runtime: _ControllerRuntime, logger: logging.Logger) -> No
     thread.start()
 
 
-def controller_launch_sequence(runtime: _ControllerRuntime, logger: logging.Logger) -> None:
+def controller_launch_sequence(runtime: _ControllerRuntime, logger: logging.Logger, *, source: LaunchSource = "chat") -> None:
     try:
         launch_env = runtime._build_overlay_environment()
         python_command = runtime._controller_python_command(launch_env)
@@ -61,7 +68,10 @@ def controller_launch_sequence(runtime: _ControllerRuntime, logger: logging.Logg
                 logger.debug("Removing %s from controller environment to avoid Tcl/Tk conflicts", key)
                 launch_env.pop(key, None)
         capture_output = runtime._capture_enabled()
-        runtime._controller_countdown()
+        if _should_run_countdown(source):
+            runtime._controller_countdown()
+        else:
+            logger.debug("Overlay Controller launch requested from %s; skipping countdown.", source)
         process = runtime._spawn_overlay_controller_process(python_command, launch_env, capture_output=capture_output)
     except Exception as exc:
         logger.error("Overlay Controller launch failed: %s", exc, exc_info=exc)

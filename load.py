@@ -34,6 +34,7 @@ if __package__:
     from .overlay_plugin.logging_utils import build_rotating_payload_handler
     from .overlay_plugin.runtime_services import start_runtime_services, stop_runtime_services
     from .overlay_plugin.controller_services import (
+        LaunchSource,
         controller_launch_sequence,
         launch_controller,
         terminate_controller_process,
@@ -92,6 +93,7 @@ else:  # pragma: no cover - EDMC loads as top-level module
     from overlay_plugin.logging_utils import build_rotating_payload_handler
     from overlay_plugin.runtime_services import start_runtime_services, stop_runtime_services
     from overlay_plugin.controller_services import (
+        LaunchSource,
         controller_launch_sequence,
         launch_controller,
         terminate_controller_process,
@@ -538,6 +540,7 @@ class _PluginRuntime:
             is_running=lambda: self._running,
             get_payload_opacity=self._current_payload_opacity,
             toggle_payload_opacity=self.toggle_payload_opacity_preference,
+            launch_controller=lambda: self.launch_overlay_controller(source="hotkey"),
             logger=LOGGER,
             plugin_name=PLUGIN_NAME,
         )
@@ -2093,8 +2096,8 @@ class _PluginRuntime:
     def cycle_payload_next(self) -> None:
         self._cycle_payload_step(1)
 
-    def launch_overlay_controller(self) -> None:
-        launch_controller(self, LOGGER)
+    def launch_overlay_controller(self, *, source: LaunchSource = "chat") -> None:
+        launch_controller(self, LOGGER, source=source)
 
     def _controller_python_command(self, overlay_env: Dict[str, str]) -> List[str]:
         override = os.getenv("EDMC_OVERLAY_CONTROLLER_PYTHON")
@@ -2114,8 +2117,8 @@ class _PluginRuntime:
             "Create overlay_client/.venv or set EDMC_OVERLAY_CONTROLLER_PYTHON."
         )
 
-    def _overlay_controller_launch_sequence(self) -> None:
-        controller_launch_sequence(self, LOGGER)
+    def _overlay_controller_launch_sequence(self, source: LaunchSource = "chat") -> None:
+        controller_launch_sequence(self, LOGGER, source=source)
 
     def _controller_countdown(self) -> None:
         LOGGER.debug("Overlay Controller countdown started.")
@@ -3236,37 +3239,41 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
         payload_spam_warn_cooldown_seconds=spam_config.warn_cooldown_seconds,
     )
     try:
-        status_callback = _plugin.set_show_status_preference if _plugin else None
-        status_gutter_callback = _plugin.set_status_gutter_preference if _plugin else None
-        debug_corner_callback = _plugin.set_debug_overlay_corner_preference if _plugin else None
-        gridlines_enabled_callback = _plugin.set_gridlines_enabled_preference if _plugin else None
-        gridline_spacing_callback = _plugin.set_gridline_spacing_preference if _plugin else None
-        payload_nudge_callback = _plugin.set_payload_nudge_preference if _plugin else None
-        payload_gutter_callback = _plugin.set_payload_nudge_gutter_preference if _plugin else None
-        force_render_callback = _plugin.set_force_render_preference if _plugin else None
-        standalone_mode_callback = _plugin.set_standalone_mode_preference if _plugin else None
-        title_bar_config_callback = _plugin.set_title_bar_compensation_preference if _plugin else None
-        debug_overlay_callback = _plugin.set_debug_overlay_preference if _plugin else None
-        payload_logging_callback = _plugin.set_payload_logging_preference if _plugin else None
-        font_min_callback = _plugin.set_min_font_preference if _plugin else None
-        font_max_callback = _plugin.set_max_font_preference if _plugin else None
-        font_step_callback = _plugin.set_legacy_font_step_preference if _plugin else None
-        font_preview_callback = _plugin.preview_font_sizes if _plugin else None
-        cycle_toggle_callback = _plugin.set_cycle_payload_preference if _plugin else None
-        cycle_copy_callback = _plugin.set_cycle_payload_copy_preference if _plugin else None
-        cycle_prev_callback = _plugin.cycle_payload_prev if _plugin else None
-        cycle_next_callback = _plugin.cycle_payload_next if _plugin else None
-        restart_overlay_callback = _plugin.restart_overlay_client if _plugin else None
-        launch_command_callback = _plugin.set_launch_command_preference if _plugin else None
-        toggle_argument_callback = _plugin.set_toggle_argument_preference if _plugin else None
-        payload_opacity_callback = _plugin.set_payload_opacity_preference if _plugin else None
-        reset_group_cache_callback = _plugin.reset_group_cache if _plugin else None
-        capture_override_callback = _plugin.set_capture_override_preference if _plugin else None
-        log_retention_override_callback = _plugin.set_log_retention_override_preference if _plugin else None
-        payload_exclusion_callback = _plugin.set_payload_logging_exclusions if _plugin else None
-        payload_spam_detection_callback = _plugin.set_payload_spam_detection_preference if _plugin else None
-        if _plugin:
-            diagnostics_state = _plugin.get_troubleshooting_panel_state()
+        plugin_runtime = _plugin
+        status_callback = plugin_runtime.set_show_status_preference if plugin_runtime else None
+        status_gutter_callback = plugin_runtime.set_status_gutter_preference if plugin_runtime else None
+        debug_corner_callback = plugin_runtime.set_debug_overlay_corner_preference if plugin_runtime else None
+        gridlines_enabled_callback = plugin_runtime.set_gridlines_enabled_preference if plugin_runtime else None
+        gridline_spacing_callback = plugin_runtime.set_gridline_spacing_preference if plugin_runtime else None
+        payload_nudge_callback = plugin_runtime.set_payload_nudge_preference if plugin_runtime else None
+        payload_gutter_callback = plugin_runtime.set_payload_nudge_gutter_preference if plugin_runtime else None
+        force_render_callback = plugin_runtime.set_force_render_preference if plugin_runtime else None
+        standalone_mode_callback = plugin_runtime.set_standalone_mode_preference if plugin_runtime else None
+        title_bar_config_callback = plugin_runtime.set_title_bar_compensation_preference if plugin_runtime else None
+        debug_overlay_callback = plugin_runtime.set_debug_overlay_preference if plugin_runtime else None
+        payload_logging_callback = plugin_runtime.set_payload_logging_preference if plugin_runtime else None
+        font_min_callback = plugin_runtime.set_min_font_preference if plugin_runtime else None
+        font_max_callback = plugin_runtime.set_max_font_preference if plugin_runtime else None
+        font_step_callback = plugin_runtime.set_legacy_font_step_preference if plugin_runtime else None
+        font_preview_callback = plugin_runtime.preview_font_sizes if plugin_runtime else None
+        cycle_toggle_callback = plugin_runtime.set_cycle_payload_preference if plugin_runtime else None
+        cycle_copy_callback = plugin_runtime.set_cycle_payload_copy_preference if plugin_runtime else None
+        cycle_prev_callback = plugin_runtime.cycle_payload_prev if plugin_runtime else None
+        cycle_next_callback = plugin_runtime.cycle_payload_next if plugin_runtime else None
+        restart_overlay_callback = plugin_runtime.restart_overlay_client if plugin_runtime else None
+        launch_controller_callback = (
+            (lambda: plugin_runtime.launch_overlay_controller(source="settings")) if plugin_runtime else None
+        )
+        launch_command_callback = plugin_runtime.set_launch_command_preference if plugin_runtime else None
+        toggle_argument_callback = plugin_runtime.set_toggle_argument_preference if plugin_runtime else None
+        payload_opacity_callback = plugin_runtime.set_payload_opacity_preference if plugin_runtime else None
+        reset_group_cache_callback = plugin_runtime.reset_group_cache if plugin_runtime else None
+        capture_override_callback = plugin_runtime.set_capture_override_preference if plugin_runtime else None
+        log_retention_override_callback = plugin_runtime.set_log_retention_override_preference if plugin_runtime else None
+        payload_exclusion_callback = plugin_runtime.set_payload_logging_exclusions if plugin_runtime else None
+        payload_spam_detection_callback = plugin_runtime.set_payload_spam_detection_preference if plugin_runtime else None
+        if plugin_runtime:
+            diagnostics_state = plugin_runtime.get_troubleshooting_panel_state()
         if launch_command_callback:
             LOGGER.debug("Attaching launch command callback with initial value=%s", _preferences.controller_launch_command)
         dev_mode = _preferences.dev_mode if _preferences is not None else DEV_BUILD
@@ -3296,9 +3303,10 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
             cycle_prev_callback,
             cycle_next_callback,
             restart_overlay_callback,
-            launch_command_callback,
-            toggle_argument_callback,
-            payload_opacity_callback,
+            launch_controller_callback=launch_controller_callback,
+            set_launch_command_callback=launch_command_callback,
+            set_toggle_argument_callback=toggle_argument_callback,
+            set_payload_opacity_callback=payload_opacity_callback,
             reset_group_cache_callback=reset_group_cache_callback,
             dev_mode=dev_mode,
             plugin_version=MODERN_OVERLAY_VERSION,
@@ -3308,7 +3316,7 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
             set_log_retention_override_callback=log_retention_override_callback,
             set_payload_exclusion_callback=payload_exclusion_callback,
             set_payload_spam_detection_callback=payload_spam_detection_callback,
-            payload_logging_initial=_plugin._payload_logging_enabled if _plugin else None,
+            payload_logging_initial=plugin_runtime._payload_logging_enabled if plugin_runtime else None,
         )
     except Exception as exc:
         LOGGER.exception("Failed to build preferences panel: %s", exc)
