@@ -525,14 +525,37 @@
     ],
     "idPrefixGroups": {
       "Default": {
-        "idPrefixes": [
-          "neutrondancer-default-"
-        ],
         "idPrefixGroupAnchor": "nw",
         "markerLabelPosition": "below",
         "controllerPreviewBoxMode": "last",
         "backgroundColor": "#00000000",
         "backgroundBorderWidth": 2
+      },
+      "NeutronDancer Default": {
+        "idPrefixes": [
+          "neutrondancer-default-"
+        ],
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last"
+      }
+    }
+  },
+  "EDMC-LogEventMiner": {
+    "matchingPrefixes": [
+      "edmclogeventminer-overlay-"
+    ],
+    "idPrefixGroups": {
+      "EDMC-LogEventMiner": {
+        "idPrefixes": [
+          "edmclogeventminer-overlay-"
+        ],
+        "idPrefixGroupAnchor": "sw",
+        "offsetX": 5.0,
+        "offsetY": 955.0,
+        "backgroundColor": "#AA000000",
+        "backgroundBorderWidth": 5
       }
     }
   }

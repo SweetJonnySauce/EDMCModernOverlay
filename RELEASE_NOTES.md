@@ -11,6 +11,9 @@
 
 ### Maintenance
 - Added capability to Windows .exe installer to download python if 3.10+ is not available or accessible. 
+- `define_plugin_group` now supports canonical API argument names alongside legacy compatibility aliases.
+- Legacy alias usage emits a compatibility warning once per process per legacy argument.
+- No storage/schema key migration is required; persisted `overlay_groupings.json` structure is unchanged.
 
 ### Bug Fixes
 - Preserved existing in-game chat launch behavior (`!ovr` and aliases) while adding new launch entrypoints.

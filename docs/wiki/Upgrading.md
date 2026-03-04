@@ -1,0 +1,3 @@
+- Grab the latest OS-specific release asset from [GitHub Releases](https://github.com/SweetJonnySauce/EDMC-ModernOverlay/releases/latest) and re-run the install script (or double click on the EXE file). 
+
+- If you're on version 0.7.4 or earlier, the installer disables the old `EDMC-ModernOverlay` directory (by renaming it with the `.disabled` suffix) and deploys a fresh `EDMCModernOverlay` folder. Setting are not migrated to the new folder as there were no persistent user configurable settings prior to 0.7.4

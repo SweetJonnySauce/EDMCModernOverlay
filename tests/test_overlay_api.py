@@ -367,3 +367,169 @@ def test_define_plugin_group_supports_background_fields(grouping_store):
     assert group["backgroundColor"] == "#AB12CD"
     assert group["backgroundBorderColor"] == "red"
     assert group["backgroundBorderWidth"] == 4
+
+
+def test_define_plugin_group_legacy_and_canonical_parity(grouping_store):
+    overlay_api.define_plugin_group(
+        plugin_group="LegacyPlugin",
+        matching_prefixes=["legacy-", "common-"],
+        id_prefix_group="alerts",
+        id_prefixes=["legacy-alert-", "legacy-warning-"],
+        id_prefix_group_anchor="ne",
+        id_prefix_offset_x=12,
+        id_prefix_offset_y=-4,
+        payload_justification="center",
+        marker_label_position="above",
+        controller_preview_box_mode="max",
+        background_color="#112233",
+        background_border_color="#445566",
+        background_border_width=2,
+    )
+    overlay_api.define_plugin_group(
+        plugin_name="CanonicalPlugin",
+        plugin_matching_prefixes=["legacy-", "common-"],
+        plugin_group_name="alerts",
+        plugin_group_prefixes=["legacy-alert-", "legacy-warning-"],
+        plugin_group_anchor="ne",
+        plugin_group_offset_x=12,
+        plugin_group_offset_y=-4,
+        payload_justification="center",
+        marker_label_position="above",
+        controller_preview_box_mode="max",
+        plugin_group_background_color="#112233",
+        plugin_group_border_color="#445566",
+        plugin_group_border_width=2,
+    )
+
+    payload = _load(grouping_store)
+    assert payload["LegacyPlugin"] == payload["CanonicalPlugin"]
+
+
+@pytest.mark.parametrize(
+    "kwargs, expected_fragment",
+    [
+        (
+            {
+                "plugin_name": "Canonical",
+                "plugin_group": "Legacy",
+                "plugin_matching_prefixes": ["x-"],
+            },
+            "plugin_name (plugin_group)",
+        ),
+        (
+            {
+                "plugin_name": "Example",
+                "plugin_matching_prefixes": ["x-"],
+                "matching_prefixes": ["y-"],
+            },
+            "plugin_matching_prefixes (matching_prefixes)",
+        ),
+        (
+            {
+                "plugin_name": "Example",
+                "plugin_group_name": "alerts",
+                "plugin_group_prefixes": ["alert-"],
+                "plugin_group_border_width": 2,
+                "background_border_width": 3,
+            },
+            "plugin_group_border_width (background_border_width)",
+        ),
+    ],
+)
+def test_define_plugin_group_conflicts_include_legacy_and_canonical_names(grouping_store, kwargs, expected_fragment):
+    with pytest.raises(PluginGroupingError) as excinfo:
+        overlay_api.define_plugin_group(**kwargs)
+    assert expected_fragment in str(excinfo.value)
+
+
+def test_define_plugin_group_mixed_same_value_accepts_and_preserves_output(grouping_store):
+    overlay_api.define_plugin_group(
+        plugin_name="MixedPlugin",
+        plugin_group="MixedPlugin",
+        plugin_matching_prefixes=["mix-"],
+        matching_prefixes=["mix-"],
+        plugin_group_name="alerts",
+        id_prefix_group="alerts",
+        plugin_group_prefixes=["mix-alert-"],
+        id_prefixes=["mix-alert-"],
+        plugin_group_offset_x=5,
+        id_prefix_offset_x=5,
+    )
+
+    payload = _load(grouping_store)
+    group = payload["MixedPlugin"]["idPrefixGroups"]["alerts"]
+    assert payload["MixedPlugin"]["matchingPrefixes"] == ["mix-"]
+    assert group["idPrefixes"] == ["mix-alert-"]
+    assert group["offsetX"] == 5.0
+
+
+def test_define_plugin_group_legacy_alias_warning_once_per_argument(monkeypatch, grouping_store):
+    with overlay_api._LEGACY_ALIAS_WARNED_LOCK:
+        overlay_api._LEGACY_ALIAS_WARNED.clear()
+
+    warnings: list[str] = []
+
+    def _capture_warning(message: str, *args):
+        warnings.append(message % args if args else message)
+
+    monkeypatch.setattr(overlay_api, "_log_warning", _capture_warning)
+
+    overlay_api.define_plugin_group(plugin_group="W1", matching_prefixes=["w1-"])
+    first_warnings = list(warnings)
+    assert len(first_warnings) == 2
+    assert any("plugin_group" in item for item in first_warnings)
+    assert any("matching_prefixes" in item for item in first_warnings)
+
+    overlay_api.define_plugin_group(plugin_group="W2", matching_prefixes=["w2-"])
+    assert warnings == first_warnings
+
+
+def test_define_plugin_group_legacy_alias_warning_emits_once_for_each_alias(monkeypatch, grouping_store):
+    with overlay_api._LEGACY_ALIAS_WARNED_LOCK:
+        overlay_api._LEGACY_ALIAS_WARNED.clear()
+
+    warnings: list[str] = []
+
+    def _capture_warning(message: str, *args):
+        warnings.append(message % args if args else message)
+
+    monkeypatch.setattr(overlay_api, "_log_warning", _capture_warning)
+
+    overlay_api.define_plugin_group(plugin_group="One", matching_prefixes=["one-"])
+    overlay_api.define_plugin_group(
+        plugin_group="Two",
+        id_prefix_group="alerts",
+        id_prefixes=["two-alert-"],
+    )
+
+    assert any("plugin_group" in item for item in warnings)
+    assert any("matching_prefixes" in item for item in warnings)
+    assert any("id_prefix_group" in item for item in warnings)
+    assert any("id_prefixes" in item for item in warnings)
+    # Each alias warning should only appear once.
+    assert sum(1 for item in warnings if "plugin_group'" in item) == 1
+    assert sum(1 for item in warnings if "matching_prefixes'" in item) == 1
+    assert sum(1 for item in warnings if "id_prefix_group'" in item) == 1
+    assert sum(1 for item in warnings if "id_prefixes'" in item) == 1
+
+
+def test_define_plugin_group_mixed_same_value_still_warns_for_legacy_alias(monkeypatch, grouping_store):
+    with overlay_api._LEGACY_ALIAS_WARNED_LOCK:
+        overlay_api._LEGACY_ALIAS_WARNED.clear()
+
+    warnings: list[str] = []
+
+    def _capture_warning(message: str, *args):
+        warnings.append(message % args if args else message)
+
+    monkeypatch.setattr(overlay_api, "_log_warning", _capture_warning)
+
+    overlay_api.define_plugin_group(
+        plugin_name="MixedWarn",
+        plugin_group="MixedWarn",
+        plugin_matching_prefixes=["mixwarn-"],
+        matching_prefixes=["mixwarn-"],
+    )
+
+    assert any("plugin_group" in item for item in warnings)
+    assert any("matching_prefixes" in item for item in warnings)
