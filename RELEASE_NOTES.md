@@ -14,6 +14,7 @@
 - Plugin Developers: `define_plugin_group` now supports canonical API argument names alongside legacy compatibility aliases. Warning messages are logged once per plugin per legacy parameter used. See [[`define_plugin_group API`]](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/define_plugin_group-API) wiki for more info. 
 - Legacy alias usage emits a compatibility warning once per process per legacy argument per calling plugin.
 - No storage/schema key migration is required; persisted `overlay_groupings.json` structure is unchanged.
+- Updated `AGENTS.md` and `docs/plans/_template.md`
 
 ### Bug Fixes
 - Preserved existing in-game chat launch behavior (`!ovr` and aliases) while adding new launch entrypoints.
