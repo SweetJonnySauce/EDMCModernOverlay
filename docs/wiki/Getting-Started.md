@@ -99,7 +99,7 @@ overlay.send_raw(
 )
 
 ```
-X/Y is the center point of the marker. The "circle" marker produces a filled dot as seen on EDR Navroute and the "cross" marker produces an X as seen on Bioscan Radar. By default, all marker labels are to the right and below the marker. With EDMCModernOverlay, you can adjust the vertical placement of the label to be above or in-line with the marker by setting the `marker_label_position` property for the plugin group in `define_plugin_groups` (described below)
+X/Y is the center point of the marker. The "circle" marker produces a filled dot as seen on EDR Navroute and the "cross" marker produces an X as seen on Bioscan Radar. By default, all marker labels are to the right and below the marker. With EDMCModernOverlay, you can adjust the vertical placement of the label to be above or in-line with the marker by setting the `marker_label_position` property for the plugin group in `define_plugin_group` (described below)
 
 
 
@@ -114,16 +114,16 @@ from overlay_plugin.overlay_api import define_plugin_group, PluginGroupingError
 
 try:
     define_plugin_group(
-        plugin_group="MyPlugin",
-        matching_prefixes=["myplugin-"],
-        id_prefix_group="alerts",
-        id_prefixes=["myplugin-alert-"],
-        id_prefix_group_anchor="ne",
+        plugin_name="MyPlugin",
+        plugin_matching_prefixes=["myplugin-"],
+        plugin_group_name="alerts",
+        plugin_group_prefixes=["myplugin-alert-"],
+        plugin_group_anchor="ne",
         marker_label_position="below",
         controller_preview_box_mode="last",
-        background_color="#1A1A1ACC",
-        background_border_color="red",
-        background_border_width=2,
+        plugin_group_background_color="#1A1A1ACC",
+        plugin_group_border_color="#FF0000",
+        plugin_group_border_width=2,
     )
 except PluginGroupingError as exc:
     # Modern Overlay is offline, a legacy overlay is being used, or the payload was invalid

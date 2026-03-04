@@ -183,15 +183,15 @@ from overlay_plugin.overlay_api import define_plugin_group, PluginGroupingError
 
 try:
     define_plugin_group(
-        plugin_group="MyPlugin",
-        matching_prefixes=["myplugin-"],
-        id_prefix_group="alerts",
-        id_prefixes=["myplugin-alert-"],
-        id_prefix_group_anchor="ne",
+        plugin_name="MyPlugin",
+        plugin_matching_prefixes=["myplugin-"],
+        plugin_group_name="alerts",
+        plugin_group_prefixes=["myplugin-alert-"],
+        plugin_group_anchor="ne",
         marker_label_position="below",
         controller_preview_box_mode="last",
-        background_color="#1A1A1ACC",
-        background_border_width=2,
+        plugin_group_background_color="#1A1A1ACC",
+        plugin_group_border_width=2,
     )
 except PluginGroupingError as exc:
     # Modern Overlay is offline or the payload was invalid
@@ -199,6 +199,8 @@ except PluginGroupingError as exc:
 ```
 
 The helper enforces the schema, lowercases prefixes, ensures per-plugin uniqueness, and writes the JSON back to disk so the overlay client reloads it instantly. Use `controller_preview_box_mode` to choose `last` or `max` when you need to control which bounds the controller target boxes use (stored as `controllerPreviewBoxMode` in JSON).
+
+Canonical argument names are shown above. Legacy aliases are still accepted for compatibility.
 
 ## Example 1: Center a text string at the top center of the screen
 
@@ -212,10 +214,10 @@ from overlay_plugin.overlay_api import define_plugin_group, PluginGroupingError
 def plugin_startup():
     try:
         define_plugin_group(
-            plugin_group="Centered Banner",
-            id_prefix_group="status-line",
-            id_prefixes=["centered-banner-"],
-            id_prefix_group_anchor="top",
+            plugin_name="Centered Banner",
+            plugin_group_name="status-line",
+            plugin_group_prefixes=["centered-banner-"],
+            plugin_group_anchor="top",
             payload_justification="center",
         )
     except PluginGroupingError as exc:
@@ -256,10 +258,10 @@ from overlay_plugin.overlay_api import define_plugin_group, PluginGroupingError
 def plugin_startup():
     try:
         define_plugin_group(
-            plugin_group="Right Banner",
-            id_prefix_group="alerts",
-            id_prefixes=["right-banner-"],
-            id_prefix_group_anchor="ne",
+            plugin_name="Right Banner",
+            plugin_group_name="alerts",
+            plugin_group_prefixes=["right-banner-"],
+            plugin_group_anchor="ne",
             payload_justification="right",
         )
     except PluginGroupingError as exc:

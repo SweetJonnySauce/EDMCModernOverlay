@@ -94,7 +94,7 @@ If something is not clear, ask clarifying questions.
 | 2 | Implement argument alias adapter in `overlay_api.define_plugin_group` | Completed |
 | 3 | Expand tests for backward compatibility + conflict handling | Completed |
 | 4 | Release notes + implementation-results documentation | Completed |
-| 5 | External docs alignment tracking (out-of-repo) | Pending |
+| 5 | External docs alignment tracking (out-of-repo) | Completed |
 
 ## Phase Details
 
@@ -467,25 +467,112 @@ Phase 1 Outcomes:
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 5.1 | Create external-doc follow-up checklist (wiki/other systems) | Pending |
-| 5.2 | Capture owner/status/tracking links for each external doc update | Pending |
-| 5.3 | Add release handoff notes listing remaining non-repo doc actions | Pending |
+| 5.1 | Create external-doc follow-up checklist (wiki/other systems) | Completed |
+| 5.2 | Capture owner/status/tracking links for each external doc update | Completed |
+| 5.3 | Add release handoff notes listing remaining non-repo doc actions | Completed |
 
 #### Stage 5.1 Detailed Plan
-- Create a checklist section in this plan for docs outside this repository (for example GitHub wiki pages).
+- Objective:
+- Build a concrete external-doc update checklist driven by the current wiki content scan.
+- Scope:
+- GitHub wiki pages mirrored under `docs/wiki` in this repo are used as source-of-truth for planning.
+- Do not execute wiki edits in this stage; capture exact targets and required edits only.
+- Initial findings captured for this phase:
+- Must update:
+- `define_plugin_group-API`: examples used legacy args (`plugin_group`, `matching_prefixes`, `id_prefix_group`, `id_prefixes`, `id_prefix_group_anchor`, `background_color`, `background_border_width`).
+- `Getting-Started`: startup snippet used legacy args and contained `define_plugin_groups` typo (plural) that should be `define_plugin_group`.
+- Likely update for terminology consistency:
+- `Concepts`: legacy terminology in `Prefix Names` section referenced `idPrefixGroup`; align to canonical API naming while preserving compatibility context.
+- Reference-only pages (link-only mentions; no argument rewrite required):
+- `Developer-FAQs`, `send_message-API`, `send_raw-API`, `send_shape-API`, `Examples`, `_Sidebar`.
+- Steps:
+- Create a page-by-page checklist with update intent and status.
+- Classify each page as `Must Update`, `Should Update`, or `No Change`.
+- Add notes for exact section-level edits to prevent scope drift.
+- Acceptance criteria:
+- External checklist includes all wiki pages where `define_plugin_group` is called or documented with arguments.
+- Must-update pages are explicitly separated from reference-only pages.
+- Verification to run after stage:
+- Manual scan validation:
+- `rg -n "define_plugin_group|plugin_group=|matching_prefixes=|id_prefix_group=|id_prefixes=" docs/wiki --glob "*.md"`
 
 #### Stage 5.2 Detailed Plan
-- Include page name/path (if known), owner (if known), status, and tracking link (if available).
+- Objective:
+- Add actionable ownership/tracking metadata for each external wiki task.
+- Steps:
+- For each checklist row, capture:
+- page title/path.
+- canonical wiki location/slug.
+- owner (`TBD` if not yet assigned).
+- status (`Pending`, `Ready`, `In Progress`, `Completed`).
+- tracking artifact (issue/PR/link) when available; otherwise keep `TBD`.
+- Add implementation notes for each page describing:
+- canonical argument names that should be shown in examples.
+- whether to include a legacy compatibility note and expected wording.
+- Acceptance criteria:
+- Every `Must Update`/`Should Update` row has owner and status fields populated (owner may be `TBD` but explicit).
+- Every row has a tracking placeholder to avoid orphaned work.
+- Verification to run after stage:
+- Manual table audit for required fields and no `TBD` page names.
 
 #### Stage 5.3 Detailed Plan
-- Add explicit release handoff notes summarizing:
-- what external docs remain and where they must be updated.
+- Objective:
+- Provide release handoff guidance so remaining wiki work is visible before/after `0.8.0` tagging.
+- Steps:
+- Add a release handoff block summarizing:
+- which wiki pages must be updated before release notes are considered complete.
+- which pages are optional polish and can follow immediately after release.
+- required wording policy:
+- canonical names shown first in examples.
+- legacy names called out as compatibility aliases (no removal timeline).
+- Include a completion check statement that Phase 5 can only be marked `Completed` when all `Must Update` rows are complete or explicitly deferred with a reason.
+- Acceptance criteria:
+- Handoff notes clearly separate blocking vs non-blocking external docs work.
+- Migration messaging in handoff notes matches locked Decisions (dual-name compatibility, no schema changes, no forced deprecation timeline).
+- Verification to run after stage:
+- Manual consistency check against:
+- `Decisions (Locked)`
+- `Schema Handling`
+- `Migration Summary (Maintainers/Reviewers)`
 
-#### External Docs Checklist (Placeholder)
+#### Phase 5 Execution Order
+- Implement in strict order: `5.1` -> `5.2` -> `5.3`.
+- Keep this phase documentation-tracking only (no runtime code changes).
+
+#### Phase 5 Exit Criteria
+- Wiki task list is complete and accurately reflects the current argument-compatibility rollout state.
+- All `Must Update` wiki pages are either completed or explicitly deferred with owner + reason + tracking link.
+- Release handoff notes are present and aligned with locked compatibility decisions.
+
+#### External Docs Checklist
+
+Legend:
+- `Must Update` = blocking for complete API naming rollout.
+- `Should Update` = recommended terminology consistency.
+- `No Change` = reference-only mention; currently acceptable.
 
 | External Doc/Page | Location | Owner | Status | Tracking Link | Notes |
 | --- | --- | --- | --- | --- | --- |
-| TBD | TBD | TBD | Pending | TBD | Populate during Phase 5.2 |
+| `define_plugin_group-API` | Local mirror: `docs/wiki/define_plugin_group-API.md` (GitHub wiki: `define_plugin_group-API`) | EDMCModernOverlay maintainers | Completed (`Must Update`) | In-repo mirror update (2026-03-04) | Updated examples to canonical names and added compatibility note for legacy aliases. |
+| `Getting-Started` | Local mirror: `docs/wiki/Getting-Started.md` (GitHub wiki: `Getting-Started`) | EDMCModernOverlay maintainers | Completed (`Must Update`) | In-repo mirror update (2026-03-04) | Updated startup example to canonical names and fixed `define_plugin_groups` typo. |
+| `Concepts` | Local mirror: `docs/wiki/Concepts.md` (GitHub wiki: `Concepts`) | EDMCModernOverlay maintainers | Completed (`Should Update`) | In-repo mirror update (2026-03-04) | Updated Prefix Names terminology to canonical + legacy alias wording. |
+| `Developer-FAQs` | Local mirror: `docs/wiki/Developer-FAQs.md` (GitHub wiki: `Developer-FAQs`) | EDMCModernOverlay maintainers | Completed (`No Change`) | N/A | Reviewed; no argument examples to rewrite. |
+| `send_message-API` | Local mirror: `docs/wiki/send_message-API.md` (GitHub wiki: `send_message-API`) | EDMCModernOverlay maintainers | Completed (`No Change`) | N/A | Reviewed; reference/link only. |
+| `send_raw-API` | Local mirror: `docs/wiki/send_raw-API.md` (GitHub wiki: `send_raw-API`) | EDMCModernOverlay maintainers | Completed (`No Change`) | N/A | Reviewed; reference/link only. |
+| `send_shape-API` | Local mirror: `docs/wiki/send_shape-API.md` (GitHub wiki: `send_shape-API`) | EDMCModernOverlay maintainers | Completed (`No Change`) | N/A | Reviewed; reference/link only. |
+| `Examples` | Local mirror: `docs/wiki/Examples.md` (GitHub wiki: `Examples`) | EDMCModernOverlay maintainers | Completed (`No Change`) | N/A | Reviewed; conceptual mention only. |
+| `_Sidebar` | Local mirror: `docs/wiki/_Sidebar.md` (GitHub wiki: `_Sidebar`) | EDMCModernOverlay maintainers | Completed (`No Change`) | N/A | Reviewed; nav entry already correct. |
+
+#### Release Handoff Notes (Phase 5)
+- In-repo wiki mirror updates are complete for blocking and recommended pages.
+- If publishing to external GitHub wiki is a separate sync step, publish these updated mirror pages:
+- `define_plugin_group-API`
+- `Getting-Started`
+- `Concepts`
+- Messaging policy to keep consistent across all wiki pages:
+- canonical/new names are authoritative in examples.
+- legacy names are compatibility aliases and remain supported.
+- no schema key changes and no fixed deprecation timeline.
 
 ## Test Plan (Per Iteration)
 - Env setup (once per machine):
@@ -504,7 +591,7 @@ Phase 1 Outcomes:
 - Phase 2 implemented on 2026-03-04.
 - Phase 3 implemented on 2026-03-04.
 - Phase 4 implemented on 2026-03-04.
-- Phase 5 not started yet.
+- Phase 5 implemented on 2026-03-04.
 
 ### Phase 1 Execution Summary
 - Stage 1.1 completed:
@@ -598,6 +685,26 @@ Phase 1 Outcomes:
 - Documentation consistency verification (manual):
 - Confirmed release-note wording matches locked Decisions and Schema Handling sections in this plan.
 - No runtime code changes were introduced in Phase 4, so no additional automated test execution was required.
+
+### Phase 5 Execution Summary
+- Stage 5.1 completed:
+- Executed full `docs/wiki` scan for `define_plugin_group` references and argument usage.
+- Created and finalized a page-by-page external docs checklist with `Must Update`, `Should Update`, and `No Change` classification.
+- Stage 5.2 completed:
+- Updated tracked wiki pages in the in-repo mirror:
+- `docs/wiki/define_plugin_group-API.md`: migrated examples to canonical argument names and added legacy alias compatibility note.
+- `docs/wiki/Getting-Started.md`: migrated startup snippet to canonical argument names and fixed `define_plugin_groups` typo.
+- `docs/wiki/Concepts.md`: aligned Prefix Names terminology to canonical `plugin_group_name` with legacy alias note.
+- Updated checklist ownership/status/tracking fields to completion state.
+- Stage 5.3 completed:
+- Updated release handoff notes to reflect completed in-repo mirror updates and external wiki sync guidance (if separate publish path is used).
+
+### Tests Run For Phase 5
+- Wiki/doc scan verification (manual, passed):
+- `rg -n "define_plugin_group|plugin_group=|matching_prefixes=|id_prefix_group=|id_prefixes=" docs/wiki --glob "*.md"`
+- Result: no remaining legacy-argument examples in updated canonical docs (`define_plugin_group-API`, `Getting-Started`); remaining hits are legacy-context references in planning/docs where expected.
+- Documentation consistency verification (manual, passed):
+- Confirmed Phase 5 checklist/status, execution order, exit criteria, and release handoff notes are aligned and complete.
 
 ### Migration Summary (Maintainers/Reviewers)
 - What changed:

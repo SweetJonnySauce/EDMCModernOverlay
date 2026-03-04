@@ -50,7 +50,7 @@ Configurations made for a Plugin Group via an API call to `define_plugin_group`.
 A Plugin Group is a named grouping of Payloads as defined by Prefix Names
 
 ## Prefix Names
-Also known as `idPrefixGroup`, Prefix Names are the semantic part of the Payload Name. It is used to group like or related Payloads into a Plugin Group.
+In the `define_plugin_group` API this maps to `plugin_group_name` (legacy alias: `id_prefix_group`). Prefix Names are the semantic part of the Payload Name and are used to group related Payloads into a Plugin Group.
 
 ## User (CMDR) Defined Configurations
 Additive configurations made by CMDRs using the in-game Overlay Controller. These configurations are stored in `overlay_groupings.user.json` and Plugin Developers won't need to worry about these typically.
