@@ -83,7 +83,7 @@ If something is not clear, ask clarifying questions.
 - No fixed legacy-alias removal timeline is planned at this time; aliases remain supported indefinitely until explicitly revised.
 - Docs rollout needs its own phase: update in-repo docs now and track out-of-repo docs/wiki updates as follow-up work items.
 - Validation/error messaging uses both names during compatibility mode: `new_name (legacy_name)`.
-- Legacy-name warning emission is once per process per legacy argument (to limit log noise).
+- Legacy-name warning emission is once per process per legacy argument per calling plugin (to limit log noise).
 - Signature strategy lock: `define_plugin_group` exposes canonical/new argument names, and accepts legacy names via compatibility alias adapter (`**kwargs`) at the API boundary.
 
 ## Phase Overview
@@ -155,7 +155,7 @@ Phase 1 Outcomes:
 - both old/new with equal values: accepted, canonical/new authoritative, warning emitted.
 - both old/new with different values: reject via `PluginGroupingError`.
 - Define warning cardinality:
-- once per process per legacy argument.
+- once per process per legacy argument per calling plugin.
 - Define error-message naming policy:
 - validation/conflict errors use both names (`new_name (legacy_name)`).
 - Acceptance criteria:
@@ -285,7 +285,7 @@ Phase 1 Outcomes:
 #### Phase 2 Exit Criteria
 - Canonical/new public signature is in place and legacy aliases are accepted through compatibility adapter.
 - Conflicts raise `PluginGroupingError` with dual-name messages.
-- Legacy-alias compatibility warnings emit once per process per legacy argument.
+- Legacy-alias compatibility warnings emit once per process per legacy argument per calling plugin.
 - Existing `define_plugin_group` behavior remains unchanged for canonical-equivalent inputs.
 
 ### Phase 3: Expand tests for backward compatibility + conflict handling
@@ -367,7 +367,7 @@ Phase 1 Outcomes:
 - same-value old+new mixed call still goes through warning flow for that legacy arg.
 - Ensure tests reset warning registry state between cases to keep deterministic behavior.
 - Acceptance criteria:
-- Warning emission matches once-per-process-per-legacy-argument policy.
+- Warning emission matches once-per-process-per-legacy-argument-per-calling-plugin policy.
 - Warning behavior remains non-blocking and does not change function output/error behavior.
 - Verification to run after stage:
 - `python3 -m pytest tests/test_overlay_api.py -k "warning"`
@@ -380,7 +380,7 @@ Phase 1 Outcomes:
 #### Phase 3 Exit Criteria
 - Parity tests prove legacy/canonical inputs produce equivalent persisted output.
 - Mixed-input conflict tests enforce dual-name error messaging.
-- Warning-behavior tests confirm once-per-process-per-legacy-argument cardinality.
+- Warning-behavior tests confirm once-per-process-per-legacy-argument-per-calling-plugin cardinality.
 - Full overlay API and targeted downstream grouping tests pass.
 
 ### Phase 4: Release notes + implementation-results documentation
@@ -674,7 +674,7 @@ Legend:
 - Updated `RELEASE_NOTES.md` for `0.8.0` with `define_plugin_group` compatibility guidance:
 - canonical/new names available.
 - legacy aliases still supported.
-- once-per-process-per-legacy-argument compatibility warning behavior.
+- once-per-process-per-legacy-argument-per-calling-plugin compatibility warning behavior.
 - no schema/storage key migration required.
 - Stage 4.2 completed:
 - Updated this plan's `Implementation Results` with current phase completion state and recorded phase outcomes.
@@ -709,7 +709,7 @@ Legend:
 ### Migration Summary (Maintainers/Reviewers)
 - What changed:
 - `define_plugin_group` now has canonical/new argument names with legacy alias compatibility.
-- Legacy alias usage emits compatibility warnings (once per process per legacy argument).
+- Legacy alias usage emits compatibility warnings (once per process per legacy argument per calling plugin).
 - Conflict handling is explicit for mixed old/new inputs with dual-name error messaging.
 - What did not change:
 - Persisted `overlay_groupings.json` schema keys/shape.

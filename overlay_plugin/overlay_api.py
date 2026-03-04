@@ -26,7 +26,7 @@ _grouping_store: Optional["_PluginGroupingStore"] = None
 _publisher_warn_at: float = 0.0
 _publisher_warn_suppressed: int = 0
 _PUBLISHER_WARN_INTERVAL = 30.0  # seconds
-_LEGACY_ALIAS_WARNED: set[str] = set()
+_LEGACY_ALIAS_WARNED: set[tuple[str, str]] = set()
 _LEGACY_ALIAS_WARNED_LOCK = RLock()
 
 _LEGACY_DEFINE_PLUGIN_GROUP_ALIASES: Dict[str, str] = {
@@ -41,6 +41,19 @@ _LEGACY_DEFINE_PLUGIN_GROUP_ALIASES: Dict[str, str] = {
     "background_border_color": "plugin_group_border_color",
     "background_border_width": "plugin_group_border_width",
 }
+_LEGACY_ALIAS_BY_CANONICAL: Dict[str, str] = {canonical: legacy for legacy, canonical in _LEGACY_DEFINE_PLUGIN_GROUP_ALIASES.items()}
+_DEFINE_PLUGIN_GROUP_CANONICAL_ALIAS_ORDER: Tuple[str, ...] = (
+    "plugin_name",
+    "plugin_matching_prefixes",
+    "plugin_group_name",
+    "plugin_group_prefixes",
+    "plugin_group_anchor",
+    "plugin_group_offset_x",
+    "plugin_group_offset_y",
+    "plugin_group_background_color",
+    "plugin_group_border_color",
+    "plugin_group_border_width",
+)
 
 
 class PluginGroupingError(ValueError):
@@ -59,11 +72,29 @@ def _compat_values_equal(left: Any, right: Any) -> bool:
     return False
 
 
-def _warn_legacy_alias_once(legacy_name: str, canonical_name: str) -> None:
+def _warning_plugin_name(value: Any) -> Optional[str]:
+    if isinstance(value, str):
+        candidate = value.strip()
+        if candidate:
+            return candidate
+    return None
+
+
+def _warn_legacy_alias_once(legacy_name: str, canonical_name: str, *, plugin_name: Optional[str] = None) -> None:
+    warning_plugin = plugin_name or "<unknown>"
+    warning_key = (legacy_name, warning_plugin)
     with _LEGACY_ALIAS_WARNED_LOCK:
-        if legacy_name in _LEGACY_ALIAS_WARNED:
+        if warning_key in _LEGACY_ALIAS_WARNED:
             return
-        _LEGACY_ALIAS_WARNED.add(legacy_name)
+        _LEGACY_ALIAS_WARNED.add(warning_key)
+    if plugin_name:
+        _log_warning(
+            "define_plugin_group legacy alias '%s' is accepted for compatibility in plugin '%s'; use '%s' instead.",
+            legacy_name,
+            plugin_name,
+            canonical_name,
+        )
+        return
     _log_warning(
         "define_plugin_group legacy alias '%s' is accepted for compatibility; use '%s' instead.",
         legacy_name,
@@ -77,11 +108,17 @@ def _merge_legacy_alias(
     legacy_name: str,
     canonical_value: Any,
     legacy_kwargs: MutableMapping[str, Any],
+    plugin_name_for_warning: Optional[str] = None,
 ) -> Any:
     if legacy_name not in legacy_kwargs:
         return canonical_value
     legacy_value = legacy_kwargs.pop(legacy_name)
-    _warn_legacy_alias_once(legacy_name, canonical_name)
+    warning_plugin = _warning_plugin_name(plugin_name_for_warning)
+    if warning_plugin is None and canonical_name == "plugin_name":
+        warning_plugin = _warning_plugin_name(canonical_value)
+    if warning_plugin is None and canonical_name == "plugin_name":
+        warning_plugin = _warning_plugin_name(legacy_value)
+    _warn_legacy_alias_once(legacy_name, canonical_name, plugin_name=warning_plugin)
     if canonical_value is None:
         return legacy_value
     if not _compat_values_equal(canonical_value, legacy_value):
@@ -228,69 +265,47 @@ def define_plugin_group(
     Returns ``True`` when the JSON file was updated. Raises
     :class:`PluginGroupingError` when validation fails or when the overlay
     plugin is not running. Legacy argument aliases remain supported for
-    compatibility and emit one warning per argument per process.
+    compatibility and emit one warning per argument per calling plugin per process.
     """
-
-    plugin_name = _merge_legacy_alias(
+    canonical_values: Dict[str, Any] = {
+        "plugin_name": plugin_name,
+        "plugin_matching_prefixes": plugin_matching_prefixes,
+        "plugin_group_name": plugin_group_name,
+        "plugin_group_prefixes": plugin_group_prefixes,
+        "plugin_group_anchor": plugin_group_anchor,
+        "plugin_group_offset_x": plugin_group_offset_x,
+        "plugin_group_offset_y": plugin_group_offset_y,
+        "plugin_group_background_color": plugin_group_background_color,
+        "plugin_group_border_color": plugin_group_border_color,
+        "plugin_group_border_width": plugin_group_border_width,
+    }
+    canonical_values["plugin_name"] = _merge_legacy_alias(
         canonical_name="plugin_name",
-        legacy_name="plugin_group",
-        canonical_value=plugin_name,
+        legacy_name=_LEGACY_ALIAS_BY_CANONICAL["plugin_name"],
+        canonical_value=canonical_values["plugin_name"],
         legacy_kwargs=legacy_kwargs,
+        plugin_name_for_warning=canonical_values["plugin_name"],
     )
-    plugin_matching_prefixes = _merge_legacy_alias(
-        canonical_name="plugin_matching_prefixes",
-        legacy_name="matching_prefixes",
-        canonical_value=plugin_matching_prefixes,
-        legacy_kwargs=legacy_kwargs,
-    )
-    plugin_group_name = _merge_legacy_alias(
-        canonical_name="plugin_group_name",
-        legacy_name="id_prefix_group",
-        canonical_value=plugin_group_name,
-        legacy_kwargs=legacy_kwargs,
-    )
-    plugin_group_prefixes = _merge_legacy_alias(
-        canonical_name="plugin_group_prefixes",
-        legacy_name="id_prefixes",
-        canonical_value=plugin_group_prefixes,
-        legacy_kwargs=legacy_kwargs,
-    )
-    plugin_group_anchor = _merge_legacy_alias(
-        canonical_name="plugin_group_anchor",
-        legacy_name="id_prefix_group_anchor",
-        canonical_value=plugin_group_anchor,
-        legacy_kwargs=legacy_kwargs,
-    )
-    plugin_group_offset_x = _merge_legacy_alias(
-        canonical_name="plugin_group_offset_x",
-        legacy_name="id_prefix_offset_x",
-        canonical_value=plugin_group_offset_x,
-        legacy_kwargs=legacy_kwargs,
-    )
-    plugin_group_offset_y = _merge_legacy_alias(
-        canonical_name="plugin_group_offset_y",
-        legacy_name="id_prefix_offset_y",
-        canonical_value=plugin_group_offset_y,
-        legacy_kwargs=legacy_kwargs,
-    )
-    plugin_group_background_color = _merge_legacy_alias(
-        canonical_name="plugin_group_background_color",
-        legacy_name="background_color",
-        canonical_value=plugin_group_background_color,
-        legacy_kwargs=legacy_kwargs,
-    )
-    plugin_group_border_color = _merge_legacy_alias(
-        canonical_name="plugin_group_border_color",
-        legacy_name="background_border_color",
-        canonical_value=plugin_group_border_color,
-        legacy_kwargs=legacy_kwargs,
-    )
-    plugin_group_border_width = _merge_legacy_alias(
-        canonical_name="plugin_group_border_width",
-        legacy_name="background_border_width",
-        canonical_value=plugin_group_border_width,
-        legacy_kwargs=legacy_kwargs,
-    )
+    warning_plugin_name = _warning_plugin_name(canonical_values["plugin_name"])
+    for canonical_name in _DEFINE_PLUGIN_GROUP_CANONICAL_ALIAS_ORDER[1:]:
+        canonical_values[canonical_name] = _merge_legacy_alias(
+            canonical_name=canonical_name,
+            legacy_name=_LEGACY_ALIAS_BY_CANONICAL[canonical_name],
+            canonical_value=canonical_values[canonical_name],
+            legacy_kwargs=legacy_kwargs,
+            plugin_name_for_warning=warning_plugin_name,
+        )
+
+    plugin_name = cast(Optional[str], canonical_values["plugin_name"])
+    plugin_matching_prefixes = cast(Optional[Sequence[str]], canonical_values["plugin_matching_prefixes"])
+    plugin_group_name = cast(Optional[str], canonical_values["plugin_group_name"])
+    plugin_group_prefixes = cast(Optional[Sequence[Union[str, Mapping[str, Any]]]], canonical_values["plugin_group_prefixes"])
+    plugin_group_anchor = cast(Optional[str], canonical_values["plugin_group_anchor"])
+    plugin_group_offset_x = cast(Optional[Union[int, float]], canonical_values["plugin_group_offset_x"])
+    plugin_group_offset_y = cast(Optional[Union[int, float]], canonical_values["plugin_group_offset_y"])
+    plugin_group_background_color = cast(Optional[str], canonical_values["plugin_group_background_color"])
+    plugin_group_border_color = cast(Optional[str], canonical_values["plugin_group_border_color"])
+    plugin_group_border_width = cast(Optional[Union[int, float]], canonical_values["plugin_group_border_width"])
     _raise_unknown_legacy_aliases(legacy_kwargs)
 
     if not plugin_name:
@@ -658,15 +673,27 @@ def _log_warning(message: str, *args: Any) -> None:
 
 
 def _emit(level: int, message: str, *args: Any) -> None:
+    rendered = message % args if args else message
     try:
         from config import config as edmc_config  # type: ignore
 
         logger_obj = getattr(edmc_config, "logger", None)
         if logger_obj:
-            logger_obj.log(level, f"[EDMCModernOverlay] {message % args if args else message}")
+            logger_obj.log(level, f"[EDMCModernOverlay] {rendered}")
             return
     except Exception:
         pass
+
+    # Fall back to the plugin logger so warnings flow through load.py's
+    # EDMC bridge handler when available.
+    plugin_logger = logging.getLogger("EDMCModernOverlay")
+    try:
+        if plugin_logger.handlers or plugin_logger.propagate:
+            plugin_logger.log(level, rendered)
+            return
+    except Exception:
+        pass
+
     if args:
         _LOGGER.log(level, message, *args)
     else:

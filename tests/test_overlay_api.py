@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
+import sys
+import types
 
 import pytest
 
@@ -463,7 +466,7 @@ def test_define_plugin_group_mixed_same_value_accepts_and_preserves_output(group
     assert group["offsetX"] == 5.0
 
 
-def test_define_plugin_group_legacy_alias_warning_once_per_argument(monkeypatch, grouping_store):
+def test_define_plugin_group_legacy_alias_warning_once_per_argument_per_plugin(monkeypatch, grouping_store):
     with overlay_api._LEGACY_ALIAS_WARNED_LOCK:
         overlay_api._LEGACY_ALIAS_WARNED.clear()
 
@@ -479,9 +482,18 @@ def test_define_plugin_group_legacy_alias_warning_once_per_argument(monkeypatch,
     assert len(first_warnings) == 2
     assert any("plugin_group" in item for item in first_warnings)
     assert any("matching_prefixes" in item for item in first_warnings)
+    assert any("plugin 'W1'" in item for item in first_warnings)
 
-    overlay_api.define_plugin_group(plugin_group="W2", matching_prefixes=["w2-"])
+    # Same plugin should not re-emit warnings for the same aliases.
+    overlay_api.define_plugin_group(plugin_group="W1", matching_prefixes=["w1-second-"])
     assert warnings == first_warnings
+
+    # Different plugin should emit once per alias again.
+    overlay_api.define_plugin_group(plugin_group="W2", matching_prefixes=["w2-"])
+    assert len(warnings) == 4
+    assert sum(1 for item in warnings if "plugin_group'" in item) == 2
+    assert sum(1 for item in warnings if "matching_prefixes'" in item) == 2
+    assert any("plugin 'W2'" in item for item in warnings)
 
 
 def test_define_plugin_group_legacy_alias_warning_emits_once_for_each_alias(monkeypatch, grouping_store):
@@ -497,7 +509,7 @@ def test_define_plugin_group_legacy_alias_warning_emits_once_for_each_alias(monk
 
     overlay_api.define_plugin_group(plugin_group="One", matching_prefixes=["one-"])
     overlay_api.define_plugin_group(
-        plugin_group="Two",
+        plugin_name="Two",
         id_prefix_group="alerts",
         id_prefixes=["two-alert-"],
     )
@@ -506,7 +518,7 @@ def test_define_plugin_group_legacy_alias_warning_emits_once_for_each_alias(monk
     assert any("matching_prefixes" in item for item in warnings)
     assert any("id_prefix_group" in item for item in warnings)
     assert any("id_prefixes" in item for item in warnings)
-    # Each alias warning should only appear once.
+    # Each alias warning should only appear once for the plugin that used it.
     assert sum(1 for item in warnings if "plugin_group'" in item) == 1
     assert sum(1 for item in warnings if "matching_prefixes'" in item) == 1
     assert sum(1 for item in warnings if "id_prefix_group'" in item) == 1
@@ -533,3 +545,55 @@ def test_define_plugin_group_mixed_same_value_still_warns_for_legacy_alias(monke
 
     assert any("plugin_group" in item for item in warnings)
     assert any("matching_prefixes" in item for item in warnings)
+
+
+def test_define_plugin_group_legacy_alias_warning_includes_plugin_name(monkeypatch, grouping_store):
+    with overlay_api._LEGACY_ALIAS_WARNED_LOCK:
+        overlay_api._LEGACY_ALIAS_WARNED.clear()
+
+    warnings: list[str] = []
+
+    def _capture_warning(message: str, *args):
+        warnings.append(message % args if args else message)
+
+    monkeypatch.setattr(overlay_api, "_log_warning", _capture_warning)
+
+    overlay_api.define_plugin_group(
+        plugin_group="WarnPlugin",
+        matching_prefixes=["warn-"],
+    )
+
+    assert any("plugin 'WarnPlugin'" in item for item in warnings)
+    assert any("plugin_group" in item for item in warnings)
+    assert any("matching_prefixes" in item for item in warnings)
+
+
+def test_emit_falls_back_to_plugin_logger_when_edmc_logger_unavailable(monkeypatch):
+    fake_config_module = types.SimpleNamespace(config=types.SimpleNamespace(logger=None))
+    monkeypatch.setitem(sys.modules, "config", fake_config_module)
+
+    captured: list[str] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            captured.append(record.getMessage())
+
+    plugin_logger = logging.getLogger("EDMCModernOverlay")
+    previous_handlers = list(plugin_logger.handlers)
+    previous_level = plugin_logger.level
+    previous_propagate = plugin_logger.propagate
+
+    plugin_logger.handlers = []
+    plugin_logger.propagate = False
+    plugin_logger.setLevel(logging.DEBUG)
+    handler = _Capture()
+    plugin_logger.addHandler(handler)
+
+    try:
+        overlay_api._emit(logging.WARNING, "legacy alias %s", "plugin_group")
+    finally:
+        plugin_logger.handlers = previous_handlers
+        plugin_logger.propagate = previous_propagate
+        plugin_logger.setLevel(previous_level)
+
+    assert any("legacy alias plugin_group" in item for item in captured)
