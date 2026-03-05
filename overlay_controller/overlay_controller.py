@@ -831,14 +831,21 @@ class OverlayConfigApp(tk.Tk):
                             return head.strip().casefold()
                     return label.strip().casefold()
 
+                def _norm_token(value: str) -> str:
+                    return "".join(ch for ch in value.casefold() if ch.isalnum())
+
                 first_parts = {_prefix(lbl) for lbl in labels}
-                show_plugin = len(first_parts) > 1
+                show_plugin_collection = len(first_parts) > 1
+                plugin_token = _norm_token(plugin_name)
                 plugin_cache = cache_groups.get(plugin_name) if isinstance(cache_groups, dict) else {}
                 for label in labels:
                     has_cache = isinstance(plugin_cache, dict) and isinstance(plugin_cache.get(label), dict)
                     if not has_cache:
                         continue
-                    display = f"{plugin_name}: {label}" if show_plugin else label
+                    label_token = _norm_token(label)
+                    label_has_plugin_prefix = bool(plugin_token and label_token.startswith(plugin_token))
+                    show_plugin_label = show_plugin_collection and not label_has_plugin_prefix
+                    display = f"{plugin_name}: {label}" if show_plugin_label else label
                     options.append(display)
                     self._idprefix_entries.append((plugin_name, label))
         return options

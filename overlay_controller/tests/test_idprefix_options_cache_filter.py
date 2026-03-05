@@ -53,3 +53,49 @@ def test_idprefix_options_filtered_by_cache(tmp_path):
     # Only PluginA:Group1 should be present.
     assert options == ["PluginA: Group1"]
     assert getattr(app, "_idprefix_entries") == [("PluginA", "Group1")]
+
+
+def test_idprefix_options_prefixes_only_generic_labels(tmp_path):
+    groupings_path = tmp_path / "overlay_groupings.json"
+    cache_path = tmp_path / "overlay_group_cache.json"
+
+    groupings_payload = {
+        "NeutronDancer": {
+            "idPrefixGroups": {
+                "Default": {},
+                "NeutronDancer Galaxy Map": {},
+            }
+        }
+    }
+    cache_payload = {
+        "version": 1,
+        "groups": {
+            "NeutronDancer": {
+                "Default": {
+                    "base": {"base_min_x": 0, "base_min_y": 0, "base_max_x": 1, "base_max_y": 1},
+                    "transformed": {},
+                },
+                "NeutronDancer Galaxy Map": {
+                    "base": {"base_min_x": 0, "base_min_y": 0, "base_max_x": 1, "base_max_y": 1},
+                    "transformed": {},
+                },
+            },
+        },
+    }
+
+    groupings_path.write_text(json.dumps(groupings_payload), encoding="utf-8")
+    cache_path.write_text(json.dumps(cache_payload), encoding="utf-8")
+
+    app = SimpleNamespace(
+        _groupings_path=groupings_path,
+        _groupings_cache_path=cache_path,
+        _groupings_cache=cache_payload,
+        _idprefix_entries=[],
+    )
+    options = oc.OverlayConfigApp._load_idprefix_options(app)
+
+    assert options == ["NeutronDancer: Default", "NeutronDancer Galaxy Map"]
+    assert getattr(app, "_idprefix_entries") == [
+        ("NeutronDancer", "Default"),
+        ("NeutronDancer", "NeutronDancer Galaxy Map"),
+    ]
