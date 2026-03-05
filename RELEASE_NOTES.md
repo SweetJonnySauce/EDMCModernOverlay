@@ -18,6 +18,7 @@
 
 ### Bug Fixes
 - Preserved existing in-game chat launch behavior (`!ovr` and aliases) while adding new launch entrypoints.
+- Fixed Overlay Controller group dropdown labeling so plugin-name prefixes are applied per group label (only when needed), instead of prefixing every group in the plugin collection.
 
 ## 0.7.7
 
