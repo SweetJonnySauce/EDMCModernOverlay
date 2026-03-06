@@ -1,5 +1,5 @@
 {
-  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  "python.defaultInterpreterPath": "${workspaceFolder}/overlay_client/.venv/bin/python",
   "python.analysis.extraPaths": [
     "${workspaceFolder}/overlay_plugin",
     "${workspaceFolder}/overlay-client"
