@@ -51,7 +51,7 @@
         "idPrefixes": [
           "bgstally-msg-objectives-"
         ],
-        "idPrefixGroupAnchor": "ne",
+        "idPrefixGroupAnchor": "nw",
         "offsetX": -5,
         "payloadJustification": "left",
         "backgroundColor": "none",
@@ -534,6 +534,24 @@
       "NeutronDancer Default": {
         "idPrefixes": [
           "neutrondancer-default-"
+        ],
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last"
+      },
+      "NeutronDancer Galaxy Map": {
+        "idPrefixes": [
+          "neutrondancer-galaxy map-"
+        ],
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last"
+      },
+      "NeutronDancer Carrier": {
+        "idPrefixes": [
+          "neutrondancer-carrier-"
         ],
         "idPrefixGroupAnchor": "nw",
         "payloadJustification": "left",
