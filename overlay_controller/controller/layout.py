@@ -45,6 +45,7 @@ class LayoutBuilder:
         on_anchor_changed: Callable[[str, bool], None],
         on_justification_changed: Callable[[str], None],
         on_background_changed: Callable[[Optional[str], Optional[str], Optional[int]], None],
+        on_group_enabled_changed: Callable[[bool], None],
         on_reset_clicked: Callable[[], None],
         load_idprefix_options: Callable[[], list[str]],
     ) -> dict[str, object]:
@@ -143,6 +144,8 @@ class LayoutBuilder:
         background_widget = None
         tip_helper = None
         reset_button = None
+        group_enabled_var: Optional[tk.BooleanVar] = None
+        group_enabled_checkbox = None
 
         for index, (label_text, weight, is_selectable) in enumerate(sections):
             default_height = 120 if label_text == "anchor selector" else 80
@@ -220,14 +223,33 @@ class LayoutBuilder:
                 if is_selectable and focus_index is not None:
                     focus_widgets[("sidebar", focus_index)] = background_widget
             else:
+                context_height = 132
+                controls_reserved_width = 112
+                frame.configure(height=140)
+                frame.grid_propagate(False)
+                frame.grid_rowconfigure(0, weight=1)
+                frame.grid_columnconfigure(0, weight=1)
                 tip_wrapper = tk.Frame(frame, bd=0, highlightthickness=0, bg=frame.cget("background"))
                 tip_wrapper.grid(row=0, column=0, sticky="nsew")
-                tip_wrapper.grid_rowconfigure(0, weight=1)
-                tip_wrapper.grid_columnconfigure(0, weight=1)
-                tip_wrapper.grid_columnconfigure(1, weight=0)
+                tip_wrapper.configure(height=context_height)
 
-                tip_helper = SidebarTipHelper(tip_wrapper)
-                tip_helper.grid(row=0, column=0, sticky="nsew", padx=(2, 4), pady=(2, 4))
+                tip_helper = SidebarTipHelper(tip_wrapper, wraplength=180)
+                tip_helper.place(
+                    x=2,
+                    y=2,
+                    relwidth=1.0,
+                    width=-(controls_reserved_width + 2),
+                    height=context_height - 4,
+                )
+
+                group_enabled_var = tk.BooleanVar(value=True)
+                group_enabled_checkbox = tk.Checkbutton(
+                    tip_wrapper,
+                    text="Enabled",
+                    variable=group_enabled_var,
+                    command=lambda var=group_enabled_var: on_group_enabled_changed(bool(var.get())),
+                )
+                group_enabled_checkbox.place(relx=1.0, x=-4, y=2, anchor="ne")
 
                 reset_button = tk.Button(
                     tip_wrapper,
@@ -235,7 +257,7 @@ class LayoutBuilder:
                     command=on_reset_clicked,
                     width=6,
                 )
-                reset_button.grid(row=0, column=1, sticky="ne", padx=(0, 4), pady=(2, 0))
+                reset_button.place(relx=1.0, x=-4, y=30, anchor="ne")
                 ToolTip(reset_button, "Reset returns the overlay to the plugin defaults")
 
             if is_selectable and focus_index is not None:
@@ -274,6 +296,8 @@ class LayoutBuilder:
             "justification_widget": justification_widget,
             "background_widget": background_widget,
             "tip_helper": tip_helper,
+            "group_enabled_var": group_enabled_var,
+            "group_enabled_checkbox": group_enabled_checkbox,
             "reset_button": reset_button,
             "sidebar_selectable": sidebar_selectable,
             "placement_min_width": placement_min_width,

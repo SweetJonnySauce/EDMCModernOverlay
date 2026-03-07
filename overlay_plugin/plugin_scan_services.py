@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Callable, Mapping, Optional, Sequence, Tuple
 
 from . import plugin_scan
+from .command_overlay_groups import COMMAND_PLUGIN_STATUS_ID_PREFIX
+from .plugin_scan_cache import PluginScanCache
 
 UTC = getattr(datetime, "UTC", timezone.utc)
 
@@ -29,16 +31,11 @@ class PluginScanService:
         self._plugin_dir = Path(plugin_dir)
         self._send_overlay_message = send_overlay_message
         self._logger = logger or logging.getLogger("EDMC.ModernOverlay.PluginScanService")
+        self._cache = PluginScanCache()
 
     def report_plugins(self) -> None:
-        plugins_root = self._plugin_dir.resolve().parent
-        plugins = plugin_scan.scan_plugins(plugins_root, include_disabled=False, self_root=self._plugin_dir)
-        known_plugins = plugin_scan.load_known_plugins()
-        ignored = 0
-        for plugin in plugins:
-            spec, _matched = _match_known_spec(plugin.name, known_plugins)
-            if _is_ignored_spec(spec):
-                ignored += 1
+        plugins_root, plugins, statuses, ignored, enabled_count = self._scan_plugin_statuses(log_results=True)
+        self._cache.update({entry.name: entry.status for entry in statuses})
         self._logger.info(
             "Plugin scan: root=%s plugins=%d ignored=%d",
             plugins_root,
@@ -66,44 +63,6 @@ class PluginScanService:
                 y_offset_pixels=red_start,
             )
             return
-        if not known_plugins:
-            self._logger.info("Plugin scan: no known overlay config entries loaded from %s", plugin_scan.KNOWN_PLUGINS_PATH)
-
-        known_count = 0
-        for plugin in plugins:
-            spec, _matched = _match_known_spec(plugin.name, known_plugins)
-            if _has_known_overlay_support(spec):
-                known_count += 1
-
-        statuses: list[PluginStatus] = []
-        enabled_count = 0
-        for plugin in plugins:
-            spec, matched_key = _match_known_spec(plugin.name, known_plugins)
-            if _is_ignored_spec(spec):
-                status, config_key, raw_value = "ignored", None, None
-                self._logger.info("Plugin scan: %s overlay=%s path=%s", plugin.name, status, plugin.path)
-            elif spec is None:
-                status, config_key, raw_value = "unknown", None, None
-                self._logger.info("Plugin scan: %s overlay=%s path=%s", plugin.name, status, plugin.path)
-            else:
-                status, config_key, raw_value = plugin_scan.evaluate_overlay_status(
-                    plugin.name,
-                    {plugin.name.casefold(): spec},
-                )
-                if status == "unknown":
-                    self._logger.info("Plugin scan: %s overlay=%s path=%s", plugin.name, status, plugin.path)
-                else:
-                    self._logger.info(
-                        "Plugin scan: %s overlay=%s key=%s value=%r path=%s",
-                        plugin.name,
-                        status,
-                        config_key,
-                        raw_value,
-                        plugin.path,
-                    )
-                if status == "enabled":
-                    enabled_count += 1
-            statuses.append(PluginStatus(name=plugin.name, status=status))
 
         if statuses:
             header = f"{len(plugins)} plugins found"
@@ -134,6 +93,60 @@ class PluginScanService:
                 y_offset_pixels=list_start,
             )
 
+    def get_cached_statuses(self, *, refresh_if_empty: bool = False) -> Mapping[str, str]:
+        if refresh_if_empty and self._cache.empty():
+            _plugins_root, _plugins, statuses, _ignored, _enabled_count = self._scan_plugin_statuses(log_results=False)
+            self._cache.update({entry.name: entry.status for entry in statuses})
+        return self._cache.snapshot()
+
+    def _scan_plugin_statuses(
+        self, *, log_results: bool
+    ) -> tuple[Path, list[plugin_scan.PluginEntry], list[PluginStatus], int, int]:
+        plugins_root = self._plugin_dir.resolve().parent
+        plugins = plugin_scan.scan_plugins(plugins_root, include_disabled=False, self_root=self._plugin_dir)
+        known_plugins = plugin_scan.load_known_plugins()
+        ignored = 0
+        for plugin in plugins:
+            spec, _matched = _match_known_spec(plugin.name, known_plugins)
+            if _is_ignored_spec(spec):
+                ignored += 1
+        if not known_plugins and log_results:
+            self._logger.info("Plugin scan: no known overlay config entries loaded from %s", plugin_scan.KNOWN_PLUGINS_PATH)
+
+        statuses: list[PluginStatus] = []
+        enabled_count = 0
+        for plugin in plugins:
+            spec, _matched_key = _match_known_spec(plugin.name, known_plugins)
+            if _is_ignored_spec(spec):
+                status, config_key, raw_value = "ignored", None, None
+                if log_results:
+                    self._logger.info("Plugin scan: %s overlay=%s path=%s", plugin.name, status, plugin.path)
+            elif spec is None:
+                status, config_key, raw_value = "unknown", None, None
+                if log_results:
+                    self._logger.info("Plugin scan: %s overlay=%s path=%s", plugin.name, status, plugin.path)
+            else:
+                status, config_key, raw_value = plugin_scan.evaluate_overlay_status(
+                    plugin.name,
+                    {plugin.name.casefold(): spec},
+                )
+                if log_results:
+                    if status == "unknown":
+                        self._logger.info("Plugin scan: %s overlay=%s path=%s", plugin.name, status, plugin.path)
+                    else:
+                        self._logger.info(
+                            "Plugin scan: %s overlay=%s key=%s value=%r path=%s",
+                            plugin.name,
+                            status,
+                            config_key,
+                            raw_value,
+                            plugin.path,
+                        )
+                if status == "enabled":
+                    enabled_count += 1
+            statuses.append(PluginStatus(name=plugin.name, status=status))
+        return plugins_root, plugins, statuses, ignored, enabled_count
+
     def _display_status_message(
         self,
         lines: Sequence[str],
@@ -159,7 +172,7 @@ class PluginScanService:
                 "timestamp": datetime.now(UTC).isoformat(),
                 "event": "LegacyOverlay",
                 "type": "message",
-                "id": f"EDMCModernOverlay-plugin-status-{timestamp}-{index}",
+                "id": f"{COMMAND_PLUGIN_STATUS_ID_PREFIX}{timestamp}-{index}",
                 "text": safe_text,
                 "color": color,
                 "x": x_pos,
@@ -263,3 +276,8 @@ def default_service() -> PluginScanService:
 def report_plugins() -> None:
     """Entry point used by chat commands (uses default service)."""
     default_service().report_plugins()
+
+
+def get_cached_plugin_statuses(*, refresh_if_empty: bool = False) -> Mapping[str, str]:
+    """Return cached plugin status tokens keyed by casefolded plugin name."""
+    return default_service().get_cached_statuses(refresh_if_empty=refresh_if_empty)

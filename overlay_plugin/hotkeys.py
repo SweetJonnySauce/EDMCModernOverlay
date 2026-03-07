@@ -5,9 +5,12 @@ import threading
 from types import SimpleNamespace
 from typing import Any, Callable, List, Optional, Set, Tuple
 
+from .plugin_group_controls import resolve_payload_group_targets
+
 HOTKEYS_RETRY_DELAYS_SECONDS: Tuple[float, ...] = (0.5, 1.0, 2.0, 4.0, 8.0)
 HOTKEYS_OVERLAY_ON_ACTION_ID = "edmcmodernoverlay.hotkeys.on"
 HOTKEYS_OVERLAY_OFF_ACTION_ID = "edmcmodernoverlay.hotkeys.off"
+HOTKEYS_OVERLAY_TOGGLE_ACTION_ID = "edmcmodernoverlay.hotkeys.toggle"
 HOTKEYS_LAUNCH_CONTROLLER_ACTION_ID = "edmcmodernoverlay.hotkeys.launch_controller"
 HOTKEYS_LAUNCH_CONTROLLER_LABEL = "Launch Overlay Controller"
 
@@ -31,15 +34,15 @@ class HotkeysManager:
         self,
         *,
         is_running: Callable[[], bool],
-        get_payload_opacity: Callable[[], int],
-        toggle_payload_opacity: Callable[[], None],
+        set_group_state: Callable[..., Any],
+        toggle_group_state: Callable[..., Any],
         launch_controller: Callable[[], None],
         logger: logging.Logger,
         plugin_name: str,
     ) -> None:
         self._is_running = is_running
-        self._get_payload_opacity = get_payload_opacity
-        self._toggle_payload_opacity = toggle_payload_opacity
+        self._set_group_state = set_group_state
+        self._toggle_group_state = toggle_group_state
         self._launch_controller = launch_controller
         self._logger = logger
         self._plugin_name = plugin_name
@@ -56,61 +59,52 @@ class HotkeysManager:
         self._clear_retry_state()
 
     def _overlay_on_callback(self, *, payload: Any = None, source: str = "hotkey", hotkey: Any = None) -> None:
-        current = self._current_payload_opacity()
-        if current > 0:
-            self._logger.debug(
-                "Hotkey Overlay On no-op: source=%s hotkey=%s payload=%s opacity=%d",
-                source,
-                hotkey,
-                payload,
-                current,
-            )
-            return
+        targets = resolve_payload_group_targets(payload)
         self._logger.debug(
-            "Hotkey Overlay On applying: source=%s hotkey=%s payload=%s opacity=%d",
+            "Hotkey Overlay On applying: source=%s hotkey=%s payload=%s targets=%s",
             source,
             hotkey,
             payload,
-            current,
+            targets or "<all>",
         )
         try:
-            self._toggle_payload_opacity()
+            self._set_group_state(True, group_names=targets, source="hotkey_overlay_on")
         except Exception as exc:  # pragma: no cover - defensive guard
             self._logger.warning("Hotkey Overlay On failed: %s", exc, exc_info=exc)
             return
-        self._logger.debug("Hotkey Overlay On applied: opacity=%d", self._current_payload_opacity())
+        self._logger.debug("Hotkey Overlay On applied.")
 
     def _overlay_off_callback(self, *, payload: Any = None, source: str = "hotkey", hotkey: Any = None) -> None:
-        current = self._current_payload_opacity()
-        if current == 0:
-            self._logger.debug(
-                "Hotkey Overlay Off no-op: source=%s hotkey=%s payload=%s opacity=%d",
-                source,
-                hotkey,
-                payload,
-                current,
-            )
-            return
+        targets = resolve_payload_group_targets(payload)
         self._logger.debug(
-            "Hotkey Overlay Off applying: source=%s hotkey=%s payload=%s opacity=%d",
+            "Hotkey Overlay Off applying: source=%s hotkey=%s payload=%s targets=%s",
             source,
             hotkey,
             payload,
-            current,
+            targets or "<all>",
         )
         try:
-            self._toggle_payload_opacity()
+            self._set_group_state(False, group_names=targets, source="hotkey_overlay_off")
         except Exception as exc:  # pragma: no cover - defensive guard
             self._logger.warning("Hotkey Overlay Off failed: %s", exc, exc_info=exc)
             return
-        self._logger.debug("Hotkey Overlay Off applied: opacity=%d", self._current_payload_opacity())
+        self._logger.debug("Hotkey Overlay Off applied.")
 
-    def _current_payload_opacity(self) -> int:
+    def _overlay_toggle_callback(self, *, payload: Any = None, source: str = "hotkey", hotkey: Any = None) -> None:
+        targets = resolve_payload_group_targets(payload)
+        self._logger.debug(
+            "Hotkey Overlay Toggle applying: source=%s hotkey=%s payload=%s targets=%s",
+            source,
+            hotkey,
+            payload,
+            targets or "<all>",
+        )
         try:
-            numeric = int(self._get_payload_opacity())
-        except (TypeError, ValueError):
-            numeric = 100
-        return max(0, min(100, numeric))
+            self._toggle_group_state(group_names=targets, source="hotkey_overlay_toggle")
+        except Exception as exc:  # pragma: no cover - defensive guard
+            self._logger.warning("Hotkey Overlay Toggle failed: %s", exc, exc_info=exc)
+            return
+        self._logger.debug("Hotkey Overlay Toggle applied.")
 
     def _launch_controller_callback(self, *, payload: Any = None, source: str = "hotkey", hotkey: Any = None) -> None:
         self._logger.debug(
@@ -142,7 +136,7 @@ class HotkeysManager:
                 plugin=self._plugin_name,
                 callback=self._overlay_on_callback,
                 thread_policy="main",
-                cardinality="single",
+                cardinality="multi",
                 enabled=True,
             ),
             action_cls(
@@ -151,7 +145,16 @@ class HotkeysManager:
                 plugin=self._plugin_name,
                 callback=self._overlay_off_callback,
                 thread_policy="main",
-                cardinality="single",
+                cardinality="multi",
+                enabled=True,
+            ),
+            action_cls(
+                id=HOTKEYS_OVERLAY_TOGGLE_ACTION_ID,
+                label="Toggle Overlay",
+                plugin=self._plugin_name,
+                callback=self._overlay_toggle_callback,
+                thread_policy="main",
+                cardinality="multi",
                 enabled=True,
             ),
             action_cls(

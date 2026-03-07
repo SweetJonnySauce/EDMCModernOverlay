@@ -17,8 +17,11 @@ from overlay_client.client_config import InitialClientSettings, load_initial_set
 from overlay_client.data_client import OverlayDataClient
 from overlay_client.debug_config import DEBUG_CONFIG_ENABLED, load_dev_settings, load_troubleshooting_config
 from overlay_client.developer_helpers import DeveloperHelperController
+from overlay_client.plugin_group_clear import parse_clear_targets
+from overlay_client.plugin_group_filter import PluginGroupVisibilityFilter
 from overlay_client.overlay_client import CLIENT_DIR, DEV_MODE_ENV_VAR, OverlayWindow, _CLIENT_LOGGER, apply_log_level_hint
 from overlay_client.window_tracking import create_elite_window_tracker
+from overlay_plugin.plugin_group_resolver import PluginGroupResolver
 
 APP_NAME = "EDMC Modern Overlay"
 APP_ICON_TEXT = "MO"
@@ -137,11 +140,18 @@ def _record_log_level_hint(initial: InitialClientSettings, port_file: Path) -> N
         _CLIENT_LOGGER.debug("EDMC log level hint unavailable; assuming INFO.")
 
 
-def _build_payload_handler(helper: DeveloperHelperController, window: OverlayWindow):
+def _build_payload_handler(
+    helper: DeveloperHelperController,
+    window: OverlayWindow,
+    *,
+    group_filter: Optional[PluginGroupVisibilityFilter] = None,
+):
     def _handle_payload(payload: Dict[str, Any]) -> None:
         event = payload.get("event")
         if event == "OverlayConfig":
             helper.apply_config(window, payload)
+            if group_filter is not None:
+                group_filter.update_from_config(payload)
             return
         if event == "OverlayControllerActiveGroup":
             window.set_active_controller_group(payload.get("plugin"), payload.get("label"), payload.get("anchor"), payload.get("edit_nonce"))
@@ -155,7 +165,15 @@ def _build_payload_handler(helper: DeveloperHelperController, window: OverlayWin
         if event == "OverlayGroupCacheReset":
             window.reset_group_cache()
             return
+        if event == "OverlayPluginGroupClear":
+            targets = parse_clear_targets(payload)
+            resolver = getattr(group_filter, "resolve_group_name", None) if group_filter is not None else None
+            if targets:
+                window.clear_plugin_groups(targets, resolve_group_name=resolver)
+            return
         if event == "LegacyOverlay":
+            if group_filter is not None and not group_filter.allow_payload(payload):
+                return
             payload_id = str(payload.get("id") or "").strip().lower()
             if payload_id in {"overlay-controller-status", "edmcmodernoverlay-controller-status"}:
                 window.handle_controller_active_signal()
@@ -219,6 +237,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         except Exception as exc:
             _CLIENT_LOGGER.debug("Failed to apply AppUserModelID for stand-alone mode: %s", exc)
     helper = DeveloperHelperController(_CLIENT_LOGGER, CLIENT_DIR, initial_settings)
+    resolver = PluginGroupResolver(
+        shipped_path=(CLIENT_DIR.parent / "overlay_groupings.json").resolve(),
+        user_path=(CLIENT_DIR.parent / "overlay_groupings.user.json").resolve(),
+        logger=_CLIENT_LOGGER,
+    )
+    group_filter = PluginGroupVisibilityFilter(resolver, logger=_CLIENT_LOGGER)
     if troubleshooting_config.overlay_logs_to_keep is not None:
         helper.set_log_retention(troubleshooting_config.overlay_logs_to_keep)
 
@@ -259,7 +283,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         window.format_scale_debug(),
     )
 
-    data_client.message_received.connect(_build_payload_handler(helper, window))
+    data_client.message_received.connect(_build_payload_handler(helper, window, group_filter=group_filter))
     data_client.status_changed.connect(window.set_status_text)
 
     window.show()

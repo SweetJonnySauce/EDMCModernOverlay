@@ -269,6 +269,20 @@
         "backgroundColor": "black",
         "backgroundBorderColor": "blue",
         "backgroundBorderWidth": 10
+      },
+      "EDMCModernOverlay Group Status": {
+        "idPrefixes": [
+          "edmcmodernoverlay-group-status-"
+        ],
+        "idPrefixGroupAnchor": "center",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last",
+        "offsetX": 640.0,
+        "offsetY": 480.0,
+        "backgroundColor": "black",
+        "backgroundBorderColor": "blue",
+        "backgroundBorderWidth": 10
       }
     }
   },

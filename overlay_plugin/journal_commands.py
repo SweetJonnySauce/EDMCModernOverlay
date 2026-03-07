@@ -16,12 +16,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
-from typing import Callable, Mapping, Optional
+import shlex
+from typing import Any, Callable, Mapping, Optional, Sequence
 
 from .plugin_scan_services import report_plugins as default_report_plugins
 
 
 _LOGGER = logging.getLogger("EDMC.ModernOverlay.Commands")
+_HIDDEN_STATUS_GROUP_PREFIXES = ("edmcmodernoverlay ",)
 
 
 @dataclass
@@ -29,12 +31,13 @@ class _OverlayCommandContext:
     """Lightweight indirection that exposes just the callbacks we need."""
 
     send_message: Callable[[str], None]
-    cycle_next: Optional[Callable[[], None]] = None
-    cycle_prev: Optional[Callable[[], None]] = None
     launch_controller: Optional[Callable[[], None]] = None
     report_plugins: Optional[Callable[[], None]] = None
     set_opacity: Optional[Callable[[int], None]] = None
-    toggle_opacity: Optional[Callable[[], None]] = None
+    set_group_enabled: Optional[Callable[..., Mapping[str, Any]]] = None
+    toggle_group_enabled: Optional[Callable[..., Mapping[str, Any]]] = None
+    group_status_lines: Optional[Callable[[], Sequence[str]]] = None
+    send_group_status_overlay: Optional[Callable[[Sequence[str]], None]] = None
     test_overlay: Optional[Callable[[], None]] = None
 
 
@@ -87,6 +90,17 @@ def _parse_opacity_token(value: str) -> tuple[Optional[int], bool]:
     return None, False
 
 
+def _filter_status_lines(lines: Sequence[str]) -> list[str]:
+    visible: list[str] = []
+    for line in lines:
+        rendered = str(line)
+        group_name = rendered.split(":", 1)[0].strip().casefold()
+        if any(group_name.startswith(prefix) for prefix in _HIDDEN_STATUS_GROUP_PREFIXES):
+            continue
+        visible.append(rendered)
+    return visible
+
+
 class JournalCommandHelper:
     """Parse journal ``SendText`` events and dispatch overlay commands."""
 
@@ -107,7 +121,7 @@ class JournalCommandHelper:
         self._toggle_argument = _normalise_toggle_argument(toggle_argument)
         self._help_text = (
             f"Overlay commands: {help_prefix} (launch controller), {help_prefix} {self._toggle_argument} "
-            f"(toggle overlay), {help_prefix} next (cycle forward), {help_prefix} prev (cycle backward), "
+            f"(toggle overlay), {help_prefix} on|off [\"plugin group\"], {help_prefix} status, "
             f"{help_prefix} test (show test logo), {help_prefix} plugins (log installed plugins), "
             f"{help_prefix} help"
         )
@@ -132,7 +146,13 @@ class JournalCommandHelper:
                 continue
             _LOGGER.debug("Overlay command candidate matched prefix=%s (active prefixes=%s)", prefix, ", ".join(self._prefixes))
             content = message[len(prefix) :].strip()
-            tokens = content.split() if content else []
+            if content:
+                try:
+                    tokens = shlex.split(content)
+                except ValueError:
+                    tokens = content.split()
+            else:
+                tokens = []
             handled = self._handle_overlay_command(tokens)
             if handled:
                 _LOGGER.debug("Handled in-game overlay command (%s): %s", prefix, message)
@@ -150,12 +170,6 @@ class JournalCommandHelper:
             return self._launch_controller()
         if action in {"help", "?"}:
             self._emit_help()
-            return True
-        if action in {"next", "n"}:
-            self._invoke_cycle(self._ctx.cycle_next, success_message="Overlay cycle: next payload.")
-            return True
-        if action in {"prev", "previous", "p"}:
-            self._invoke_cycle(self._ctx.cycle_prev, success_message="Overlay cycle: previous payload.")
             return True
         if action in {"test"}:
             return self._test_overlay()
@@ -177,8 +191,20 @@ class JournalCommandHelper:
         if invalid_opacity and toggle_present:
             _LOGGER.debug("Ignoring toggle command due to invalid opacity token: %s", " ".join(args))
             return True
-        if toggle_present:
-            return self._toggle_opacity()
+
+        parsed_action = self._parse_group_action(args)
+        if parsed_action is not None:
+            action_name, targets = parsed_action
+            if action_name == "status":
+                return self._emit_group_status()
+            if action_name == "toggle":
+                return self._toggle_group_enabled(targets)
+            if action_name == "on":
+                return self._set_group_enabled(True, targets)
+            if action_name == "off":
+                return self._set_group_enabled(False, targets)
+        elif toggle_present:
+            return self._toggle_group_enabled(None)
 
         _LOGGER.debug("Ignoring unknown overlay command: %s", action)
         return True
@@ -227,13 +253,28 @@ class JournalCommandHelper:
             self._ctx.send_message("Overlay Controller launch failed; see EDMC log.")
         return True
 
-    def _toggle_opacity(self) -> bool:
-        callback = self._ctx.toggle_opacity
+    def _set_group_enabled(self, enabled: bool, targets: Optional[list[str]]) -> bool:
+        callback = self._ctx.set_group_enabled
+        if callback is None:
+            self._ctx.send_message("Overlay on/off command unavailable.")
+            return True
+        action_label = "on" if enabled else "off"
+        try:
+            callback(enabled, group_names=targets, source=f"chat_{action_label}")
+        except RuntimeError as exc:
+            self._ctx.send_message(f"Overlay {action_label} unavailable: {exc}")
+        except Exception as exc:  # pragma: no cover - defensive guard
+            _LOGGER.warning("Overlay %s callback failed: %s", action_label, exc)
+            self._ctx.send_message(f"Overlay {action_label} failed; see EDMC log.")
+        return True
+
+    def _toggle_group_enabled(self, targets: Optional[list[str]]) -> bool:
+        callback = self._ctx.toggle_group_enabled
         if callback is None:
             self._ctx.send_message("Overlay toggle command unavailable.")
             return True
         try:
-            callback()
+            callback(group_names=targets, source="chat_toggle")
         except RuntimeError as exc:
             self._ctx.send_message(f"Overlay toggle unavailable: {exc}")
         except Exception as exc:  # pragma: no cover - defensive guard
@@ -241,19 +282,42 @@ class JournalCommandHelper:
             self._ctx.send_message("Overlay toggle failed; see EDMC log.")
         return True
 
-    def _invoke_cycle(self, callback: Optional[Callable[[], None]], *, success_message: str) -> None:
+    def _emit_group_status(self) -> bool:
+        callback = self._ctx.group_status_lines
         if callback is None:
-            self._ctx.send_message("Overlay cycle commands are unavailable right now.")
-            return
+            self._ctx.send_message("Overlay status command unavailable.")
+            return True
         try:
-            callback()
+            lines = _filter_status_lines(callback())
         except RuntimeError as exc:
-            self._ctx.send_message(f"Overlay cycle unavailable: {exc}")
+            self._ctx.send_message(f"Overlay status unavailable: {exc}")
+            return True
         except Exception as exc:  # pragma: no cover - defensive guard
-            _LOGGER.warning("Overlay cycle callback failed: %s", exc)
-            self._ctx.send_message("Overlay cycle failed; see EDMC log for details.")
-        else:
-            self._ctx.send_message(success_message)
+            _LOGGER.warning("Overlay status callback failed: %s", exc)
+            self._ctx.send_message("Overlay status failed; see EDMC log.")
+            return True
+        if not lines:
+            self._ctx.send_message("No plugin groups configured.")
+            return True
+        overlay_callback = self._ctx.send_group_status_overlay
+        if overlay_callback is not None:
+            try:
+                overlay_callback(lines)
+            except RuntimeError as exc:
+                self._ctx.send_message(f"Overlay status unavailable: {exc}")
+            except Exception as exc:  # pragma: no cover - defensive guard
+                _LOGGER.warning("Overlay status overlay callback failed: %s", exc)
+                self._ctx.send_message("Overlay status failed; see EDMC log.")
+            else:
+                if _LOGGER.isEnabledFor(logging.DEBUG):
+                    for line in lines:
+                        _LOGGER.debug("Overlay status line: %s", line)
+                return True
+        self._ctx.send_message("\n".join(lines))
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            for line in lines:
+                _LOGGER.debug("Overlay status line: %s", line)
+        return True
 
     def _test_overlay(self) -> bool:
         callback = self._ctx.test_overlay
@@ -270,6 +334,49 @@ class JournalCommandHelper:
         else:
             self._ctx.send_message("Overlay test logo sent.")
         return True
+
+    def _parse_group_action(self, args: list[str]) -> Optional[tuple[str, Optional[list[str]]]]:
+        if not args:
+            return None
+        filtered = [token for token in args if token.lower() != "turn"]
+        if not filtered:
+            return None
+
+        action_indexes: list[tuple[int, str]] = []
+        for index, token in enumerate(filtered):
+            lowered = token.lower()
+            if lowered == "on":
+                action_indexes.append((index, "on"))
+                continue
+            if lowered == "off":
+                action_indexes.append((index, "off"))
+                continue
+            if lowered == "status":
+                action_indexes.append((index, "status"))
+                continue
+            if lowered in {"toggle", self._toggle_argument}:
+                action_indexes.append((index, "toggle"))
+                continue
+        if not action_indexes:
+            return None
+
+        action_names = {name for _idx, name in action_indexes}
+        if len(action_names) != 1:
+            _LOGGER.debug("Ignoring ambiguous overlay command action tokens: %s", " ".join(args))
+            return None
+        action_name = action_indexes[0][1]
+        if action_name == "status":
+            return "status", None
+
+        action_positions = {idx for idx, _name in action_indexes}
+        target_tokens = [token for idx, token in enumerate(filtered) if idx not in action_positions]
+        if not target_tokens:
+            return action_name, None
+
+        target = " ".join(target_tokens).strip()
+        if not target:
+            return action_name, None
+        return action_name, [target]
 
 
 def build_command_helper(
@@ -294,12 +401,13 @@ def build_command_helper(
     report_callback = report_plugins or default_report_plugins
     context = _OverlayCommandContext(
         send_message=_send_overlay_message,
-        cycle_next=getattr(plugin_runtime, "cycle_payload_next", None),
-        cycle_prev=getattr(plugin_runtime, "cycle_payload_prev", None),
         launch_controller=getattr(plugin_runtime, "launch_overlay_controller", None),
         report_plugins=report_callback,
         set_opacity=getattr(plugin_runtime, "set_payload_opacity_preference", None),
-        toggle_opacity=getattr(plugin_runtime, "toggle_payload_opacity_preference", None),
+        set_group_enabled=getattr(plugin_runtime, "_set_plugin_groups_enabled", None),
+        toggle_group_enabled=getattr(plugin_runtime, "_toggle_plugin_groups_enabled", None),
+        group_status_lines=getattr(plugin_runtime, "get_plugin_group_status_lines", None),
+        send_group_status_overlay=getattr(plugin_runtime, "send_group_status_overlay", None),
         test_overlay=getattr(plugin_runtime, "send_test_overlay", None),
     )
     legacy = legacy_prefixes if legacy_prefixes is not None else []
