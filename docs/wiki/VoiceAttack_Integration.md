@@ -39,10 +39,22 @@ After you have installed the EDMCHotkeys plugin into the E:D Market Connector ap
 
 ### VoiceAttack
 
-#### Step 1:
+1. Load VoiceAttack and Click on the **More Profile Actions** button.
+2. Select **Create New Profle**
 
- 1 <img width="1085" height="140" alt="Screenshot 2026-03-06 192755" src="https://github.com/user-attachments/assets/3ea58fff-58de-415b-823c-89eafceafa6b" />
+<img width="839" height="152" alt="VoiceAttack Steps 1 and 2" src="https://github.com/user-attachments/assets/321b5fd8-2480-4a6e-ba70-08de9c246621" />
 
+
+
+3. Choose a name to enter into the **Profile Name** field.
+4. Click the **New Command** button.
+
+<img width="1086" height="505" alt="VoiceAttack Add Profile Steps 3 and 4" src="https://github.com/user-attachments/assets/2fa842ed-d16b-4be2-8c86-cbc6c2d92532" />
+
+
+
+5. 
+<img width="1085" height="140" alt="Screenshot 2026-03-06 192755" src="https://github.com/user-attachments/assets/3ea58fff-58de-415b-823c-89eafceafa6b" />
 
 ## Tips and Considerations
 
