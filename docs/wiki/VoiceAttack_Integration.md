@@ -13,9 +13,8 @@ The EDMCHotkeys plugin listens for configured keybinds to perform available and 
 ### E:D Market Connector
 After you have installed the EDMCHotkeys plugin into the E:D Market Connector application, navigate to the E:D Market Connector settings screen located under **File, Settings**.
 
-<img width="223" height="141" alt="E:D Market Connector Settings Menu" src="https://github.com/user-attachments/assets/bd109539-9bac-4fb6-8c14-e4ef716f08d5" />
-New:
 ![E:D Market Connector Settings Menu](./images/VoiceAttack_Integration/edmc-settings-menu.png)
+
 <hr/>
 
 ***EDMCHotkeys Plugin Screen***
