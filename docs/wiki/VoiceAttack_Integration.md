@@ -1,4 +1,4 @@
-# DRAFT VoiceAttack and Modern Overlay Integration
+# DRAFT (Fixing images in prep for PR) VoiceAttack and Modern Overlay Integration
 
 The instructions below are intended to assist you with configuring VoiceAttack with the E:D Market Connector Modern Overlay plugin, utilizing the EDMCHotkeys plugin.
 
@@ -14,12 +14,14 @@ The EDMCHotkeys plugin listens for configured keybinds to perform available and 
 After you have installed the EDMCHotkeys plugin into the E:D Market Connector application, navigate to the E:D Market Connector settings screen located under **File, Settings**.
 
 <img width="223" height="141" alt="E:D Market Connector Settings Menu" src="https://github.com/user-attachments/assets/bd109539-9bac-4fb6-8c14-e4ef716f08d5" />
+New:
+![E:D Market Connector Settings Menu](./images/VoiceAttack_Integration/edmc-settings-menu.png)
 <hr/>
 
-*EDMCHotkeys Plugin Screen*
+***EDMCHotkeys Plugin Screen***
 1. Click the **Add Binding** button to add a new Hotkey action.
 2. Click within the Hotkey field.
-	- Using your keyboard, press the key combination you want to use to for your first action.
+	- Using your keyboard, press the key combination you want to use for your first action.
 		- This key combination will be detected and input into the field, in the order it understands.
 		 - Some operating systems may not have all the keys detected properly. You may have to choose other key combinations to adjust for this.
 		 - Ensure you do **not** use keybinds already in use by **Elite Dangerous** or other game tools.
@@ -40,28 +42,29 @@ After you have installed the EDMCHotkeys plugin into the E:D Market Connector ap
 ### VoiceAttack
 
 1. Load VoiceAttack and Click on the **More Profile Actions** button.
-2. Select **Create New Profle**
+2. Select **Create New Profile**.
 
-<img width="839" height="152" alt="VoiceAttack Steps 1 and 2" src="https://github.com/user-attachments/assets/321b5fd8-2480-4a6e-ba70-08de9c246621" />
+<img width="839" height="152" alt="VoiceAttack: Create New Profile. Steps 1-2" src="https://github.com/user-attachments/assets/321b5fd8-2480-4a6e-ba70-08de9c246621" />
 
 
 
 3. Choose a name to enter into the **Profile Name** field.
 4. Click the **New Command** button.
 
-<img width="1086" height="505" alt="VoiceAttack Add Profile Steps 3 and 4" src="https://github.com/user-attachments/assets/2fa842ed-d16b-4be2-8c86-cbc6c2d92532" />
+<img width="1086" height="505" alt="VoiceAttack: Add Profile. Steps 3-4" src="https://github.com/user-attachments/assets/2fa842ed-d16b-4be2-8c86-cbc6c2d92532" />
 
 
 
 5. Ensure **When I say:** is **checked**, then enter the phrase you would like to say to activate the command, e.g. "Show Modern Overlay" or "Show Market Connector".
 
-<img width="988" height="221" alt="VoiceAttack_Add_a_Command_Step_5" src="https://github.com/user-attachments/assets/39f1e287-1313-4e15-aff2-a9c204eeeb65" />
+
+<img width="988" height="221" alt="VoiceAttack: Add a Command. Step 5" src="https://github.com/user-attachments/assets/39f1e287-1313-4e15-aff2-a9c204eeeb65" />
 
 
 6. Click the **Key Press** button.
 	- If the **Really important Key Press Tips - Please Read** message appears, click the **Close** button.
 
-<img width="440" height="293" alt="VoiceAttack_Key_Press_Step_6" src="https://github.com/user-attachments/assets/47a5a4f6-d2db-4358-9429-bf2e546b1553" />
+<img width="440" height="293" alt="VoiceAttack: Key Press. Step 6" src="https://github.com/user-attachments/assets/47a5a4f6-d2db-4358-9429-bf2e546b1553" />
 
 
 
@@ -69,9 +72,9 @@ After you have installed the EDMCHotkeys plugin into the E:D Market Connector ap
 	- Note: Image capture could not accurately grab this example. 
 8. **Press** the **keyboard key or key combination** that you want VoiceAttack to perform when it carries out the voice command.
 9. Ensure the **Press and Release Key(s)** option is selected.
-10. Click **OK**
+10. Click the **OK** button.
 
-<img width="512" height="584" alt="VoiceAttack_Add_Keypress_Steps_7-10" src="https://github.com/user-attachments/assets/0064f50a-15b9-4866-92c9-deb495a7a74f" />
+<img width="512" height="584" alt="VoiceAttack: Add a Key Press. Steps 7-10" src="https://github.com/user-attachments/assets/0064f50a-15b9-4866-92c9-deb495a7a74f" />
 
 
 
@@ -81,8 +84,8 @@ After you have installed the EDMCHotkeys plugin into the E:D Market Connector ap
 
 
 
-12. Click the **Sounds** flyout option
-13. Then click the **Say Something with Text-To-Speech** option
+12. Click the **Sounds** flyout option.
+13. Then click the **Say Something with Text-To-Speech** option.
 	- You can be creative in the Sounds section, using built in system voices from a built-in text-to-speech engine or Play a Sound from pre-recorded audio clips that represent when the command has been recognized and executed. 
 
 <img width="707" height="338" alt="VoiceAttack: Add a Command, Other, Sounds. Steps 12-13" src="https://github.com/user-attachments/assets/df0c4351-ad5f-4922-ac7e-9ca73af874b3" />
@@ -116,16 +119,16 @@ After you have installed the EDMCHotkeys plugin into the E:D Market Connector ap
 
 
 
-20. You are done at this stage if you are not using other VoiceAttack profiles or HCSVoice PAKS with Elite Dangerous.
-	- Note: Ensure E:D Market Connector and VoiceAttack is running and your new VoiceAttack profile loaded and in listening mode when playing Elite Dangerous.
+20. You are done at this stage if you are not using other VoiceAttack profiles or [HCS VOICEPACKS](https://www.hcsvoicepacks.com/collections/elite-dangerous) with Elite Dangerous.
+	- Note: Ensure E:D Market Connector and VoiceAttack are running and your new VoiceAttack profile is loaded and in listening mode when playing Elite Dangerous.
 
-<img width="787" height="197" alt="VoiceAttack: Profile Loaded and Listening" src="https://github.com/user-attachments/assets/01af494a-9311-4ad7-addd-b7cc2bd01abf" />
+<img width="787" height="197" alt="VoiceAttack: Profile Loaded and Listening." src="https://github.com/user-attachments/assets/01af494a-9311-4ad7-addd-b7cc2bd01abf" />
 
 
 
  #### VoiceAttack with other Profiles
  <hr/>
-If you are using VoiceAttack with other profiles such as, **HCS - Singularity (Elite Horizons/Odyssey LIVE)**, there are additional steps you must complete when using your customized voice command simultaneously: 
+If you are using VoiceAttack with other profiles such as, **HCS - Singularity (Elite Horizons/Odyssey LIVE)**, there are additional steps you must complete when using your customized voice commands simultaneously: 
 
 1. **Switch** to your main Elite Dangerous profile, e.g. HCS - Singularity (Elite Horizons/Odyssey LIVE). 
 2. Click the **Edit Profile** button. 
@@ -167,11 +170,9 @@ If you are using VoiceAttack with other profiles such as, **HCS - Singularity (E
 
 
 
-
 10. Click the **OK** button in the **Profile Options** window.
 
 <img width="648" height="660" alt="VoiceAttack: Additional. Step 10" src="https://github.com/user-attachments/assets/2fdf08bd-f51e-4ccb-8808-55e05ff14bf4" />
-
 
 
 
@@ -181,9 +182,8 @@ If you are using VoiceAttack with other profiles such as, **HCS - Singularity (E
 
 
 
-
 12. You are done combining your custom VoiceAttack profile with an existing profile. 
-	- Note: Ensure E:D Market Connector and VoiceAttack is running and your new VoiceAttack profile loaded and in listening mode when playing Elite Dangerous.
+	- Note: Ensure E:D Market Connector and VoiceAttack are running and your new VoiceAttack profile is loaded and in listening mode when playing Elite Dangerous.
 
 <img width="1033" height="191" alt="VoiceAttack: Additional. Completed" src="https://github.com/user-attachments/assets/0f4e86f7-779f-4c7f-9590-642b11102a56" />
 
@@ -192,6 +192,5 @@ If you are using VoiceAttack with other profiles such as, **HCS - Singularity (E
 ## Tips and Considerations
 
 1. Validate desired overlays for installed plugins are enabled.
-2. Attaching overlays to VR controllers allows for physical placement of the overlay canvas.
-3. Use easily understood and remembered voice commands for improved use and recognition.
-4. Not all EDMCHotkeys keybind or keybind combinations will work with all operating systems and versions. This instruction was testing on Windows 11 24H2 x64 at the time of writing.
+2. Use easily understood and remembered voice commands for improved use and recognition.
+3. Not all EDMCHotkeys keybind or keybind combinations will work with all operating systems and versions. These instruction were tested on Windows 11 24H2 x64 at the time of writing.
