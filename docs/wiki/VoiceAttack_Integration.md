@@ -146,11 +146,48 @@ If you are using VoiceAttack with other profiles such as, **HCS - Singularity (E
 
 
 
-5. dd
+5. Click the **Plus** button, to add a profile to the list of included profiles.
+
+<img width="674" height="523" alt="VoiceAttack: Additional. Step 5" src="https://github.com/user-attachments/assets/a7a88271-ac63-42a2-861b-def2d6c1df5b" />
 
 
 
-<img width="1085" height="140" alt="Screenshot 2026-03-06 192755" src="https://github.com/user-attachments/assets/3ea58fff-58de-415b-823c-89eafceafa6b" />
+6. **Select** the profile you created above from the dropdown list to include, e.g. "EDMC".
+7. Then click the **OK** button. 
+
+<img width="554" height="184" alt="VoiceAttack: Additional. Steps 6-7" src="https://github.com/user-attachments/assets/4f0b58c7-c1da-4592-ba8a-7bf13e3b9130" />
+
+
+
+8. If necessary, reorder the list of included profiles, with the **Up** and **Down** arrows If you have more than one included profile in the list. 
+	- Note: Higher profiles have higher priority.
+9.  Then click the **OK** button.
+
+<img width="675" height="524" alt="VoiceAttack: Additional. Steps 8-9" src="https://github.com/user-attachments/assets/5dee4084-2ed1-4476-ad98-c51cc4f8c728" />
+
+
+
+
+10. Click the **OK** button in the **Profile Options** window.
+
+<img width="648" height="660" alt="VoiceAttack: Additional. Step 10" src="https://github.com/user-attachments/assets/2fdf08bd-f51e-4ccb-8808-55e05ff14bf4" />
+
+
+
+
+11. Click the **Done** button in the **Edit a Profile** window.
+
+<img width="1086" height="508" alt="VoiceAttack: Additional. Step 11" src="https://github.com/user-attachments/assets/4f5e5403-33ac-4680-8138-ba87a100e4c2" />
+
+
+
+
+12. You are done combining your custom VoiceAttack profile with an existing profile. 
+	- Note: Ensure E:D Market Connector and VoiceAttack is running and your new VoiceAttack profile loaded and in listening mode when playing Elite Dangerous.
+
+<img width="1033" height="191" alt="VoiceAttack: Additional. Completed" src="https://github.com/user-attachments/assets/0f4e86f7-779f-4c7f-9590-642b11102a56" />
+
+
 
 ## Tips and Considerations
 
