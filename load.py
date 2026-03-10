@@ -80,6 +80,15 @@ if __package__:
     )
     from .overlay_plugin.hotkeys import HotkeysManager
     from .overlay_plugin.journal_commands import build_command_helper
+    from .overlay_plugin.group_status_enrichment import build_enriched_group_status_lines
+    from .overlay_plugin.plugin_scan_services import get_cached_plugin_statuses
+    from .overlay_plugin.command_overlay_groups import ensure_runtime_command_groups, render_group_status_payloads
+    from .overlay_plugin.plugin_group_controls import (
+        PluginGroupControlService,
+        dedupe_group_names,
+        resolve_payload_group_targets,
+    )
+    from .overlay_plugin.plugin_group_state import PluginGroupStateManager
     from .overlay_plugin.toggle_helpers import toggle_payload_opacity
     from .EDMCOverlay import edmcoverlay
     from .EDMCOverlay.edmcoverlay import normalise_legacy_payload
@@ -139,6 +148,15 @@ else:  # pragma: no cover - EDMC loads as top-level module
     )
     from overlay_plugin.hotkeys import HotkeysManager
     from overlay_plugin.journal_commands import build_command_helper
+    from overlay_plugin.group_status_enrichment import build_enriched_group_status_lines
+    from overlay_plugin.plugin_scan_services import get_cached_plugin_statuses
+    from overlay_plugin.command_overlay_groups import ensure_runtime_command_groups, render_group_status_payloads
+    from overlay_plugin.plugin_group_controls import (
+        PluginGroupControlService,
+        dedupe_group_names,
+        resolve_payload_group_targets,
+    )
+    from overlay_plugin.plugin_group_state import PluginGroupStateManager
     from overlay_plugin.toggle_helpers import toggle_payload_opacity
     from EDMCOverlay import edmcoverlay
     from EDMCOverlay.edmcoverlay import normalise_legacy_payload
@@ -536,16 +554,28 @@ class _PluginRuntime:
         self._last_launch_log_time: float = 0.0
         self._command_helper_prefix: Optional[str] = None
         self._controller_active_group: Optional[Tuple[str, str]] = None
+        self._prefs_worker = PrefsWorker(self._lifecycle, LOGGER)
+        register_grouping_store(self.plugin_dir / "overlay_groupings.json")
+        ensure_runtime_command_groups(logger=LOGGER)
+        self._plugin_group_state = PluginGroupStateManager(
+            shipped_path=self.plugin_dir / "overlay_groupings.json",
+            user_path=self.plugin_dir / "overlay_groupings.user.json",
+            logger=LOGGER,
+        )
+        self._plugin_group_controls = PluginGroupControlService(
+            state_manager=self._plugin_group_state,
+            publish_config=self._send_overlay_config,
+            publish_group_clear=self._publish_group_clear_event,
+            logger=LOGGER,
+        )
         self._hotkeys = HotkeysManager(
             is_running=lambda: self._running,
-            get_payload_opacity=self._current_payload_opacity,
-            toggle_payload_opacity=self.toggle_payload_opacity_preference,
+            set_group_state=self._set_plugin_groups_enabled,
+            toggle_group_state=self._toggle_plugin_groups_enabled,
             launch_controller=lambda: self.launch_overlay_controller(source="hotkey"),
             logger=LOGGER,
             plugin_name=PLUGIN_NAME,
         )
-        self._prefs_worker = PrefsWorker(self._lifecycle, LOGGER)
-        register_grouping_store(self.plugin_dir / "overlay_groupings.json")
         threading.Thread(
             target=self._evaluate_version_status_once,
             name="ModernOverlayVersionCheck",
@@ -1661,6 +1691,21 @@ class _PluginRuntime:
         if not sent:
             raise RuntimeError("No test overlay payloads were sent.")
 
+    def send_group_status_overlay(self, lines: Sequence[str]) -> None:
+        if not self._running:
+            raise RuntimeError("Overlay is not running")
+        payloads = render_group_status_payloads(lines)
+        if not payloads:
+            return
+        failures = 0
+        for payload in payloads:
+            stamped = dict(payload)
+            stamped.setdefault("timestamp", datetime.now(UTC).isoformat())
+            if not send_overlay_message(stamped):
+                failures += 1
+        if failures:
+            raise RuntimeError(f"Failed to send {failures} status overlay payload(s)")
+
     def preview_font_sizes(self) -> None:
         if not self._running:
             raise RuntimeError("Overlay is not running")
@@ -1751,6 +1796,7 @@ class _PluginRuntime:
         LOGGER.info("Overlay toggle argument preference updated to %s", normalised)
 
     def set_payload_opacity_preference(self, value: int) -> None:
+        """Set visual payload transparency only (not logical overlay/group on/off)."""
         try:
             numeric = int(value)
         except (TypeError, ValueError):
@@ -1764,6 +1810,7 @@ class _PluginRuntime:
         self._send_overlay_config()
 
     def toggle_payload_opacity_preference(self) -> None:
+        """Toggle visual payload transparency only (not logical overlay/group on/off)."""
         with self._prefs_lock:
             toggle_payload_opacity(self._preferences)
             self._preferences.save()
@@ -1776,6 +1823,59 @@ class _PluginRuntime:
             except (TypeError, ValueError):
                 numeric = 100
         return max(0, min(100, numeric))
+
+    def _publish_group_clear_event(self, group_names: Sequence[str], source: str) -> None:
+        targets = dedupe_group_names(group_names)
+        if not targets:
+            return
+        payload = {
+            "event": "OverlayPluginGroupClear",
+            "plugin_groups": list(targets),
+            "source": str(source or "runtime"),
+        }
+        self._publish_payload(payload)
+
+    def _set_plugin_groups_enabled(
+        self,
+        enabled: bool,
+        *,
+        group_names: Optional[Sequence[str]] = None,
+        source: str = "runtime",
+    ) -> Dict[str, Any]:
+        controls = getattr(self, "_plugin_group_controls", None)
+        if controls is None:
+            raise RuntimeError("Plugin-group controls are not initialised")
+        return controls.set_enabled(bool(enabled), group_names=group_names, source=source)
+
+    def _toggle_plugin_groups_enabled(
+        self,
+        *,
+        group_names: Optional[Sequence[str]] = None,
+        source: str = "runtime",
+    ) -> Dict[str, Any]:
+        controls = getattr(self, "_plugin_group_controls", None)
+        if controls is None:
+            raise RuntimeError("Plugin-group controls are not initialised")
+        return controls.toggle(group_names=group_names, source=source)
+
+    def get_plugin_group_status_lines(self) -> list[str]:
+        controls = getattr(self, "_plugin_group_controls", None)
+        group_state = getattr(self, "_plugin_group_state", None)
+        if controls is None or group_state is None:
+            return []
+        group_state_map = controls.state_snapshot()
+        group_names = sorted(group_state_map.keys(), key=str.casefold)
+        lines = build_enriched_group_status_lines(
+            group_names=group_names,
+            group_owner_map=group_state.group_owner_map(),
+            plugin_status_map=get_cached_plugin_statuses(refresh_if_empty=True),
+            group_state_map=group_state_map,
+            metadata_snapshot=group_state.metadata_snapshot(),
+        )
+        if LOGGER.isEnabledFor(logging.DEBUG):
+            for line in lines:
+                LOGGER.debug("Plugin-group status: %s", line)
+        return lines
 
     def _build_command_helper(self, prefix: str, previous_prefix: Optional[str] = None) -> Any:
         legacy: list[str] = []
@@ -2516,6 +2616,45 @@ class _PluginRuntime:
             if command == "overlay_metrics":
                 self._update_overlay_metrics(payload)
                 return {"status": "ok"}
+            if command == "plugin_group_set":
+                if "enabled" not in payload:
+                    raise ValueError("plugin_group_set payload requires 'enabled'")
+                enabled = bool(payload.get("enabled"))
+                targets = resolve_payload_group_targets(payload)
+                result = self._set_plugin_groups_enabled(
+                    enabled,
+                    group_names=targets,
+                    source="controller_cli",
+                )
+                return {
+                    "status": "ok",
+                    **result,
+                    "plugin_group_states": self._plugin_group_controls.state_snapshot(),
+                    "lines": self._plugin_group_controls.status_lines(),
+                }
+            if command == "plugin_group_toggle":
+                targets = resolve_payload_group_targets(payload)
+                result = self._toggle_plugin_groups_enabled(
+                    group_names=targets,
+                    source="controller_cli",
+                )
+                return {
+                    "status": "ok",
+                    **result,
+                    "plugin_group_states": self._plugin_group_controls.state_snapshot(),
+                    "lines": self._plugin_group_controls.status_lines(),
+                }
+            if command == "plugin_group_status":
+                controls = getattr(self, "_plugin_group_controls", None)
+                group_state = getattr(self, "_plugin_group_state", None)
+                if controls is None or group_state is None:
+                    raise RuntimeError("Plugin-group state manager unavailable")
+                return {
+                    "status": "ok",
+                    "lines": controls.status_lines(),
+                    "plugin_group_states": controls.state_snapshot(),
+                    "counters": group_state.counters(),
+                }
             if command == "controller_heartbeat":
                 self._emit_controller_active_notice()
                 return {"status": "ok"}
@@ -2588,12 +2727,16 @@ class _PluginRuntime:
     def _send_overlay_config(self, rebroadcast: bool = False) -> None:
         self._load_payload_debug_config()
         diagnostics_enabled = _diagnostic_logging_enabled()
+        group_state = getattr(self, "_plugin_group_state", None)
+        group_states = group_state.state_snapshot() if group_state is not None else {}
         payload = build_overlay_config_payload(
             self._preferences,
             diagnostics_enabled=diagnostics_enabled,
             force_render=self._resolve_force_render(),
             client_log_retention=self._resolve_client_log_retention(),
             platform_context=self._platform_context_payload(),
+            plugin_group_states=group_states,
+            plugin_group_state_default_on=True,
         )
         self._last_config = dict(payload)
         self._publish_payload(payload)
@@ -2631,6 +2774,16 @@ class _PluginRuntime:
 
     def _publish_payload(self, payload: Mapping[str, Any]) -> None:
         message = dict(payload)
+        group_state = getattr(self, "_plugin_group_state", None)
+        if group_state is not None:
+            drop_payload, group_name = group_state.should_drop_payload(message)
+            if drop_payload:
+                self._trace_payload_event(
+                    "publish:dropped_disabled_group",
+                    message,
+                    {"plugin_group_name": group_name or "", "reason": "disabled_group"},
+                )
+                return
         plugin_name, _payload_id = self._plugin_name_for_payload(message)
         self._payload_spam_tracker.record(plugin_name)
         self._trace_payload_event("publish:dispatch", message)

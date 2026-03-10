@@ -1,7 +1,7 @@
 """Helpers for building overlay config payloads."""
 from __future__ import annotations
 
-from typing import Any, Dict, Mapping
+from typing import Any, Dict, Mapping, Optional
 
 from overlay_plugin.standalone_support import standalone_mode_preference_value
 
@@ -13,10 +13,12 @@ def build_overlay_config_payload(
     force_render: bool,
     client_log_retention: int,
     platform_context: Mapping[str, Any],
+    plugin_group_states: Optional[Mapping[str, bool]] = None,
+    plugin_group_state_default_on: bool = True,
 ) -> Dict[str, Any]:
     """Build the OverlayConfig payload from preferences and runtime context."""
     show_debug_overlay = bool(getattr(preferences, "show_debug_overlay", False) and diagnostics_enabled)
-    return {
+    payload: Dict[str, Any] = {
         "event": "OverlayConfig",
         "opacity": float(getattr(preferences, "overlay_opacity", 0.0)),
         "global_payload_opacity": int(getattr(preferences, "global_payload_opacity", 100)),
@@ -44,3 +46,7 @@ def build_overlay_config_payload(
         "payload_log_delay_seconds": float(getattr(preferences, "payload_log_delay_seconds", 0.0)),
         "platform_context": dict(platform_context),
     }
+    if plugin_group_states is not None:
+        payload["plugin_group_states"] = {str(name): bool(value) for name, value in plugin_group_states.items()}
+    payload["plugin_group_state_default_on"] = bool(plugin_group_state_default_on)
+    return payload

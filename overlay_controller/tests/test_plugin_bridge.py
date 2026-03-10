@@ -135,3 +135,39 @@ def test_force_render_override_sends_payloads(tmp_path: Path) -> None:
     assert first_payload["force_render"] is True
     second_payload = json.loads(json_writes[-1])
     assert second_payload["force_render"] is False
+
+
+def test_request_cli_reads_status_response(tmp_path: Path) -> None:
+    log: list[object] = []
+    (tmp_path / "port.json").write_text('{"port": 2345}', encoding="utf-8")
+
+    def fake_connect(addr, timeout=0.0):
+        return FakeSocket(log, responses=['{"status": "ok", "value": 1}\n'])
+
+    bridge = pb.PluginBridge(root=tmp_path, connect=fake_connect)
+    response = bridge.request_cli({"cli": "plugin_group_status"})
+
+    assert isinstance(response, dict)
+    assert response["status"] == "ok"
+    json_writes = [entry for entry in log if isinstance(entry, tuple) and entry[0] == "write"]
+    assert json.loads(json_writes[0][1]) == {"cli": "plugin_group_status"}
+
+
+def test_set_plugin_group_enabled_sends_expected_payload(tmp_path: Path) -> None:
+    log: list[object] = []
+    (tmp_path / "port.json").write_text('{"port": 2345}', encoding="utf-8")
+
+    def fake_connect(addr, timeout=0.0):
+        return FakeSocket(log, responses=['{"status": "ok"}\n'])
+
+    bridge = pb.PluginBridge(root=tmp_path, connect=fake_connect)
+    response = bridge.set_plugin_group_enabled(False, group_name="BGS-Tally Objectives")
+
+    assert isinstance(response, dict)
+    assert response["status"] == "ok"
+    json_writes = [entry for entry in log if isinstance(entry, tuple) and entry[0] == "write"]
+    assert json.loads(json_writes[0][1]) == {
+        "cli": "plugin_group_set",
+        "enabled": False,
+        "plugin_group": "BGS-Tally Objectives",
+    }

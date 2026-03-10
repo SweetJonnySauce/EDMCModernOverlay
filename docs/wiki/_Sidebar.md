@@ -6,6 +6,7 @@
 * [[Usage]]
     * [[Overlay Controller]]
     * [[Chat Command]]
+    * [[Overlay Actions]]
     * [[Changing Fonts]]
 * [[FAQs]]
 * [[Troubleshooting]]

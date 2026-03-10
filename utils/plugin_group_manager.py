@@ -2229,6 +2229,8 @@ class PluginGroupManagerApp:
         self.group_name_var = tk.StringVar(value="Select a group")
         self.group_match_var = tk.StringVar(value="-")
         self.group_notes_var = tk.StringVar(value="-")
+        self.group_enabled_var = tk.BooleanVar(value=True)
+        self._suppress_group_enabled_toggle = False
         self.grouping_canvas: Optional[tk.Canvas] = None
         self.grouping_scrollbar: Optional[ttk.Scrollbar] = None
         self.grouping_entries_frame: Optional[ttk.Frame] = None
@@ -2410,6 +2412,18 @@ class PluginGroupManagerApp:
             columnspan=3,
             sticky="w",
             pady=(4, 0),
+        )
+        ttk.Label(info_grid, text="Enabled:").grid(row=3, column=0, sticky="w", pady=(6, 0))
+        ttk.Checkbutton(
+            info_grid,
+            text="On",
+            variable=self.group_enabled_var,
+            command=self._on_group_enabled_toggled,
+        ).grid(
+            row=3,
+            column=1,
+            sticky="w",
+            pady=(6, 0),
         )
 
         grouping_section = self._create_label_frame(right_panel, "ID Prefix Groups")
@@ -2907,6 +2921,7 @@ class PluginGroupManagerApp:
             self.group_name_var.set("Select a group")
             self.group_match_var.set("-")
             self.group_notes_var.set("-")
+            self._refresh_group_enabled_state(None)
             return
         view = self._group_views[group_name]
         match_text = ", ".join(view.get("match_prefixes", [])) or "- none -"
@@ -2914,6 +2929,7 @@ class PluginGroupManagerApp:
         self.group_name_var.set(group_name)
         self.group_match_var.set(match_text)
         self.group_notes_var.set(notes_text)
+        self._refresh_group_enabled_state(group_name)
 
         entries: List[Dict[str, object]] = list(view.get("groupings", []))
         self._render_grouping_entries(group_name, entries)
@@ -3353,6 +3369,77 @@ class PluginGroupManagerApp:
                 f"Failed to send payload to the overlay client on port {port}: {exc}. "
                 "Ensure the Modern Overlay window is running."
             ) from exc
+
+    def _request_plugin_group_status(self) -> Optional[Mapping[str, Any]]:
+        try:
+            port = self._load_overlay_port()
+            response = self._send_payload_to_client(port, {"cli": "plugin_group_status"})
+        except RuntimeError as exc:
+            LOG.debug("Plugin-group status query failed: %s", exc)
+            return None
+        if str(response.get("status") or "").strip().lower() != "ok":
+            return None
+        return response
+
+    def _refresh_group_enabled_state(self, group_name: Optional[str]) -> None:
+        default_enabled = True
+        if not group_name:
+            self._suppress_group_enabled_toggle = True
+            try:
+                self.group_enabled_var.set(default_enabled)
+            finally:
+                self._suppress_group_enabled_toggle = False
+            return
+        enabled = default_enabled
+        response = self._request_plugin_group_status()
+        if isinstance(response, Mapping):
+            states = response.get("plugin_group_states")
+            if isinstance(states, Mapping):
+                raw = states.get(group_name)
+                if raw is not None:
+                    enabled = bool(raw)
+        self._suppress_group_enabled_toggle = True
+        try:
+            self.group_enabled_var.set(enabled)
+        finally:
+            self._suppress_group_enabled_toggle = False
+
+    def _on_group_enabled_toggled(self) -> None:
+        if self._suppress_group_enabled_toggle:
+            return
+        group_name = self.selected_group_var.get().strip()
+        if not group_name:
+            return
+        desired = bool(self.group_enabled_var.get())
+        payload: Dict[str, Any] = {
+            "cli": "plugin_group_set",
+            "enabled": desired,
+            "plugin_group": group_name,
+        }
+        try:
+            port = self._load_overlay_port()
+            response = self._send_payload_to_client(port, payload)
+        except RuntimeError as exc:
+            LOG.debug("Plugin-group set failed for %s: %s", group_name, exc)
+            self.status_var.set(f"Could not update group state for {group_name}: overlay is unavailable.")
+            self._refresh_group_enabled_state(group_name)
+            return
+        if str(response.get("status") or "").strip().lower() != "ok":
+            self.status_var.set(f"Overlay rejected enabled-state update for {group_name}.")
+            self._refresh_group_enabled_state(group_name)
+            return
+        states = response.get("plugin_group_states")
+        effective_enabled = desired
+        if isinstance(states, Mapping):
+            raw = states.get(group_name)
+            if raw is not None:
+                effective_enabled = bool(raw)
+        self._suppress_group_enabled_toggle = True
+        try:
+            self.group_enabled_var.set(effective_enabled)
+        finally:
+            self._suppress_group_enabled_toggle = False
+        self.status_var.set(f"{group_name}: {'On' if effective_enabled else 'Off'}")
 
     def _on_group_selected(self) -> None:
         name = self.selected_group_var.get()

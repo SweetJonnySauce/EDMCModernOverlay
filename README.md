@@ -2,7 +2,7 @@
 [![Github All Releases](https://img.shields.io/github/downloads/SweetJonnySauce/EDMCModernOverlay/total.svg)](https://github.com/SweetJonnySauce/EDMCModernOverlay/releases/latest)
 [![GitHub Latest Version](https://img.shields.io/github/v/release/SweetJonnySauce/EDMCModernOverlay)](https://github.com/SweetJonnySauce/EDMCModernOverlay/releases/latest)
 [![Build Status][build-badge]][build-url]
-[![VirusTotal](https://img.shields.io/badge/VirusTotal-clean-brightgreen.svg)](https://www.virustotal.com/gui/file/0a6612269ecbf822ee6df02883d4c9af246fc202325cc058cff9ed721ef278d4)
+[![VirusTotal](https://img.shields.io/badge/VirusTotal-clean-brightgreen.svg)](https://www.virustotal.com/gui/file/10e10354acbfc6cddea8ebf728ebeda5530a0b4c1d13a1d99867d392f439ffb8)
 
 [build-badge]: https://github.com/SweetJonnySauce/EDMCModernOverlay/actions/workflows/ci.yml/badge.svg?branch=main
 [build-url]: https://github.com/SweetJonnySauce/EDMCModernOverlay/actions/workflows/ci.yml
@@ -39,6 +39,8 @@ See the [Wiki for Upgrading](https://github.com/SweetJonnySauce/EDMCModernOverla
 See the [Wiki for Usage](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Usage) for how to run the game with the HUD and configure settings.
 
 See the [Wiki for Overlay Controller ](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Overlay-Controller) for how to modify where overlays are placed on the game screen.
+
+See the [Wiki for Overlay Actions](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Overlay-Actions) for complete chat/hotkey action behavior and payload targeting examples.
    
 # Support
 Best way to get support for this plugin is to create a github issue in this repo. This is a side project for me. As such, support is best effort only and there is no guarantee I'll be able to fix or fully address your issue/request. You can occassionally find me on [EDCD Discord](https://edcd.github.io/) in the `#edmc-plugins` channel.

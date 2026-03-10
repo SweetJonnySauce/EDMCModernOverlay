@@ -1,28 +1,41 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, List
+from typing import Any, List, Optional, Sequence
 
 from overlay_plugin import hotkeys
 
 
 class _HostState:
-    def __init__(self, *, opacity: int = 100, running: bool = True) -> None:
-        self.opacity = opacity
+    def __init__(self, *, running: bool = True) -> None:
         self.running = running
-        self.toggle_calls = 0
+        self.set_calls: list[tuple[bool, Optional[tuple[str, ...]], str]] = []
+        self.toggle_calls: list[tuple[Optional[tuple[str, ...]], str]] = []
         self.launch_calls = 0
         self.launch_should_fail = False
+        self.states = {
+            "Group A": True,
+            "Group B": True,
+        }
 
     def is_running(self) -> bool:
         return self.running
 
-    def get_payload_opacity(self) -> int:
-        return self.opacity
+    def set_group_state(self, enabled: bool, *, group_names: Optional[Sequence[str]] = None, source: str = "") -> None:
+        targets = tuple(group_names) if group_names is not None else None
+        self.set_calls.append((bool(enabled), targets, source))
+        resolved = list(group_names) if group_names is not None else list(self.states.keys())
+        for name in resolved:
+            if name in self.states:
+                self.states[name] = bool(enabled)
 
-    def toggle_payload_opacity(self) -> None:
-        self.toggle_calls += 1
-        self.opacity = 0 if self.opacity > 0 else 64
+    def toggle_group_state(self, *, group_names: Optional[Sequence[str]] = None, source: str = "") -> None:
+        targets = tuple(group_names) if group_names is not None else None
+        self.toggle_calls.append((targets, source))
+        resolved = list(group_names) if group_names is not None else list(self.states.keys())
+        for name in resolved:
+            if name in self.states:
+                self.states[name] = not self.states[name]
 
     def launch_controller(self) -> None:
         if self.launch_should_fail:
@@ -58,8 +71,8 @@ class _FakeHotkeysApi:
 def _make_manager(state: _HostState) -> hotkeys.HotkeysManager:
     return hotkeys.HotkeysManager(
         is_running=state.is_running,
-        get_payload_opacity=state.get_payload_opacity,
-        toggle_payload_opacity=state.toggle_payload_opacity,
+        set_group_state=state.set_group_state,
+        toggle_group_state=state.toggle_group_state,
         launch_controller=state.launch_controller,
         logger=logging.getLogger("test-hotkeys"),
         plugin_name="EDMCModernOverlay",
@@ -98,15 +111,17 @@ def test_hotkeys_start_registers_overlay_actions(monkeypatch):
     assert [action.label for action in api.registered] == [
         "Overlay On",
         "Overlay Off",
+        "Toggle Overlay",
         hotkeys.HOTKEYS_LAUNCH_CONTROLLER_LABEL,
     ]
     assert [action.id for action in api.registered] == [
         hotkeys.HOTKEYS_OVERLAY_ON_ACTION_ID,
         hotkeys.HOTKEYS_OVERLAY_OFF_ACTION_ID,
+        hotkeys.HOTKEYS_OVERLAY_TOGGLE_ACTION_ID,
         hotkeys.HOTKEYS_LAUNCH_CONTROLLER_ACTION_ID,
     ]
-    assert [action.thread_policy for action in api.registered] == ["main", "main", "main"]
-    assert [action.cardinality for action in api.registered] == ["single", "single", "single"]
+    assert [action.thread_policy for action in api.registered] == ["main", "main", "main", "main"]
+    assert [action.cardinality for action in api.registered] == ["multi", "multi", "multi", "single"]
 
 
 def test_hotkeys_launch_controller_callback_delegates():
@@ -128,28 +143,44 @@ def test_hotkeys_launch_controller_callback_handles_errors():
     assert state.launch_calls == 0
 
 
-def test_hotkeys_callbacks_enforce_noop_boundaries():
-    state = _HostState(opacity=50)
+def test_hotkeys_callbacks_apply_global_and_targeted_actions():
+    state = _HostState()
     manager = _make_manager(state)
 
     manager._overlay_on_callback()
-    assert state.toggle_calls == 0
-    assert state.opacity == 50
+    assert state.set_calls[-1] == (True, None, "hotkey_overlay_on")
+    assert state.states == {"Group A": True, "Group B": True}
 
-    state.opacity = 0
-    manager._overlay_on_callback()
-    assert state.toggle_calls == 1
-    assert state.opacity == 64
-
-    state.opacity = 0
     manager._overlay_off_callback()
-    assert state.toggle_calls == 1
-    assert state.opacity == 0
+    assert state.set_calls[-1] == (False, None, "hotkey_overlay_off")
+    assert state.states == {"Group A": False, "Group B": False}
 
-    state.opacity = 40
-    manager._overlay_off_callback()
-    assert state.toggle_calls == 2
-    assert state.opacity == 0
+    manager._overlay_toggle_callback()
+    assert state.toggle_calls[-1] == (None, "hotkey_overlay_toggle")
+    assert state.states == {"Group A": True, "Group B": True}
+
+    manager._overlay_off_callback(payload={"plugin_group": "Group A"})
+    assert state.set_calls[-1] == (False, ("Group A",), "hotkey_overlay_off")
+    assert state.states == {"Group A": False, "Group B": True}
+
+    manager._overlay_toggle_callback(payload={"plugin_groups": ["Group A", "Group B", "Group A"]})
+    assert state.toggle_calls[-1] == (("Group A", "Group B"), "hotkey_overlay_toggle")
+    assert state.states == {"Group A": True, "Group B": False}
+
+
+def test_hotkeys_target_payload_unions_plugin_group_and_plugin_groups() -> None:
+    state = _HostState()
+    manager = _make_manager(state)
+
+    manager._overlay_off_callback(
+        payload={
+            "plugin_group": "Group B",
+            "plugin_groups": ["Group A", "group b", "Group A"],
+        }
+    )
+
+    assert state.set_calls[-1] == (False, ("Group B", "Group A"), "hotkey_overlay_off")
+    assert state.states == {"Group A": False, "Group B": False}
 
 
 def test_import_failures_schedule_exponential_retry(monkeypatch):
@@ -220,6 +251,7 @@ def test_registration_false_schedules_retry(monkeypatch):
     assert set(manager._registered_action_ids) == {
         hotkeys.HOTKEYS_OVERLAY_ON_ACTION_ID,
         hotkeys.HOTKEYS_OVERLAY_OFF_ACTION_ID,
+        hotkeys.HOTKEYS_OVERLAY_TOGGLE_ACTION_ID,
         hotkeys.HOTKEYS_LAUNCH_CONTROLLER_ACTION_ID,
     }
 
@@ -288,6 +320,7 @@ def test_stop_cancels_retry_and_leaves_registrations_managed(monkeypatch):
         [
             hotkeys.HOTKEYS_OVERLAY_ON_ACTION_ID,
             hotkeys.HOTKEYS_OVERLAY_OFF_ACTION_ID,
+            hotkeys.HOTKEYS_OVERLAY_TOGGLE_ACTION_ID,
             hotkeys.HOTKEYS_LAUNCH_CONTROLLER_ACTION_ID,
         ]
     )

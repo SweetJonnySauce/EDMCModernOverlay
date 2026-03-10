@@ -51,7 +51,7 @@
         "idPrefixes": [
           "bgstally-msg-objectives-"
         ],
-        "idPrefixGroupAnchor": "ne",
+        "idPrefixGroupAnchor": "nw",
         "offsetX": -5,
         "payloadJustification": "left",
         "backgroundColor": "none",
@@ -266,6 +266,20 @@
         "payloadJustification": "left",
         "markerLabelPosition": "below",
         "controllerPreviewBoxMode": "last",
+        "backgroundColor": "black",
+        "backgroundBorderColor": "blue",
+        "backgroundBorderWidth": 10
+      },
+      "EDMCModernOverlay Group Status": {
+        "idPrefixes": [
+          "edmcmodernoverlay-group-status-"
+        ],
+        "idPrefixGroupAnchor": "center",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last",
+        "offsetX": 640.0,
+        "offsetY": 480.0,
         "backgroundColor": "black",
         "backgroundBorderColor": "blue",
         "backgroundBorderWidth": 10
@@ -534,6 +548,24 @@
       "NeutronDancer Default": {
         "idPrefixes": [
           "neutrondancer-default-"
+        ],
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last"
+      },
+      "NeutronDancer Galaxy Map": {
+        "idPrefixes": [
+          "neutrondancer-galaxy map-"
+        ],
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last"
+      },
+      "NeutronDancer Carrier": {
+        "idPrefixes": [
+          "neutrondancer-carrier-"
         ],
         "idPrefixGroupAnchor": "nw",
         "payloadJustification": "left",

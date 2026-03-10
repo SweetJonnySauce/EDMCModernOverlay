@@ -3,21 +3,21 @@
 ## 0.8.0
 
 ### Features
+- Added per-plugin group on/off functionality. Available via Overlay Controller, chat commands, and [EDMCHotkey](github.com/SweetJonnySauce/EDMCHotkeys) actions.
+- Added hotkey actions. Requires the newly released [EDMCHotkey](github.com/SweetJonnySauce/EDMCHotkeys) to be installed and configured.
 - Added a dedicated `Controller` tab in plugin settings (positioned after `Overlay`).
 - Added `Launch Controller` button as the first option on the `Controller` tab.
-- Moved `Chat command to launch controller` and `Chat command argument to toggle overlay` to the new `Controller` tab.
-- Added EDMCHotkeys action: `Launch Overlay Controller`.
-- Settings button and hotkey launch paths now start the Overlay Controller immediately (no 3-second countdown).
 
 ### Maintenance
 - Added capability to Windows .exe installer to download python if 3.10+ is not available or accessible. 
 - Plugin Developers: `define_plugin_group` now supports canonical API argument names alongside legacy compatibility aliases. Warning messages are logged once per plugin per legacy parameter used. See [[`define_plugin_group API`]](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/define_plugin_group-API) wiki for more info. 
 - Legacy alias usage emits a compatibility warning once per process per legacy argument per calling plugin.
-- No storage/schema key migration is required; persisted `overlay_groupings.json` structure is unchanged.
-- Updated `AGENTS.md` and `docs/plans/_template.md`
+
+- Settings button and hotkey launch paths now start the Overlay Controller immediately (no 3-second countdown).
+- Moved grouping logic out of client and into separate module for use between both client and plugin
 
 ### Bug Fixes
-- Preserved existing in-game chat launch behavior (`!ovr` and aliases) while adding new launch entrypoints.
+- Fixed Overlay Controller group dropdown labeling so plugin-name prefixes are applied per group label (only when needed), instead of prefixing every group in the plugin collection.
 
 ## 0.7.7
 

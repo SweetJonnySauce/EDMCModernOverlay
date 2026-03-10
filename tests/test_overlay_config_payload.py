@@ -35,11 +35,20 @@ class _StubPrefs:
         return
 
 
+class _StubGroupState:
+    def __init__(self, states):
+        self._states = dict(states)
+
+    def state_snapshot(self):
+        return dict(self._states)
+
+
 def test_overlay_config_includes_physical_clamp_flag(monkeypatch):
     runtime = object.__new__(load._PluginRuntime)
     runtime._preferences = _StubPrefs()
     runtime._log_retention_override = None
     runtime._last_config = {}
+    runtime._plugin_group_state = _StubGroupState({"BGS-Tally Objectives": False})
     runtime._platform_context_payload = lambda: {"platform": "stub"}
     runtime._load_payload_debug_config = lambda: None
     runtime._schedule_config_rebroadcasts = lambda: None
@@ -56,6 +65,8 @@ def test_overlay_config_includes_physical_clamp_flag(monkeypatch):
     assert payload["physical_clamp_overrides"] == {"DisplayPort-2": 1.0}
     assert runtime._last_config.get("physical_clamp_overrides") == {"DisplayPort-2": 1.0}
     assert payload["legacy_font_step"] == 2
+    assert payload["plugin_group_states"] == {"BGS-Tally Objectives": False}
+    assert payload["plugin_group_state_default_on"] is True
 
 
 def test_overlay_config_defaults_keep_clamp_off(monkeypatch):
@@ -65,6 +76,7 @@ def test_overlay_config_defaults_keep_clamp_off(monkeypatch):
     runtime._preferences.physical_clamp_overrides = {}
     runtime._log_retention_override = None
     runtime._last_config = {}
+    runtime._plugin_group_state = _StubGroupState({})
     runtime._platform_context_payload = lambda: {"platform": "stub"}
     runtime._load_payload_debug_config = lambda: None
     runtime._schedule_config_rebroadcasts = lambda: None

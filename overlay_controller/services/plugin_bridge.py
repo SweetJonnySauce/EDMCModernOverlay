@@ -71,6 +71,49 @@ class PluginBridge:
         except Exception:
             return False
 
+    def request_cli(self, payload: JsonDict, *, timeout: float = 1.5) -> Optional[JsonDict]:
+        port = self.read_port()
+        if port is None:
+            return None
+        try:
+            with self._connect(("127.0.0.1", port), timeout=timeout) as sock:
+                try:
+                    sock.settimeout(timeout)
+                except Exception:
+                    pass
+                writer = sock.makefile("w", encoding="utf-8", newline="\n")
+                reader = sock.makefile("r", encoding="utf-8")
+                writer.write(json.dumps(payload, ensure_ascii=False))
+                writer.write("\n")
+                writer.flush()
+                while True:
+                    response_line = reader.readline()
+                    if not response_line:
+                        return None
+                    try:
+                        response = json.loads(response_line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(response, dict) and "status" in response:
+                        return response
+        except Exception:
+            return None
+
+    def plugin_group_status(self) -> Optional[JsonDict]:
+        return self.request_cli({"cli": "plugin_group_status"})
+
+    def set_plugin_group_enabled(self, enabled: bool, *, group_name: Optional[str] = None) -> Optional[JsonDict]:
+        payload: JsonDict = {"cli": "plugin_group_set", "enabled": bool(enabled)}
+        if group_name:
+            payload["plugin_group"] = group_name
+        return self.request_cli(payload)
+
+    def toggle_plugin_group(self, *, group_name: Optional[str] = None) -> Optional[JsonDict]:
+        payload: JsonDict = {"cli": "plugin_group_toggle"}
+        if group_name:
+            payload["plugin_group"] = group_name
+        return self.request_cli(payload)
+
     def send_heartbeat(self) -> bool:
         return self.send_cli({"cli": "controller_heartbeat"})
 

@@ -41,8 +41,8 @@ def test_chat_settings_hotkey_paths_route_to_expected_launch_modes() -> None:
     # Hotkey launch path.
     manager = hotkeys.HotkeysManager(
         is_running=lambda: True,
-        get_payload_opacity=lambda: 100,
-        toggle_payload_opacity=lambda: None,
+        set_group_state=lambda *_args, **_kwargs: None,
+        toggle_group_state=lambda *_args, **_kwargs: None,
         launch_controller=lambda: runtime.launch_overlay_controller(source="hotkey"),
         logger=logging.getLogger("test-launch-entrypoint-parity"),
         plugin_name="EDMCModernOverlay",
