@@ -1,4 +1,4 @@
-# DRAFT (Fixing images in prep for PR) VoiceAttack and Modern Overlay Integration
+# VoiceAttack and Modern Overlay Integration
 
 The instructions below are intended to assist you with configuring VoiceAttack with the E:D Market Connector Modern Overlay plugin, utilizing the EDMCHotkeys plugin.
 
