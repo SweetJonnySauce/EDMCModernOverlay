@@ -1,6 +1,8 @@
-EDMCModernOverlay now supports [EDMCHotkey](github.com/SweetJonnySauce/EDMCHotkeys) actions. These allow you to map plugin actions to hotkey combinations (e.g. LCtrl+LSfhit+F1) that you can bind to controller buttons or to Voice Attack commands. 
+EDMCModernOverlay now supports [EDMCHotkey](github.com/SweetJonnySauce/EDMCHotkeys) actions. These allow you to map plugin actions to hotkey combinations (e.g. LCtrl+LSfhit+F1) that you can bind to controller buttons or to VoiceAttack commands. 
 
-See [EDMCHotkeys Usage](https://github.com/SweetJonnySauce/EDMCHotkeys#Usage) for information on how to set up hotkey ations
+See:
+- [EDMCHotkeys Usage](https://github.com/SweetJonnySauce/EDMCHotkeys#Usage) for information on how to set up hotkey ations
+- [VoiceAttack Integration](./VoiceAttack_Integration.md) for information on how to set up VoiceAttack with hotkey actions
 
 ## Hotkey Actions Supported
 - `Overlay On`: Turn all overlay plugin groups on. Optionally, you can specify specific plugin groups to turn on.
