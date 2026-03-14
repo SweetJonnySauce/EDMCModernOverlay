@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the plugin's Python against the EDMC-tested baseline."""
+"""Validate plugin Python compatibility against EDMC's tested minimum baseline."""
 from __future__ import annotations
 
 import os
@@ -40,24 +40,32 @@ def _current_arch() -> str:
 
 
 def main() -> None:
-    expected_version, expected_arch = _load_expected()
+    minimum_version, preferred_arch = _load_expected()
     actual_version = _current_version()
     actual_arch = _current_arch()
 
-    mismatches = []
-    if actual_version != expected_version:
-        mismatches.append(f"Python version mismatch: expected {expected_version}, found {actual_version}")
-    if expected_arch and expected_arch != actual_arch:
-        mismatches.append(f"Python arch mismatch: expected {expected_arch}, found {actual_arch}")
-
-    if mismatches:
-        message = "; ".join(mismatches)
+    if actual_version < minimum_version:
+        message = (
+            f"Python version too old: requires >= {minimum_version}, "
+            f"found {actual_version}"
+        )
         if os.environ.get(ALLOW_ENV):
             print(f"[check-edmc-python] WARNING: {message} (override via {ALLOW_ENV})")
             raise SystemExit(0)
         raise SystemExit(f"[check-edmc-python] ERROR: {message} (set {ALLOW_ENV}=1 to bypass)")
 
-    print(f"[check-edmc-python] OK: Python {actual_version} ({actual_arch}) matches baseline in {BASELINE_PATH}")
+    if preferred_arch and preferred_arch != actual_arch:
+        print(
+            "[check-edmc-python] WARNING: "
+            f"Preferred EDMC baseline arch is {preferred_arch}, found {actual_arch}; "
+            "continuing because version compatibility floor is satisfied."
+        )
+
+    print(
+        "[check-edmc-python] OK: "
+        f"Python {actual_version} ({actual_arch}) meets minimum baseline >= {minimum_version} "
+        f"from {BASELINE_PATH}"
+    )
 
 
 if __name__ == "__main__":

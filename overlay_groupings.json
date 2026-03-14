@@ -51,7 +51,7 @@
         "idPrefixes": [
           "bgstally-msg-objectives-"
         ],
-        "idPrefixGroupAnchor": "nw",
+        "idPrefixGroupAnchor": "ne",
         "offsetX": -5,
         "payloadJustification": "left",
         "backgroundColor": "none",
@@ -195,6 +195,40 @@
       }
     }
   },
+  "EDMC-LogEventMiner": {
+    "matchingPrefixes": [
+      "edmclogeventminer-status-overlay-"
+    ],
+    "idPrefixGroups": {
+      "EDMC-LogEventMiner": {
+        "idPrefixGroupAnchor": "sw",
+        "offsetX": 5,
+        "offsetY": 955,
+        "backgroundColor": "#AA000000",
+        "backgroundBorderWidth": 5
+      },
+      "EDMC-LogEventMiner Journal Events": {
+        "idPrefixes": [
+          "edmclogeventminer-overlay-"
+        ],
+        "idPrefixGroupAnchor": "sw",
+        "offsetX": 5,
+        "offsetY": 955,
+        "backgroundColor": "#AA000000",
+        "backgroundBorderWidth": 5
+      },
+      "EDMC-LogEventMiner Status Flags": {
+        "idPrefixes": [
+          "edmclogeventminer-status-overlay-"
+        ],
+        "idPrefixGroupAnchor": "sw",
+        "offsetX": 420,
+        "offsetY": 955,
+        "backgroundColor": "#AA000000",
+        "backgroundBorderWidth": 5
+      }
+    }
+  },
   "EDMC-Mining-Analytics": {
     "matchingPrefixes": [
       "edmcma"
@@ -275,11 +309,11 @@
           "edmcmodernoverlay-group-status-"
         ],
         "idPrefixGroupAnchor": "center",
+        "offsetX": 640,
+        "offsetY": 480,
         "payloadJustification": "left",
         "markerLabelPosition": "below",
         "controllerPreviewBoxMode": "last",
-        "offsetX": 640.0,
-        "offsetY": 480.0,
         "backgroundColor": "black",
         "backgroundBorderColor": "blue",
         "backgroundBorderWidth": 10
@@ -469,6 +503,47 @@
       }
     }
   },
+  "NeutronDancer": {
+    "matchingPrefixes": [
+      "neutrondancer-"
+    ],
+    "idPrefixGroups": {
+      "Default": {
+        "idPrefixGroupAnchor": "nw",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last",
+        "backgroundColor": "#00000000",
+        "backgroundBorderWidth": 2
+      },
+      "NeutronDancer Default": {
+        "idPrefixes": [
+          "neutrondancer-default-"
+        ],
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last"
+      },
+      "NeutronDancer Galaxy Map": {
+        "idPrefixes": [
+          "neutrondancer-galaxy map-"
+        ],
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last"
+      },
+      "NeutronDancer Carrier": {
+        "idPrefixes": [
+          "neutrondancer-carrier-"
+        ],
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last"
+      }
+    }
+  },
   "Pioneer": {
     "matchingPrefixes": [
       "pioneer_"
@@ -533,61 +608,20 @@
       }
     }
   },
-  "NeutronDancer": {
+  "edmclogeventminer": {
     "matchingPrefixes": [
-      "neutrondancer-"
+      "edmclogeventminer-"
     ],
     "idPrefixGroups": {
-      "Default": {
-        "idPrefixGroupAnchor": "nw",
-        "markerLabelPosition": "below",
-        "controllerPreviewBoxMode": "last",
-        "backgroundColor": "#00000000",
-        "backgroundBorderWidth": 2
-      },
-      "NeutronDancer Default": {
+      "Edmclogeventminer Overlay": {
         "idPrefixes": [
-          "neutrondancer-default-"
+          "edmclogeventminer-overlay-",
+          "edmclogeventminer-truth-"
         ],
         "idPrefixGroupAnchor": "nw",
         "payloadJustification": "left",
         "markerLabelPosition": "below",
         "controllerPreviewBoxMode": "last"
-      },
-      "NeutronDancer Galaxy Map": {
-        "idPrefixes": [
-          "neutrondancer-galaxy map-"
-        ],
-        "idPrefixGroupAnchor": "nw",
-        "payloadJustification": "left",
-        "markerLabelPosition": "below",
-        "controllerPreviewBoxMode": "last"
-      },
-      "NeutronDancer Carrier": {
-        "idPrefixes": [
-          "neutrondancer-carrier-"
-        ],
-        "idPrefixGroupAnchor": "nw",
-        "payloadJustification": "left",
-        "markerLabelPosition": "below",
-        "controllerPreviewBoxMode": "last"
-      }
-    }
-  },
-  "EDMC-LogEventMiner": {
-    "matchingPrefixes": [
-      "edmclogeventminer-overlay-"
-    ],
-    "idPrefixGroups": {
-      "EDMC-LogEventMiner": {
-        "idPrefixes": [
-          "edmclogeventminer-overlay-"
-        ],
-        "idPrefixGroupAnchor": "sw",
-        "offsetX": 5.0,
-        "offsetY": 955.0,
-        "backgroundColor": "#AA000000",
-        "backgroundBorderWidth": 5
       }
     }
   }

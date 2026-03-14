@@ -35,8 +35,6 @@ jobs:
 
       - name: Check EDMC Python baseline
         run: python scripts/check_edmc_python.py
-        env:
-          ALLOW_EDMC_PYTHON_MISMATCH: "1"
 
       - name: Run plugin checks
         run: make check
@@ -66,8 +64,6 @@ jobs:
 
       - name: Check EDMC Python baseline
         run: python scripts/check_edmc_python.py
-        env:
-          ALLOW_EDMC_PYTHON_MISMATCH: "1"
 
       - name: Run checks
         run: make check
