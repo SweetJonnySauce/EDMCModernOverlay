@@ -1,4 +1,8 @@
 name: Win Inno Build Installer
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  VERSION: ${{ github.event.release.tag_name || github.ref_name || format('run-{0}', github.run_number) }}
 permissions:
   contents: write
 
@@ -7,9 +11,6 @@ on:
     types:
       - published
   workflow_dispatch: {}
-
-env:
-  VERSION: ${{ github.event.release.tag_name || github.ref_name || format('run-{0}', github.run_number) }}
 
 jobs:
   build:
