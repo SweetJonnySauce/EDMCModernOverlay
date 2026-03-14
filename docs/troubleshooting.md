@@ -30,6 +30,12 @@ Use these steps to gather diagnostics when the overlay misbehaves. EDMC’s own 
 - Overlay Controller log: `logs/EDMCModernOverlay/overlay_controller.log` (same directory as the client log). The controller writes a startup banner every time `!ovr` launches it and captures any uncaught exceptions or stack traces before it exits. Set EDMC to DEBUG (or use dev mode) so geometry/routing DEBUG logs are flushed to the file even before Tk initialises.
 - Debug flags live in `debug.json` in the plugin directory; Modern Overlay now auto-creates this file whenever EDMC logging is DEBUG (or dev mode is active) so users don’t need to craft it manually before capturing payloads. Developer-only overlay helpers (tracing, outlines, vertex markers) live in `dev_settings.json`, which is created/read only when dev mode is enabled so normal troubleshooting stays focused on capture/logging knobs.
 
+## Windows: Python auto-install (installer)
+- The Windows `.exe` installer can download and install Python automatically if no Python 3.10+ is found.
+- If Python is detected on `PATH`, it will be reused; otherwise the installer checks the default per-user install path.
+- To force a fresh Python install, run the installer with `/ForcePythonInstall` (you will still be prompted to confirm the download).
+- If the download or install fails, install Python manually from https://www.python.org/downloads/windows/ and re-run the installer.
+
 ## Manual config reference
 
 Most users never need to edit JSON by hand because the Diagnostics section writes these values for you, but support workflows sometimes require double-checking what is on disk. `debug.json` is the troubleshooting store; only edit it when you want to seed capture/log-retention defaults before EDMC launches:

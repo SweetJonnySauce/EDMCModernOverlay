@@ -1,5 +1,16 @@
 # EDMC Compliance Tracker
 
+Follow persona details in `AGENTS.md`.
+Treat this as a compliance audit only: do not make code changes as part of this task.
+Evaluate each compliance rule with an explicit `Yes` or `No`.
+For every `No`, document: why it fails, evidence (file paths/lines or command output), and the exact change required.
+Record all checks run (and checks skipped with reason) in `Implementation Results`.
+After each stage is complete, change stage status to `Completed`.
+When all stages in a phase are complete, change phase status to `Completed`.
+If something is unclear or blocked (for example, external EDMC-core docs), capture it under `Open Questions`.
+
+----
+
 This file tracks adherence to EDMC’s plugin best practices for the Modern Overlay project. Use it to preserve context about gaps, decisions, and verification steps so we can keep the plugin aligned with EDMC core expectations across releases.
 
 ## Compliance rules
@@ -28,9 +39,9 @@ These are EDMC best practices. Evaluate the code to make sure it's adhering to t
 - Performance awareness: efficient enough without premature micro-optimizations; measure before tuning.
 
 ## Checks (run per release or compliance review)
-- Confirm target Python version matches the version stated in EDMC core `docs/Releasing`; baseline (as of this review) is Python 3.10.3 32-bit for Windows builds. Update this file if the baseline changes. This applies to the EDMC plugin runtime; the controller/client run in their own environments and require Python >= 3.10.
-- Run `python scripts/check_edmc_python.py` to enforce the plugin baseline in `docs/compliance/edmc_python_version.txt` (override with `ALLOW_EDMC_PYTHON_MISMATCH=1` only for non-release/dev work).
-  - CI runs this via `.github/workflows/ci.yml` (override enabled because CI uses non-baseline Python/arch).
+- Confirm target Python compatibility meets or exceeds the minimum version stated in EDMC core `docs/Releasing`; baseline (as of this review) is Python 3.10.3, with 32-bit Windows as the preferred EDMC release parity runtime. Update this file if the baseline changes. This applies to the EDMC plugin runtime; the controller/client run in their own environments and require Python >= 3.10.
+- Run `python3 scripts/check_edmc_python.py` to enforce the minimum compatibility baseline in `docs/compliance/edmc_python_version.txt` (the check fails only when the interpreter is below the minimum; `ALLOW_EDMC_PYTHON_MISMATCH=1` is an emergency non-release/dev override).
+  - CI runs this via `.github/workflows/ci.yml` on both Python 3.10 and 3.12 without override to prove backward compatibility and newer-runtime support.
 - Re-scan imports to ensure only supported EDMC APIs/helpers (`config`, `monitor`, `theme`, `timeout_session`, etc.) are used in plugin code.
 - Verify logger wiring (`plugin_name`, folder name, logger name) aligns and that `logger.exception`/`exc_info` is used instead of `print`.
 - Confirm long-running or network work runs in worker threads and that Tk widgets are only touched on the main thread.
@@ -38,6 +49,27 @@ These are EDMC best practices. Evaluate the code to make sure it's adhering to t
 - Validate dependency handling: venv for bundled packages, copied dependencies when needed, and debug HTTP routing via `config.debug_senders`.
 - Monitor EDMC releases/discussions: subscribe to `EDCD/EDMarketConnector` GitHub Releases and Discussions; check weekly and before shipping a plugin release, logging any plugin-impacting changes here.
   - PRs must tick the compliance items in `.github/pull_request_template.md`.
+
+## How to pass: Stay aligned with EDMC core
+Use this evidence checklist for each release when deciding the `Stay aligned with EDMC core` status.
+
+### Required evidence
+- `python3 scripts/check_edmc_python.py` passes (minimum compatibility baseline met).
+- `load.py` exists at plugin root.
+- `plugin_start3` exists in `load.py`.
+- Plugin metadata maps to plugin folder naming (`name = PLUGIN_NAME` and `plugin_name = PLUGIN_NAME`).
+
+### Suggested capture commands
+- `python3 scripts/check_edmc_python.py`
+- `test -f load.py && echo "load.py present"`
+- `rg -n "def plugin_start3|name = PLUGIN_NAME|plugin_name = PLUGIN_NAME" load.py`
+
+### Status rubric
+- Mark `Yes` when required evidence is satisfied and any waived sub-requirement is explicitly recorded in `Exceptions`.
+- Mark `No` when minimum Python compatibility fails, plugin entrypoint/structure evidence is missing, or a waived sub-requirement is not documented as an exception.
+
+### Exception handling
+- If a release intentionally waives EDMC Releases/Discussions logging or parity-environment artifacts, record that waiver in `Exceptions` with release scope and rationale.
 
 ## Exceptions
 - None

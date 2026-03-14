@@ -34,6 +34,7 @@ if __package__:
     from .overlay_plugin.logging_utils import build_rotating_payload_handler
     from .overlay_plugin.runtime_services import start_runtime_services, stop_runtime_services
     from .overlay_plugin.controller_services import (
+        LaunchSource,
         controller_launch_sequence,
         launch_controller,
         terminate_controller_process,
@@ -77,7 +78,17 @@ if __package__:
         unregister_grouping_store,
         unregister_publisher,
     )
+    from .overlay_plugin.hotkeys import HotkeysManager
     from .overlay_plugin.journal_commands import build_command_helper
+    from .overlay_plugin.group_status_enrichment import build_enriched_group_status_lines
+    from .overlay_plugin.plugin_scan_services import get_cached_plugin_statuses
+    from .overlay_plugin.command_overlay_groups import ensure_runtime_command_groups, render_group_status_payloads
+    from .overlay_plugin.plugin_group_controls import (
+        PluginGroupControlService,
+        dedupe_group_names,
+        resolve_payload_group_targets,
+    )
+    from .overlay_plugin.plugin_group_state import PluginGroupStateManager
     from .overlay_plugin.toggle_helpers import toggle_payload_opacity
     from .EDMCOverlay import edmcoverlay
     from .EDMCOverlay.edmcoverlay import normalise_legacy_payload
@@ -91,6 +102,7 @@ else:  # pragma: no cover - EDMC loads as top-level module
     from overlay_plugin.logging_utils import build_rotating_payload_handler
     from overlay_plugin.runtime_services import start_runtime_services, stop_runtime_services
     from overlay_plugin.controller_services import (
+        LaunchSource,
         controller_launch_sequence,
         launch_controller,
         terminate_controller_process,
@@ -134,7 +146,17 @@ else:  # pragma: no cover - EDMC loads as top-level module
         unregister_grouping_store,
         unregister_publisher,
     )
+    from overlay_plugin.hotkeys import HotkeysManager
     from overlay_plugin.journal_commands import build_command_helper
+    from overlay_plugin.group_status_enrichment import build_enriched_group_status_lines
+    from overlay_plugin.plugin_scan_services import get_cached_plugin_statuses
+    from overlay_plugin.command_overlay_groups import ensure_runtime_command_groups, render_group_status_payloads
+    from overlay_plugin.plugin_group_controls import (
+        PluginGroupControlService,
+        dedupe_group_names,
+        resolve_payload_group_targets,
+    )
+    from overlay_plugin.plugin_group_state import PluginGroupStateManager
     from overlay_plugin.toggle_helpers import toggle_payload_opacity
     from EDMCOverlay import edmcoverlay
     from EDMCOverlay.edmcoverlay import normalise_legacy_payload
@@ -534,6 +556,26 @@ class _PluginRuntime:
         self._controller_active_group: Optional[Tuple[str, str]] = None
         self._prefs_worker = PrefsWorker(self._lifecycle, LOGGER)
         register_grouping_store(self.plugin_dir / "overlay_groupings.json")
+        ensure_runtime_command_groups(logger=LOGGER)
+        self._plugin_group_state = PluginGroupStateManager(
+            shipped_path=self.plugin_dir / "overlay_groupings.json",
+            user_path=self.plugin_dir / "overlay_groupings.user.json",
+            logger=LOGGER,
+        )
+        self._plugin_group_controls = PluginGroupControlService(
+            state_manager=self._plugin_group_state,
+            publish_config=self._send_overlay_config,
+            publish_group_clear=self._publish_group_clear_event,
+            logger=LOGGER,
+        )
+        self._hotkeys = HotkeysManager(
+            is_running=lambda: self._running,
+            set_group_state=self._set_plugin_groups_enabled,
+            toggle_group_state=self._toggle_plugin_groups_enabled,
+            launch_controller=lambda: self.launch_overlay_controller(source="hotkey"),
+            logger=LOGGER,
+            plugin_name=PLUGIN_NAME,
+        )
         threading.Thread(
             target=self._evaluate_version_status_once,
             name="ModernOverlayVersionCheck",
@@ -574,6 +616,7 @@ class _PluginRuntime:
         self._start_force_render_monitor_if_needed()
         self._start_version_status_check()
         register_publisher(self._publish_external)
+        self._hotkeys.start()
         self._start_legacy_tcp_server()
         self._send_overlay_config(rebroadcast=True)
         self._maybe_emit_version_update_notice()
@@ -583,9 +626,11 @@ class _PluginRuntime:
     def stop(self) -> None:
         with self._lock:
             if not self._running:
+                self._hotkeys.stop()
                 self._stop_prefs_worker()
                 return
             self._running = False
+        self._hotkeys.stop()
         unregister_publisher()
         unregister_grouping_store()
         _log("Plugin stopping")
@@ -1646,6 +1691,21 @@ class _PluginRuntime:
         if not sent:
             raise RuntimeError("No test overlay payloads were sent.")
 
+    def send_group_status_overlay(self, lines: Sequence[str]) -> None:
+        if not self._running:
+            raise RuntimeError("Overlay is not running")
+        payloads = render_group_status_payloads(lines)
+        if not payloads:
+            return
+        failures = 0
+        for payload in payloads:
+            stamped = dict(payload)
+            stamped.setdefault("timestamp", datetime.now(UTC).isoformat())
+            if not send_overlay_message(stamped):
+                failures += 1
+        if failures:
+            raise RuntimeError(f"Failed to send {failures} status overlay payload(s)")
+
     def preview_font_sizes(self) -> None:
         if not self._running:
             raise RuntimeError("Overlay is not running")
@@ -1736,6 +1796,7 @@ class _PluginRuntime:
         LOGGER.info("Overlay toggle argument preference updated to %s", normalised)
 
     def set_payload_opacity_preference(self, value: int) -> None:
+        """Set visual payload transparency only (not logical overlay/group on/off)."""
         try:
             numeric = int(value)
         except (TypeError, ValueError):
@@ -1749,10 +1810,72 @@ class _PluginRuntime:
         self._send_overlay_config()
 
     def toggle_payload_opacity_preference(self) -> None:
+        """Toggle visual payload transparency only (not logical overlay/group on/off)."""
         with self._prefs_lock:
             toggle_payload_opacity(self._preferences)
             self._preferences.save()
         self._send_overlay_config()
+
+    def _current_payload_opacity(self) -> int:
+        with self._prefs_lock:
+            try:
+                numeric = int(getattr(self._preferences, "global_payload_opacity", 100))
+            except (TypeError, ValueError):
+                numeric = 100
+        return max(0, min(100, numeric))
+
+    def _publish_group_clear_event(self, group_names: Sequence[str], source: str) -> None:
+        targets = dedupe_group_names(group_names)
+        if not targets:
+            return
+        payload = {
+            "event": "OverlayPluginGroupClear",
+            "plugin_groups": list(targets),
+            "source": str(source or "runtime"),
+        }
+        self._publish_payload(payload)
+
+    def _set_plugin_groups_enabled(
+        self,
+        enabled: bool,
+        *,
+        group_names: Optional[Sequence[str]] = None,
+        source: str = "runtime",
+    ) -> Dict[str, Any]:
+        controls = getattr(self, "_plugin_group_controls", None)
+        if controls is None:
+            raise RuntimeError("Plugin-group controls are not initialised")
+        return controls.set_enabled(bool(enabled), group_names=group_names, source=source)
+
+    def _toggle_plugin_groups_enabled(
+        self,
+        *,
+        group_names: Optional[Sequence[str]] = None,
+        source: str = "runtime",
+    ) -> Dict[str, Any]:
+        controls = getattr(self, "_plugin_group_controls", None)
+        if controls is None:
+            raise RuntimeError("Plugin-group controls are not initialised")
+        return controls.toggle(group_names=group_names, source=source)
+
+    def get_plugin_group_status_lines(self) -> list[str]:
+        controls = getattr(self, "_plugin_group_controls", None)
+        group_state = getattr(self, "_plugin_group_state", None)
+        if controls is None or group_state is None:
+            return []
+        group_state_map = controls.state_snapshot()
+        group_names = sorted(group_state_map.keys(), key=str.casefold)
+        lines = build_enriched_group_status_lines(
+            group_names=group_names,
+            group_owner_map=group_state.group_owner_map(),
+            plugin_status_map=get_cached_plugin_statuses(refresh_if_empty=True),
+            group_state_map=group_state_map,
+            metadata_snapshot=group_state.metadata_snapshot(),
+        )
+        if LOGGER.isEnabledFor(logging.DEBUG):
+            for line in lines:
+                LOGGER.debug("Plugin-group status: %s", line)
+        return lines
 
     def _build_command_helper(self, prefix: str, previous_prefix: Optional[str] = None) -> Any:
         legacy: list[str] = []
@@ -2073,8 +2196,8 @@ class _PluginRuntime:
     def cycle_payload_next(self) -> None:
         self._cycle_payload_step(1)
 
-    def launch_overlay_controller(self) -> None:
-        launch_controller(self, LOGGER)
+    def launch_overlay_controller(self, *, source: LaunchSource = "chat") -> None:
+        launch_controller(self, LOGGER, source=source)
 
     def _controller_python_command(self, overlay_env: Dict[str, str]) -> List[str]:
         override = os.getenv("EDMC_OVERLAY_CONTROLLER_PYTHON")
@@ -2094,8 +2217,8 @@ class _PluginRuntime:
             "Create overlay_client/.venv or set EDMC_OVERLAY_CONTROLLER_PYTHON."
         )
 
-    def _overlay_controller_launch_sequence(self) -> None:
-        controller_launch_sequence(self, LOGGER)
+    def _overlay_controller_launch_sequence(self, source: LaunchSource = "chat") -> None:
+        controller_launch_sequence(self, LOGGER, source=source)
 
     def _controller_countdown(self) -> None:
         LOGGER.debug("Overlay Controller countdown started.")
@@ -2493,6 +2616,45 @@ class _PluginRuntime:
             if command == "overlay_metrics":
                 self._update_overlay_metrics(payload)
                 return {"status": "ok"}
+            if command == "plugin_group_set":
+                if "enabled" not in payload:
+                    raise ValueError("plugin_group_set payload requires 'enabled'")
+                enabled = bool(payload.get("enabled"))
+                targets = resolve_payload_group_targets(payload)
+                result = self._set_plugin_groups_enabled(
+                    enabled,
+                    group_names=targets,
+                    source="controller_cli",
+                )
+                return {
+                    "status": "ok",
+                    **result,
+                    "plugin_group_states": self._plugin_group_controls.state_snapshot(),
+                    "lines": self._plugin_group_controls.status_lines(),
+                }
+            if command == "plugin_group_toggle":
+                targets = resolve_payload_group_targets(payload)
+                result = self._toggle_plugin_groups_enabled(
+                    group_names=targets,
+                    source="controller_cli",
+                )
+                return {
+                    "status": "ok",
+                    **result,
+                    "plugin_group_states": self._plugin_group_controls.state_snapshot(),
+                    "lines": self._plugin_group_controls.status_lines(),
+                }
+            if command == "plugin_group_status":
+                controls = getattr(self, "_plugin_group_controls", None)
+                group_state = getattr(self, "_plugin_group_state", None)
+                if controls is None or group_state is None:
+                    raise RuntimeError("Plugin-group state manager unavailable")
+                return {
+                    "status": "ok",
+                    "lines": controls.status_lines(),
+                    "plugin_group_states": controls.state_snapshot(),
+                    "counters": group_state.counters(),
+                }
             if command == "controller_heartbeat":
                 self._emit_controller_active_notice()
                 return {"status": "ok"}
@@ -2565,12 +2727,16 @@ class _PluginRuntime:
     def _send_overlay_config(self, rebroadcast: bool = False) -> None:
         self._load_payload_debug_config()
         diagnostics_enabled = _diagnostic_logging_enabled()
+        group_state = getattr(self, "_plugin_group_state", None)
+        group_states = group_state.state_snapshot() if group_state is not None else {}
         payload = build_overlay_config_payload(
             self._preferences,
             diagnostics_enabled=diagnostics_enabled,
             force_render=self._resolve_force_render(),
             client_log_retention=self._resolve_client_log_retention(),
             platform_context=self._platform_context_payload(),
+            plugin_group_states=group_states,
+            plugin_group_state_default_on=True,
         )
         self._last_config = dict(payload)
         self._publish_payload(payload)
@@ -2608,6 +2774,16 @@ class _PluginRuntime:
 
     def _publish_payload(self, payload: Mapping[str, Any]) -> None:
         message = dict(payload)
+        group_state = getattr(self, "_plugin_group_state", None)
+        if group_state is not None:
+            drop_payload, group_name = group_state.should_drop_payload(message)
+            if drop_payload:
+                self._trace_payload_event(
+                    "publish:dropped_disabled_group",
+                    message,
+                    {"plugin_group_name": group_name or "", "reason": "disabled_group"},
+                )
+                return
         plugin_name, _payload_id = self._plugin_name_for_payload(message)
         self._payload_spam_tracker.record(plugin_name)
         self._trace_payload_event("publish:dispatch", message)
@@ -3216,37 +3392,41 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
         payload_spam_warn_cooldown_seconds=spam_config.warn_cooldown_seconds,
     )
     try:
-        status_callback = _plugin.set_show_status_preference if _plugin else None
-        status_gutter_callback = _plugin.set_status_gutter_preference if _plugin else None
-        debug_corner_callback = _plugin.set_debug_overlay_corner_preference if _plugin else None
-        gridlines_enabled_callback = _plugin.set_gridlines_enabled_preference if _plugin else None
-        gridline_spacing_callback = _plugin.set_gridline_spacing_preference if _plugin else None
-        payload_nudge_callback = _plugin.set_payload_nudge_preference if _plugin else None
-        payload_gutter_callback = _plugin.set_payload_nudge_gutter_preference if _plugin else None
-        force_render_callback = _plugin.set_force_render_preference if _plugin else None
-        standalone_mode_callback = _plugin.set_standalone_mode_preference if _plugin else None
-        title_bar_config_callback = _plugin.set_title_bar_compensation_preference if _plugin else None
-        debug_overlay_callback = _plugin.set_debug_overlay_preference if _plugin else None
-        payload_logging_callback = _plugin.set_payload_logging_preference if _plugin else None
-        font_min_callback = _plugin.set_min_font_preference if _plugin else None
-        font_max_callback = _plugin.set_max_font_preference if _plugin else None
-        font_step_callback = _plugin.set_legacy_font_step_preference if _plugin else None
-        font_preview_callback = _plugin.preview_font_sizes if _plugin else None
-        cycle_toggle_callback = _plugin.set_cycle_payload_preference if _plugin else None
-        cycle_copy_callback = _plugin.set_cycle_payload_copy_preference if _plugin else None
-        cycle_prev_callback = _plugin.cycle_payload_prev if _plugin else None
-        cycle_next_callback = _plugin.cycle_payload_next if _plugin else None
-        restart_overlay_callback = _plugin.restart_overlay_client if _plugin else None
-        launch_command_callback = _plugin.set_launch_command_preference if _plugin else None
-        toggle_argument_callback = _plugin.set_toggle_argument_preference if _plugin else None
-        payload_opacity_callback = _plugin.set_payload_opacity_preference if _plugin else None
-        reset_group_cache_callback = _plugin.reset_group_cache if _plugin else None
-        capture_override_callback = _plugin.set_capture_override_preference if _plugin else None
-        log_retention_override_callback = _plugin.set_log_retention_override_preference if _plugin else None
-        payload_exclusion_callback = _plugin.set_payload_logging_exclusions if _plugin else None
-        payload_spam_detection_callback = _plugin.set_payload_spam_detection_preference if _plugin else None
-        if _plugin:
-            diagnostics_state = _plugin.get_troubleshooting_panel_state()
+        plugin_runtime = _plugin
+        status_callback = plugin_runtime.set_show_status_preference if plugin_runtime else None
+        status_gutter_callback = plugin_runtime.set_status_gutter_preference if plugin_runtime else None
+        debug_corner_callback = plugin_runtime.set_debug_overlay_corner_preference if plugin_runtime else None
+        gridlines_enabled_callback = plugin_runtime.set_gridlines_enabled_preference if plugin_runtime else None
+        gridline_spacing_callback = plugin_runtime.set_gridline_spacing_preference if plugin_runtime else None
+        payload_nudge_callback = plugin_runtime.set_payload_nudge_preference if plugin_runtime else None
+        payload_gutter_callback = plugin_runtime.set_payload_nudge_gutter_preference if plugin_runtime else None
+        force_render_callback = plugin_runtime.set_force_render_preference if plugin_runtime else None
+        standalone_mode_callback = plugin_runtime.set_standalone_mode_preference if plugin_runtime else None
+        title_bar_config_callback = plugin_runtime.set_title_bar_compensation_preference if plugin_runtime else None
+        debug_overlay_callback = plugin_runtime.set_debug_overlay_preference if plugin_runtime else None
+        payload_logging_callback = plugin_runtime.set_payload_logging_preference if plugin_runtime else None
+        font_min_callback = plugin_runtime.set_min_font_preference if plugin_runtime else None
+        font_max_callback = plugin_runtime.set_max_font_preference if plugin_runtime else None
+        font_step_callback = plugin_runtime.set_legacy_font_step_preference if plugin_runtime else None
+        font_preview_callback = plugin_runtime.preview_font_sizes if plugin_runtime else None
+        cycle_toggle_callback = plugin_runtime.set_cycle_payload_preference if plugin_runtime else None
+        cycle_copy_callback = plugin_runtime.set_cycle_payload_copy_preference if plugin_runtime else None
+        cycle_prev_callback = plugin_runtime.cycle_payload_prev if plugin_runtime else None
+        cycle_next_callback = plugin_runtime.cycle_payload_next if plugin_runtime else None
+        restart_overlay_callback = plugin_runtime.restart_overlay_client if plugin_runtime else None
+        launch_controller_callback = (
+            (lambda: plugin_runtime.launch_overlay_controller(source="settings")) if plugin_runtime else None
+        )
+        launch_command_callback = plugin_runtime.set_launch_command_preference if plugin_runtime else None
+        toggle_argument_callback = plugin_runtime.set_toggle_argument_preference if plugin_runtime else None
+        payload_opacity_callback = plugin_runtime.set_payload_opacity_preference if plugin_runtime else None
+        reset_group_cache_callback = plugin_runtime.reset_group_cache if plugin_runtime else None
+        capture_override_callback = plugin_runtime.set_capture_override_preference if plugin_runtime else None
+        log_retention_override_callback = plugin_runtime.set_log_retention_override_preference if plugin_runtime else None
+        payload_exclusion_callback = plugin_runtime.set_payload_logging_exclusions if plugin_runtime else None
+        payload_spam_detection_callback = plugin_runtime.set_payload_spam_detection_preference if plugin_runtime else None
+        if plugin_runtime:
+            diagnostics_state = plugin_runtime.get_troubleshooting_panel_state()
         if launch_command_callback:
             LOGGER.debug("Attaching launch command callback with initial value=%s", _preferences.controller_launch_command)
         dev_mode = _preferences.dev_mode if _preferences is not None else DEV_BUILD
@@ -3276,9 +3456,10 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
             cycle_prev_callback,
             cycle_next_callback,
             restart_overlay_callback,
-            launch_command_callback,
-            toggle_argument_callback,
-            payload_opacity_callback,
+            launch_controller_callback=launch_controller_callback,
+            set_launch_command_callback=launch_command_callback,
+            set_toggle_argument_callback=toggle_argument_callback,
+            set_payload_opacity_callback=payload_opacity_callback,
             reset_group_cache_callback=reset_group_cache_callback,
             dev_mode=dev_mode,
             plugin_version=MODERN_OVERLAY_VERSION,
@@ -3288,7 +3469,7 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
             set_log_retention_override_callback=log_retention_override_callback,
             set_payload_exclusion_callback=payload_exclusion_callback,
             set_payload_spam_detection_callback=payload_spam_detection_callback,
-            payload_logging_initial=_plugin._payload_logging_enabled if _plugin else None,
+            payload_logging_initial=plugin_runtime._payload_logging_enabled if plugin_runtime else None,
         )
     except Exception as exc:
         LOGGER.exception("Failed to build preferences panel: %s", exc)

@@ -38,6 +38,50 @@ def test_load_options_filters_by_cache(tmp_path: Path) -> None:
     assert service.idprefix_entries == [("PluginA", "Group1")]
 
 
+def test_load_options_prefixes_only_labels_missing_plugin_name(tmp_path: Path) -> None:
+    shipped = tmp_path / "overlay_groupings.json"
+    user = tmp_path / "overlay_groupings.user.json"
+    cache = tmp_path / "overlay_group_cache.json"
+
+    shipped.write_text(
+        json.dumps(
+            {
+                "NeutronDancer": {
+                    "idPrefixGroups": {
+                        "Default": {},
+                        "NeutronDancer Galaxy Map": {},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    cache.write_text(
+        json.dumps(
+            {
+                "groups": {
+                    "NeutronDancer": {
+                        "Default": {"base": {"base_min_x": 0, "base_min_y": 0, "base_max_x": 1, "base_max_y": 1}},
+                        "NeutronDancer Galaxy Map": {
+                            "base": {"base_min_x": 0, "base_min_y": 0, "base_max_x": 1, "base_max_y": 1}
+                        },
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    service = GroupStateService(shipped_path=shipped, user_groupings_path=user, cache_path=cache)
+    options = service.load_options()
+
+    assert options == ["NeutronDancer: Default", "NeutronDancer Galaxy Map"]
+    assert service.idprefix_entries == [
+        ("NeutronDancer", "Default"),
+        ("NeutronDancer", "NeutronDancer Galaxy Map"),
+    ]
+
+
 def test_snapshot_synthesizes_from_base_and_offsets(tmp_path: Path) -> None:
     shipped = tmp_path / "overlay_groupings.json"
     user = tmp_path / "overlay_groupings.user.json"

@@ -104,6 +104,14 @@ _LOG_LEVEL_OVERRIDE_VALUE: Optional[int] = None
 _LOG_LEVEL_OVERRIDE_NAME: Optional[str] = None
 _LOG_LEVEL_OVERRIDE_SOURCE: Optional[str] = None
 legacy_write_groupings_config = staticmethod(EditController.legacy_write_groupings_config)
+_HIDDEN_DROPDOWN_PLUGIN_NAMES = {"edmcmodernoverlay"}
+
+
+def _include_dropdown_plugin(plugin_name: object) -> bool:
+    token = str(plugin_name or "").strip().casefold()
+    if not token:
+        return False
+    return token not in _HIDDEN_DROPDOWN_PLUGIN_NAMES
 
 def _ForceRenderOverrideManager(
     root: Path,
@@ -242,6 +250,10 @@ class OverlayConfigApp(tk.Tk):
         self._last_override_reload_nonce: Optional[str] = None
         self._last_override_reload_ts: float = 0.0
         self._last_active_group_sent: Optional[tuple[str, str, str]] = None
+        self._plugin_group_enabled_states: Dict[str, bool] = {}
+        self._suppress_group_enabled_command = False
+        self._last_plugin_group_state_refresh_ts: float = 0.0
+        self._group_controls_align_handle: str | None = None
 
         self._groupings_cache = self._load_groupings_cache()
         layout_builder = LayoutBuilder(self)
@@ -266,6 +278,7 @@ class OverlayConfigApp(tk.Tk):
             on_anchor_changed=self._handle_anchor_changed,
             on_justification_changed=self._handle_justification_changed,
             on_background_changed=self._handle_background_changed,
+            on_group_enabled_changed=self._handle_group_enabled_changed,
             on_reset_clicked=self._handle_reset_clicked,
             load_idprefix_options=self._load_idprefix_options,
         )
@@ -287,10 +300,16 @@ class OverlayConfigApp(tk.Tk):
         self.justification_widget = layout["justification_widget"]
         self.background_widget = layout["background_widget"]
         self.tip_helper = layout["tip_helper"]
+        self.group_enabled_var = layout.get("group_enabled_var")
+        self.group_enabled_checkbox = layout.get("group_enabled_checkbox")
         self.reset_button = layout["reset_button"]
         self._sidebar_focus_index = 0
         self.widget_select_mode = True
         self.sidebar.grid_propagate(True)
+        self.bind("<Configure>", self._schedule_group_controls_alignment, add="+")
+        if self.background_widget is not None:
+            self.background_widget.bind("<Configure>", self._schedule_group_controls_alignment, add="+")
+        self.after(0, self._align_group_controls_to_pick_button)
         self._binding_config = BindingConfig.load()
         self._binding_manager = BindingManager(self, self._binding_config)
         if self.idprefix_widget is not None:
@@ -790,9 +809,24 @@ class OverlayConfigApp(tk.Tk):
         if state is not None:
             try:
                 self._groupings_cache = state.refresh_cache()
-                options = state.load_options()
+                raw_options = list(state.load_options())
                 self._groupings_data = getattr(state, "_groupings_data", {})
-                self._idprefix_entries = list(state.idprefix_entries)
+                raw_entries = list(state.idprefix_entries)
+                options: list[str] = []
+                entries: list[tuple[str, str]] = []
+                for idx, entry in enumerate(raw_entries):
+                    if not isinstance(entry, tuple) or len(entry) != 2:
+                        continue
+                    plugin_name, label = entry
+                    if not _include_dropdown_plugin(plugin_name):
+                        continue
+                    label_text = str(label)
+                    entries.append((str(plugin_name), label_text))
+                    if idx < len(raw_options):
+                        options.append(str(raw_options[idx]))
+                    else:
+                        options.append(label_text)
+                self._idprefix_entries = entries
                 return options
             except Exception:
                 pass
@@ -819,6 +853,8 @@ class OverlayConfigApp(tk.Tk):
         cache_groups = self._groupings_cache.get("groups") if isinstance(self._groupings_cache, dict) else {}
         if isinstance(self._groupings_data, dict):
             for plugin_name, entry in sorted(self._groupings_data.items(), key=lambda item: item[0].casefold()):
+                if not _include_dropdown_plugin(plugin_name):
+                    continue
                 groups = entry.get("idPrefixGroups") if isinstance(entry, dict) else None
                 if not isinstance(groups, dict):
                     continue
@@ -831,14 +867,21 @@ class OverlayConfigApp(tk.Tk):
                             return head.strip().casefold()
                     return label.strip().casefold()
 
+                def _norm_token(value: str) -> str:
+                    return "".join(ch for ch in value.casefold() if ch.isalnum())
+
                 first_parts = {_prefix(lbl) for lbl in labels}
-                show_plugin = len(first_parts) > 1
+                show_plugin_collection = len(first_parts) > 1
+                plugin_token = _norm_token(plugin_name)
                 plugin_cache = cache_groups.get(plugin_name) if isinstance(cache_groups, dict) else {}
                 for label in labels:
                     has_cache = isinstance(plugin_cache, dict) and isinstance(plugin_cache.get(label), dict)
                     if not has_cache:
                         continue
-                    display = f"{plugin_name}: {label}" if show_plugin else label
+                    label_token = _norm_token(label)
+                    label_has_plugin_prefix = bool(plugin_token and label_token.startswith(plugin_token))
+                    show_plugin_label = show_plugin_collection and not label_has_plugin_prefix
+                    display = f"{plugin_name}: {label}" if show_plugin_label else label
                     options.append(display)
                     self._idprefix_entries.append((plugin_name, label))
         return options
@@ -885,10 +928,55 @@ class OverlayConfigApp(tk.Tk):
                 reset_button.configure(state="normal" if enabled else "disabled")
             except Exception:
                 pass
+        enabled_checkbox = getattr(self, "group_enabled_checkbox", None)
+        if enabled_checkbox is not None:
+            try:
+                enabled_checkbox.configure(state="normal" if enabled else "disabled")
+            except Exception:
+                pass
         if not enabled and not self.widget_select_mode and self.widget_focus_area == "sidebar":
             if getattr(self, "_sidebar_focus_index", 0) > 0:
                 self.exit_focus_mode()
         self._update_contextual_tip()
+
+    def _schedule_group_controls_alignment(self, _event: object | None = None) -> None:
+        handle = getattr(self, "_group_controls_align_handle", None)
+        if handle:
+            try:
+                self.after_cancel(handle)
+            except Exception:
+                pass
+        self._group_controls_align_handle = self.after(20, self._align_group_controls_to_pick_button)
+
+    def _align_group_controls_to_pick_button(self) -> None:
+        self._group_controls_align_handle = None
+        checkbox = getattr(self, "group_enabled_checkbox", None)
+        reset_button = getattr(self, "reset_button", None)
+        background = getattr(self, "background_widget", None)
+        if checkbox is None or reset_button is None or background is None:
+            return
+        pick_button = getattr(background, "_picker_btn", None)
+        if pick_button is None:
+            return
+        try:
+            self.update_idletasks()
+            parent = checkbox.master
+            parent_root_x = int(parent.winfo_rootx())
+            parent_width = int(parent.winfo_width())
+            parent_height = int(parent.winfo_height())
+            pick_right_x = int(pick_button.winfo_rootx()) + int(pick_button.winfo_width())
+            target_x = max(0, min(parent_width, pick_right_x - parent_root_x))
+            checkbox.place_configure(relx=0.0, x=target_x, y=2, anchor="ne")
+
+            checkbox_top = int(checkbox.winfo_y())
+            checkbox_height = max(1, int(checkbox.winfo_height()))
+            reset_height = max(1, int(reset_button.winfo_height()))
+            reset_top = checkbox_top + checkbox_height + 6
+            max_reset_top = max(2, parent_height - reset_height - 2)
+            reset_top = max(2, min(reset_top, max_reset_top))
+            reset_button.place_configure(relx=0.0, x=target_x, y=reset_top, anchor="ne")
+        except Exception:
+            return
 
     def _compute_absolute_from_snapshot(self, snapshot: GroupSnapshot) -> tuple[float, float]:
         controller = getattr(self, "_preview_controller", None)
@@ -1184,6 +1272,18 @@ class OverlayConfigApp(tk.Tk):
             _controller_debug("Groupings reloaded from disk at %s", time.strftime("%H:%M:%S"))
             self._refresh_idprefix_options()
         self._refresh_current_group_snapshot(force_ui=False)
+        selection = self._get_current_group_selection()
+        if selection is not None:
+            self._refresh_plugin_group_state_cache(force=False)
+            group_name = selection[1]
+            enabled = bool(self._plugin_group_enabled_states.get(group_name, True))
+            var = getattr(self, "group_enabled_var", None)
+            if var is not None and bool(var.get()) != enabled:
+                self._suppress_group_enabled_command = True
+                try:
+                    var.set(enabled)
+                finally:
+                    self._suppress_group_enabled_command = False
         if self._mode_timers is None:
             self._status_poll_handle = self.after(self._status_poll_interval_ms, self._poll_cache_and_status)
     def _refresh_idprefix_options(self) -> None:
@@ -1425,6 +1525,76 @@ class OverlayConfigApp(tk.Tk):
     ) -> None:
         self._edit_controller.persist_offsets(selection, offset_x, offset_y, debounce_ms)
 
+    def _refresh_plugin_group_state_cache(self, *, force: bool = False, min_interval_seconds: float = 1.0) -> None:
+        now = time.time()
+        if not force and now - float(getattr(self, "_last_plugin_group_state_refresh_ts", 0.0) or 0.0) < min_interval_seconds:
+            return
+        bridge = getattr(self, "_plugin_bridge", None)
+        if bridge is None:
+            return
+        try:
+            response = bridge.plugin_group_status()
+        except Exception:
+            return
+        if not isinstance(response, dict):
+            return
+        if str(response.get("status") or "").strip().lower() != "ok":
+            return
+        raw_states = response.get("plugin_group_states")
+        if not isinstance(raw_states, dict):
+            return
+        states: Dict[str, bool] = {}
+        for group_name, raw_value in raw_states.items():
+            if not isinstance(group_name, str):
+                continue
+            token = group_name.strip()
+            if not token:
+                continue
+            states[token] = bool(raw_value)
+        self._plugin_group_enabled_states = states
+        self._last_plugin_group_state_refresh_ts = now
+
+    def _sync_group_enabled_checkbox(self, group_name: Optional[str]) -> None:
+        var = getattr(self, "group_enabled_var", None)
+        if var is None:
+            return
+        self._refresh_plugin_group_state_cache(force=True)
+        enabled = True
+        if group_name:
+            enabled = bool(self._plugin_group_enabled_states.get(group_name, True))
+        self._suppress_group_enabled_command = True
+        try:
+            var.set(enabled)
+        finally:
+            self._suppress_group_enabled_command = False
+
+    def _handle_group_enabled_changed(self, enabled: bool) -> None:
+        if getattr(self, "_suppress_group_enabled_command", False):
+            return
+        selection = self._get_current_group_selection()
+        if selection is None:
+            return
+        _plugin_name, group_name = selection
+        bridge = getattr(self, "_plugin_bridge", None)
+        if bridge is None:
+            return
+        try:
+            response = bridge.set_plugin_group_enabled(bool(enabled), group_name=group_name)
+        except Exception as exc:
+            _controller_debug("Failed to set plugin group state for %s: %s", group_name, exc)
+            self._sync_group_enabled_checkbox(group_name)
+            return
+        if not isinstance(response, dict) or str(response.get("status") or "").strip().lower() != "ok":
+            _controller_debug("Plugin group state update rejected for %s: %s", group_name, response)
+            self._sync_group_enabled_checkbox(group_name)
+            return
+        self._plugin_group_enabled_states[group_name] = bool(enabled)
+        raw_states = response.get("plugin_group_states")
+        if isinstance(raw_states, dict):
+            for raw_name, raw_value in raw_states.items():
+                if isinstance(raw_name, str) and raw_name.strip():
+                    self._plugin_group_enabled_states[raw_name.strip()] = bool(raw_value)
+
     def _handle_idprefix_selected(self, _selection: str | None = None) -> None:
         if not hasattr(self, "idprefix_widget"):
             return
@@ -1438,6 +1608,7 @@ class OverlayConfigApp(tk.Tk):
             _controller_debug("No cached idPrefix groups available; controls disabled.")
             self._set_group_controls_enabled(False)
             self._send_active_group_selection("", "")
+            self._sync_group_enabled_checkbox(None)
             return
         plugin_name, label = self._idprefix_entries[idx]
         cfg = self._get_group_config(plugin_name, label)
@@ -1464,6 +1635,7 @@ class OverlayConfigApp(tk.Tk):
         self._sync_absolute_for_current_group(force_ui=True)
         self._sync_offset_pins_for_current_group()
         self._send_active_group_selection(plugin_name, label)
+        self._sync_group_enabled_checkbox(label)
 
     def _handle_justification_changed(self, justification: str) -> None:
         selection = self._get_current_group_selection()

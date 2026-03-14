@@ -5,7 +5,7 @@ import tkinter as tk
 class SidebarTipHelper(tk.Frame):
     """Lightweight helper that shows context-aware tips for the sidebar widgets."""
 
-    def __init__(self, parent: tk.Widget) -> None:
+    def __init__(self, parent: tk.Widget, *, wraplength: int = 220) -> None:
         super().__init__(parent, bd=0, highlightthickness=0, bg=parent.cget("background"))
         self._default_primary = "Handy tips will show up here in the future."
         self._primary_var = tk.StringVar(value=self._default_primary)
@@ -16,7 +16,8 @@ class SidebarTipHelper(tk.Frame):
             textvariable=self._primary_var,
             justify="left",
             anchor="nw",
-            wraplength=220,
+            wraplength=wraplength,
+            height=3,
             padx=6,
             pady=4,
             bg=self.cget("background"),
@@ -27,7 +28,8 @@ class SidebarTipHelper(tk.Frame):
             textvariable=self._secondary_var,
             justify="left",
             anchor="nw",
-            wraplength=220,
+            wraplength=wraplength,
+            height=2,
             padx=6,
             pady=2,
             bg=self.cget("background"),
@@ -35,11 +37,10 @@ class SidebarTipHelper(tk.Frame):
             font=("TkDefaultFont", 8),
         )
 
-        primary.pack(fill="x")
-        secondary.pack(fill="x")
+        primary.pack(fill="x", anchor="n")
+        secondary.pack(fill="x", anchor="n")
 
     def set_context(self, primary: str | None = None, secondary: str | None = None) -> None:
         self._primary_var.set(primary or self._default_primary)
         self._secondary_var.set(secondary or "")
-
 

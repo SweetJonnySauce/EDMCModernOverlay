@@ -172,3 +172,27 @@ def test_stop_without_start_is_safe(monkeypatch, tmp_path):
     assert not runtime._tracked_threads
     # Broadcaster is created during __init__; when not started, handles remain limited to it.
     assert runtime._tracked_handles == [runtime.broadcaster]
+
+
+def test_hotkeys_manager_start_stop_are_lightweight_tie_ins(monkeypatch, tmp_path):
+    class _DummyHotkeysManager:
+        def __init__(self, **kwargs):
+            self.start_calls = 0
+            self.stop_calls = 0
+
+        def start(self):
+            self.start_calls += 1
+            return True
+
+        def stop(self):
+            self.stop_calls += 1
+
+    monkeypatch.setattr(load, "HotkeysManager", _DummyHotkeysManager)
+    runtime = _make_runtime(monkeypatch, tmp_path)
+
+    assert isinstance(runtime._hotkeys, _DummyHotkeysManager)
+    runtime.start()
+    runtime.stop()
+
+    assert runtime._hotkeys.start_calls == 1
+    assert runtime._hotkeys.stop_calls == 1

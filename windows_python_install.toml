@@ -1,0 +1,7 @@
+[tool.windows_python_install]
+version = "0.0.0"
+arch = "amd64"
+url = "REPLACED_AT_BUILD"
+sha256 = "REPLACED_AT_BUILD"
+target_dir_template = "%LOCALAPPDATA%\\Programs\\Python\\Python{MAJOR}{MINOR}"
+python_exe_template = "%LOCALAPPDATA%\\Programs\\Python\\Python{MAJOR}{MINOR}\\python.exe"

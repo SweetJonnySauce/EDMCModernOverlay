@@ -5,13 +5,14 @@ import logging
 import math
 import sys
 import time
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
 from PyQt6.QtGui import QGuiApplication, QPainter
 
 from overlay_client.group_transform import GroupTransform
 from overlay_client.legacy_store import LegacyItem
 from overlay_client.override_reload import force_reload_overrides, parse_reload_nonce
+from overlay_client.plugin_group_clear import clear_store_for_groups, dedupe_group_names
 from overlay_client.payload_transform import (
     build_payload_transform_context,
     remap_axis_value,
@@ -817,6 +818,29 @@ class ControlSurfaceMixin:
 
     def handle_legacy_payload(self, payload: Dict[str, Any]) -> None:
         self._handle_legacy(payload)
+
+    def clear_plugin_groups(
+        self,
+        group_names: Sequence[str],
+        *,
+        resolve_group_name: Optional[Callable[[Mapping[str, Any]], Optional[str]]] = None,
+    ) -> int:
+        targets = dedupe_group_names(group_names)
+        if not targets:
+            return 0
+        removed = clear_store_for_groups(
+            store=self._payload_model.store,
+            target_groups=targets,
+            resolve_group_name=resolve_group_name,
+        )
+        if removed <= 0:
+            return 0
+        if self._cycle_payload_enabled:
+            self._sync_cycle_items()
+        self._mark_legacy_cache_dirty()
+        self._request_repaint("plugin_group_clear", immediate=True)
+        _CLIENT_LOGGER.debug("Cleared %d cached payload(s) for plugin groups: %s", removed, ", ".join(targets))
+        return int(removed)
 
     def handle_override_reload(self, payload: Optional[Mapping[str, Any]] = None) -> None:
         nonce = parse_reload_nonce(payload)

@@ -148,6 +148,11 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
+      - name: Resolve Windows Python installer metadata
+        shell: pwsh
+        run: |
+          python scripts/resolve_windows_python.py --pyproject pyproject.toml
+
       - name: Verify release build is not in dev mode
         shell: pwsh
         run: |

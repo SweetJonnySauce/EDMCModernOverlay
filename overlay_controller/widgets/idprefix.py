@@ -6,6 +6,8 @@ from typing import Callable
 
 from overlay_controller.widgets.common import alt_modifier_active
 
+IDPREFIX_DROPDOWN_WIDTH = 32
+
 
 class IdPrefixGroupWidget(tk.Frame):
     """Composite control with a dropdown selector (placeholder for future inputs)."""
@@ -22,7 +24,7 @@ class IdPrefixGroupWidget(tk.Frame):
             values=self._choices,
             state="readonly",
             textvariable=self._selection,
-            width=24,
+            width=IDPREFIX_DROPDOWN_WIDTH,
         )
         if self._choices:
             self.dropdown.current(0)

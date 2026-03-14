@@ -26,10 +26,121 @@ _grouping_store: Optional["_PluginGroupingStore"] = None
 _publisher_warn_at: float = 0.0
 _publisher_warn_suppressed: int = 0
 _PUBLISHER_WARN_INTERVAL = 30.0  # seconds
+_LEGACY_ALIAS_WARNED: set[tuple[str, str]] = set()
+_LEGACY_ALIAS_WARNED_LOCK = RLock()
+
+_LEGACY_DEFINE_PLUGIN_GROUP_ALIASES: Dict[str, str] = {
+    "plugin_group": "plugin_name",
+    "matching_prefixes": "plugin_matching_prefixes",
+    "id_prefix_group": "plugin_group_name",
+    "id_prefixes": "plugin_group_prefixes",
+    "id_prefix_group_anchor": "plugin_group_anchor",
+    "id_prefix_offset_x": "plugin_group_offset_x",
+    "id_prefix_offset_y": "plugin_group_offset_y",
+    "background_color": "plugin_group_background_color",
+    "background_border_color": "plugin_group_border_color",
+    "background_border_width": "plugin_group_border_width",
+}
+_LEGACY_ALIAS_BY_CANONICAL: Dict[str, str] = {canonical: legacy for legacy, canonical in _LEGACY_DEFINE_PLUGIN_GROUP_ALIASES.items()}
+_DEFINE_PLUGIN_GROUP_CANONICAL_ALIAS_ORDER: Tuple[str, ...] = (
+    "plugin_name",
+    "plugin_matching_prefixes",
+    "plugin_group_name",
+    "plugin_group_prefixes",
+    "plugin_group_anchor",
+    "plugin_group_offset_x",
+    "plugin_group_offset_y",
+    "plugin_group_background_color",
+    "plugin_group_border_color",
+    "plugin_group_border_width",
+)
 
 
 class PluginGroupingError(ValueError):
     """Raised when callers provide invalid plugin grouping data."""
+
+
+def _compat_arg_label(canonical_name: str, legacy_name: str) -> str:
+    return f"{canonical_name} ({legacy_name})"
+
+
+def _compat_values_equal(left: Any, right: Any) -> bool:
+    if left == right:
+        return True
+    if isinstance(left, Sequence) and isinstance(right, Sequence) and not isinstance(left, (str, bytes)) and not isinstance(right, (str, bytes)):
+        return list(left) == list(right)
+    return False
+
+
+def _warning_plugin_name(value: Any) -> Optional[str]:
+    if isinstance(value, str):
+        candidate = value.strip()
+        if candidate:
+            return candidate
+    return None
+
+
+def _warn_legacy_alias_once(legacy_name: str, canonical_name: str, *, plugin_name: Optional[str] = None) -> None:
+    warning_plugin = plugin_name or "<unknown>"
+    warning_key = (legacy_name, warning_plugin)
+    with _LEGACY_ALIAS_WARNED_LOCK:
+        if warning_key in _LEGACY_ALIAS_WARNED:
+            return
+        _LEGACY_ALIAS_WARNED.add(warning_key)
+    if plugin_name:
+        _log_warning(
+            "define_plugin_group legacy alias '%s' is accepted for compatibility in plugin '%s'; use '%s' instead.",
+            legacy_name,
+            plugin_name,
+            canonical_name,
+        )
+        return
+    _log_warning(
+        "define_plugin_group legacy alias '%s' is accepted for compatibility; use '%s' instead.",
+        legacy_name,
+        canonical_name,
+    )
+
+
+def _merge_legacy_alias(
+    *,
+    canonical_name: str,
+    legacy_name: str,
+    canonical_value: Any,
+    legacy_kwargs: MutableMapping[str, Any],
+    plugin_name_for_warning: Optional[str] = None,
+) -> Any:
+    if legacy_name not in legacy_kwargs:
+        return canonical_value
+    legacy_value = legacy_kwargs.pop(legacy_name)
+    warning_plugin = _warning_plugin_name(plugin_name_for_warning)
+    if warning_plugin is None and canonical_name == "plugin_name":
+        warning_plugin = _warning_plugin_name(canonical_value)
+    if warning_plugin is None and canonical_name == "plugin_name":
+        warning_plugin = _warning_plugin_name(legacy_value)
+    _warn_legacy_alias_once(legacy_name, canonical_name, plugin_name=warning_plugin)
+    if canonical_value is None:
+        return legacy_value
+    if not _compat_values_equal(canonical_value, legacy_value):
+        raise PluginGroupingError(
+            f"Conflicting values for {_compat_arg_label(canonical_name, legacy_name)}; "
+            "provide only one name or matching values."
+        )
+    return canonical_value
+
+
+def _raise_unknown_legacy_aliases(legacy_kwargs: Mapping[str, Any]) -> None:
+    if not legacy_kwargs:
+        return
+    unknown = ", ".join(sorted(str(key) for key in legacy_kwargs.keys()))
+    raise PluginGroupingError(
+        f"Unknown define_plugin_group argument(s): {unknown}. "
+        f"Supported legacy aliases: {', '.join(sorted(_LEGACY_DEFINE_PLUGIN_GROUP_ALIASES.keys()))}"
+    )
+
+
+def _rewrite_compat_error(exc: PluginGroupingError, *, token: str, canonical_name: str, legacy_name: str) -> PluginGroupingError:
+    return PluginGroupingError(str(exc).replace(token, _compat_arg_label(canonical_name, legacy_name)))
 
 
 def register_publisher(publisher: Callable[[Mapping[str, Any]], bool]) -> None:
@@ -134,90 +245,218 @@ def send_overlay_message(message: Mapping[str, Any]) -> bool:
 
 def define_plugin_group(
     *,
-    plugin_group: str,
-    matching_prefixes: Optional[Sequence[str]] = None,
-    id_prefix_group: Optional[str] = None,
-    id_prefixes: Optional[Sequence[Union[str, Mapping[str, Any]]]] = None,
-    id_prefix_group_anchor: Optional[str] = None,
-    id_prefix_offset_x: Optional[Union[int, float]] = None,
-    id_prefix_offset_y: Optional[Union[int, float]] = None,
+    plugin_name: Optional[str] = None,
+    plugin_matching_prefixes: Optional[Sequence[str]] = None,
+    plugin_group_name: Optional[str] = None,
+    plugin_group_prefixes: Optional[Sequence[Union[str, Mapping[str, Any]]]] = None,
+    plugin_group_anchor: Optional[str] = None,
+    plugin_group_offset_x: Optional[Union[int, float]] = None,
+    plugin_group_offset_y: Optional[Union[int, float]] = None,
     payload_justification: Optional[str] = None,
     marker_label_position: Optional[str] = None,
     controller_preview_box_mode: Optional[str] = None,
-    background_color: Optional[str] = None,
-    background_border_color: Optional[str] = None,
-    background_border_width: Optional[Union[int, float]] = None,
+    plugin_group_background_color: Optional[str] = None,
+    plugin_group_border_color: Optional[str] = None,
+    plugin_group_border_width: Optional[Union[int, float]] = None,
+    **legacy_kwargs: Any,
 ) -> bool:
     """Create or replace grouping metadata for a plugin.
 
     Returns ``True`` when the JSON file was updated. Raises
     :class:`PluginGroupingError` when validation fails or when the overlay
-    plugin is not running.
+    plugin is not running. Legacy argument aliases remain supported for
+    compatibility and emit one warning per argument per calling plugin per process.
     """
+    canonical_values: Dict[str, Any] = {
+        "plugin_name": plugin_name,
+        "plugin_matching_prefixes": plugin_matching_prefixes,
+        "plugin_group_name": plugin_group_name,
+        "plugin_group_prefixes": plugin_group_prefixes,
+        "plugin_group_anchor": plugin_group_anchor,
+        "plugin_group_offset_x": plugin_group_offset_x,
+        "plugin_group_offset_y": plugin_group_offset_y,
+        "plugin_group_background_color": plugin_group_background_color,
+        "plugin_group_border_color": plugin_group_border_color,
+        "plugin_group_border_width": plugin_group_border_width,
+    }
+    canonical_values["plugin_name"] = _merge_legacy_alias(
+        canonical_name="plugin_name",
+        legacy_name=_LEGACY_ALIAS_BY_CANONICAL["plugin_name"],
+        canonical_value=canonical_values["plugin_name"],
+        legacy_kwargs=legacy_kwargs,
+        plugin_name_for_warning=canonical_values["plugin_name"],
+    )
+    warning_plugin_name = _warning_plugin_name(canonical_values["plugin_name"])
+    for canonical_name in _DEFINE_PLUGIN_GROUP_CANONICAL_ALIAS_ORDER[1:]:
+        canonical_values[canonical_name] = _merge_legacy_alias(
+            canonical_name=canonical_name,
+            legacy_name=_LEGACY_ALIAS_BY_CANONICAL[canonical_name],
+            canonical_value=canonical_values[canonical_name],
+            legacy_kwargs=legacy_kwargs,
+            plugin_name_for_warning=warning_plugin_name,
+        )
 
-    if not plugin_group:
-        raise PluginGroupingError("pluginGroup is required")
+    plugin_name = cast(Optional[str], canonical_values["plugin_name"])
+    plugin_matching_prefixes = cast(Optional[Sequence[str]], canonical_values["plugin_matching_prefixes"])
+    plugin_group_name = cast(Optional[str], canonical_values["plugin_group_name"])
+    plugin_group_prefixes = cast(Optional[Sequence[Union[str, Mapping[str, Any]]]], canonical_values["plugin_group_prefixes"])
+    plugin_group_anchor = cast(Optional[str], canonical_values["plugin_group_anchor"])
+    plugin_group_offset_x = cast(Optional[Union[int, float]], canonical_values["plugin_group_offset_x"])
+    plugin_group_offset_y = cast(Optional[Union[int, float]], canonical_values["plugin_group_offset_y"])
+    plugin_group_background_color = cast(Optional[str], canonical_values["plugin_group_background_color"])
+    plugin_group_border_color = cast(Optional[str], canonical_values["plugin_group_border_color"])
+    plugin_group_border_width = cast(Optional[Union[int, float]], canonical_values["plugin_group_border_width"])
+    _raise_unknown_legacy_aliases(legacy_kwargs)
+
+    if not plugin_name:
+        raise PluginGroupingError(_compat_arg_label("plugin_name", "plugin_group") + " is required")
 
     store = _grouping_store
     if store is None:
         raise PluginGroupingError("Modern Overlay plugin is unavailable; cannot define plugin groups")
 
-    plugin_label = _normalise_label(plugin_group, "pluginGroup")
+    plugin_label = _normalise_label(plugin_name, _compat_arg_label("plugin_name", "plugin_group"))
     if (
-        matching_prefixes is None
-        and id_prefix_group is None
-        and id_prefixes is None
-        and id_prefix_group_anchor is None
-        and id_prefix_offset_x is None
-        and id_prefix_offset_y is None
+        plugin_matching_prefixes is None
+        and plugin_group_name is None
+        and plugin_group_prefixes is None
+        and plugin_group_anchor is None
+        and plugin_group_offset_x is None
+        and plugin_group_offset_y is None
         and payload_justification is None
         and marker_label_position is None
         and controller_preview_box_mode is None
-        and background_color is None
-        and background_border_color is None
-        and background_border_width is None
+        and plugin_group_background_color is None
+        and plugin_group_border_color is None
+        and plugin_group_border_width is None
     ):
         raise PluginGroupingError(
-            "Provide matchingPrefixes, idPrefixGroup, idPrefixes, idPrefixGroupAnchor, "
-            "markerLabelPosition, controllerPreviewBoxMode, offsets, payloadJustification, or background fields"
+            "Provide plugin_matching_prefixes (matching_prefixes), "
+            "plugin_group_name (id_prefix_group), plugin_group_prefixes (id_prefixes), "
+            "plugin_group_anchor (id_prefix_group_anchor), plugin_group_offset_x (id_prefix_offset_x), "
+            "plugin_group_offset_y (id_prefix_offset_y), payload_justification, marker_label_position, "
+            "controller_preview_box_mode, plugin_group_background_color (background_color), "
+            "plugin_group_border_color (background_border_color), or "
+            "plugin_group_border_width (background_border_width)."
         )
 
-    match_list = _normalise_prefixes(matching_prefixes, "matchingPrefixes") if matching_prefixes is not None else None
-    id_group_label = _normalise_label(id_prefix_group, "idPrefixGroup") if id_prefix_group is not None else None
-    id_prefix_entries = _normalise_id_prefix_entries(id_prefixes) if id_prefixes is not None else None
+    match_list = (
+        _normalise_prefixes(
+            plugin_matching_prefixes,
+            _compat_arg_label("plugin_matching_prefixes", "matching_prefixes"),
+        )
+        if plugin_matching_prefixes is not None
+        else None
+    )
+    id_group_label = (
+        _normalise_label(plugin_group_name, _compat_arg_label("plugin_group_name", "id_prefix_group"))
+        if plugin_group_name is not None
+        else None
+    )
+    try:
+        id_prefix_entries = _normalise_id_prefix_entries(plugin_group_prefixes) if plugin_group_prefixes is not None else None
+    except PluginGroupingError as exc:
+        raise _rewrite_compat_error(
+            exc,
+            token="idPrefixes",
+            canonical_name="plugin_group_prefixes",
+            legacy_name="id_prefixes",
+        ) from exc
     if id_prefix_entries is not None and id_group_label is None:
-        raise PluginGroupingError("idPrefixGroup is required when specifying idPrefixes")
-    anchor_token = _normalise_anchor(id_prefix_group_anchor) if id_prefix_group_anchor is not None else None
+        raise PluginGroupingError(
+            f"{_compat_arg_label('plugin_group_name', 'id_prefix_group')} is required when specifying "
+            f"{_compat_arg_label('plugin_group_prefixes', 'id_prefixes')}"
+        )
+    if plugin_group_anchor is not None:
+        try:
+            anchor_token = _normalise_anchor(plugin_group_anchor)
+        except PluginGroupingError as exc:
+            raise _rewrite_compat_error(
+                exc,
+                token="idPrefixGroupAnchor",
+                canonical_name="plugin_group_anchor",
+                legacy_name="id_prefix_group_anchor",
+            ) from exc
+    else:
+        anchor_token = None
     if anchor_token is not None and id_group_label is None:
-        raise PluginGroupingError("idPrefixGroup is required when specifying idPrefixGroupAnchor")
-    offset_x = _normalise_offset(id_prefix_offset_x, "idPrefixGroup offsetX") if id_prefix_offset_x is not None else None
-    offset_y = _normalise_offset(id_prefix_offset_y, "idPrefixGroup offsetY") if id_prefix_offset_y is not None else None
+        raise PluginGroupingError(
+            f"{_compat_arg_label('plugin_group_name', 'id_prefix_group')} is required when specifying "
+            f"{_compat_arg_label('plugin_group_anchor', 'id_prefix_group_anchor')}"
+        )
+    offset_x = (
+        _normalise_offset(
+            plugin_group_offset_x,
+            _compat_arg_label("plugin_group_offset_x", "id_prefix_offset_x"),
+        )
+        if plugin_group_offset_x is not None
+        else None
+    )
+    offset_y = (
+        _normalise_offset(
+            plugin_group_offset_y,
+            _compat_arg_label("plugin_group_offset_y", "id_prefix_offset_y"),
+        )
+        if plugin_group_offset_y is not None
+        else None
+    )
     if id_group_label is None and (offset_x is not None or offset_y is not None):
-        raise PluginGroupingError("idPrefixGroup is required when specifying offsets")
+        raise PluginGroupingError(
+            f"{_compat_arg_label('plugin_group_name', 'id_prefix_group')} is required when specifying offsets"
+        )
     justification_token = (
         _normalise_justification(payload_justification) if payload_justification is not None else None
     )
     if justification_token is not None and id_group_label is None:
-        raise PluginGroupingError("idPrefixGroup is required when specifying payloadJustification")
+        raise PluginGroupingError(
+            f"{_compat_arg_label('plugin_group_name', 'id_prefix_group')} is required when specifying payload_justification"
+        )
     marker_label_position_token = (
         _normalise_marker_label_position(marker_label_position) if marker_label_position is not None else None
     )
     if marker_label_position_token is not None and id_group_label is None:
-        raise PluginGroupingError("idPrefixGroup is required when specifying markerLabelPosition")
+        raise PluginGroupingError(
+            f"{_compat_arg_label('plugin_group_name', 'id_prefix_group')} is required when specifying marker_label_position"
+        )
     controller_preview_box_mode_token = (
         _normalise_controller_preview_box_mode(controller_preview_box_mode)
         if controller_preview_box_mode is not None
         else None
     )
     if controller_preview_box_mode_token is not None and id_group_label is None:
-        raise PluginGroupingError("idPrefixGroup is required when specifying controllerPreviewBoxMode")
-    background_color_token = _normalise_background_color(background_color) if background_color is not None else None
-    background_border_color_token = (
-        _normalise_background_color(background_border_color) if background_border_color is not None else None
-    )
+        raise PluginGroupingError(
+            f"{_compat_arg_label('plugin_group_name', 'id_prefix_group')} is required when specifying controller_preview_box_mode"
+        )
+    if plugin_group_background_color is not None:
+        try:
+            background_color_token = _normalise_background_color(plugin_group_background_color)
+        except PluginGroupingError as exc:
+            raise _rewrite_compat_error(
+                exc,
+                token="backgroundColor",
+                canonical_name="plugin_group_background_color",
+                legacy_name="background_color",
+            ) from exc
+    else:
+        background_color_token = None
+    if plugin_group_border_color is not None:
+        try:
+            background_border_color_token = _normalise_background_color(plugin_group_border_color)
+        except PluginGroupingError as exc:
+            raise _rewrite_compat_error(
+                exc,
+                token="backgroundColor",
+                canonical_name="plugin_group_border_color",
+                legacy_name="background_border_color",
+            ) from exc
+    else:
+        background_border_color_token = None
     background_border_width_token = (
-        _normalise_border_width(background_border_width, "backgroundBorderWidth")
-        if background_border_width is not None
+        _normalise_border_width(
+            plugin_group_border_width,
+            _compat_arg_label("plugin_group_border_width", "background_border_width"),
+        )
+        if plugin_group_border_width is not None
         else None
     )
     if (
@@ -226,7 +465,10 @@ def define_plugin_group(
         or background_border_width_token is not None
     ) and id_group_label is None:
         raise PluginGroupingError(
-            "idPrefixGroup is required when specifying backgroundColor, backgroundBorderColor, or backgroundBorderWidth"
+            f"{_compat_arg_label('plugin_group_name', 'id_prefix_group')} is required when specifying "
+            f"{_compat_arg_label('plugin_group_background_color', 'background_color')}, "
+            f"{_compat_arg_label('plugin_group_border_color', 'background_border_color')}, or "
+            f"{_compat_arg_label('plugin_group_border_width', 'background_border_width')}"
         )
 
     update = _GroupingUpdate(
@@ -431,15 +673,27 @@ def _log_warning(message: str, *args: Any) -> None:
 
 
 def _emit(level: int, message: str, *args: Any) -> None:
+    rendered = message % args if args else message
     try:
         from config import config as edmc_config  # type: ignore
 
         logger_obj = getattr(edmc_config, "logger", None)
         if logger_obj:
-            logger_obj.log(level, f"[EDMCModernOverlay] {message % args if args else message}")
+            logger_obj.log(level, f"[EDMCModernOverlay] {rendered}")
             return
     except Exception:
         pass
+
+    # Fall back to the plugin logger so warnings flow through load.py's
+    # EDMC bridge handler when available.
+    plugin_logger = logging.getLogger("EDMCModernOverlay")
+    try:
+        if plugin_logger.handlers or plugin_logger.propagate:
+            plugin_logger.log(level, rendered)
+            return
+    except Exception:
+        pass
+
     if args:
         _LOGGER.log(level, message, *args)
     else:
