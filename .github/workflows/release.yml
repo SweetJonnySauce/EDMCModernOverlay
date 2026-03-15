@@ -82,7 +82,7 @@ jobs:
           ls -al dist
 
       - name: Upload workflow artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: release-bundles
           path: |
@@ -92,12 +92,19 @@ jobs:
 
       - name: Attach archives to GitHub Release
         if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event.release.tag_name || github.ref_name }}
-          files: |
-            dist/EDMCModernOverlay-windows_powershell-*.zip
-            dist/EDMCModernOverlay-linux-*.tar.gz
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(dist/EDMCModernOverlay-windows_powershell-*.zip dist/EDMCModernOverlay-linux-*.tar.gz)
+          if (( ${#files[@]} == 0 )); then
+            echo "No release archives matched expected patterns." >&2
+            exit 1
+          fi
+          gh release upload "$TAG" "${files[@]}" --clobber
 
   source_zip:
     name: Fetch source code archive
@@ -128,7 +135,7 @@ jobs:
 
       - name: Upload source zip artifact
         if: steps.fetch_source.outputs.have_source == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: source-zip
           path: dist/EDMCModernOverlay-source.zip
@@ -282,7 +289,7 @@ jobs:
           iscc scripts\\installer.iss /DAppVersion="${env:VERSION}" /DOutputDir="$outputDir" /DOutputBaseFilename="$finalExeBase" /DPayloadRoot="$payloadRoot" /DInstallVenvMode="build"
 
       - name: Upload installer artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: win-inno-build
           path: |
@@ -293,7 +300,7 @@ jobs:
 
       - name: Upload installer EXE (manual run)
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: win-inno-build-exe
           path: dist/inno_output/*.exe
@@ -301,11 +308,17 @@ jobs:
 
       - name: Attach installer to GitHub Release
         if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event.release.tag_name || github.ref_name }}
-          files: dist/inno_output/*.exe
-          fail_on_unmatched_files: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || github.ref_name }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $files = Get-ChildItem -Path "dist/inno_output/*.exe" -File | ForEach-Object { $_.FullName }
+          if ($files.Count -eq 0) {
+            throw "No installer EXE files found in dist/inno_output."
+          }
+          gh release upload $env:TAG $files --clobber
 
   vt_scan_bundles:
     permissions:
@@ -371,7 +384,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Download VT badge fragments
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: vt-report-*
           path: vt_reports
@@ -473,11 +486,17 @@ jobs:
           print(f"Wrote {report_html} with {len(fragments)} fragments.")
           PY
       - name: Upload transparency report to release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event.release.tag_name || github.ref_name }}
-          files: |
-            vt-transparency.html
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f vt-transparency.html ]]; then
+            echo "vt-transparency.html was not generated." >&2
+            exit 1
+          fi
+          gh release upload "$TAG" vt-transparency.html --clobber
 
   update_readme_vt:
     name: Update README VirusTotal link
@@ -495,7 +514,7 @@ jobs:
           fetch-depth: 0
 
       - name: Download source VT badge fragment
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: vt-report-*-source
           path: vt_reports_source

@@ -48,7 +48,7 @@ jobs:
       scan_status: ${{ steps.scan_status.outputs.scan_status }}
     steps:
       - name: Download artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: ${{ inputs.artifact }}
           path: .
@@ -306,7 +306,7 @@ jobs:
           echo "scan_status=${status}" >> "$GITHUB_OUTPUT"
 
       - name: Upload VT badges fragment
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: vt-report-${{ inputs.release_tag || inputs.release_id || github.run_id }}${{ inputs.artifact_suffix != '' && format('-{0}', inputs.artifact_suffix) || '' }}
           path: vt_badges.md
