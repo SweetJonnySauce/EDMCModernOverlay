@@ -104,6 +104,9 @@ class InteractionSurfaceMixin:
                 and self._last_set_geometry is not None
                 and (frame.x(), frame.y(), frame.width(), frame.height()) != self._last_set_geometry
             ):
+                if bool(getattr(self, "_standalone_mode", False)):
+                    self._last_move_log = current
+                    return
                 override_rect = getattr(self._follow_controller, "wm_override", None)
                 current_rect = (frame.x(), frame.y(), frame.width(), frame.height())
                 if override_rect != current_rect:

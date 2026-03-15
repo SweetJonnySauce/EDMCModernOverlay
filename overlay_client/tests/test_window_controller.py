@@ -177,7 +177,7 @@ def test_post_process_follow_state_updates_visibility_and_fullscreen_hint() -> N
     assert controller._last_visibility_state is True
 
 
-def test_post_process_follow_state_standalone_hides_when_not_foreground() -> None:
+def test_post_process_follow_state_standalone_stays_visible_when_tracker_is_visible() -> None:
     controller = WindowController(log_fn=lambda _msg: None)
     visibility: List[bool] = []
     state = _state(is_visible=True, is_foreground=False, identifier="abc123")
@@ -194,7 +194,7 @@ def test_post_process_follow_state_standalone_hides_when_not_foreground() -> Non
         is_visible_fn=lambda: False,
     )
 
-    assert visibility == [False]
+    assert visibility == [True]
 
 
 def test_post_process_follow_state_non_standalone_hides_when_not_foreground() -> None:
@@ -207,6 +207,26 @@ def test_post_process_follow_state_non_standalone_hides_when_not_foreground() ->
         (0, 0, 1920, 1080),
         force_render=False,
         standalone_mode=False,
+        update_follow_visibility_fn=visibility.append,
+        update_auto_scale_fn=lambda _w, _h: None,
+        ensure_transient_parent_fn=lambda _identifier: None,
+        fullscreen_hint_fn=lambda: False,
+        is_visible_fn=lambda: True,
+    )
+
+    assert visibility == [False]
+
+
+def test_post_process_follow_state_standalone_hides_when_tracker_not_visible() -> None:
+    controller = WindowController(log_fn=lambda _msg: None)
+    visibility: List[bool] = []
+    state = _state(is_visible=False, is_foreground=False, identifier="abc123")
+
+    controller.post_process_follow_state(
+        state,
+        (0, 0, 1920, 1080),
+        force_render=False,
+        standalone_mode=True,
         update_follow_visibility_fn=visibility.append,
         update_auto_scale_fn=lambda _w, _h: None,
         ensure_transient_parent_fn=lambda _identifier: None,
@@ -240,7 +260,7 @@ def test_post_process_follow_state_force_render_takes_precedence() -> None:
 def test_post_process_follow_state_stable_inputs_do_not_oscillate_visibility_calls() -> None:
     controller = WindowController(log_fn=lambda _msg: None)
     visibility: List[bool] = []
-    current_visible = [True]
+    current_visible = [False]
     state = _state(is_visible=True, is_foreground=False, identifier="abc123")
 
     def _update_visibility(show: bool) -> None:
@@ -260,4 +280,4 @@ def test_post_process_follow_state_stable_inputs_do_not_oscillate_visibility_cal
             is_visible_fn=lambda: current_visible[0],
         )
 
-    assert visibility == [False]
+    assert visibility == [True]

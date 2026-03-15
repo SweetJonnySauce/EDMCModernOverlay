@@ -36,6 +36,7 @@ class _InteractionStubWindow(InteractionSurfaceMixin, QWidget):
         self._last_follow_state = None
         self._last_set_geometry: Optional[Tuple[int, int, int, int]] = None
         self._last_move_log: Optional[Tuple[int, int]] = None
+        self._standalone_mode = False
 
         self._drag_enabled = False
         self._drag_active = False
@@ -193,6 +194,21 @@ def test_move_event_skips_duplicate_override_record(qt_app):
     window.setGeometry(10, 10, 20, 20)
     window._last_move_log = None
     window._follow_controller.wm_override = (10, 10, 20, 20)
+
+    move_event = QMoveEvent(QPoint(10, 10), QPoint(0, 0))
+    window.moveEvent(move_event)
+
+    assert window._override_calls == []
+
+
+@pytest.mark.pyqt_required
+def test_move_event_skips_override_record_in_standalone(qt_app):
+    window = _InteractionStubWindow()
+    window._follow_enabled = True
+    window._standalone_mode = True
+    window._last_set_geometry = (0, 0, 20, 20)
+    window.setGeometry(10, 10, 20, 20)
+    window._last_move_log = None
 
     move_event = QMoveEvent(QPoint(10, 10), QPoint(0, 0))
     window.moveEvent(move_event)

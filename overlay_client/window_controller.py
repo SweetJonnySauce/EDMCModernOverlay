@@ -125,6 +125,8 @@ class WindowController:
             self._fullscreen_hint_logged = True
         if force_render:
             should_show = True
+        elif standalone_mode:
+            should_show = state.is_visible
         else:
             should_show = state.is_visible and state.is_foreground
         visibility_inputs = (standalone_mode, force_render, state.is_visible, state.is_foreground)
