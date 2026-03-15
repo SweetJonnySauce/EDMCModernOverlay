@@ -222,8 +222,8 @@
           "edmclogeventminer-status-overlay-"
         ],
         "idPrefixGroupAnchor": "sw",
-        "offsetX": 420,
-        "offsetY": 955,
+        "offsetX": 5.0,
+        "offsetY": 300.0,
         "backgroundColor": "#AA000000",
         "backgroundBorderWidth": 5
       }
