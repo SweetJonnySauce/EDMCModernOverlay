@@ -43,6 +43,9 @@ See the [Wiki for Overlay Actions](https://github.com/SweetJonnySauce/EDMCModern
 # Support
 Best way to get support for this plugin is to create a github issue in this repo. This is a side project for me. As such, support is best effort only and there is no guarantee I'll be able to fix or fully address your issue/request. You can occassionally find me on [EDCD Discord](https://edcd.github.io/) in the `#edmc-plugins` channel.
 
+# Roadmap
+EDMCModernOverlay now has a published roadmap. You can review it [here](https://github.com/SweetJonnySauce/EDMCModernOverlay/blob/main/docs/roadmap.md).
+
 # Thanks
 Special thanks to [inorton](https://github.com/inorton) for the original [EDMCOverlay](https://github.com/inorton/EDMCOverlay) development.
 
