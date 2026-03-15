@@ -32,8 +32,7 @@ If something is unclear, capture it under `Open Questions`.
 - `overlay_client/tests/test_follow_surface_mixin.py`
 - `overlay_client/tests/test_interaction_controller.py`
 - Docs/notes:
-- `docs/testing-standalone-mode-linux-x11-wayland.md`
-- `docs/plans/standalone-selectable-app-window.md`
+- `docs/plans/standalone-selectable-app-window.md` (includes consolidated manual validation checklist/matrix)
 
 ## Assumptions
 - SteamVR app/window picker visibility is driven by a combination of WM/app identity and window manager flags/role/parenting behavior.
@@ -53,7 +52,7 @@ If something is unclear, capture it under `Open Questions`.
 ## Decisions (Locked)
 - One toggle for all platforms; no Linux-specific toggle.
 - Standalone mode default remains disabled for all platforms; no detection-based auto-enable.
-- Required targets for completion are X11 + GNOME (Wayland) for now.
+- Required targets for completion are Ubuntu GNOME (Mutter) on X11 and GNOME (Mutter) on Wayland.
 - Required-target capture failures are blocking, including black/transparent/frozen/flickering output.
 - Standalone mode must preserve always-on-top behavior over Elite.
 - Standalone mode remains frameless.
@@ -63,6 +62,12 @@ If something is unclear, capture it under `Open Questions`.
 - Respect user `force_xwayland` runtime setting; do not auto-mutate this setting in code.
 - Manual validation should prioritize `force_xwayland=false` first on Wayland.
 - Sign-off is maintainer approval only; no fixed screenshot/template evidence requirement.
+- Maintainer sign-off owner is `jon`; no separate artifact is required.
+- Desktop app switcher validation requires both GNOME Activities overview and `Alt+Tab`.
+- Off/on/off transition validation requires one full cycle.
+- Manual checklist completion is non-blocking for implementation changes; checklist must still be maintained in this plan.
+- SteamVR availability detection is out of scope for this change; testing coordination is maintainer-driven.
+- Exception approvals (always-on-top vs switcher visibility conflicts) are maintainer-approved by `jon`.
 - If a required target cannot satisfy both always-on-top and switcher visibility simultaneously, record it as a non-blocking exception for this plan and log follow-up work.
 
 ## Phase Overview
@@ -245,17 +250,39 @@ If something is unclear, capture it under `Open Questions`.
 - Risks: compositor/session-specific behavior may still fail despite automated pass.
 - Mitigations: strict required-target matrix and blocking-quality rules.
 
+#### Manual Validation Checklist (Consolidated)
+- Scope:
+- Track manual validation for standalone selectable-app-window behavior in this plan doc.
+- Checklist maintenance is required; completion is non-blocking for implementation changes until maintainer-scheduled manual test runs are executed.
+- Required targets:
+- Ubuntu GNOME (Mutter) on X11.
+- GNOME (Mutter) on Wayland (`force_xwayland=false` first).
+- Pass rules:
+- SteamVR picker lists overlay window as selectable app/window target.
+- App switcher visibility passes in both GNOME Activities overview and `Alt+Tab`.
+- Capture quality shows no black/transparent/frozen/flickering output.
+- Stability passes one full `off -> on -> off` cycle with no crash/focus-loop/input regression.
+- Exception policy:
+- If always-on-top and switcher visibility cannot both be satisfied on a required target, record a non-blocking exception with maintainer approval (`jon`).
+
+| Target | SteamVR Picker Listed | Activities Visible | Alt+Tab Visible | Capture Quality OK | One Full off/on/off Cycle OK | Notes | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Ubuntu GNOME (Mutter/X11) | Pending | Pending | Pending | Pending | Pending | Manual validation pending maintainer-coordinated run. | Blocked |
+| GNOME (Mutter/Wayland, `force_xwayland=false`) | Pending | Pending | Pending | Pending | Pending | Manual validation pending maintainer-coordinated run. | Blocked |
+| GNOME (Mutter/Wayland, `force_xwayland=true`) | Optional | Optional | Optional | Optional | Optional | Always capture as reference evidence. | Optional |
+
 | Stage | Description | Status |
 | --- | --- | --- |
-| 4.1 | Validate one Linux X11 environment in SteamVR picker. | Pending (`Blocked: manual environment required`) |
-| 4.2 | Validate GNOME (Wayland) required target (native Wayland first). | Pending (`Blocked: manual environment required`) |
-| 4.3 | Confirm capture quality + standalone off/on/off transition stability. | Pending (`Blocked: manual environment required`) |
+| 4.1 | Validate Ubuntu GNOME (Mutter/X11) environment in SteamVR picker. | Blocked |
+| 4.2 | Validate GNOME (Mutter/Wayland) required target (native Wayland first). | Blocked |
+| 4.3 | Confirm capture quality + standalone off/on/off transition stability. | Blocked |
 
 #### Stage 4.1 Detailed Plan
 - Objective:
-- Validate standalone window appears/selects as app target on X11.
+- Validate standalone window appears/selects as app target on Ubuntu GNOME (Mutter/X11).
 - Steps:
 - Run manual matrix for standalone `off`, `on`, restart path, SteamVR picker visibility, and desktop app switcher visibility.
+- App switcher check must pass in both GNOME Activities overview and `Alt+Tab`.
 - Capture timestamped logs for profile/identity branch and warnings.
 - Acceptance criteria:
 - X11 target is selectable, appears in desktop app switcher consistently, and capture output is usable.
@@ -264,10 +291,11 @@ If something is unclear, capture it under `Open Questions`.
 
 #### Stage 4.2 Detailed Plan
 - Objective:
-- Validate required Wayland target GNOME.
+- Validate required Wayland target GNOME (Mutter).
 - Steps:
 - Run full matrix in GNOME session with SteamVR picker and desktop app switcher checks.
 - Prioritize validation with `force_xwayland=false` first, then optionally capture `force_xwayland=true` behavior as secondary evidence.
+- App switcher check must pass in both GNOME Activities overview and `Alt+Tab`.
 - Validate fallback/restart warning behavior if live apply is unreliable.
 - Acceptance criteria:
 - GNOME is selectable, appears in desktop app switcher consistently, and capture output is usable.
@@ -279,7 +307,7 @@ If something is unclear, capture it under `Open Questions`.
 - Confirm capture-quality and stability acceptance gates.
 - Steps:
 - Validate no black/transparent/frozen/flickering output on required targets.
-- Validate standalone `off -> on -> off` transitions with consistent desktop app switcher visibility and no crash/focus-loop/input regression.
+- Validate one full standalone `off -> on -> off` cycle with consistent desktop app switcher visibility and no crash/focus-loop/input regression.
 - Acceptance criteria:
 - All required-target quality/stability checks pass and are evidenced, or any always-on-top vs switcher-visibility conflict is explicitly classified as approved non-blocking exception.
 - Verification to run:
@@ -361,7 +389,8 @@ If something is unclear, capture it under `Open Questions`.
 - Phase 1 implemented on 2026-03-09.
 - Phase 2 implemented on 2026-03-09.
 - Phase 3 implemented on 2026-03-09.
-- Phase 4 in progress (manual validation blocked in this workspace).
+- Manual checklist consolidated into this plan on 2026-03-14.
+- Phase 4 in progress (manual validation blocked pending maintainer-coordinated testing).
 - Phase 5 in progress (awaiting maintainer sign-off).
 
 ### Phase 1 Execution Summary
@@ -412,11 +441,11 @@ If something is unclear, capture it under `Open Questions`.
 
 ### Phase 4 Execution Summary
 - Stage 4.1:
-- Pending (`Blocked: manual X11 SteamVR + desktop-switcher validation required`).
+- Blocked (`Manual validation pending; target is Ubuntu GNOME (Mutter/X11)`).
 - Stage 4.2:
-- Pending (`Blocked: manual GNOME Wayland validation required; prioritize force_xwayland=false`).
+- Blocked (`Manual validation pending; target is GNOME (Mutter/Wayland), prioritize force_xwayland=false`).
 - Stage 4.3:
-- Pending (`Blocked: manual capture-quality and off/on/off switcher consistency validation required`).
+- Blocked (`Manual validation pending; one full off/on/off cycle remains required`).
 
 ### Tests Run For Phase 4
 - `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_platform_integration.py overlay_client/tests/test_setup_surface_standalone.py -q`
@@ -435,3 +464,6 @@ If something is unclear, capture it under `Open Questions`.
 ### Tests Run For Phase 5
 - `make check`
 - Result: `ruff: pass`, `mypy: pass`, `pytest: 572 passed, 25 skipped`
+
+### Tests Run For Checklist Consolidation (Docs-Only)
+- Not rerun (documentation-only consolidation).
