@@ -27,7 +27,7 @@ DEFAULT_WINDOW_BASE_HEIGHT = 960
 class FollowSurfaceMixin:
     """Follow/window orchestration, platform hooks, and visibility helpers."""
 
-    def _apply_drag_state(self) -> None:
+    def _apply_drag_state(self, *, raise_window: bool = True) -> None:
         window = self.windowHandle()
         _CLIENT_LOGGER.debug(
             "Applying drag state: drag_enabled=%s transparent=%s move_mode=%s window=%s flags=%s",
@@ -45,7 +45,8 @@ class FollowSurfaceMixin:
             if self._cursor_saved:
                 self.setCursor(self._saved_cursor)
                 self._cursor_saved = False
-        self.raise_()
+        if raise_window:
+            self.raise_()
 
     def _poll_modifiers(self) -> None:
         if not self._drag_enabled or self._drag_active:
@@ -85,6 +86,21 @@ class FollowSurfaceMixin:
     def _clear_transient_parent_ids(self) -> None:
         self._transient_parent_window = None
         self._transient_parent_id = None
+
+    def _clear_transient_parent_binding(self, *, reason: str) -> None:
+        window_handle = self.windowHandle()
+        if window_handle is not None:
+            try:
+                window_handle.setTransientParent(None)
+            except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+                _CLIENT_LOGGER.debug("Failed to clear transient parent (%s): %s", reason, exc)
+            except Exception as exc:  # pragma: no cover - unexpected Qt errors
+                _CLIENT_LOGGER.warning("Unexpected error clearing transient parent (%s): %s", reason, exc)
+        had_parent = self._transient_parent_window is not None or self._transient_parent_id is not None
+        self._transient_parent_window = None
+        self._transient_parent_id = None
+        if had_parent:
+            _CLIENT_LOGGER.debug("Cleared overlay transient parent (%s); %s", reason, self.format_scale_debug())
 
     # Follow mode ----------------------------------------------------------
 
@@ -264,7 +280,10 @@ class FollowSurfaceMixin:
     ) -> Tuple[int, int, int, int]:
         override_rect = self._follow_controller.wm_override
         override_tracker = self._follow_controller.wm_override_tracker
-        override_expired = self._follow_controller.override_expired()
+        override_expired = self._follow_controller.override_expired(
+            tracker_tuple=tracker_qt_tuple,
+            standalone_mode=bool(getattr(self, "_standalone_mode", False)),
+        )
 
         def _current_geometry() -> Tuple[int, int, int, int]:
             current_rect = self.frameGeometry()
@@ -376,6 +395,7 @@ class FollowSurfaceMixin:
             normalized_state,
             target_tuple,
             force_render=self._force_render,
+            standalone_mode=bool(getattr(self, "_standalone_mode", False)),
             update_follow_visibility_fn=self._update_follow_visibility,
             update_auto_scale_fn=self._update_auto_legacy_scale,
             ensure_transient_parent_fn=_ensure_parent,
@@ -388,18 +408,12 @@ class FollowSurfaceMixin:
     def _ensure_transient_parent(self, state: WindowState) -> None:
         if not sys.platform.startswith("linux"):
             return
+        if getattr(self, "_standalone_mode", False):
+            self._clear_transient_parent_binding(reason="standalone_mode")
+            return
         if self._is_wayland():
-            if self._transient_parent_window is not None:
-                window_handle = self.windowHandle()
-                if window_handle is not None:
-                    try:
-                        window_handle.setTransientParent(None)
-                    except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
-                        _CLIENT_LOGGER.debug("Failed to clear transient parent on Wayland: %s", exc)
-                    except Exception as exc:  # pragma: no cover - unexpected Qt errors
-                        _CLIENT_LOGGER.warning("Unexpected error clearing transient parent on Wayland: %s", exc)
-                self._transient_parent_window = None
-                self._transient_parent_id = None
+            if self._transient_parent_window is not None or self._transient_parent_id is not None:
+                self._clear_transient_parent_binding(reason="wayland_session")
             return
         identifier = state.identifier
         if not identifier or identifier == self._transient_parent_id:
@@ -447,14 +461,16 @@ class FollowSurfaceMixin:
             self._update_follow_visibility(False)
 
     def _update_follow_visibility(self, show: bool) -> None:
+        standalone_mode = bool(getattr(self, "_standalone_mode", False))
         new_state = self._visibility_helper.update_visibility(
             show,
             is_visible_fn=lambda: self.isVisible(),
             show_fn=lambda: self.show(),
             hide_fn=lambda: self.hide(),
             raise_fn=lambda: self.raise_(),
-            apply_drag_state_fn=self._apply_drag_state,
+            apply_drag_state_fn=lambda: self._apply_drag_state(raise_window=not standalone_mode),
             format_scale_debug_fn=self.format_scale_debug,
+            raise_on_show=not standalone_mode,
         )
         # keep compatibility for any consumers expecting cached state
         self._last_visibility_state = new_state

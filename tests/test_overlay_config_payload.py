@@ -12,6 +12,7 @@ class _StubPrefs:
         self.gridlines_enabled = False
         self.gridline_spacing = 100
         self.force_render = False
+        self.standalone_mode = True
         self.title_bar_enabled = False
         self.title_bar_height = 0
         self.show_debug_overlay = False
@@ -65,6 +66,7 @@ def test_overlay_config_includes_physical_clamp_flag(monkeypatch):
     assert payload["physical_clamp_overrides"] == {"DisplayPort-2": 1.0}
     assert runtime._last_config.get("physical_clamp_overrides") == {"DisplayPort-2": 1.0}
     assert payload["legacy_font_step"] == 2
+    assert payload["standalone_mode"] is True
     assert payload["plugin_group_states"] == {"BGS-Tally Objectives": False}
     assert payload["plugin_group_state_default_on"] is True
 
@@ -72,6 +74,7 @@ def test_overlay_config_includes_physical_clamp_flag(monkeypatch):
 def test_overlay_config_defaults_keep_clamp_off(monkeypatch):
     runtime = object.__new__(load._PluginRuntime)
     runtime._preferences = _StubPrefs()
+    runtime._preferences.standalone_mode = False
     runtime._preferences.physical_clamp_enabled = False
     runtime._preferences.physical_clamp_overrides = {}
     runtime._log_retention_override = None
@@ -87,6 +90,7 @@ def test_overlay_config_defaults_keep_clamp_off(monkeypatch):
     runtime._send_overlay_config()
 
     payload = published[0]
+    assert payload["standalone_mode"] is False
     assert payload["physical_clamp_enabled"] is False
     assert payload["physical_clamp_overrides"] == {}
     assert runtime._last_config.get("physical_clamp_enabled") is False

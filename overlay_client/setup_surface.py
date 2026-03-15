@@ -112,8 +112,6 @@ class SetupSurfaceMixin:
         self._log_retention: int = max(1, int(initial.client_log_retention))
         self._force_render: bool = bool(getattr(initial, "force_render", False))
         self._standalone_mode: bool = bool(getattr(initial, "standalone_mode", False))
-        if not sys.platform.startswith("win"):
-            self._standalone_mode = False
         self._standalone_icon_handles: Tuple[Optional[int], Optional[int]] = (None, None)
         self._physical_clamp_enabled: bool = bool(getattr(initial, "physical_clamp_enabled", False))
         self._physical_clamp_overrides: Dict[str, float] = dict(
@@ -121,6 +119,8 @@ class SetupSurfaceMixin:
         )
         self._window_tracker: Optional[WindowTracker] = None
         self._data_client: Optional[OverlayDataClient] = None
+        self._window_flag_state_cache: Dict[int, bool] = {}
+        self._standalone_profile_signature: Optional[Tuple[bool, bool]] = None
         self._last_follow_state: Optional[WindowState] = None
         self._lost_window_logged: bool = False
         self._last_tracker_state: Optional[Tuple[str, int, int, int, int]] = None
@@ -151,6 +151,7 @@ class SetupSurfaceMixin:
         self._visibility_helper = VisibilityHelper(log_fn=_CLIENT_LOGGER.debug)
         self._interaction_controller = InteractionController(
             is_wayland_fn=self._is_wayland,
+            standalone_mode_fn=lambda: bool(getattr(self, "_standalone_mode", False)),
             log_fn=_CLIENT_LOGGER.debug,
             prepare_window_fn=lambda window: self._platform_controller.prepare_window(window),
             apply_click_through_fn=lambda transparent: self._platform_controller.apply_click_through(transparent),
@@ -302,12 +303,12 @@ class SetupSurfaceMixin:
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Window
         )
-        if sys.platform.startswith("linux"):
+        if sys.platform.startswith("linux") and not self._standalone_mode:
             window_flags |= Qt.WindowType.X11BypassWindowManagerHint
         self.setWindowFlags(window_flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, not self._standalone_mode)
 
         message_font = QFont(self._font_family, 16)
         self._apply_font_fallbacks(message_font)
@@ -412,12 +413,61 @@ class SetupSurfaceMixin:
 
     def _set_window_flag(self, flag: Qt.WindowType, enabled: bool) -> None:
         apply_enabled = enabled
-        if flag == Qt.WindowType.Tool and self._standalone_mode and sys.platform.startswith("win"):
+        if flag == Qt.WindowType.Tool and self._standalone_mode:
             apply_enabled = False
+        cache = getattr(self, "_window_flag_state_cache", None)
+        if not isinstance(cache, dict):
+            cache = {}
+            self._window_flag_state_cache = cache
+        key = int(flag)
+        cached_enabled = cache.get(key)
+        if cached_enabled is None:
+            try:
+                cached_enabled = bool(int(self.windowFlags()) & key)
+            except Exception:
+                cached_enabled = None
+            else:
+                cache[key] = cached_enabled
+        if cached_enabled is not None and cached_enabled == apply_enabled:
+            return
         try:
             self.setWindowFlag(flag, apply_enabled)
+            cache[key] = apply_enabled
         except Exception as exc:
             _CLIENT_LOGGER.debug("Failed to set window flag %s=%s: %s", flag, apply_enabled, exc)
+
+    def _set_widget_attribute(self, attr: Qt.WidgetAttribute, enabled: bool) -> None:
+        try:
+            if self.testAttribute(attr) == enabled:
+                return
+        except Exception:
+            pass
+        self.setAttribute(attr, enabled)
+
+    def _apply_standalone_window_profile(self, *, reason: str) -> None:
+        wayland_session = self._is_wayland()
+        profile_signature = (bool(self._standalone_mode), bool(wayland_session))
+        if profile_signature == getattr(self, "_standalone_profile_signature", None):
+            _CLIENT_LOGGER.debug(
+                "Skipping stand-alone window profile reapply: standalone=%s wayland=%s reason=%s",
+                self._standalone_mode,
+                wayland_session,
+                reason,
+            )
+            return
+        self._set_window_flag(Qt.WindowType.WindowStaysOnTopHint, True)
+        self._set_window_flag(Qt.WindowType.FramelessWindowHint, True)
+        self._set_window_flag(Qt.WindowType.Tool, not self._standalone_mode and not wayland_session)
+        if sys.platform.startswith("linux"):
+            self._set_window_flag(Qt.WindowType.X11BypassWindowManagerHint, not self._standalone_mode)
+        self._set_widget_attribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, not self._standalone_mode)
+        self._standalone_profile_signature = profile_signature
+        _CLIENT_LOGGER.debug(
+            "Applied stand-alone window profile: standalone=%s wayland=%s reason=%s",
+            self._standalone_mode,
+            wayland_session,
+            reason,
+        )
 
     # Set up experimental feature to run the overlay as a stand-alone window for capture tools.
     def _apply_standalone_window_identity(self) -> None:
@@ -454,6 +504,7 @@ class SetupSurfaceMixin:
     def _handle_show_event(self) -> None:
         self._apply_legacy_scale()
         self._platform_controller.prepare_window(self.windowHandle())
+        self._apply_standalone_window_profile(reason="show_event")
         _CLIENT_LOGGER.debug(
             "Platform controller initialised: session=%s compositor=%s force_xwayland=%s",
             self._platform_context.session_type or "unknown",

@@ -104,10 +104,13 @@ class InteractionSurfaceMixin:
                 and self._last_set_geometry is not None
                 and (frame.x(), frame.y(), frame.width(), frame.height()) != self._last_set_geometry
             ):
-                self._set_wm_override(
-                    (frame.x(), frame.y(), frame.width(), frame.height()),
-                    tracker_tuple=None,
-                    reason="moveEvent delta",
-                    classification="wm_intervention",
-                )
+                override_rect = getattr(self._follow_controller, "wm_override", None)
+                current_rect = (frame.x(), frame.y(), frame.width(), frame.height())
+                if override_rect != current_rect:
+                    self._set_wm_override(
+                        current_rect,
+                        tracker_tuple=None,
+                        reason="moveEvent delta",
+                        classification="wm_intervention",
+                    )
             self._last_move_log = current

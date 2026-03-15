@@ -28,6 +28,7 @@ class _StubWindowHandle:
     def __init__(self, dpr: float = 1.5) -> None:
         self._dpr = dpr
         self._screen = None
+        self.transient_parents = []
 
     def devicePixelRatio(self) -> float:
         return self._dpr
@@ -38,11 +39,15 @@ class _StubWindowHandle:
     def setFlag(self, *_args, **_kwargs) -> None:
         return None
 
+    def setTransientParent(self, parent) -> None:
+        self.transient_parents.append(parent)
+
 
 class _StubFollowController:
     def __init__(self) -> None:
         self.wm_override = None
         self.wm_override_tracker = None
+        self.override_expired_calls = []
         self.start_called = 0
         self.stop_called = 0
         self.suspend_called = []
@@ -79,18 +84,40 @@ class _StubFollowController:
         self.wm_override = None
         self._clear_reason = reason
 
-    def override_expired(self) -> bool:
+    def override_expired(self, *, tracker_tuple=None, standalone_mode: bool = False) -> bool:
+        self.override_expired_calls.append(
+            {
+                "tracker_tuple": tracker_tuple,
+                "standalone_mode": standalone_mode,
+            }
+        )
         return False
 
 
 class _StubVisibilityHelper:
     def __init__(self) -> None:
         self.calls = []
+        self.raise_on_show_flags = []
 
-    def update_visibility(self, show, is_visible_fn, show_fn, hide_fn, raise_fn, apply_drag_state_fn, format_scale_debug_fn):
+    def update_visibility(
+        self,
+        show,
+        *,
+        is_visible_fn,
+        show_fn,
+        hide_fn,
+        raise_fn,
+        apply_drag_state_fn,
+        format_scale_debug_fn,
+        raise_on_show=True,
+    ):
         self.calls.append(show)
+        self.raise_on_show_flags.append(bool(raise_on_show))
         if show:
             show_fn()
+            if raise_on_show:
+                raise_fn()
+            apply_drag_state_fn()
         else:
             hide_fn()
         return {"show": show}
@@ -123,6 +150,9 @@ class _FollowSurfaceStub(FollowSurfaceMixin):
         self._last_screen_name = None
         self._transient_parent_window = None
         self._transient_parent_id = None
+        self._standalone_mode = False
+        self.raise_calls = 0
+        self._window_handle = _StubWindowHandle()
 
         self._interaction_controller = type(
             "StubInteraction",
@@ -155,7 +185,7 @@ class _FollowSurfaceStub(FollowSurfaceMixin):
 
     # Qt shell shims
     def windowHandle(self):
-        return _StubWindowHandle()
+        return self._window_handle
 
     def frameGeometry(self):
         return _StubFrame()
@@ -164,6 +194,7 @@ class _FollowSurfaceStub(FollowSurfaceMixin):
         return None
 
     def raise_(self) -> None:
+        self.raise_calls += 1
         return None
 
     def isVisible(self) -> bool:
@@ -203,7 +234,7 @@ class _FollowSurfaceStub(FollowSurfaceMixin):
     def _restore_drag_interactivity(self) -> None:
         return None
 
-    def _apply_drag_state(self) -> None:
+    def _apply_drag_state(self, *, raise_window: bool = True) -> None:
         return None
 
     def _update_auto_legacy_scale(self, *_args, **_kwargs) -> None:
@@ -219,6 +250,22 @@ def test_resolve_and_apply_geometry_updates_last_geometry_log():
 
     assert result == desired
     assert stub._last_geometry_log == desired
+    assert stub._follow_controller.override_expired_calls[-1] == {
+        "tracker_tuple": tracker,
+        "standalone_mode": False,
+    }
+
+
+def test_resolve_and_apply_geometry_passes_standalone_mode_to_override_expiry():
+    stub = _FollowSurfaceStub()
+    stub._standalone_mode = True
+
+    stub._resolve_and_apply_geometry((2, 4, 6, 8), (10, 20, 30, 40))
+
+    assert stub._follow_controller.override_expired_calls[-1] == {
+        "tracker_tuple": (2, 4, 6, 8),
+        "standalone_mode": True,
+    }
 
 
 def test_normalise_tracker_geometry_updates_logs(monkeypatch: pytest.MonkeyPatch):
@@ -257,3 +304,76 @@ def test_handle_missing_follow_state_force_render_enables_visibility(monkeypatch
 
     assert applied == [True, True]  # click-through and restore
     assert stub._visibility_helper.calls == [True]
+
+
+def test_ensure_transient_parent_clears_existing_parent_when_standalone(monkeypatch: pytest.MonkeyPatch):
+    stub = _FollowSurfaceStub()
+    stub._standalone_mode = True
+    stub._transient_parent_window = object()
+    stub._transient_parent_id = "abc"
+    state = WindowState(x=0, y=0, width=100, height=50, is_foreground=True, is_visible=True, identifier="10")
+    monkeypatch.setattr("overlay_client.follow_surface.sys.platform", "linux")
+
+    stub._ensure_transient_parent(state)
+
+    assert stub._transient_parent_window is None
+    assert stub._transient_parent_id is None
+    assert stub.windowHandle().transient_parents[-1] is None
+
+
+def test_ensure_transient_parent_sets_parent_when_not_standalone(monkeypatch: pytest.MonkeyPatch):
+    stub = _FollowSurfaceStub()
+    parent_window = object()
+    state = WindowState(x=0, y=0, width=100, height=50, is_foreground=True, is_visible=True, identifier="10")
+    monkeypatch.setattr("overlay_client.follow_surface.sys.platform", "linux")
+    monkeypatch.setattr("overlay_client.follow_surface.QWindow.fromWinId", lambda _native_id: parent_window)
+
+    stub._ensure_transient_parent(state)
+
+    assert stub._transient_parent_window is parent_window
+    assert stub._transient_parent_id == "10"
+    assert stub.windowHandle().transient_parents[-1] is parent_window
+
+
+def test_post_process_follow_state_passes_standalone_mode_to_controller() -> None:
+    stub = _FollowSurfaceStub()
+    stub._standalone_mode = True
+    captured = {}
+    visibility_calls: list[bool] = []
+
+    class _CaptureController:
+        def __init__(self) -> None:
+            self._fullscreen_hint_logged = False
+
+        def post_process_follow_state(self, state, target_tuple, **kwargs):
+            captured["standalone_mode"] = kwargs.get("standalone_mode")
+            kwargs["update_follow_visibility_fn"](True)
+
+    stub._window_controller = _CaptureController()
+    stub._update_follow_visibility = lambda show: visibility_calls.append(show)  # type: ignore[assignment]
+    state = WindowState(x=0, y=0, width=100, height=50, is_foreground=False, is_visible=True, identifier="10")
+
+    stub._post_process_follow_state(state, target_tuple=(0, 0, 100, 50))
+
+    assert captured["standalone_mode"] is True
+    assert visibility_calls == [True]
+
+
+def test_update_follow_visibility_disables_raise_on_show_in_standalone() -> None:
+    stub = _FollowSurfaceStub()
+    stub._standalone_mode = True
+
+    stub._update_follow_visibility(True)
+
+    assert stub._visibility_helper.raise_on_show_flags == [False]
+    assert stub.raise_calls == 0
+
+
+def test_update_follow_visibility_keeps_raise_on_show_when_not_standalone() -> None:
+    stub = _FollowSurfaceStub()
+    stub._standalone_mode = False
+
+    stub._update_follow_visibility(True)
+
+    assert stub._visibility_helper.raise_on_show_flags == [True]
+    assert stub.raise_calls == 1

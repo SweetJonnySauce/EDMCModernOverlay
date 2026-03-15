@@ -32,6 +32,10 @@ TRANSPARENCY_WARNING_TITLE = "WARNING:"
 TRANSPARENCY_WARNING_BODY_FULL = "The EDMCModernOverlay plugin is set to full transparency."
 TRANSPARENCY_WARNING_BODY_LOW = "The EDMCModernOverlay plugin is more than {threshold}% transparent and may not be visible"
 TRANSPARENCY_WARNING_BODY_COLOR = "#ffa500"
+STANDALONE_RESTART_WARNING_TTL_SECONDS = 8.0
+STANDALONE_RESTART_WARNING_MESSAGE = (
+    "WARNING: Restart overlay client for reliable stand-alone app-window discoverability after this change."
+)
 
 
 class ControlSurfaceMixin:
@@ -63,14 +67,28 @@ class ControlSurfaceMixin:
 
     def set_standalone_mode(self, enabled: Optional[bool]) -> None:
         flag = bool(enabled)
-        if not sys.platform.startswith("win"):
-            flag = False
         if flag == getattr(self, "_standalone_mode", False):
             return
+        previous = bool(getattr(self, "_standalone_mode", False))
         self._standalone_mode = flag
         _CLIENT_LOGGER.debug("Stand-alone mode %s", "enabled" if flag else "disabled")
+        follow_controller = getattr(self, "_follow_controller", None)
+        if follow_controller is not None and getattr(follow_controller, "wm_override", None) is not None:
+            self._clear_wm_override(reason="standalone_mode_toggle")
+        self._apply_standalone_window_profile(reason="set_standalone_mode")
+        self._interaction_controller.reapply_current(reason="standalone_mode_toggle")
+        if flag:
+            self._clear_transient_parent_binding(reason="standalone_mode_toggle")
         self._apply_drag_state()
         self._apply_standalone_window_identity()
+        if getattr(self, "_follow_enabled", False):
+            last_state = getattr(self, "_last_follow_state", None)
+            if last_state is not None:
+                self._apply_follow_state(last_state)
+            elif getattr(self, "_window_tracker", None) is not None:
+                self._refresh_follow_geometry()
+        if sys.platform.startswith("linux"):
+            self._warn_standalone_restart_required(transition=f"{int(previous)}->{int(flag)}", reason="toggle")
 
     def set_physical_clamp_enabled(self, enabled: bool) -> None:
         flag = bool(enabled)
@@ -507,6 +525,18 @@ class ControlSurfaceMixin:
             f'<br><span style="color: {TRANSPARENCY_WARNING_BODY_COLOR}; font-size: {large_size:.1f}pt;">{body_text}</span>'
         )
         self.display_message(warning_message, ttl=TRANSPARENCY_WARNING_TTL_SECONDS)
+
+    def _warn_standalone_restart_required(self, *, transition: str, reason: str) -> None:
+        warning_key = f"{transition}:{reason}"
+        if getattr(self, "_standalone_restart_warning_key", None) == warning_key:
+            return
+        self._standalone_restart_warning_key = warning_key
+        _CLIENT_LOGGER.warning(
+            "Standalone runtime transition classified as restart-required: transition=%s reason=%s",
+            transition,
+            reason,
+        )
+        self.display_message(STANDALONE_RESTART_WARNING_MESSAGE, ttl=STANDALONE_RESTART_WARNING_TTL_SECONDS)
 
     def set_status_text(self, status: str) -> None:
         self._status_presenter.set_status_text(status)
@@ -953,7 +983,13 @@ class ControlSurfaceMixin:
         self._platform_controller.update_context(new_context)
         self._platform_controller.prepare_window(self.windowHandle())
         self._platform_controller.apply_click_through(True)
+        follow_controller = getattr(self, "_follow_controller", None)
+        if follow_controller is not None and getattr(follow_controller, "wm_override", None) is not None:
+            self._clear_wm_override(reason="platform_context_update")
+        self._apply_standalone_window_profile(reason="platform_context_update")
         self._interaction_controller.reapply_current(reason="platform_context_update")
+        if self._standalone_mode and sys.platform.startswith("linux"):
+            self._warn_standalone_restart_required(transition="context", reason="platform_context_update")
         self._restore_drag_interactivity()
         _CLIENT_LOGGER.debug(
             "Platform context updated: session=%s compositor=%s force_xwayland=%s flatpak=%s",

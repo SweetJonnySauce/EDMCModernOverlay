@@ -168,9 +168,23 @@ class FollowController:
     def last_state_missing(self) -> bool:
         return self._last_state_missing
 
-    def override_expired(self) -> bool:
+    def override_expired(
+        self,
+        *,
+        tracker_tuple: Optional[Tuple[int, int, int, int]] = None,
+        standalone_mode: bool = False,
+    ) -> bool:
         if self._wm_authoritative_rect is None:
             return False
         if self._wm_override_classification in ("layout", "layout_constraint"):
             return False
-        return (time.monotonic() - self._wm_override_timestamp) >= self._WM_OVERRIDE_TTL
+        expired = (time.monotonic() - self._wm_override_timestamp) >= self._WM_OVERRIDE_TTL
+        if (
+            expired
+            and standalone_mode
+            and tracker_tuple is not None
+            and self._wm_override_tracker is not None
+            and tracker_tuple == self._wm_override_tracker
+        ):
+            return False
+        return expired

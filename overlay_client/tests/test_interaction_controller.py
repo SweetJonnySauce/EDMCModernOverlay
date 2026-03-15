@@ -7,7 +7,13 @@ from PyQt6.QtCore import Qt
 from overlay_client.interaction_controller import InteractionController
 
 
-def _build_controller(monkeypatch, *, is_wayland: bool = False, transparent_input_supported: bool = True):
+def _build_controller(
+    monkeypatch,
+    *,
+    is_wayland: bool = False,
+    standalone_mode: bool = False,
+    transparent_input_supported: bool = True,
+):
     calls = types.SimpleNamespace(
         widget_attrs=[],
         children_attrs=[],
@@ -23,14 +29,16 @@ def _build_controller(monkeypatch, *, is_wayland: bool = False, transparent_inpu
     )
 
     window_obj = object()
+    state = types.SimpleNamespace(is_wayland=is_wayland, standalone_mode=standalone_mode, window=window_obj)
     controller = InteractionController(
-        is_wayland_fn=lambda: is_wayland,
+        is_wayland_fn=lambda: state.is_wayland,
+        standalone_mode_fn=lambda: state.standalone_mode,
         log_fn=lambda msg, *args: calls.logs.append((msg, args)),
         prepare_window_fn=lambda window: calls.prepared.append(window),
         apply_click_through_fn=lambda flag: calls.applied.append(flag),
         set_transient_parent_fn=lambda parent: calls.transient_parents.append(parent),
         clear_transient_parent_ids_fn=lambda: setattr(calls, "cleared", calls.cleared + 1),
-        window_handle_fn=lambda: window_obj,
+        window_handle_fn=lambda: state.window,
         set_widget_attribute_fn=lambda attr, enabled: calls.widget_attrs.append((attr, enabled)),
         set_window_flag_fn=lambda flag, enabled: calls.window_flags.append((flag, enabled)),
         ensure_visible_fn=lambda: setattr(calls, "ensured", calls.ensured + 1),
@@ -39,11 +47,11 @@ def _build_controller(monkeypatch, *, is_wayland: bool = False, transparent_inpu
         transparent_input_supported=transparent_input_supported,
         set_window_transparent_input_fn=lambda enabled: calls.set_transparent.append(enabled),
     )
-    return controller, calls, window_obj
+    return controller, calls, state, window_obj
 
 
 def test_click_through_applies_flags_and_is_idempotent(monkeypatch):
-    controller, calls, window_obj = _build_controller(monkeypatch)
+    controller, calls, _state, window_obj = _build_controller(monkeypatch)
 
     controller.set_click_through(True)
     assert calls.widget_attrs == [(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)]
@@ -74,17 +82,29 @@ def test_click_through_applies_flags_and_is_idempotent(monkeypatch):
     assert calls.children_attrs[-1] is False
 
 
+def test_click_through_disables_tool_flag_in_standalone_mode(monkeypatch):
+    controller, calls, _state, _ = _build_controller(monkeypatch, standalone_mode=True)
+
+    controller.set_click_through(True)
+
+    assert (Qt.WindowType.Tool, False) in calls.window_flags
+
+
 def test_reapply_current(monkeypatch):
-    controller, calls, _ = _build_controller(monkeypatch)
+    controller, calls, state, _ = _build_controller(monkeypatch)
     controller.set_click_through(True)
     calls.applied.clear()
     controller.reapply_current(reason="reapply")
+    assert calls.applied == []
+
+    state.standalone_mode = True
+    controller.reapply_current(reason="standalone_mode_toggle")
     assert calls.applied == [True]
-    assert calls.logs[-1][1][1] == "reapply"
+    assert (Qt.WindowType.Tool, False) in calls.window_flags
 
 
 def test_restore_drag_interactivity_respects_flags(monkeypatch):
-    controller, calls, _ = _build_controller(monkeypatch)
+    controller, calls, _state, _ = _build_controller(monkeypatch)
 
     # Drag disabled -> no-op
     controller.restore_drag_interactivity(False, False, lambda: "debug")
@@ -100,7 +120,7 @@ def test_restore_drag_interactivity_respects_flags(monkeypatch):
 
 
 def test_handle_force_render_reapplies_current(monkeypatch):
-    controller, calls, _ = _build_controller(monkeypatch, is_wayland=True)
+    controller, calls, _state, _ = _build_controller(monkeypatch, is_wayland=True)
     controller.set_click_through(False)
     calls.applied.clear()
     monkeypatch.setattr("overlay_client.interaction_controller.sys.platform", "linux")
@@ -112,3 +132,17 @@ def test_handle_force_render_reapplies_current(monkeypatch):
     assert calls.applied[-1] is False
     assert calls.cleared == 1
     assert calls.transient_parents[-1] is None
+
+
+def test_reapply_current_reacts_to_window_handle_availability(monkeypatch):
+    controller, calls, state, _ = _build_controller(monkeypatch)
+
+    controller.set_click_through(True)
+    calls.applied.clear()
+    calls.prepared.clear()
+    state.window = None
+
+    controller.reapply_current(reason="window_lost")
+
+    assert calls.applied == []
+    assert calls.prepared == []

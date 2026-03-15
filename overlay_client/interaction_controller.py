@@ -13,7 +13,8 @@ class InteractionController:
         self,
         *,
         is_wayland_fn: Callable[[], bool],
-        log_fn: Callable[[str, object, object], None],
+        standalone_mode_fn: Callable[[], bool],
+        log_fn: Callable[..., None],
         prepare_window_fn: Callable[[object], None],
         apply_click_through_fn: Callable[[bool], None],
         set_transient_parent_fn: Callable[[object | None], None],
@@ -28,6 +29,7 @@ class InteractionController:
         set_window_transparent_input_fn: Callable[[bool], None],
     ) -> None:
         self._is_wayland = is_wayland_fn
+        self._standalone_mode = standalone_mode_fn
         self._log = log_fn
         self._prepare_window = prepare_window_fn
         self._apply_click_through = apply_click_through_fn
@@ -42,17 +44,18 @@ class InteractionController:
         self._transparent_input_supported = transparent_input_supported
         self._set_window_transparent_input = set_window_transparent_input_fn
         self._current_click_through: Optional[bool] = None
+        self._last_apply_signature: Optional[tuple[bool, bool, bool, bool, bool]] = None
 
     def set_click_through(self, transparent: bool, *, force: bool = False, reason: str = "") -> None:
         if not force and self._current_click_through is not None and self._current_click_through == transparent:
             return
         self._current_click_through = transparent
-        self._apply_click_through_state(transparent, reason or "set_click_through")
+        self._apply_click_through_state(transparent, reason or "set_click_through", force=force)
 
-    def reapply_current(self, *, reason: str = "") -> None:
+    def reapply_current(self, *, reason: str = "", force: bool = False) -> None:
         if self._current_click_through is None:
             return
-        self._apply_click_through_state(self._current_click_through, reason or "reapply_current")
+        self._apply_click_through_state(self._current_click_through, reason or "reapply_current", force=force)
 
     def restore_drag_interactivity(self, drag_enabled: bool, drag_active: bool, format_scale_debug: Callable[[], str]) -> None:
         if not drag_enabled or drag_active:
@@ -65,7 +68,7 @@ class InteractionController:
         self.set_click_through(False, force=True, reason="restore_drag_interactivity")
 
     def handle_force_render_enter(self) -> None:
-        if sys.platform.startswith("linux") and self._is_wayland():
+        if sys.platform.startswith("linux") and (self._is_wayland() or self._standalone_mode()):
             window_handle = self._window_handle()
             if window_handle is not None:
                 try:
@@ -78,21 +81,29 @@ class InteractionController:
         if sys.platform.startswith("linux"):
             # Best-effort: ask the platform controller to apply transparent input, then restore desired state.
             self._apply_click_through(True)
-        self.reapply_current(reason="force_render_enter")
+        self.reapply_current(reason="force_render_enter", force=True)
 
-    def _apply_click_through_state(self, transparent: bool, reason: str) -> None:
+    def _apply_click_through_state(self, transparent: bool, reason: str, *, force: bool = False) -> None:
+        standalone_mode = bool(self._standalone_mode())
+        wayland_session = bool(self._is_wayland())
+        tool_enabled = not standalone_mode and not wayland_session
+        window = self._window_handle()
+        apply_signature = (transparent, standalone_mode, wayland_session, tool_enabled, window is not None)
+        if not force and apply_signature == self._last_apply_signature:
+            return
         self._set_widget_attribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, transparent)
         self._set_children_attr(transparent)
         self._set_window_flag(Qt.WindowType.WindowStaysOnTopHint, True)
         self._set_window_flag(Qt.WindowType.FramelessWindowHint, True)
-        self._set_window_flag(Qt.WindowType.Tool, not self._is_wayland())
+        self._set_window_flag(Qt.WindowType.Tool, tool_enabled)
         self._ensure_visible()
-        window = self._window_handle()
         self._log(
-            "Set click-through to %s (reason=%s window_flag=%s)",
+            "Set click-through to %s (reason=%s window_flag=%s standalone=%s tool=%s)",
             transparent,
             reason or "unspecified",
             "unknown" if window is None else "set",
+            standalone_mode,
+            tool_enabled,
         )
         if window is not None:
             self._prepare_window(window)
@@ -100,3 +111,4 @@ class InteractionController:
             if self._transparent_input_supported:
                 self._set_window_transparent_input(transparent)
         self._raise()
+        self._last_apply_signature = apply_signature

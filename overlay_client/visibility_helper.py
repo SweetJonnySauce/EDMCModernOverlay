@@ -20,11 +20,13 @@ class VisibilityHelper:
         raise_fn: Callable[[], None],
         apply_drag_state_fn: Callable[[], None],
         format_scale_debug_fn: Callable[[], str],
+        raise_on_show: bool = True,
     ) -> bool:
         if show:
             if not is_visible_fn():
                 show_fn()
-                raise_fn()
+                if raise_on_show:
+                    raise_fn()
                 apply_drag_state_fn()
         else:
             if is_visible_fn():

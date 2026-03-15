@@ -13,6 +13,7 @@ from overlay_client.interaction_surface import InteractionSurfaceMixin
 class _FollowStub:
     def __init__(self) -> None:
         self.drag_state_calls: list[Tuple[bool, bool]] = []
+        self.wm_override: Optional[Tuple[int, int, int, int]] = None
 
     def set_drag_state(self, active: bool, move_mode: bool) -> None:
         self.drag_state_calls.append((active, move_mode))
@@ -182,3 +183,18 @@ def test_move_event_records_override_for_geometry_delta(qt_app):
     assert window._override_calls == [((10, 10, 20, 20), None, "moveEvent delta", "wm_intervention")]
     assert window._last_move_log == (10, 10)
     assert window._describe_calls == [None]
+
+
+@pytest.mark.pyqt_required
+def test_move_event_skips_duplicate_override_record(qt_app):
+    window = _InteractionStubWindow()
+    window._follow_enabled = True
+    window._last_set_geometry = (0, 0, 20, 20)
+    window.setGeometry(10, 10, 20, 20)
+    window._last_move_log = None
+    window._follow_controller.wm_override = (10, 10, 20, 20)
+
+    move_event = QMoveEvent(QPoint(10, 10), QPoint(0, 0))
+    window.moveEvent(move_event)
+
+    assert window._override_calls == []

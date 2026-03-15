@@ -41,6 +41,7 @@ class WindowController:
         self._last_follow_state: Optional[WindowState] = None
         self._fullscreen_hint_logged = False
         self._last_visibility_state: Optional[bool] = None
+        self._last_visibility_inputs: Optional[Tuple[bool, bool, bool, bool]] = None
 
     # Placeholder methods for future wiring; concrete logic stays in OverlayWindow for now.
     # These will be filled as geometry and visibility orchestration moves here in later stages.
@@ -110,6 +111,7 @@ class WindowController:
         target_tuple: Geometry,
         *,
         force_render: bool,
+        standalone_mode: bool = False,
         update_follow_visibility_fn: Callable[[bool], None],
         update_auto_scale_fn: Callable[[int, int], None],
         ensure_transient_parent_fn: Callable[[str], None],
@@ -121,7 +123,23 @@ class WindowController:
         ensure_transient_parent_fn(state.identifier or "")
         if fullscreen_hint_fn():
             self._fullscreen_hint_logged = True
-        should_show = force_render or (state.is_visible and state.is_foreground)
+        if force_render:
+            should_show = True
+        else:
+            should_show = state.is_visible and state.is_foreground
+        visibility_inputs = (standalone_mode, force_render, state.is_visible, state.is_foreground)
+        if visibility_inputs != self._last_visibility_inputs:
+            self._log(
+                "Follow visibility decision: standalone=%s force_render=%s tracker_visible=%s tracker_foreground=%s -> show=%s"
+                % (
+                    standalone_mode,
+                    force_render,
+                    state.is_visible,
+                    state.is_foreground,
+                    should_show,
+                )
+            )
+            self._last_visibility_inputs = visibility_inputs
         actual_visible = is_visible_fn()
         if self._last_visibility_state != should_show or actual_visible != should_show:
             update_follow_visibility_fn(should_show)

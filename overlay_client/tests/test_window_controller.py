@@ -161,6 +161,7 @@ def test_post_process_follow_state_updates_visibility_and_fullscreen_hint() -> N
         state,
         (0, 0, 1920, 1080),
         force_render=False,
+        standalone_mode=False,
         update_follow_visibility_fn=update_visibility,
         update_auto_scale_fn=auto_scale,
         ensure_transient_parent_fn=ensure_parent,
@@ -174,3 +175,89 @@ def test_post_process_follow_state_updates_visibility_and_fullscreen_hint() -> N
     assert fullscreen_called == [True]
     assert controller._last_follow_state == state
     assert controller._last_visibility_state is True
+
+
+def test_post_process_follow_state_standalone_hides_when_not_foreground() -> None:
+    controller = WindowController(log_fn=lambda _msg: None)
+    visibility: List[bool] = []
+    state = _state(is_visible=True, is_foreground=False, identifier="abc123")
+
+    controller.post_process_follow_state(
+        state,
+        (0, 0, 1920, 1080),
+        force_render=False,
+        standalone_mode=True,
+        update_follow_visibility_fn=visibility.append,
+        update_auto_scale_fn=lambda _w, _h: None,
+        ensure_transient_parent_fn=lambda _identifier: None,
+        fullscreen_hint_fn=lambda: False,
+        is_visible_fn=lambda: False,
+    )
+
+    assert visibility == [False]
+
+
+def test_post_process_follow_state_non_standalone_hides_when_not_foreground() -> None:
+    controller = WindowController(log_fn=lambda _msg: None)
+    visibility: List[bool] = []
+    state = _state(is_visible=True, is_foreground=False, identifier="abc123")
+
+    controller.post_process_follow_state(
+        state,
+        (0, 0, 1920, 1080),
+        force_render=False,
+        standalone_mode=False,
+        update_follow_visibility_fn=visibility.append,
+        update_auto_scale_fn=lambda _w, _h: None,
+        ensure_transient_parent_fn=lambda _identifier: None,
+        fullscreen_hint_fn=lambda: False,
+        is_visible_fn=lambda: True,
+    )
+
+    assert visibility == [False]
+
+
+def test_post_process_follow_state_force_render_takes_precedence() -> None:
+    controller = WindowController(log_fn=lambda _msg: None)
+    visibility: List[bool] = []
+    state = _state(is_visible=False, is_foreground=False, identifier="abc123")
+
+    controller.post_process_follow_state(
+        state,
+        (0, 0, 1920, 1080),
+        force_render=True,
+        standalone_mode=False,
+        update_follow_visibility_fn=visibility.append,
+        update_auto_scale_fn=lambda _w, _h: None,
+        ensure_transient_parent_fn=lambda _identifier: None,
+        fullscreen_hint_fn=lambda: False,
+        is_visible_fn=lambda: False,
+    )
+
+    assert visibility == [True]
+
+
+def test_post_process_follow_state_stable_inputs_do_not_oscillate_visibility_calls() -> None:
+    controller = WindowController(log_fn=lambda _msg: None)
+    visibility: List[bool] = []
+    current_visible = [True]
+    state = _state(is_visible=True, is_foreground=False, identifier="abc123")
+
+    def _update_visibility(show: bool) -> None:
+        visibility.append(show)
+        current_visible[0] = show
+
+    for _ in range(4):
+        controller.post_process_follow_state(
+            state,
+            (0, 0, 1920, 1080),
+            force_render=False,
+            standalone_mode=True,
+            update_follow_visibility_fn=_update_visibility,
+            update_auto_scale_fn=lambda _w, _h: None,
+            ensure_transient_parent_fn=lambda _identifier: None,
+            fullscreen_hint_fn=lambda: False,
+            is_visible_fn=lambda: current_visible[0],
+        )
+
+    assert visibility == [False]

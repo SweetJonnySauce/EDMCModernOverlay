@@ -103,6 +103,7 @@ def test_interaction_controller_logs_transient_parent_failure(monkeypatch):
 
     controller = InteractionController(
         is_wayland_fn=lambda: True,
+        standalone_mode_fn=lambda: False,
         log_fn=_log,
         prepare_window_fn=lambda _window: None,
         apply_click_through_fn=lambda _transparent: None,
