@@ -1,5 +1,8 @@
 name: VT Transparency Report
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   workflow_dispatch:
     inputs:
@@ -15,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Build transparency report
         env:
@@ -127,8 +130,14 @@ jobs:
           PY
 
       - name: Upload report to release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event.inputs.release_tag }}
-          files: |
-            vt-transparency.html
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f vt-transparency.html ]]; then
+            echo "vt-transparency.html was not generated." >&2
+            exit 1
+          fi
+          gh release upload "$TAG" vt-transparency.html --clobber

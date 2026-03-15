@@ -1,5 +1,8 @@
 name: CI
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   push:
     branches: [main, master, ilities]
@@ -17,13 +20,13 @@ jobs:
       PYTHONUTF8: "1"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install system deps (Qt/EGL)
         run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1
 
       - name: Set up Python (plugin runtime parity)
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.10"
           cache: "pip"
@@ -46,13 +49,13 @@ jobs:
       PYTHONUTF8: "1"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install system deps (Qt/EGL)
         run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: "pip"
@@ -72,7 +75,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Run Linux installer tests
         run: bash tests/test_install_linux.sh
@@ -81,7 +84,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Pester 5
         shell: pwsh
