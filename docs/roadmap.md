@@ -1,6 +1,8 @@
 # EDMCModernOverlay Roadmap
 
-Here you'll find the general direction I'm taking EDMCModernOverlay. But it only makes sense if it's something that could be useful to the community. Comment on the associated tracker if you want to see this feature or have thoughts on how it should work. Full disclosure, this is a hobby for me, so there are no timelines assoicated with these items.
+Here you'll find the general direction I'm taking EDMCModernOverlay. But it only makes sense if it's something that could be useful to the community. Comment on the associated tracker if you want to see this feature or have thoughts on how it should work. Full disclosure, this is a hobby for me, so there are no timelines assoicated with these items. 
+
+Got an idea? Please open up a new issue for consideration/tracking.
 
 | **Roadmap Item** | **Description** | **Tracker** |
 | --- | --- | --- |
