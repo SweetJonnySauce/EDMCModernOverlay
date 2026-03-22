@@ -40,6 +40,8 @@ DEFAULT_CONFIG = {
         "absolute_focus_prev": ["<Shift-Tab>", "<Up>"],
         "background_focus_next": ["<Tab>", "<Return>", "<KP_Enter>", "<Down>"],
         "background_focus_prev": ["<Shift-Tab>", "<Up>"],
+        "group_controls_focus_next": ["<Tab>", "<Return>", "<KP_Enter>", "<Down>"],
+        "group_controls_focus_prev": ["<Shift-Tab>", "<Up>"],
     },
 }
     },

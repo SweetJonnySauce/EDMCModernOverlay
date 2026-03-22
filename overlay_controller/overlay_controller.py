@@ -299,7 +299,7 @@ class OverlayConfigApp(tk.Tk):
         self.anchor_widget = layout["anchor_widget"]
         self.justification_widget = layout["justification_widget"]
         self.background_widget = layout["background_widget"]
-        self.tip_helper = layout["tip_helper"]
+        self.group_controls_widget = layout.get("group_controls_widget")
         self.group_enabled_var = layout.get("group_enabled_var")
         self.group_enabled_checkbox = layout.get("group_enabled_checkbox")
         self.reset_button = layout["reset_button"]
@@ -551,9 +551,6 @@ class OverlayConfigApp(tk.Tk):
 
     def _update_placement_focus_highlight(self) -> None:
         self._focus_manager.update_placement_focus_highlight()
-
-    def _update_contextual_tip(self) -> None:
-        self._focus_manager.update_contextual_tip()
 
     def _refresh_widget_focus(self) -> None:
         manager = safe_getattr(self, "_focus_manager")
@@ -922,6 +919,14 @@ class OverlayConfigApp(tk.Tk):
                     setter(enabled)
                 except Exception:
                     continue
+        group_controls_widget = getattr(self, "group_controls_widget", None)
+        if group_controls_widget is not None:
+            setter = getattr(group_controls_widget, "set_enabled", None)
+            if callable(setter):
+                try:
+                    setter(enabled)
+                except Exception:
+                    pass
         reset_button = getattr(self, "reset_button", None)
         if reset_button is not None:
             try:
@@ -937,7 +942,6 @@ class OverlayConfigApp(tk.Tk):
         if not enabled and not self.widget_select_mode and self.widget_focus_area == "sidebar":
             if getattr(self, "_sidebar_focus_index", 0) > 0:
                 self.exit_focus_mode()
-        self._update_contextual_tip()
 
     def _schedule_group_controls_alignment(self, _event: object | None = None) -> None:
         handle = getattr(self, "_group_controls_align_handle", None)
@@ -954,6 +958,10 @@ class OverlayConfigApp(tk.Tk):
         reset_button = getattr(self, "reset_button", None)
         background = getattr(self, "background_widget", None)
         if checkbox is None or reset_button is None or background is None:
+            return
+        if str(getattr(checkbox, "winfo_manager", lambda: "")()) != "place":
+            return
+        if str(getattr(reset_button, "winfo_manager", lambda: "")()) != "place":
             return
         pick_button = getattr(background, "_picker_btn", None)
         if pick_button is None:
@@ -1189,7 +1197,6 @@ class OverlayConfigApp(tk.Tk):
             widget.set_text_color(None)
         except Exception:
             pass
-        self._update_contextual_tip()
 
     def _apply_snapshot_to_absolute_widget(
         self, selection: tuple[str, str], snapshot: GroupSnapshot, force_ui: bool = True

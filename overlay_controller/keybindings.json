@@ -64,6 +64,16 @@
         "background_focus_prev": [
           "<Shift-Tab>",
           "<Up>"
+        ],
+        "group_controls_focus_next": [
+          "<Tab>",
+          "<Return>",
+          "<KP_Enter>",
+          "<Down>"
+        ],
+        "group_controls_focus_prev": [
+          "<Shift-Tab>",
+          "<Up>"
         ]
       }
     }
