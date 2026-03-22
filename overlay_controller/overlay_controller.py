@@ -617,13 +617,45 @@ class OverlayConfigApp(tk.Tk):
         if sys.platform.startswith("win"):
             self._alt_active = False
 
+    @staticmethod
+    def _is_window_drag_blocked_widget(widget: object | None) -> bool:
+        if widget is None:
+            return False
+        try:
+            widget_class = str(widget.winfo_class()).lower()
+        except Exception:
+            return False
+        return widget_class in {
+            "entry",
+            "ttk::entry",
+            "text",
+            "spinbox",
+            "scale",
+            "listbox",
+            "button",
+            "ttk::button",
+            "checkbutton",
+            "ttk::checkbutton",
+            "combobox",
+            "ttk::combobox",
+            "scrollbar",
+            "ttk::scrollbar",
+            "treeview",
+            "ttk::treeview",
+            "menubutton",
+            "ttk::menubutton",
+        }
+
     def _start_window_drag(self, event: tk.Event[tk.Misc]) -> None:  # type: ignore[name-defined]
         """Begin window drag tracking when a mouse button is pressed."""
 
+        self._drag_offset = None
         try:
             if event.widget.winfo_toplevel() is not self:
                 return
         except Exception:
+            return
+        if self._is_window_drag_blocked_widget(getattr(event, "widget", None)):
             return
         try:
             self._drag_offset = (
@@ -761,6 +793,16 @@ class OverlayConfigApp(tk.Tk):
             return None
         return self._focus_widgets.get(key)
 
+    @staticmethod
+    def _is_text_input_widget(widget: object | None) -> bool:
+        if widget is None:
+            return False
+        try:
+            widget_class = str(widget.winfo_class()).lower()
+        except Exception:
+            return False
+        return widget_class in {"entry", "ttk::entry", "text"}
+
     def _handle_active_widget_key(self, keysym: str, event: tk.Event[tk.Misc] | None = None) -> bool:  # type: ignore[name-defined]
         if self.widget_select_mode:
             return False
@@ -773,6 +815,9 @@ class OverlayConfigApp(tk.Tk):
             self.exit_focus_mode()
             return True
         if lower_keysym == "space":
+            event_widget = getattr(event, "widget", None) if event is not None else None
+            if self._is_text_input_widget(event_widget):
+                return False
             handler = getattr(widget, "handle_key", None)
             try:
                 handled = bool(handler(keysym, event)) if handler is not None else False
