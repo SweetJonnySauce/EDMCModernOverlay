@@ -432,6 +432,7 @@ If something is unclear, capture it under `Open Questions`.
 - `Copy`/`Paste` clones full profile content (rules + full placement snapshot), not partial row metadata only.
 - Verification to run:
 - `python -m pytest overlay_plugin/tests -k "profile and preferences or context menu or table"`
+- `python -m pytest tests/test_preferences_panel_controller_tab.py -k "profile and copy or paste or inline"`
 
 #### Stage 3.2 Detailed Plan
 - Objective:
@@ -469,6 +470,7 @@ If something is unclear, capture it under `Open Questions`.
 - State updates are reflected in controller and runtime behavior.
 - Verification to run:
 - `python -m pytest overlay_plugin/tests -k "profile and command or hotkey"`
+- `python -m pytest tests/test_hotkeys.py tests/test_journal_commands.py -k "profile and next or prev"`
 
 #### Phase 3 Execution Order
 - Implement in strict order: `3.1` -> `3.2` -> `3.3`.
@@ -500,8 +502,10 @@ If something is unclear, capture it under `Open Questions`.
 - Acceptance criteria:
 - Rule matching produces single deterministic profile result for all states.
 - Unmatched states fall back according to locked contract.
+- Repeated identical dashboard snapshots do not re-trigger profile switch side effects or duplicate auto-switch messages.
 - Verification to run:
 - `python -m pytest overlay_plugin/tests -k "dashboard or rule and profile"`
+- `python -m pytest tests/test_plugin_group_state.py -k "profile and transition"`
 
 #### Stage 4.2 Detailed Plan
 - Objective:
@@ -515,8 +519,10 @@ If something is unclear, capture it under `Open Questions`.
 - Switching profile updates rendered placements immediately and correctly.
 - Cache state remains coherent after repeated transitions.
 - Manual-selection and auto-rule behavior matches locked requirements, including transition-only auto-switching and always-available manual selection.
+- Auto-rule transitions emit the standard overlay message with exact text format `Active Profile: {name}`.
 - Verification to run:
 - `python -m pytest overlay_controller/tests -k "profile and cache and transition"`
+- `python -m pytest tests/test_lifecycle_tracking.py tests/test_runtime_plugin_group_publish.py -k "profile and active message"`
 
 #### Stage 4.3 Detailed Plan
 - Objective:
