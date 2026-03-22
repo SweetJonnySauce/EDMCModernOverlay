@@ -299,7 +299,7 @@ class OverlayConfigApp(tk.Tk):
         self.anchor_widget = layout["anchor_widget"]
         self.justification_widget = layout["justification_widget"]
         self.background_widget = layout["background_widget"]
-        self.tip_helper = layout["tip_helper"]
+        self.group_controls_widget = layout.get("group_controls_widget")
         self.group_enabled_var = layout.get("group_enabled_var")
         self.group_enabled_checkbox = layout.get("group_enabled_checkbox")
         self.reset_button = layout["reset_button"]
@@ -370,6 +370,18 @@ class OverlayConfigApp(tk.Tk):
         frame_width = target_inner_width + (self.preview_canvas_padding * 2) + horizontal_slack
         column_width = frame_width + (self.placement_overlay_padding * 2)
         return int(ceil(column_width))
+
+    def _resolve_min_window_height(self) -> int:
+        """Return the effective minimum height needed to keep controls visible."""
+
+        min_height = int(getattr(self, "base_min_height", 640) or 640)
+        try:
+            req_height = int(self.winfo_reqheight())
+        except Exception:
+            req_height = 0
+        if req_height > 0:
+            min_height = max(min_height, req_height)
+        return min_height
 
     def _register_widget_specific_bindings(self) -> None:
         absolute_widget = getattr(self, "absolute_widget", None)
@@ -551,9 +563,6 @@ class OverlayConfigApp(tk.Tk):
 
     def _update_placement_focus_highlight(self) -> None:
         self._focus_manager.update_placement_focus_highlight()
-
-    def _update_contextual_tip(self) -> None:
-        self._focus_manager.update_contextual_tip()
 
     def _refresh_widget_focus(self) -> None:
         manager = safe_getattr(self, "_focus_manager")
@@ -922,6 +931,14 @@ class OverlayConfigApp(tk.Tk):
                     setter(enabled)
                 except Exception:
                     continue
+        group_controls_widget = getattr(self, "group_controls_widget", None)
+        if group_controls_widget is not None:
+            setter = getattr(group_controls_widget, "set_enabled", None)
+            if callable(setter):
+                try:
+                    setter(enabled)
+                except Exception:
+                    pass
         reset_button = getattr(self, "reset_button", None)
         if reset_button is not None:
             try:
@@ -937,7 +954,6 @@ class OverlayConfigApp(tk.Tk):
         if not enabled and not self.widget_select_mode and self.widget_focus_area == "sidebar":
             if getattr(self, "_sidebar_focus_index", 0) > 0:
                 self.exit_focus_mode()
-        self._update_contextual_tip()
 
     def _schedule_group_controls_alignment(self, _event: object | None = None) -> None:
         handle = getattr(self, "_group_controls_align_handle", None)
@@ -954,6 +970,10 @@ class OverlayConfigApp(tk.Tk):
         reset_button = getattr(self, "reset_button", None)
         background = getattr(self, "background_widget", None)
         if checkbox is None or reset_button is None or background is None:
+            return
+        if str(getattr(checkbox, "winfo_manager", lambda: "")()) != "place":
+            return
+        if str(getattr(reset_button, "winfo_manager", lambda: "")()) != "place":
             return
         pick_button = getattr(background, "_picker_btn", None)
         if pick_button is None:
@@ -1189,7 +1209,6 @@ class OverlayConfigApp(tk.Tk):
             widget.set_text_color(None)
         except Exception:
             pass
-        self._update_contextual_tip()
 
     def _apply_snapshot_to_absolute_widget(
         self, selection: tuple[str, str], snapshot: GroupSnapshot, force_ui: bool = True
@@ -2448,16 +2467,17 @@ class OverlayConfigApp(tk.Tk):
         """Show the correct placement frame for the current state."""
 
         self.update_idletasks()
+        min_height = self._resolve_min_window_height()
         viewable = False
         try:
             viewable = bool(self.winfo_viewable())
         except Exception:
             viewable = False
         if viewable and not self._initial_geometry_applied:
-            current_height = max(self.base_min_height, self.winfo_reqheight())
+            current_height = max(min_height, self.winfo_reqheight())
             self._initial_geometry_applied = True
         else:
-            current_height = max(self.winfo_height(), self.base_min_height)
+            current_height = max(self.winfo_height(), min_height)
         open_outer_padding = self.container_pad_left + self.container_pad_right_open
         closed_outer_padding = self.container_pad_left + self.container_pad_right_closed
         sidebar_total_open = self.sidebar_width + self.sidebar_pad
@@ -2482,7 +2502,7 @@ class OverlayConfigApp(tk.Tk):
             self.container.grid_columnconfigure(1, weight=1, minsize=self.placement_min_width)
             self.update_idletasks()
             target_width = max(self._open_width, self.winfo_reqwidth(), open_min_width)
-            self.minsize(open_min_width, self.base_min_height)
+            self.minsize(open_min_width, min_height)
             self.geometry(f"{int(target_width)}x{int(current_height)}")
             self._open_width = max(self._open_width, self.winfo_width(), self.winfo_reqwidth(), open_min_width)
             self._current_direction = "left"
@@ -2504,7 +2524,7 @@ class OverlayConfigApp(tk.Tk):
                 + self.indicator_hit_width
             )
             collapsed_width = max(collapsed_width, closed_min_width)
-            self.minsize(collapsed_width, self.base_min_height)
+            self.minsize(collapsed_width, min_height)
             self.geometry(f"{int(collapsed_width)}x{int(current_height)}")
             self._current_direction = "right"
 

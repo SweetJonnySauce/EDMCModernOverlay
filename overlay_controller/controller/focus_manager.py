@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from overlay_controller.widgets import AbsoluteXYWidget, BackgroundWidget
+from overlay_controller.widgets import AbsoluteXYWidget, BackgroundWidget, GroupControlsWidget
 
 
 class FocusManager:
@@ -36,6 +36,19 @@ class FocusManager:
             self.binding_manager.register_action(
                 "background_focus_prev",
                 background_widget.focus_previous_field,
+                widgets=targets,
+            )
+        group_controls_widget = getattr(self.app, "group_controls_widget", None)
+        if isinstance(group_controls_widget, GroupControlsWidget):
+            targets = group_controls_widget.get_binding_targets()
+            self.binding_manager.register_action(
+                "group_controls_focus_next",
+                group_controls_widget.focus_next_field,
+                widgets=targets,
+            )
+            self.binding_manager.register_action(
+                "group_controls_focus_prev",
+                group_controls_widget.focus_previous_field,
                 widgets=targets,
             )
 
@@ -172,59 +185,6 @@ class FocusManager:
         color = "#888888" if app.widget_select_mode else "#000000"
         app.placement_overlay.show(app.placement_frame, color)
 
-    def update_contextual_tip(self) -> None:
-        app = self.app
-        helper = getattr(app, "tip_helper", None)
-        if helper is None:
-            return
-        primary: str | None = None
-        secondary: str | None = None
-        controls_enabled = getattr(app, "_group_controls_enabled", True)
-        in_sidebar = app.widget_focus_area == "sidebar" and bool(getattr(app, "sidebar_cells", None))
-
-        if not in_sidebar:
-            primary = "Use arrow keys to move between controls."
-            secondary = "Press Enter to focus a control; Esc exits focus mode."
-            helper.set_context(primary, secondary)
-            return
-
-        sidebar_cells = getattr(app, "sidebar_cells", []) or []
-        idx = max(0, min(getattr(app, "_sidebar_focus_index", 0), len(sidebar_cells) - 1))
-        if not controls_enabled and idx > 0:
-            primary = "Waiting for overlay cache to populate this group."
-            secondary = "Controls unlock once the latest payload arrives."
-            helper.set_context(primary, secondary)
-            return
-
-        select_mode = app.widget_select_mode
-        focus_hint = "Press Space to edit; arrows move the selection." if select_mode else "Press Space to exit."
-
-        if idx == 0:
-            primary = "Pick an ID prefix group to adjust."
-            secondary = "Select the overlay group you want to adjust. The Controller needs to see an overlay at least once to manage it. Launch the game with the overlay running and do some activities that would trigger in-game overlays."
-            if select_mode:
-                secondary = "Select the overlay group you want to adjust; arrows move the selection."
-                focus_hint = "Press Space to edit."
-        elif idx == 1:
-            primary = "Use Alt-click / Alt-arrow to move the overlay group to the screen edge."
-        elif idx == 2:
-            primary = "Set exact coordinates for this group."
-            secondary = "Enter px or % values; Tab switches fields."
-        elif idx == 3:
-            primary = "Choose the anchor point used for transforms."
-            secondary = "Use arrows or click dots to move the highlight."
-        elif idx == 4:
-            primary = "Set payload justification."
-            secondary = "Left/Center/Right controls text alignment."
-        elif idx == 5:
-            primary = "Set background and border colors."
-            secondary = "Enter #RRGGBB/#AARRGGBB or a named color; border width expands the fill."
-
-        if focus_hint:
-            secondary = f"{secondary} {focus_hint}" if secondary else focus_hint
-
-        helper.set_context(primary, secondary)
-
     def refresh_widget_focus(self) -> None:
         app = self.app
         if hasattr(app, "sidebar_cells"):
@@ -234,4 +194,3 @@ class FocusManager:
             app.indicator_wrapper.lift()
         except Exception:
             pass
-        self.update_contextual_tip()
