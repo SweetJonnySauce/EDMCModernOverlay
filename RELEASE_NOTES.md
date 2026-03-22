@@ -1,5 +1,14 @@
 # Release Notes
 
+## 0.9.0
+
+### Features
+
+### Maintenance
+
+### Bug Fixes
+- Fix [#183](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/183) - Enabled checkbox on Overlay Controller is confusing.
+
 ## 0.8.0
 
 ### Features
