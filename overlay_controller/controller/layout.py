@@ -222,15 +222,12 @@ class LayoutBuilder:
                 if is_selectable and focus_index is not None:
                     focus_widgets[("sidebar", focus_index)] = background_widget
             else:
-                frame.configure(height=140)
-                frame.grid_propagate(False)
-                frame.pack_propagate(False)
                 group_controls_widget = GroupControlsWidget(frame)
                 if is_selectable and focus_index is not None:
                     group_controls_widget.set_focus_request_callback(lambda idx=focus_index: on_sidebar_click(idx))
                 group_controls_widget.set_enabled_change_callback(on_group_enabled_changed)
                 group_controls_widget.set_reset_callback(on_reset_clicked)
-                group_controls_widget.pack(fill="both", expand=True, padx=4, pady=4)
+                group_controls_widget.pack(fill="x", expand=False, padx=4, pady=4)
                 group_enabled_var = group_controls_widget.group_enabled_var
                 group_enabled_checkbox = group_controls_widget.enabled_checkbox
                 reset_button = group_controls_widget.reset_button
@@ -242,8 +239,7 @@ class LayoutBuilder:
                 for child in frame.winfo_children():
                     child.bind("<Button-1>", lambda _e, idx=focus_index: on_sidebar_click(idx), add="+")
 
-            grow_weight = 1 if index == len(sections) - 1 else 0
-            row_opts = {"weight": grow_weight}
+            row_opts = {"weight": 0}
             if index == 3:
                 row_opts["minsize"] = 220
             sidebar.grid_rowconfigure(index, **row_opts)
@@ -253,6 +249,8 @@ class LayoutBuilder:
                 sidebar_context_frame = frame
 
         sidebar.grid_columnconfigure(0, weight=1)
+        # Keep controls row content-sized; dedicate spare height to a trailing spacer row.
+        sidebar.grid_rowconfigure(len(sections), weight=1)
 
         return {
             "container": container,

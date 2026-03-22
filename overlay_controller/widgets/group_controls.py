@@ -23,7 +23,7 @@ class GroupControlsWidget(tk.Frame):
         self.grid_rowconfigure(0, weight=0)
         self.enabled_checkbox = tk.Checkbutton(
             self,
-            text="Enabled",
+            text="Overlay Visible",
             variable=self.group_enabled_var,
             command=self._handle_enabled_changed,
         )
@@ -31,9 +31,8 @@ class GroupControlsWidget(tk.Frame):
 
         self.reset_button = tk.Button(
             self,
-            text="Reset",
+            text="Reset Defaults",
             command=self._handle_reset_clicked,
-            width=6,
         )
         self.reset_button.grid(row=0, column=1, sticky="e", padx=(4, 8), pady=(6, 8))
         ToolTip(self.reset_button, "Reset returns the overlay to the plugin defaults")

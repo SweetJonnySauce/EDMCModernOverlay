@@ -67,6 +67,8 @@ If something is unclear, capture it under `Open Questions`.
 | 3 | Focus-manager, call-site, and accessibility wiring cleanup | Completed |
 | 4 | Tests and validation | Completed |
 | 5 | Docs/results and follow-up | Completed |
+| 6 | Follow-up geometry fix: compact group-controls row height | Completed |
+| 7 | Follow-up geometry fix: enforce minimum window height for controls visibility | Completed |
 
 ## Phase Details
 
@@ -415,6 +417,143 @@ If something is unclear, capture it under `Open Questions`.
 - Implementation and test evidence documented in this file.
 - Residual risk: manual visual smoke-check of bottom-row geometry/focus highlight in live controller UI is still recommended because this environment is headless.
 
+### Phase 6: Follow-up Geometry Fix (Compact Controls Row Height)
+- Reduce the group-controls frame height to content so the selected frame does not consume extra vertical space.
+- Risks: changing row expansion may alter sidebar stretching behavior.
+- Mitigations: move stretch responsibility to a dedicated spacer row and keep focus-cycle/order unchanged.
+
+| Stage | Description | Status |
+| --- | --- | --- |
+| 6.1 | Define compact-height contract and touch points | Completed |
+| 6.2 | Update layout row expansion to avoid stretching controls widget | Completed |
+| 6.3 | Run targeted regression tests and record results | Completed |
+
+#### Stage 6.1 Detailed Plan
+- Objective:
+- Lock behavior for the follow-up UI fix.
+- Steps:
+- Keep `GroupControlsWidget` content and behavior unchanged.
+- Remove forced expansion from the bottom controls row so frame height follows child controls.
+- Preserve sidebar focus order and binding targets.
+- Acceptance criteria:
+- Bottom controls frame wraps the controls row height instead of expanding to fill remaining sidebar space.
+- Verification to run:
+- Manual controller visual check in display session.
+
+#### Stage 6.2 Detailed Plan
+- Objective:
+- Apply layout changes that prevent oversized controls frame.
+- Primary touch points:
+- `overlay_controller/controller/layout.py`
+- Steps:
+- Remove fixed-height/non-propagating settings for the group-controls row.
+- Stop assigning the grow-weight to the controls row.
+- Add a trailing spacer grid row with grow-weight to absorb free vertical space.
+- Acceptance criteria:
+- Controls row remains compact while sidebar still expands to fill available height.
+- Verification to run:
+- `python3 -m pytest overlay_controller/tests/test_group_controls_widget.py`
+- `python3 -m pytest overlay_controller/tests/test_focus_manager.py`
+
+#### Stage 6.3 Detailed Plan
+- Objective:
+- Validate no behavior regression from geometry update.
+- Steps:
+- Run focused tests for controls widget and focus wiring.
+- Document results under `Implementation Results`.
+- Acceptance criteria:
+- Targeted tests pass.
+- Verification to run:
+- `python3 -m pytest overlay_controller/tests -k "group_controls or focus_manager"`
+
+#### Phase 6 Execution Order
+- Implement in strict order: `6.1` -> `6.2` -> `6.3`.
+
+#### Phase 6 Exit Criteria
+- Group-controls frame height is content-sized.
+- Focus/navigation behaviors remain unchanged.
+
+#### Phase 6 Execution Plan (2026-03-21)
+- Patch layout so the controls row no longer expands.
+- Keep behavior scoped to geometry only.
+- Run focused tests for controls and focus-manager wiring.
+
+#### Phase 6 Results
+- Updated `overlay_controller/controller/layout.py` so the group-controls row no longer forces fixed height or expansion.
+- Removed grow-weight from selectable rows and added a trailing spacer row to absorb extra sidebar height.
+- Focus wiring and controls widget behavior remain unchanged; only geometry behavior changed.
+- Focused test execution results:
+- `overlay_client/.venv/bin/python -m pytest overlay_controller/tests/test_group_controls_widget.py` -> `4 skipped` (headless Tk guard in this environment).
+- `overlay_client/.venv/bin/python -m pytest overlay_controller/tests/test_focus_manager.py` -> `1 passed`.
+- `overlay_client/.venv/bin/python -m pytest overlay_controller/tests -k "group_controls or focus_manager"` -> `1 passed`, `4 skipped`, `52 deselected`.
+
+### Phase 7: Follow-up Geometry Fix (Minimum Height Enforcement)
+- Prevent shrinking the controller window vertically to a size that clips/hides the bottom controls.
+- Risks: over-constraining height could feel rigid on smaller displays.
+- Mitigations: derive min-height from current required layout height with `base_min_height` as floor.
+
+| Stage | Description | Status |
+| --- | --- | --- |
+| 7.1 | Define min-height contract and touch points | Completed |
+| 7.2 | Implement dynamic minimum-height resolution in placement-state logic | Completed |
+| 7.3 | Run targeted regression tests and record results | Completed |
+
+#### Stage 7.1 Detailed Plan
+- Objective:
+- Lock the behavior contract for vertical sizing.
+- Steps:
+- Keep existing width-toggle behavior unchanged.
+- Ensure min-height follows required UI height so the bottom controls remain visible.
+- Keep `base_min_height` as fallback floor.
+- Acceptance criteria:
+- User cannot resize window height below the height needed to show sidebar controls.
+- Verification to run:
+- Manual controller resize check in display session.
+
+#### Stage 7.2 Detailed Plan
+- Objective:
+- Apply scoped min-height enforcement without changing control behavior.
+- Primary touch points:
+- `overlay_controller/overlay_controller.py`
+- Steps:
+- Add helper to resolve effective min-height from `winfo_reqheight()` with `base_min_height` floor.
+- Use resolved min-height in `_apply_placement_state` when setting `minsize` and target height.
+- Acceptance criteria:
+- Both open/collapsed placement states enforce effective min-height.
+- Verification to run:
+- `overlay_client/.venv/bin/python -m pytest overlay_controller/tests/test_focus_manager.py`
+- `overlay_client/.venv/bin/python -m pytest overlay_controller/tests/test_app_context.py`
+
+#### Stage 7.3 Detailed Plan
+- Objective:
+- Validate no regressions from min-height change.
+- Steps:
+- Run focused tests that cover controller context/focus wiring.
+- Document results in `Implementation Results`.
+- Acceptance criteria:
+- Targeted tests pass.
+- Verification to run:
+- `overlay_client/.venv/bin/python -m pytest overlay_controller/tests -k "focus_manager or app_context"`
+
+#### Phase 7 Execution Order
+- Implement in strict order: `7.1` -> `7.2` -> `7.3`.
+
+#### Phase 7 Exit Criteria
+- Vertical resize floor preserves visibility of bottom controls.
+- Focus/navigation behavior remains unchanged.
+
+#### Phase 7 Execution Plan (2026-03-21)
+- Add a dynamic min-height resolver to `OverlayConfigApp`.
+- Apply the resolved min-height in `_apply_placement_state` for open and collapsed modes.
+- Run targeted non-GUI-heavy tests and record results.
+
+#### Phase 7 Results
+- Added `_resolve_min_window_height()` in `overlay_controller/overlay_controller.py` to derive effective min-height from `winfo_reqheight()` with `base_min_height` as floor.
+- Updated `_apply_placement_state()` to apply the effective min-height to both open/collapsed `minsize(...)` calls and current-height clamping.
+- Focused test execution results:
+- `overlay_client/.venv/bin/python -m pytest overlay_controller/tests/test_focus_manager.py overlay_controller/tests/test_app_context.py` -> `2 passed`.
+- `overlay_client/.venv/bin/python -m pytest overlay_controller/tests -k "focus_manager or app_context"` -> `2 passed`, `55 deselected`.
+
 ## Tests To Run (Per Iteration)
 - `python3 -m pytest overlay_controller/tests -k "focus or controller or widget"`
 - `python3 -m pytest overlay_controller/tests/test_focus_manager.py`
@@ -422,7 +561,7 @@ If something is unclear, capture it under `Open Questions`.
 - `make check`
 
 ## Implementation Results
-- Completed phases: `1`, `2`, `3`, `4`, `5`.
+- Completed phases: `1`, `2`, `3`, `4`, `5`, `6`, `7`.
 - Touched files:
 - `overlay_controller/widgets/group_controls.py` (new)
 - `overlay_controller/controller/layout.py`
@@ -435,14 +574,22 @@ If something is unclear, capture it under `Open Questions`.
 - `overlay_controller/tests/test_focus_manager.py`
 - `overlay_controller/tests/test_group_controls_widget.py` (new)
 - `overlay_controller/widgets/tips.py` (deleted)
+- `docs/plans/fix183-overlay-controller-update.md`
 - Behavioral outcome:
 - Bottom hint text and hint-update plumbing removed from overlay-controller runtime.
 - `Enabled` checkbox and `Reset` button now live in a dedicated `GroupControlsWidget`.
 - New controls widget is part of normal sidebar focus cycle and follows multi-control navigation patterns.
+- Group-controls frame now sizes to control content height; excess sidebar height is assigned to a non-selectable spacer row.
+- Controller minimum height now follows required layout height, preventing vertical resize that would hide bottom controls.
 - Verification summary:
 - `python3 -m pytest overlay_controller/tests -k "focus or controller or widget"` passed (`46 passed`, `11 skipped`).
 - `python3 -m pytest overlay_controller/tests/test_focus_manager.py` passed (`1 passed`).
 - `python3 -m pytest overlay_controller/tests` passed (`46 passed`, `11 skipped`).
 - `make check` passed (`ruff`, `mypy`, full pytest with `547 passed`, `29 skipped`).
+- `overlay_client/.venv/bin/python -m pytest overlay_controller/tests/test_group_controls_widget.py` passed with headless skips (`4 skipped`).
+- `overlay_client/.venv/bin/python -m pytest overlay_controller/tests/test_focus_manager.py` passed (`1 passed`).
+- `overlay_client/.venv/bin/python -m pytest overlay_controller/tests -k "group_controls or focus_manager"` passed (`1 passed`, `4 skipped`, `52 deselected`).
+- `overlay_client/.venv/bin/python -m pytest overlay_controller/tests/test_focus_manager.py overlay_controller/tests/test_app_context.py` passed (`2 passed`).
+- `overlay_client/.venv/bin/python -m pytest overlay_controller/tests -k "focus_manager or app_context"` passed (`2 passed`, `55 deselected`).
 - Follow-up:
 - Run a live manual controller UI smoke check to validate visual alignment/highlight behavior in a real display session.
