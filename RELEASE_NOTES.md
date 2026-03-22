@@ -3,7 +3,7 @@
 ## 0.9.0
 
 ### Features
-- Overlay Controller now has a background slider for opacity. This controls the alpha channel for background and background border colors. [#199](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/199)
+- Overlay Controller now has a background slider for opacity. This controls the alpha channel for background and background border colors. [#199](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/199) 
 
 ### Maintenance
 
