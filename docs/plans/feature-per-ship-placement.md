@@ -29,6 +29,7 @@ If something is unclear, capture it under `Open Questions`.
 - `InMainShip ShipID` rule picker must not render ID-only placeholder rows; only ships with known ship names are shown in selectable rows.
 - `InMainShip ShipID` rule picker row labels must use only ship identity fields: render as `{ship_name} ({ship_ident})` when ident is present, otherwise `{ship_name}` (never include ship type or numeric ShipID in the row text).
 - Users must be able to set the current profile from Overlay Controller, chat commands, and hotkeys.
+- Chat commands and hotkeys must support profile navigation actions for `next` and `prev` profile selection (in addition to direct profile selection), and traversal order must match the profile table order in settings.
 - On profile switch, plugin must materialize the selected profile overrides into the root plugin/group keys in `overlay_groupings.user.json` (active-root view) for legacy compatibility.
 - Each profile must persist a full placement configuration set (including unmodified values inherited from `Default`), not only sparse changed fields.
 - Profile management (create/list/rename/delete/rule assignment) must live in a dedicated tab on the EDMCModernOverlay preferences pane.
@@ -36,22 +37,27 @@ If something is unclear, capture it under `Open Questions`.
 - Profile table in preferences must emulate the look/interaction pattern of BGS-Tally's Discord webhooks table (reference implementation in `../BGS-Tally/bgstally/ui.py`, `sheet_webhooks` setup).
 - Profile rule assignment in that table must be checkbox-driven; each rule is represented by a checkbox column (use abbreviations where needed for column width, while keeping full human-readable meaning in labels/tooltips/help text).
 - Profile table right-click menu must support row insert, row delete, `Set Active`, `Copy`, and `Paste` actions.
+- Profile name editing in the preferences table must be inline (cell edit), with the same validation rules as any other rename path.
+- `Paste` naming must be deterministic: first duplicate uses ` (Copy)` suffix, then ` (Copy 2)`, ` (Copy 3)`, etc. as needed.
 - Context-menu action icons may be reused from sibling plugin assets under `../BGS-Tally/assets` (for example: `icon_col_edit.png`, `icon_col_delete.png`, `icon_green_tick_16x16.png`), with a graceful fallback to text-only menu entries if icon loading fails.
 - Profile names are case-insensitive and may include spaces and symbols.
 - When multiple profiles match simultaneously, winner precedence is alphabetical by profile name (case-insensitive compare).
-- Manual profile selection remains locked until an auto-rule match overrides it.
+- Manual profile selection must always remain user-selectable from controller/preferences/chat/hotkeys.
 - Profiles with no rules are manual-only and must never auto-activate.
+- Rule triggers only change the active profile; they must not disable or block manual profile selection controls.
+- Auto-rule-driven profile switches must only occur when match state changes and the resolved winner changes (no repeated re-activation on identical successive status snapshots).
+- When an auto-rule changes the active profile, use the standard overlay message scheme and show `Active Profile: {name}` briefly on screen.
 - Overlay Controller profile UX is switch-only; it must not expose profile CRUD operations.
 - Overlay Controller must render profile selection as its own dedicated selector widget.
 - Profile selector widget must be positioned above the IdPrefix selector widget in the controller sidebar stack.
 - Profile selector widget label text must be `Profile`, rendered above the profile dropdown field.
 - IdPrefix selector widget label text must be `Overlay`, rendered above the overlay dropdown field.
 - Profile selector widget interaction rules must match IdPrefix selector widget rules (same readonly dropdown semantics, left/right arrow-button stepping, keyboard/focus behavior, selection-wrapping behavior, and empty/disabled-state handling model).
-- Controller `Reset Defaults` action must be profile-aware:
-- when active profile is non-`Default`, reset target settings to `Default` profile values
-- when active profile is `Default`, reset all profiles back to original shipped plugin settings
+- Controller `Reset Defaults` action must be profile-aware and scoped to the currently selected overlay group across all profiles:
+- when active profile is non-`Default`, reset the selected overlay group's placement overrides in that active profile to `Default` profile values
+- when active profile is `Default`, reset the selected overlay group's settings in all profiles back to original shipped plugin settings
 - Reset button label must be profile-aware:
-- when active profile is `Default`, button text is `Reset All Profiles`
+- when active profile is `Default`, button text is `Reset Overlay (All Profiles)`
 - when active profile is non-`Default`, button text is `Reset Profile to Default`
 - Placement edits in non-`Default` profiles apply to the current profile only.
 - When editing `Default`, changed plugin-group settings must propagate to all other profiles that do not currently hold a divergent override for that same setting.
@@ -74,6 +80,7 @@ If something is unclear, capture it under `Open Questions`.
 - `InTaxi` -> `Flags2.InTaxi`
 - `InMulticrew` -> `Flags2.InMulticrew`
 - Profile auto-rule evaluation must run when dashboard status updates are received; it must not depend on journal event-name inference for these contexts.
+- Auto-rule evaluation runs on dashboard updates, but profile-switch side effects (state change + message) fire only when rule-match state/winner transitions.
 - Journal/state ingestion remains responsible for ship identity (`ShipID`) and fleet-cache maintenance; dashboard status drives context flags.
 - Keep/refresh a last-known decoded dashboard snapshot for rule checks during the session.
 - If no dashboard status has been received yet in the current session, do not synthesize context from journal events for the above rules; preserve manual/default fallback behavior.
@@ -88,6 +95,7 @@ If something is unclear, capture it under `Open Questions`.
 - checkbox columns for boolean rule toggles
 - keyboard navigation and standard edit bindings
 - right-click popup menu bindings enabled
+- inline cell editing for profile-name rename operations
 - Required right-click commands for profile rows:
 - `Insert Row Above/Below`
 - `Delete Row`
@@ -95,8 +103,8 @@ If something is unclear, capture it under `Open Questions`.
 - `Copy`
 - `Paste`
 - `Set Active` updates current/manual active profile state through the same shared profile service path as other switch controls.
-- `Copy` stores selected row data (profile name + rule checkbox state/assignments) in table clipboard state.
-- `Paste` creates a new profile row from copied data and must resolve profile-name collisions with deterministic unique naming (for example, suffixing ` (Copy)` / increment).
+- `Copy` stores full selected profile data in table clipboard state (profile name, rules/checkbox assignments, and full profile placement configuration snapshot).
+- `Paste` creates a new profile row from copied data, cloning all copied profile content, and resolves profile-name collisions with deterministic unique naming: first duplicate uses ` (Copy)`, then ` (Copy 2)`, ` (Copy 3)`, etc.
 
 ### Overlay Controller Selector Layout Contract
 - Controller top selector area must contain two stacked selector widgets, in this exact order:
@@ -138,18 +146,17 @@ If something is unclear, capture it under `Open Questions`.
 - This contract ensures legacy/root-only readers observe the same placement data as the selected active profile.
 
 ### Reset Contract
-- Controller `Reset Defaults` behavior is conditional on active profile:
-- Active profile is non-`Default`: reset operation reverts target settings to `Default` profile values.
-- Active profile is `Default`: reset operation reverts all profiles to shipped/original plugin settings (global reset).
+- Controller `Reset Defaults` behavior is conditional on active profile and is scoped to the currently selected overlay group.
+- Active profile is non-`Default`: reset operation reverts the selected overlay group's settings in the active profile to `Default` profile values.
+- Active profile is `Default`: reset operation reverts the selected overlay group's settings in all profiles to shipped/original plugin settings.
 - Controller reset button label mirrors active-profile reset mode:
-- `Default` active -> `Reset All Profiles`
+- `Default` active -> `Reset Overlay (All Profiles)`
 - non-`Default` active -> `Reset Profile to Default`
-- Global reset must clear profile-specific divergent overrides so every profile resolves to shipped defaults after reset completes.
+- `Default`-profile reset must clear profile-specific divergent overrides for the selected overlay group so every profile resolves to shipped defaults for that overlay group after reset completes.
 - Reset operations must trigger the same runtime reload/invalidation path as normal controller edits so overlays update immediately.
 
 ## Out Of Scope (This Change)
 - Per-profile overlay visibility toggles.
-- Copy profile / clone profile / "promote current profile to Default" workflow.
 - Large standalone Profile Controller window redesign.
 
 ## Current Touch Points
@@ -195,8 +202,8 @@ If something is unclear, capture it under `Open Questions`.
 - Mitigation: Merge/preserve active ship from journal `state`/entry during `StoredShips` refresh and guard with targeted regression tests.
 - Risk: `Default` edit propagation may overwrite intentional per-profile custom values.
 - Mitigation: Propagate only for fields that are missing or equal to pre-edit `Default`; preserve fields that differ, with targeted diff/merge tests.
-- Risk: `Default`-profile reset is global and could unintentionally erase per-profile customization.
-- Mitigation: Add explicit reset-behavior tests and UI messaging/confirmation for global reset path.
+- Risk: `Default`-profile reset (selected-overlay-group scope across all profiles) could unintentionally erase per-profile customization for that overlay group.
+- Mitigation: Add explicit reset-behavior tests and clear UI messaging that reset scope is the selected overlay group across profiles.
 - Risk: UX confusion between "current profile", "assigned rules", and "Default" fallback.
 - Mitigation: Lock terms/labels early and add inline helper copy in settings/controller.
 - Risk: Command/hotkey/controller paths diverge in behavior.
@@ -215,9 +222,10 @@ If something is unclear, capture it under `Open Questions`.
 - Placement edits in non-`Default` profiles apply only to the current profile.
 - `Default` edits propagate to other profiles only for non-divergent fields (missing or equal to pre-edit `Default`), and never overwrite divergent per-profile values.
 - Switching active profile materializes that profile's overrides at root in `overlay_groupings.user.json` for legacy compatibility.
-- `Reset Defaults` from a non-`Default` profile reverts target settings to `Default` profile values.
-- `Reset Defaults` from `Default` performs a global reset that returns all profiles to shipped/original plugin settings.
-- Reset button text is locked to active-profile mode: `Reset All Profiles` (`Default`) vs `Reset Profile to Default` (non-`Default`).
+- `Reset Defaults` is scoped to the currently selected overlay group.
+- `Reset Defaults` from a non-`Default` profile reverts the selected overlay group's settings in the active profile to `Default` profile values.
+- `Reset Defaults` from `Default` resets the selected overlay group's settings in all profiles to shipped/original plugin settings.
+- Reset button text is locked to active-profile mode: `Reset Overlay (All Profiles)` (`Default`) vs `Reset Profile to Default` (non-`Default`).
 - `InMainShip` assignment uses cached `ShipID` values as the canonical key.
 - Plugin maintains its own persisted fleet cache from `StoredShips` + shipyard/name-change updates.
 - `StoredShips` processing must preserve/include active ship data from journal `state`/entry when active ship is missing from snapshot.
@@ -231,19 +239,24 @@ If something is unclear, capture it under `Open Questions`.
 - Auto-rule evaluation for these context rules runs on dashboard status updates; journal path remains ship-id/fleet-cache only.
 - Preferences profile table emulates BGS-Tally webhook table look/interaction model, including checkbox columns and right-click row operations.
 - Preferences profile table right-click menu includes `Insert`, `Delete`, `Set Active`, `Copy`, and `Paste`.
+- Preferences profile table supports inline rename editing in the name cell.
+- `Paste` collision naming is deterministic: ` (Copy)`, then ` (Copy 2)`, ` (Copy 3)`, etc.
+- `Copy`/`Paste` clones the full profile payload (rules and full placement snapshot), not name/rules only.
 - Profile management UX is a dedicated tab in EDMCModernOverlay preferences; current-profile switching is exposed in controller/chat/hotkeys.
+- Chat and hotkey profile switching includes `next` and `prev` selection actions, ordered by the profile table order in settings.
 - Overlay Controller profile UX is switch-only (no profile CRUD operations).
 - Overlay Controller uses two separate stacked selector widgets: `Profile` above `Overlay`.
 - Controller selector labels are explicit and rendered above dropdowns with exact text `Profile` and `Overlay`.
 - Profile selector interaction contract is parity-matched to Overlay selector interaction rules.
 - Profile-name uniqueness/lookup is case-insensitive; spaces/symbols are valid in display and persisted values.
 - Multi-match precedence is alphabetical by profile name (case-insensitive).
-- Manual profile switches stay active until an auto-rule evaluation selects a different matching profile.
+- Manual profile selection is always available to users from every control surface.
+- Auto-rule matches may change the active profile, but never block or disable manual profile selection.
+- Auto-rule-triggered profile changes occur only on match-state/winner transitions and use the standard overlay message scheme with exact text `Active Profile: {name}`.
 - Profiles with no rules are manual-only and never participate in auto-rule matching.
 - Deleting a non-default profile removes that profile's assignments/rules and profile-scoped placements.
 - `InMainShip` ship picker shows `no ships yet` when fleet cache has no entries.
 - Per-profile visibility is out of scope for this feature.
-- Profile copy/clone workflow is out of scope for this feature.
 
 ## Phase Overview
 
@@ -252,7 +265,7 @@ If something is unclear, capture it under `Open Questions`.
 | 1 | Finalize locked contracts into implementation-ready acceptance matrix | Completed |
 | 2 | Data model + persistence + migration implementation (including fleet cache) | Completed |
 | 3 | Control surfaces integration (dedicated preferences tab + controller switch-only + chat/hotkeys) | Completed |
-| 4 | Rule evaluation/runtime behavior (alphabetical precedence + manual-lock semantics) + end-to-end validation | Completed |
+| 4 | Rule evaluation/runtime behavior (alphabetical precedence + manual-selection fallback semantics) + end-to-end validation | Completed |
 | 5 | Docs, release notes, rollout safeguards, and follow-up backlog | Completed |
 
 ## Phase Details
@@ -270,7 +283,7 @@ If something is unclear, capture it under `Open Questions`.
 
 #### Stage 1.1 Detailed Plan
 - Objective:
-- Create a single source of truth for activation behavior, fallback to `Default`, edit-target semantics, and manual-lock behavior.
+- Create a single source of truth for activation behavior, fallback to `Default`, edit-target semantics, and manual-selection fallback behavior.
 - Primary touch points:
 - `docs/plans/feature-per-ship-placement.md`
 - Steps:
@@ -288,7 +301,7 @@ If something is unclear, capture it under `Open Questions`.
 - Steps:
 - Propose additive schema with backward-compatible defaulting.
 - Define migration/default rules from legacy unprofiled data to `Default`.
-- Define persisted fields needed for controller switch-only and manual-lock state continuity.
+- Define persisted fields needed for controller switch-only and manual-selection state continuity.
 - Acceptance criteria:
 - Schema doc includes read/write examples for legacy and new payloads.
 - Migration path preserves existing placements.
@@ -337,7 +350,7 @@ If something is unclear, capture it under `Open Questions`.
 - Add profile identifiers and rule collections to state payloads.
 - Route read/write operations through profile-aware model.
 - Add `Default`-edit propagation merge path that updates only non-divergent fields in other profiles.
-- Add reset-state paths for both reset modes (non-`Default` -> revert to `Default`; `Default` -> global shipped-default reset).
+- Add reset-state paths for both reset modes scoped to selected overlay group (non-`Default` -> selected overlay group in active profile reverts to `Default`; `Default` -> selected overlay group resets to shipped defaults across all profiles).
 - Add active-profile materialization path so profile switches rewrite root plugin/group keys to selected profile values.
 - Ensure per-profile persistence writes full snapshots (including unmodified inherited values), not sparse-only diffs.
 - Acceptance criteria:
@@ -409,12 +422,14 @@ If something is unclear, capture it under `Open Questions`.
 - Steps:
 - Add a dedicated tab to the EDMCModernOverlay preferences pane for profile management.
 - Add BGS-Tally-style profile table UI (webhook-table visual pattern) with rule checkbox columns and right-click row commands.
-- Add profile list/create/rename/delete controls, rule assignment controls, `Set Active`/`Copy`/`Paste` context-menu actions, and validation messaging.
+- Add profile list/create/rename/delete controls, inline table rename editing, rule assignment controls, `Set Active`/`Copy`/`Paste` context-menu actions, and validation messaging.
 - Persist changes through shared profile service APIs.
 - Acceptance criteria:
 - CMDR can create and manage profiles/rules from the dedicated preferences tab.
 - New profile creation inherits `Default` placements.
-- Table interactions (insert/delete/set active/copy/paste, checkbox toggles) behave consistently with the BGS-Tally reference UX.
+- Table interactions (insert/delete/set active/copy/paste, inline rename, checkbox toggles) behave consistently with the BGS-Tally reference UX.
+- `Paste` name collision handling follows deterministic ` (Copy)` / ` (Copy N)` suffixing.
+- `Copy`/`Paste` clones full profile content (rules + full placement snapshot), not partial row metadata only.
 - Verification to run:
 - `python -m pytest overlay_plugin/tests -k "profile and preferences or context menu or table"`
 
@@ -427,7 +442,8 @@ If something is unclear, capture it under `Open Questions`.
 - Sync both selectors with shared state/service APIs.
 - Explicitly prevent create/rename/delete/rule-assignment operations in controller UI.
 - Implement controller reset wiring that dispatches reset behavior according to active profile reset contract.
-- Implement dynamic reset-button labeling tied to active profile (`Reset All Profiles` vs `Reset Profile to Default`).
+- Implement dynamic reset-button labeling tied to active profile (`Reset Overlay (All Profiles)` vs `Reset Profile to Default`).
+- Scope controller reset behavior to the currently selected overlay group across profiles.
 - Ensure placement edits apply only to active profile.
 - Acceptance criteria:
 - Controller reflects current profile and updates edit target accordingly.
@@ -435,6 +451,7 @@ If something is unclear, capture it under `Open Questions`.
 - Controller renders separate labeled `Profile` and `Overlay` selector widgets in required order (`Profile` above `Overlay`).
 - `Profile` selector interaction behavior is parity-matched with `Overlay` selector behavior.
 - Controller reset behavior matches contract for non-`Default` and `Default` active-profile cases.
+- Controller reset scope is limited to the currently selected overlay group.
 - Controller reset button text updates immediately when active profile changes and matches locked label copy exactly.
 - Profile switch updates preview/placement behavior deterministically.
 - Verification to run:
@@ -444,10 +461,11 @@ If something is unclear, capture it under `Open Questions`.
 - Objective:
 - Add command/hotkey pathways for profile switching.
 - Steps:
-- Extend chat command parser and hotkey actions for profile select.
+- Extend chat command parser and hotkey actions for profile select plus `next`/`prev` profile traversal.
 - Route through shared service to keep behavior identical to UI paths.
 - Acceptance criteria:
 - Chat and hotkeys can switch profiles with consistent validation/errors.
+- Chat and hotkeys support deterministic `next`/`prev` profile cycling behavior using the same ordering as the settings profile table.
 - State updates are reflected in controller and runtime behavior.
 - Verification to run:
 - `python -m pytest overlay_plugin/tests -k "profile and command or hotkey"`
@@ -478,6 +496,7 @@ If something is unclear, capture it under `Open Questions`.
 - Implement matcher for `InMainShip`, `InSRV`, `InFighter`, `OnFoot`, `InWing`, `InTaxi`, `InMulticrew` plus `ShipID`-scoped `InMainShip` subrules.
 - Define and enforce deterministic winner precedence (alphabetical, case-insensitive).
 - Exclude profiles with zero rules from auto-rule matching.
+- Ensure auto-rule transition handling only switches profile when match-state/winner changes; unchanged repeated snapshots are no-op for switching/message emission.
 - Acceptance criteria:
 - Rule matching produces single deterministic profile result for all states.
 - Unmatched states fall back according to locked contract.
@@ -489,12 +508,13 @@ If something is unclear, capture it under `Open Questions`.
 - Ensure profile transitions are consistent across runtime, cache, and controller.
 - Steps:
 - Trigger refresh paths on auto/manual profile changes.
-- Implement manual-switch lock semantics that remain active until auto-rule evaluation selects another matching profile.
+- Implement manual-selection fallback semantics: users can always manually select a profile; auto-rule matches may still switch to matching profiles.
+- Emit the standard overlay message `Active Profile: {name}` whenever an auto-rule changes the active profile.
 - Validate no stale placement leakage across profiles.
 - Acceptance criteria:
 - Switching profile updates rendered placements immediately and correctly.
 - Cache state remains coherent after repeated transitions.
-- Manual-switch lock semantics behave exactly as locked requirements specify.
+- Manual-selection and auto-rule behavior matches locked requirements, including transition-only auto-switching and always-available manual selection.
 - Verification to run:
 - `python -m pytest overlay_controller/tests -k "profile and cache and transition"`
 
@@ -594,17 +614,20 @@ If something is unclear, capture it under `Open Questions`.
 - Requirements clarification update on 2026-03-22: Fleet-cache contract now explicitly requires preserving/merging active ship on `StoredShips` refresh so `InMainShip ShipID` rules include the currently occupied ship even when omitted from snapshot payloads.
 - Requirements clarification update on 2026-03-22: `InMainShip ShipID` picker now explicitly excludes entries without known ship names; only ships with known ship names are shown in the selectable list.
 - Requirements clarification update on 2026-03-22: `Default` edit behavior now requires per-setting propagation to other profiles unless that profile has a divergent override for the same setting.
-- Requirements clarification update on 2026-03-22: reset behavior is now profile-aware (`non-Default` reset -> revert to `Default`; `Default` reset -> global shipped-default reset for all profiles).
-- Requirements clarification update on 2026-03-22: reset button copy is profile-aware (`Reset All Profiles` when `Default` is active, `Reset Profile to Default` for custom profiles).
+- Requirements clarification update on 2026-03-22: reset behavior is profile-aware and scoped to the currently selected overlay group (`non-Default` reset -> selected overlay group in active profile reverts to `Default`; `Default` reset -> selected overlay group resets to shipped defaults across all profiles).
+- Requirements clarification update on 2026-03-22: reset button copy is profile-aware (`Reset Overlay (All Profiles)` when `Default` is active, `Reset Profile to Default` for custom profiles).
 - Requirements clarification update on 2026-03-22: profile switching now explicitly requires active-root materialization (selected profile is copied to root plugin/group keys for legacy readers).
 - Requirements clarification update on 2026-03-22: per-profile persistence now explicitly requires full snapshots (including unmodified inherited `Default` values), not sparse-only diffs.
-- Requirements clarification update on 2026-03-22: preferences profile-table context menu now explicitly includes `Copy` and `Paste` with deterministic unique-name handling on paste.
+- Requirements clarification update on 2026-03-22: preferences profile-table context menu now explicitly includes `Copy` and `Paste` with deterministic unique-name handling (` (Copy)`, ` (Copy 2)`, ...), and profile-name editing is inline in the table.
 - Requirements clarification update on 2026-03-22: `InMainShip` picker label format now explicitly uses only `ship_name`/`ship_ident` (`{ship_name} ({ship_ident})` or `{ship_name}`), excluding ship type and ShipID text.
+- Requirements clarification update on 2026-03-22: auto-rule activation may switch profiles but never blocks manual profile selection; auto-rule-triggered switches only fire on match-state/winner changes and show `Active Profile: {name}` via the standard overlay message scheme.
+- Requirements clarification update on 2026-03-22: chat commands and hotkeys must include `next` and `prev` profile-switch actions ordered the same as the settings profile table.
+- Requirements clarification update on 2026-03-22: preferences profile-table `Copy`/`Paste` clones full profile data (rules + full placement snapshot), not partial row metadata.
 
 ### Phase 1 Execution Summary
 - Stage 1.1:
 - Created and locked the activation/state-transition matrix.
-- Locked fallback semantics: auto-match winner takes precedence; when no auto match exists, runtime falls back to manual-selected profile (or `Default` if unset).
+- Locked fallback semantics: auto-match winner takes precedence with transition-only switching; when no auto match exists, runtime falls back to manual-selected profile (or `Default` if unset), and manual selection remains available at all times.
 - Locked no-rule profile behavior as manual-only.
 - Stage 1.2:
 - Finalized additive persisted schema contract in `overlay_groupings.user.json`:
@@ -656,7 +679,7 @@ If something is unclear, capture it under `Open Questions`.
 - Implemented runtime rule engine (`InMainShip`, `InSRV`, `InFighter`, `OnFoot`) with `ShipID` filtering.
 - Implemented deterministic alphabetical precedence (case-insensitive) for multi-match auto-rules.
 - Stage 4.2:
-- Implemented manual-lock fallback semantics: no auto-match falls back to manual-selected profile.
+- Implemented manual-selection fallback semantics: no auto-match falls back to manual-selected profile.
 - Added runtime transition signaling (`OverlayProfileChanged` + `OverlayOverrideReload`) and config rebroadcast on profile changes.
 - Stage 4.3:
 - Added targeted tests for profile store behavior, command/hotkey paths, and metadata-preserving write flows.
@@ -673,7 +696,7 @@ If something is unclear, capture it under `Open Questions`.
 - Stage 5.2:
 - Added release-note entry for profile-based per-ship/context placement support.
 - Stage 5.3:
-- Documented deferred scope remains unchanged (`profile copy/clone`, per-profile visibility), with rollout validation captured in automated tests.
+- Documented deferred scope (`per-profile visibility`), with rollout validation captured in automated tests.
 
 ### Tests Run For Phase 5
 - `overlay_client/.venv/bin/python -m pytest tests/test_profile_state.py tests/test_hotkeys.py tests/test_journal_commands.py tests/test_preferences_panel_controller_tab.py overlay_controller/tests/test_controller_groupings_loader.py overlay_controller/tests/test_group_state_service.py tests/test_launch_entrypoint_parity.py -q`
