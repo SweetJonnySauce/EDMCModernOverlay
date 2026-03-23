@@ -36,12 +36,14 @@ If something is unclear, capture it under `Open Questions`.
 - Rule labels in the preferences pane must be human-readable with spaces between words (e.g., `In Main Ship`, `In SRV`, `In Fighter`, `On Foot`, `In Wing`, `In Taxi`, `In Multicrew`).
 - Profile table in preferences must emulate the look/interaction pattern of BGS-Tally's Discord webhooks table (reference implementation in `../BGS-Tally/bgstally/ui.py`, `sheet_webhooks` setup).
 - Profile rule assignment in that table must be checkbox-driven; each rule is represented by a checkbox column (use abbreviations where needed for column width, while keeping full human-readable meaning in labels/tooltips/help text).
-- Profile table right-click menu must support row insert, row delete, `Set Active`, `Copy`, and `Paste` actions.
+- Profile table right-click menu must support row insert, row move up/down, row delete, `Set Active`, `Copy`, and `Paste` actions.
 - Profile name editing in the preferences table must be inline (cell edit), with the same validation rules as any other rename path.
 - `Paste` naming must be deterministic: first duplicate uses ` (Copy)` suffix, then ` (Copy 2)`, ` (Copy 3)`, etc. as needed.
 - Context-menu action icons may be reused from sibling plugin assets under `../BGS-Tally/assets` (for example: `icon_col_edit.png`, `icon_col_delete.png`, `icon_green_tick_16x16.png`), with a graceful fallback to text-only menu entries if icon loading fails.
 - Profile names are case-insensitive and may include spaces and symbols.
-- When multiple profiles match simultaneously, winner precedence is alphabetical by profile name (case-insensitive compare).
+- When multiple profiles match simultaneously, winner precedence is:
+- any matching non-`Default` profile beats `Default`
+- if multiple non-`Default` profiles match, the lowest profile sequence number (settings table order) wins
 - Manual profile selection must always remain user-selectable from controller/preferences/chat/hotkeys.
 - Profiles with no rules are manual-only and must never auto-activate.
 - Rule triggers only change the active profile; they must not disable or block manual profile selection controls.
@@ -148,6 +150,7 @@ If something is unclear, capture it under `Open Questions`.
 ### Reset Contract
 - Controller `Reset Defaults` behavior is conditional on active profile and is scoped to the currently selected overlay group.
 - Active profile is non-`Default`: reset operation reverts the selected overlay group's settings in the active profile to `Default` profile values.
+- Active profile is non-`Default`: reset operation also reverts selected overlay-group visibility (`Overlay Visible`) to the `Default` profile setting for that overlay group.
 - Active profile is `Default`: reset operation reverts the selected overlay group's settings in all profiles to shipped/original plugin settings.
 - Controller reset button label mirrors active-profile reset mode:
 - `Default` active -> `Reset Overlay (All Profiles)`
@@ -156,7 +159,6 @@ If something is unclear, capture it under `Open Questions`.
 - Reset operations must trigger the same runtime reload/invalidation path as normal controller edits so overlays update immediately.
 
 ## Out Of Scope (This Change)
-- Per-profile overlay visibility toggles.
 - Large standalone Profile Controller window redesign.
 
 ## Current Touch Points
@@ -249,14 +251,16 @@ If something is unclear, capture it under `Open Questions`.
 - Controller selector labels are explicit and rendered above dropdowns with exact text `Profile` and `Overlay`.
 - Profile selector interaction contract is parity-matched to Overlay selector interaction rules.
 - Profile-name uniqueness/lookup is case-insensitive; spaces/symbols are valid in display and persisted values.
-- Multi-match precedence is alphabetical by profile name (case-insensitive).
+- Multi-match precedence is:
+- any matching non-`Default` profile beats `Default`
+- if multiple non-`Default` profiles match, the lowest profile sequence number (settings table order) wins.
 - Manual profile selection is always available to users from every control surface.
 - Auto-rule matches may change the active profile, but never block or disable manual profile selection.
 - Auto-rule-triggered profile changes occur only on match-state/winner transitions and use the standard overlay message scheme with exact text `Active Profile: {name}`.
 - Profiles with no rules are manual-only and never participate in auto-rule matching.
 - Deleting a non-default profile removes that profile's assignments/rules and profile-scoped placements.
 - `InMainShip` ship picker shows `no ships yet` when fleet cache has no entries.
-- Per-profile visibility is out of scope for this feature.
+- Overlay visibility (`plugin_group_states`, controller `Overlay Visible`) is profile-scoped and follows the active profile across controller/chat/hotkey/settings profile switches.
 
 ## Phase Overview
 
@@ -265,8 +269,42 @@ If something is unclear, capture it under `Open Questions`.
 | 1 | Finalize locked contracts into implementation-ready acceptance matrix | Completed |
 | 2 | Data model + persistence + migration implementation (including fleet cache) | Completed |
 | 3 | Control surfaces integration (dedicated preferences tab + controller switch-only + chat/hotkeys) | Completed |
-| 4 | Rule evaluation/runtime behavior (alphabetical precedence + manual-selection fallback semantics) + end-to-end validation | Completed |
+| 4 | Rule evaluation/runtime behavior (non-`Default` precedence + sequence-order tie-break + manual-selection fallback semantics) + end-to-end validation | Completed |
 | 5 | Docs, release notes, rollout safeguards, and follow-up backlog | Completed |
+
+## Execution Run (2026-03-22)
+
+| Phase | Execution Plan (This Run) | Status |
+| --- | --- | --- |
+| 1 | Reconcile this branch against locked requirements and document execution matrix + verification commands for each phase. | Completed |
+| 2 | Restore/implement profile persistence, migration, active-root materialization, and fleet cache completeness behaviors. | Completed |
+| 3 | Restore/implement preferences/controller/chat/hotkey profile control surfaces with locked UX semantics. | Completed |
+| 4 | Restore/implement runtime rule evaluation, transition-only auto-switching, and active-profile overlay messaging. | Completed |
+| 5 | Run consolidated tests, update implementation results, and close documentation/release deltas. | Completed |
+
+### Execution Details (This Run)
+- Phase 1 detailed execution:
+- Audit current branch for profile feature coverage against locked requirements.
+- Reuse existing implementation from `per-ship-placement` branch where possible to minimize behavioral risk.
+- Record exact test commands for each downstream phase before code changes.
+- Phase 2 detailed execution:
+- Reintroduce profile state model/persistence (`_overlay_profile_state`, `_overlay_profile_overrides`) and migration/default handling.
+- Reintroduce active-root materialization on profile switch.
+- Reintroduce fleet cache updates and active-ship merge on `StoredShips`.
+- Validate with profile-state and group-state tests.
+- Phase 3 detailed execution:
+- Reintroduce preferences profile tab/table workflows (CRUD/rules/ship picker/copy-paste).
+- Reintroduce controller profile selector integration and profile-aware reset behavior.
+- Reintroduce chat/hotkey profile commands and traversal controls.
+- Validate with preferences/controller/command/hotkey tests.
+- Phase 4 detailed execution:
+- Reintroduce/align runtime profile rule evaluation and deterministic precedence.
+- Align transition behavior to locked contract (transition-only auto-switching and manual selection always available).
+- Emit locked active-profile overlay message format on auto-rule-triggered switches.
+- Validate with runtime/profile transition tests.
+- Phase 5 detailed execution:
+- Run consolidated targeted test pass across touched profile/controller/plugin modules.
+- Update `Implementation Results` with this run's phase-by-phase outcomes and test evidence.
 
 ## Phase Details
 
@@ -496,7 +534,7 @@ If something is unclear, capture it under `Open Questions`.
 - Steps:
 - Implement `dashboard_entry` ingestion and decode `Flags`/`Flags2` status fields into rule-context tokens.
 - Implement matcher for `InMainShip`, `InSRV`, `InFighter`, `OnFoot`, `InWing`, `InTaxi`, `InMulticrew` plus `ShipID`-scoped `InMainShip` subrules.
-- Define and enforce deterministic winner precedence (alphabetical, case-insensitive).
+- Define and enforce deterministic winner precedence (non-`Default` beats `Default`; among matching non-`Default` profiles, first in persisted profile order wins).
 - Exclude profiles with zero rules from auto-rule matching.
 - Ensure auto-rule transition handling only switches profile when match-state/winner changes; unchanged repeated snapshots are no-op for switching/message emission.
 - Acceptance criteria:
@@ -581,7 +619,7 @@ If something is unclear, capture it under `Open Questions`.
 - Objective:
 - Finalize rollout safeguards and future backlog.
 - Steps:
-- Capture deferred items (profile copy, per-profile visibility) in roadmap/issues.
+- Capture deferred items in roadmap/issues.
 - Define post-release checks for activation correctness and user feedback.
 - Acceptance criteria:
 - Follow-up backlog is explicit and linked.
@@ -629,6 +667,38 @@ If something is unclear, capture it under `Open Questions`.
 - Requirements clarification update on 2026-03-22: auto-rule activation may switch profiles but never blocks manual profile selection; auto-rule-triggered switches only fire on match-state/winner changes and show `Active Profile: {name}` via the standard overlay message scheme.
 - Requirements clarification update on 2026-03-22: chat commands and hotkeys must include `next` and `prev` profile-switch actions ordered the same as the settings profile table.
 - Requirements clarification update on 2026-03-22: preferences profile-table `Copy`/`Paste` clones full profile data (rules + full placement snapshot), not partial row metadata.
+- Execution update on 2026-03-22:
+- Restored profile feature implementation from `per-ship-placement` branch into this branch and reconciled with locked requirements.
+- Implemented dashboard-driven rule contexts for `InMainShip`, `InSRV`, `InFighter`, `OnFoot`, `InWing`, `InTaxi`, and `InMulticrew`, with transition-only auto-switch behavior and `Active Profile: {name}` overlay messaging for auto-rule transitions.
+- Implemented profile next/prev traversal support in both chat commands (`!overlay next|prev`, `!overlay profile next|prev`) and EDMCHotkeys actions.
+- Implemented profile-aware controller edit/reset semantics through profile store integration:
+- Default edits propagate per-field to non-divergent values in other profiles.
+- Non-default edits apply to active profile only.
+- Reset from non-default reverts selected overlay group to `Default` values.
+- Reset from `Default` resets selected overlay group across all profiles to shipped/original values for controller-editable placement fields.
+- Implemented controller reset-button copy contract:
+- `Reset Overlay (All Profiles)` when active profile is `Default`.
+- `Reset Profile to Default` when active profile is non-`Default`.
+- Implemented controller selector layout contract with separate stacked widgets:
+- `Profile` selector above `Overlay` selector.
+- Labels rendered above each dropdown.
+- Profile selector interaction parity with overlay selector (readonly, step arrows, keyboard/focus behavior).
+- Implemented preferences profile-table workflow updates:
+- Table-based profile list with rule checkbox columns (`MS`, `SRV`, `FTR`, `Foot`, `Wing`, `Taxi`, `MC`).
+- Inline profile rename on double-click name cell.
+- Right-click menu actions: insert above/below, delete row, set active, copy, paste.
+- Insert above/below now preserves table/profile traversal order by reordering persisted profile list.
+- Paste uses deterministic naming (` (Copy)`, ` (Copy 2)`, ...).
+- Paste clones full profile payload by adding `profile_clone` runtime/CLI path (`source_profile` + `new_profile`).
+- Added `profile_reorder` runtime/CLI path used by preferences table insert-above/insert-below flows.
+- Added/updated tests for profile propagation/reset semantics and updated controller state-service expectations.
+
+### Tests Run (2026-03-22 Execution Update)
+- `python3 -m pytest tests/test_profile_state.py tests/test_hotkeys.py tests/test_journal_commands.py tests/test_lifecycle_tracking.py -q`
+- `python3 -m pytest overlay_controller/tests/test_group_state_service.py tests/test_profile_state.py tests/test_hotkeys.py tests/test_journal_commands.py -q`
+- `python3 -m pytest tests/test_profile_state.py tests/test_hotkeys.py tests/test_journal_commands.py tests/test_preferences_panel_controller_tab.py tests/test_launch_entrypoint_parity.py tests/test_lifecycle_tracking.py overlay_controller/tests/test_group_state_service.py overlay_controller/tests/test_idprefix_refresh.py overlay_controller/tests/test_focus_manager.py -q`
+- `python3 -m pytest overlay_controller/tests tests/test_plugin_group_state.py tests/test_plugin_group_controls.py tests/test_runtime_plugin_group_publish.py tests/test_plugin_hooks.py tests/test_lifecycle_tracking.py tests/test_hotkeys.py tests/test_journal_commands.py tests/test_profile_state.py tests/test_preferences_panel_controller_tab.py tests/test_launch_entrypoint_parity.py -q`
+- Result: passed (`129 passed`, `21 skipped`)
 
 ### Phase 1 Execution Summary
 - Stage 1.1:
@@ -683,7 +753,7 @@ If something is unclear, capture it under `Open Questions`.
 ### Phase 4 Execution Summary
 - Stage 4.1:
 - Implemented runtime rule engine (`InMainShip`, `InSRV`, `InFighter`, `OnFoot`) with `ShipID` filtering.
-- Implemented deterministic alphabetical precedence (case-insensitive) for multi-match auto-rules.
+- Implemented deterministic precedence: matching non-`Default` profiles beat `Default`; matching non-`Default` conflicts resolve by persisted profile order.
 - Stage 4.2:
 - Implemented manual-selection fallback semantics: no auto-match falls back to manual-selected profile.
 - Added runtime transition signaling (`OverlayProfileChanged` + `OverlayOverrideReload`) and config rebroadcast on profile changes.
@@ -702,7 +772,7 @@ If something is unclear, capture it under `Open Questions`.
 - Stage 5.2:
 - Added release-note entry for profile-based per-ship/context placement support.
 - Stage 5.3:
-- Documented deferred scope (`per-profile visibility`), with rollout validation captured in automated tests.
+- Documented rollout validation for profile-scoped visibility and profile-copy behavior captured in automated tests.
 
 ### Tests Run For Phase 5
 - `overlay_client/.venv/bin/python -m pytest tests/test_profile_state.py tests/test_hotkeys.py tests/test_journal_commands.py tests/test_preferences_panel_controller_tab.py overlay_controller/tests/test_controller_groupings_loader.py overlay_controller/tests/test_group_state_service.py tests/test_launch_entrypoint_parity.py -q`

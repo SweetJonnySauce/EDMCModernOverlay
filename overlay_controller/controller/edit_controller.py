@@ -233,6 +233,18 @@ class EditController:
             except Exception:
                 shipped_raw = {}
 
+            existing_payload: dict[str, object] = {}
+            try:
+                raw_existing = json.loads(user_path.read_text(encoding="utf-8"))
+                if isinstance(raw_existing, dict):
+                    existing_payload = raw_existing
+            except Exception:
+                existing_payload = {}
+            preserved_metadata: dict[str, object] = {}
+            for key, value in existing_payload.items():
+                if isinstance(key, str) and key.startswith("_"):
+                    preserved_metadata[key] = value
+
             merged_view = getattr(app, "_groupings_data", None)
             if not isinstance(merged_view, dict):
                 merged_view = {}
@@ -245,10 +257,14 @@ class EditController:
                 return
 
             if is_empty_diff(diff):
-                if user_path.exists():
+                payload = dict(preserved_metadata)
+                edit_nonce = str(getattr(app, "_user_overrides_nonce", "") or "")
+                if edit_nonce:
+                    payload["_edit_nonce"] = edit_nonce
+                if user_path.exists() or payload:
                     try:
-                        user_path.write_text("{}\n", encoding="utf-8")
-                        self._log("Cleared user groupings file; no overrides to persist.")
+                        user_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+                        self._log("Cleared user groupings diff; preserved metadata only.")
                     except Exception:
                         pass
                 else:
@@ -257,6 +273,10 @@ class EditController:
 
             try:
                 payload = dict(diff) if isinstance(diff, dict) else {}
+                for key, value in preserved_metadata.items():
+                    if key == "_edit_nonce":
+                        continue
+                    payload[key] = value
                 payload["_edit_nonce"] = getattr(app, "_user_overrides_nonce", "")
                 text = json.dumps(payload, indent=2) + "\n"
                 tmp_path = user_path.with_suffix(user_path.suffix + ".tmp")

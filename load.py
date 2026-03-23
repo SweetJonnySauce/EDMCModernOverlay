@@ -89,6 +89,8 @@ if __package__:
         resolve_payload_group_targets,
     )
     from .overlay_plugin.plugin_group_state import PluginGroupStateManager
+    from .overlay_plugin import profile_runtime as profile_runtime_helpers
+    from .overlay_plugin.profile_state import OverlayProfileStore, ProfileStateError
     from .overlay_plugin.toggle_helpers import toggle_payload_opacity
     from .EDMCOverlay import edmcoverlay
     from .EDMCOverlay.edmcoverlay import normalise_legacy_payload
@@ -157,6 +159,8 @@ else:  # pragma: no cover - EDMC loads as top-level module
         resolve_payload_group_targets,
     )
     from overlay_plugin.plugin_group_state import PluginGroupStateManager
+    import overlay_plugin.profile_runtime as profile_runtime_helpers
+    from overlay_plugin.profile_state import OverlayProfileStore, ProfileStateError
     from overlay_plugin.toggle_helpers import toggle_payload_opacity
     from EDMCOverlay import edmcoverlay
     from EDMCOverlay.edmcoverlay import normalise_legacy_payload
@@ -186,6 +190,15 @@ FONT_PREVIEW_TTL = 5
 FONT_PREVIEW_BASE_X = 60
 FONT_PREVIEW_BASE_Y = 120
 FONT_PREVIEW_LINE_SPACING = 40
+
+# Expose dashboard bit flags for tests and runtime helpers.
+_FLAG_IN_WING = profile_runtime_helpers.FLAG_IN_WING
+_FLAG_IN_MAIN_SHIP = profile_runtime_helpers.FLAG_IN_MAIN_SHIP
+_FLAG_IN_FIGHTER = profile_runtime_helpers.FLAG_IN_FIGHTER
+_FLAG_IN_SRV = profile_runtime_helpers.FLAG_IN_SRV
+_FLAG2_ON_FOOT = profile_runtime_helpers.FLAG2_ON_FOOT
+_FLAG2_IN_TAXI = profile_runtime_helpers.FLAG2_IN_TAXI
+_FLAG2_IN_MULTICREW = profile_runtime_helpers.FLAG2_IN_MULTICREW
 
 EDMC_DEFAULT_LOG_LEVEL = logging.DEBUG if DEV_BUILD else logging.INFO
 _LEVEL_NAME_MAP = {
@@ -557,22 +570,31 @@ class _PluginRuntime:
         self._prefs_worker = PrefsWorker(self._lifecycle, LOGGER)
         register_grouping_store(self.plugin_dir / "overlay_groupings.json")
         ensure_runtime_command_groups(logger=LOGGER)
+        self._groupings_user_path = self.plugin_dir / "overlay_groupings.user.json"
         self._plugin_group_state = PluginGroupStateManager(
             shipped_path=self.plugin_dir / "overlay_groupings.json",
-            user_path=self.plugin_dir / "overlay_groupings.user.json",
+            user_path=self._groupings_user_path,
             logger=LOGGER,
         )
+        self._profile_store = OverlayProfileStore(user_path=self._groupings_user_path, logger=LOGGER)
+        self._profile_active_contexts: set[str] = {"InMainShip"}
+        self._profile_ship_id: Optional[int] = None
+        self._profile_dashboard_ready = False
+        self._profile_last_matched_profile: Optional[str] = None
         self._plugin_group_controls = PluginGroupControlService(
             state_manager=self._plugin_group_state,
             publish_config=self._send_overlay_config,
             publish_group_clear=self._publish_group_clear_event,
             logger=LOGGER,
         )
+        self._sync_profile_scoped_group_state()
         self._hotkeys = HotkeysManager(
             is_running=lambda: self._running,
             set_group_state=self._set_plugin_groups_enabled,
             toggle_group_state=self._toggle_plugin_groups_enabled,
             launch_controller=lambda: self.launch_overlay_controller(source="hotkey"),
+            set_profile=lambda name: self.set_current_profile(name, source="hotkey"),
+            cycle_profile=lambda direction: self.cycle_profile(direction, source="hotkey"),
             logger=LOGGER,
             plugin_name=PLUGIN_NAME,
         )
@@ -656,7 +678,14 @@ class _PluginRuntime:
 
     # Journal handling -----------------------------------------------------
 
-    def handle_journal(self, cmdr: str, system: str, station: str, entry: Dict[str, Any]) -> None:
+    def handle_journal(
+        self,
+        cmdr: str,
+        system: str,
+        station: str,
+        entry: Dict[str, Any],
+        state: Optional[Mapping[str, Any]] = None,
+    ) -> None:
         if not self._running:
             return
         # Respect EDMC helpers (PLUGINS.md:113) instead of relying solely on journal-derived state.
@@ -673,6 +702,14 @@ class _PluginRuntime:
             self._command_helper.handle_entry(entry)
         except Exception as exc:  # pragma: no cover - defensive guard
             LOGGER.debug("Journal command helper failed: %s", exc, exc_info=exc)
+
+        self._update_profile_runtime_state(entry, state)
+        profile_store = getattr(self, "_profile_store", None)
+        if profile_store is not None:
+            try:
+                profile_store.update_fleet_from_journal(entry=entry, state=state)
+            except Exception as exc:
+                LOGGER.debug("Profile fleet cache update failed: %s", exc, exc_info=exc)
 
         self._update_state(cmdr, system, station, entry)
         if event not in self.BROADCAST_EVENTS:
@@ -708,6 +745,56 @@ class _PluginRuntime:
             self._state["station"] = station
         if event in {"Location", "FSDJump", "SupercruiseExit"} and entry.get("StationName"):
             self._state["station"] = entry["StationName"]
+
+    @staticmethod
+    def _profile_ship_id_from_mapping(mapping: Optional[Mapping[str, Any]]) -> Optional[int]:
+        return profile_runtime_helpers.profile_ship_id_from_mapping(mapping)
+
+    def _update_profile_runtime_state(self, entry: Mapping[str, Any], state: Optional[Mapping[str, Any]]) -> None:
+        profile_runtime_helpers.update_profile_runtime_state(self, entry=entry, state=state)
+
+    @staticmethod
+    def _decode_dashboard_contexts(entry: Mapping[str, Any]) -> set[str]:
+        return profile_runtime_helpers.decode_dashboard_contexts(entry)
+
+    def handle_dashboard_entry(self, entry: Mapping[str, Any]) -> None:
+        profile_runtime_helpers.handle_dashboard_entry(self, entry)
+
+    def _emit_profile_change_event(self, *, source: str, matched_profile: Optional[str] = None) -> None:
+        profile_runtime_helpers.emit_profile_change_event(self, source=source, matched_profile=matched_profile)
+
+    def get_profile_status(self) -> Dict[str, Any]:
+        return profile_runtime_helpers.get_profile_status(self, logger=LOGGER)
+
+    def _sync_profile_scoped_group_state(self, status: Optional[Mapping[str, Any]] = None) -> None:
+        profile_runtime_helpers.sync_profile_scoped_group_state(self, status=status, logger=LOGGER)
+
+    def set_current_profile(self, profile_name: str, *, source: str = "manual") -> Dict[str, Any]:
+        return profile_runtime_helpers.set_current_profile(self, profile_name, source=source, logger=LOGGER)
+
+    def cycle_profile(self, direction: int, *, source: str = "manual") -> Dict[str, Any]:
+        return profile_runtime_helpers.cycle_profile(self, direction, source=source)
+
+    def create_profile(self, profile_name: str) -> Dict[str, Any]:
+        return profile_runtime_helpers.create_profile(self, profile_name, logger=LOGGER)
+
+    def clone_profile(self, source_profile: str, new_profile: str) -> Dict[str, Any]:
+        return profile_runtime_helpers.clone_profile(self, source_profile, new_profile, logger=LOGGER)
+
+    def rename_profile(self, old_name: str, new_name: str) -> Dict[str, Any]:
+        return profile_runtime_helpers.rename_profile(self, old_name, new_name, logger=LOGGER)
+
+    def delete_profile(self, profile_name: str) -> Dict[str, Any]:
+        return profile_runtime_helpers.delete_profile(self, profile_name, logger=LOGGER)
+
+    def reorder_profile(self, profile_name: str, target_index: int) -> Dict[str, Any]:
+        return profile_runtime_helpers.reorder_profile(self, profile_name, target_index, logger=LOGGER)
+
+    def set_profile_rules(self, profile_name: str, rules: list[Mapping[str, Any]]) -> Dict[str, Any]:
+        return profile_runtime_helpers.set_profile_rules(self, profile_name, rules)
+
+    def _apply_profile_runtime_rules(self) -> None:
+        profile_runtime_helpers.apply_profile_runtime_rules(self, logger=LOGGER)
 
     def _evaluate_version_status_once(self) -> None:
         try:
@@ -1858,6 +1945,26 @@ class _PluginRuntime:
             raise RuntimeError("Plugin-group controls are not initialised")
         return controls.toggle(group_names=group_names, source=source)
 
+    def _reset_plugin_groups_to_default(
+        self,
+        *,
+        group_names: Optional[Sequence[str]] = None,
+        source: str = "runtime",
+    ) -> Dict[str, Any]:
+        controls = getattr(self, "_plugin_group_controls", None)
+        if controls is None:
+            raise RuntimeError("Plugin-group controls are not initialised")
+        reset_fn = getattr(controls, "reset_to_default", None)
+        if callable(reset_fn):
+            return reset_fn(group_names=group_names, source=source)
+        return {
+            "updated": [],
+            "unknown": list(group_names or []),
+            "cleared": [],
+            "changed": False,
+            "action": "reset_to_default",
+        }
+
     def get_plugin_group_status_lines(self) -> list[str]:
         controls = getattr(self, "_plugin_group_controls", None)
         group_state = getattr(self, "_plugin_group_state", None)
@@ -2644,6 +2751,18 @@ class _PluginRuntime:
                     "plugin_group_states": self._plugin_group_controls.state_snapshot(),
                     "lines": self._plugin_group_controls.status_lines(),
                 }
+            if command == "plugin_group_reset_default":
+                targets = resolve_payload_group_targets(payload)
+                result = self._reset_plugin_groups_to_default(
+                    group_names=targets,
+                    source="controller_cli",
+                )
+                return {
+                    "status": "ok",
+                    **result,
+                    "plugin_group_states": self._plugin_group_controls.state_snapshot(),
+                    "lines": self._plugin_group_controls.status_lines(),
+                }
             if command == "plugin_group_status":
                 controls = getattr(self, "_plugin_group_controls", None)
                 group_state = getattr(self, "_plugin_group_state", None)
@@ -2655,6 +2774,85 @@ class _PluginRuntime:
                     "plugin_group_states": controls.state_snapshot(),
                     "counters": group_state.counters(),
                 }
+            if command == "profile_status":
+                return {"status": "ok", **self.get_profile_status()}
+            if command == "profile_set":
+                raw_name = payload.get("profile")
+                profile_name = str(raw_name or "").strip()
+                if not profile_name:
+                    raise ValueError("profile_set payload requires non-empty 'profile'")
+                try:
+                    status = self.set_current_profile(profile_name, source="controller")
+                except ProfileStateError as exc:
+                    raise ValueError(str(exc)) from exc
+                return {"status": "ok", **status}
+            if command == "profile_create":
+                profile_name = str(payload.get("profile") or "").strip()
+                if not profile_name:
+                    raise ValueError("profile_create payload requires non-empty 'profile'")
+                try:
+                    status = self.create_profile(profile_name)
+                except ProfileStateError as exc:
+                    raise ValueError(str(exc)) from exc
+                return {"status": "ok", **status}
+            if command == "profile_clone":
+                source_name = str(payload.get("source_profile") or "").strip()
+                new_name = str(payload.get("new_profile") or "").strip()
+                if not source_name or not new_name:
+                    raise ValueError("profile_clone payload requires 'source_profile' and 'new_profile'")
+                try:
+                    status = self.clone_profile(source_name, new_name)
+                except ProfileStateError as exc:
+                    raise ValueError(str(exc)) from exc
+                return {"status": "ok", **status}
+            if command == "profile_rename":
+                old_name = str(payload.get("old_profile") or "").strip()
+                new_name = str(payload.get("new_profile") or "").strip()
+                if not old_name or not new_name:
+                    raise ValueError("profile_rename payload requires 'old_profile' and 'new_profile'")
+                try:
+                    status = self.rename_profile(old_name, new_name)
+                except ProfileStateError as exc:
+                    raise ValueError(str(exc)) from exc
+                return {"status": "ok", **status}
+            if command == "profile_delete":
+                profile_name = str(payload.get("profile") or "").strip()
+                if not profile_name:
+                    raise ValueError("profile_delete payload requires non-empty 'profile'")
+                try:
+                    status = self.delete_profile(profile_name)
+                except ProfileStateError as exc:
+                    raise ValueError(str(exc)) from exc
+                return {"status": "ok", **status}
+            if command == "profile_reorder":
+                profile_name = str(payload.get("profile") or "").strip()
+                try:
+                    target_index = int(payload.get("target_index"))
+                except (TypeError, ValueError):
+                    raise ValueError("profile_reorder payload requires integer 'target_index'") from None
+                if not profile_name:
+                    raise ValueError("profile_reorder payload requires non-empty 'profile'")
+                try:
+                    status = self.reorder_profile(profile_name, target_index)
+                except ProfileStateError as exc:
+                    raise ValueError(str(exc)) from exc
+                return {"status": "ok", **status}
+            if command == "profile_set_rules":
+                profile_name = str(payload.get("profile") or "").strip()
+                raw_rules = payload.get("rules")
+                if not profile_name:
+                    raise ValueError("profile_set_rules payload requires non-empty 'profile'")
+                if not isinstance(raw_rules, list):
+                    raise ValueError("profile_set_rules payload requires list 'rules'")
+                normalized_rules: list[Mapping[str, Any]] = []
+                for item in raw_rules:
+                    if isinstance(item, Mapping):
+                        normalized_rules.append(item)
+                try:
+                    status = self.set_profile_rules(profile_name, normalized_rules)
+                except ProfileStateError as exc:
+                    raise ValueError(str(exc)) from exc
+                return {"status": "ok", **status}
             if command == "controller_heartbeat":
                 self._emit_controller_active_notice()
                 return {"status": "ok"}
@@ -3421,6 +3619,16 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
         toggle_argument_callback = plugin_runtime.set_toggle_argument_preference if plugin_runtime else None
         payload_opacity_callback = plugin_runtime.set_payload_opacity_preference if plugin_runtime else None
         reset_group_cache_callback = plugin_runtime.reset_group_cache if plugin_runtime else None
+        profile_status_callback = plugin_runtime.get_profile_status if plugin_runtime else None
+        create_profile_callback = plugin_runtime.create_profile if plugin_runtime else None
+        clone_profile_callback = plugin_runtime.clone_profile if plugin_runtime else None
+        rename_profile_callback = plugin_runtime.rename_profile if plugin_runtime else None
+        delete_profile_callback = plugin_runtime.delete_profile if plugin_runtime else None
+        reorder_profile_callback = plugin_runtime.reorder_profile if plugin_runtime else None
+        set_current_profile_callback = (
+            (lambda name: plugin_runtime.set_current_profile(name, source="settings")) if plugin_runtime else None
+        )
+        set_profile_rules_callback = plugin_runtime.set_profile_rules if plugin_runtime else None
         capture_override_callback = plugin_runtime.set_capture_override_preference if plugin_runtime else None
         log_retention_override_callback = plugin_runtime.set_log_retention_override_preference if plugin_runtime else None
         payload_exclusion_callback = plugin_runtime.set_payload_logging_exclusions if plugin_runtime else None
@@ -3461,6 +3669,14 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
             set_toggle_argument_callback=toggle_argument_callback,
             set_payload_opacity_callback=payload_opacity_callback,
             reset_group_cache_callback=reset_group_cache_callback,
+            profile_status_callback=profile_status_callback,
+            create_profile_callback=create_profile_callback,
+            clone_profile_callback=clone_profile_callback,
+            rename_profile_callback=rename_profile_callback,
+            delete_profile_callback=delete_profile_callback,
+            reorder_profile_callback=reorder_profile_callback,
+            set_current_profile_callback=set_current_profile_callback,
+            set_profile_rules_callback=set_profile_rules_callback,
             dev_mode=dev_mode,
             plugin_version=MODERN_OVERLAY_VERSION,
             version_update_available=version_update_available,
@@ -3534,7 +3750,13 @@ def journal_entry(
 ) -> None:
     """EDMC entrypoint: forward journal entries to the overlay runtime when active."""
     if _plugin:
-        _plugin.handle_journal(cmdr, system, station, entry)
+        _plugin.handle_journal(cmdr, system, station, entry, state)
+
+
+def dashboard_entry(cmdr: str, is_beta: bool, entry: Dict[str, Any]) -> None:
+    """EDMC hook for dashboard status updates used by profile-rule evaluation."""
+    if _plugin:
+        _plugin.handle_dashboard_entry(entry)
 
 
 # Metadata expected by some plugin loaders

@@ -109,6 +109,29 @@ class PluginGroupControlService:
             "action": "toggle",
         }
 
+    def reset_to_default(
+        self,
+        *,
+        group_names: Optional[Sequence[str]] = None,
+        source: str = "unknown",
+    ) -> Dict[str, Any]:
+        """Reset active-profile visibility to resolved Default-profile values."""
+        updated, unknown = self._state.reset_groups_to_default(group_names)
+        self._warn_unknown_groups(unknown, source=source)
+        clear_targets: list[str] = []
+        targets = self._resolve_clear_targets(group_names)
+        if updated:
+            self._publish_config()
+        clear_targets = [group_name for group_name in targets if not self._state.is_group_enabled(group_name)]
+        self._emit_group_clear(clear_targets, source=source)
+        return {
+            "updated": updated,
+            "unknown": unknown,
+            "cleared": clear_targets,
+            "changed": bool(updated),
+            "action": "reset_to_default",
+        }
+
     def status_lines(self) -> list[str]:
         return self._state.status_lines()
 

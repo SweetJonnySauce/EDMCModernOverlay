@@ -5,7 +5,7 @@ from overlay_plugin import preferences as prefs
 
 
 def test_preferences_tab_order_contract() -> None:
-    assert prefs._preferences_tab_order() == ("Overlay", "Controller", "Experimental")
+    assert prefs._preferences_tab_order() == ("Overlay", "Controller", "Profiles", "Experimental")
 
 
 def test_controller_tab_control_order_contract() -> None:

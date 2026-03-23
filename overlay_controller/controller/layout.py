@@ -9,9 +9,10 @@ from overlay_controller.widgets import (
     AnchorSelectorWidget,
     BackgroundWidget,
     GroupControlsWidget,
-    IdPrefixGroupWidget,
     JustificationWidget,
+    OverlaySelectorWidget,
     OffsetSelectorWidget,
+    ProfileSelectorWidget,
 )
 
 
@@ -39,6 +40,7 @@ class LayoutBuilder:
         on_sidebar_click: Callable[[int], None],
         on_placement_click: Callable[[], None],
         on_idprefix_selected: Callable[[], None],
+        on_profile_selected: Callable[[str | None], None],
         on_offset_changed: Callable[[str, bool], None],
         on_absolute_changed: Callable[[str], None],
         on_anchor_changed: Callable[[str, bool], None],
@@ -47,6 +49,7 @@ class LayoutBuilder:
         on_group_enabled_changed: Callable[[bool], None],
         on_reset_clicked: Callable[[], None],
         load_idprefix_options: Callable[[], list[str]],
+        load_profile_options: Callable[[], list[str]],
     ) -> dict[str, object]:
         app = self.app
         container = tk.Frame(app)
@@ -121,7 +124,8 @@ class LayoutBuilder:
         )
 
         sections = [
-            ("idprefix group selector", 0, True),
+            ("profile selector", 0, True),
+            ("overlay selector", 0, True),
             ("offset selector", 0, True),
             ("absolute x/y", 0, True),
             ("anchor selector", 0, True),
@@ -135,6 +139,7 @@ class LayoutBuilder:
         selectable_index = 0
         sidebar_context_frame = None
 
+        profile_widget = None
         idprefix_widget = None
         offset_widget = None
         absolute_widget = None
@@ -172,14 +177,22 @@ class LayoutBuilder:
                 selectable_index += 1
 
             if index == 0:
-                idprefix_widget = IdPrefixGroupWidget(frame, options=load_idprefix_options())
+                profile_widget = ProfileSelectorWidget(frame, options=load_profile_options())
+                if is_selectable and focus_index is not None:
+                    profile_widget.set_focus_request_callback(lambda idx=focus_index: on_sidebar_click(idx))
+                profile_widget.set_selection_change_callback(on_profile_selected)
+                profile_widget.pack(fill="both", expand=True, padx=0, pady=0)
+                if is_selectable and focus_index is not None:
+                    focus_widgets[("sidebar", focus_index)] = profile_widget
+            elif index == 1:
+                idprefix_widget = OverlaySelectorWidget(frame, options=load_idprefix_options())
                 if is_selectable and focus_index is not None:
                     idprefix_widget.set_focus_request_callback(lambda idx=focus_index: on_sidebar_click(idx))
                 idprefix_widget.set_selection_change_callback(lambda _sel=None: on_idprefix_selected())
                 idprefix_widget.pack(fill="both", expand=True, padx=0, pady=0)
                 if is_selectable and focus_index is not None:
                     focus_widgets[("sidebar", focus_index)] = idprefix_widget
-            elif index == 1:
+            elif index == 2:
                 offset_widget = OffsetSelectorWidget(frame)
                 if is_selectable and focus_index is not None:
                     offset_widget.set_focus_request_callback(lambda idx=focus_index: on_sidebar_click(idx))
@@ -187,7 +200,7 @@ class LayoutBuilder:
                 offset_widget.pack(expand=True)
                 if is_selectable and focus_index is not None:
                     focus_widgets[("sidebar", focus_index)] = offset_widget
-            elif index == 2:
+            elif index == 3:
                 absolute_widget = AbsoluteXYWidget(frame)
                 if is_selectable and focus_index is not None:
                     absolute_widget.set_focus_request_callback(lambda idx=focus_index: on_sidebar_click(idx))
@@ -195,7 +208,7 @@ class LayoutBuilder:
                 absolute_widget.pack(fill="both", expand=True, padx=0, pady=0)
                 if is_selectable and focus_index is not None:
                     focus_widgets[("sidebar", focus_index)] = absolute_widget
-            elif index == 3:
+            elif index == 4:
                 frame.configure(height=140)
                 frame.grid_propagate(False)
                 anchor_widget = AnchorSelectorWidget(frame)
@@ -205,7 +218,7 @@ class LayoutBuilder:
                 anchor_widget.pack(fill="both", expand=True, padx=4, pady=4)
                 if is_selectable and focus_index is not None:
                     focus_widgets[("sidebar", focus_index)] = anchor_widget
-            elif index == 4:
+            elif index == 5:
                 justification_widget = JustificationWidget(frame)
                 if is_selectable and focus_index is not None:
                     justification_widget.set_focus_request_callback(lambda idx=focus_index: on_sidebar_click(idx))
@@ -213,7 +226,7 @@ class LayoutBuilder:
                 justification_widget.pack(fill="both", expand=True, padx=4, pady=4)
                 if is_selectable and focus_index is not None:
                     focus_widgets[("sidebar", focus_index)] = justification_widget
-            elif index == 5:
+            elif index == 6:
                 background_widget = BackgroundWidget(frame)
                 if is_selectable and focus_index is not None:
                     background_widget.set_focus_request_callback(lambda idx=focus_index: on_sidebar_click(idx))
@@ -240,7 +253,7 @@ class LayoutBuilder:
                     child.bind("<Button-1>", lambda _e, idx=focus_index: on_sidebar_click(idx), add="+")
 
             row_opts = {"weight": 0}
-            if index == 3:
+            if index == 4:
                 row_opts["minsize"] = 220
             sidebar.grid_rowconfigure(index, **row_opts)
             if is_selectable and focus_index is not None:
@@ -264,6 +277,7 @@ class LayoutBuilder:
             "indicator_canvas": indicator_canvas,
             "sidebar_overlay": sidebar_overlay,
             "placement_overlay": placement_overlay,
+            "profile_widget": profile_widget,
             "idprefix_widget": idprefix_widget,
             "offset_widget": offset_widget,
             "absolute_widget": absolute_widget,
