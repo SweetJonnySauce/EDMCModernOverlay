@@ -105,6 +105,29 @@ def test_profile_runtime_rules_switch_only_on_transition() -> None:
     assert switch_calls == [("Mining", "auto_rule")]
 
 
+def test_profile_runtime_rules_fall_back_to_default_when_no_custom_match() -> None:
+    runtime = object.__new__(load._PluginRuntime)
+    runtime._profile_store = _StaticMatchStore(None)
+    runtime._profile_dashboard_ready = True
+    runtime._profile_active_contexts = {"InMainShip"}
+    runtime._profile_ship_id = 999
+    runtime._profile_last_matched_profile = "Mining"
+
+    switch_calls: list[tuple[str, str]] = []
+
+    def _set_current_profile(name: str, *, source: str = "manual"):
+        switch_calls.append((name, source))
+        return {"current_profile": name}
+
+    runtime.set_current_profile = _set_current_profile
+    runtime.get_profile_status = lambda: {"current_profile": "Mining"}
+
+    load._PluginRuntime._apply_profile_runtime_rules(runtime)
+
+    assert runtime._profile_last_matched_profile == "Default"
+    assert switch_calls == [("Default", "auto_rule")]
+
+
 def test_set_current_profile_syncs_plugin_group_state_to_active_profile() -> None:
     runtime = object.__new__(load._PluginRuntime)
     runtime._profile_store = _MutableStatusStore()

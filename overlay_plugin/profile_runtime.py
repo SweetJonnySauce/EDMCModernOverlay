@@ -363,6 +363,8 @@ def apply_profile_runtime_rules(runtime: Any, *, logger: Optional[logging.Logger
             logger.debug("Profile rule evaluation failed: %s", exc, exc_info=exc)
         return
     normalized_match = str(matched_profile or "").strip() or None
+    if normalized_match is None:
+        normalized_match = DEFAULT_PROFILE_NAME
     previous_match = str(getattr(runtime, "_profile_last_matched_profile", "") or "").strip() or None
     runtime._profile_last_matched_profile = normalized_match
 
@@ -370,8 +372,6 @@ def apply_profile_runtime_rules(runtime: Any, *, logger: Optional[logging.Logger
     if previous_match is not None and normalized_match is not None:
         if previous_match.casefold() == normalized_match.casefold():
             return
-    if normalized_match is None:
-        return
 
     current = str(runtime.get_profile_status().get("current_profile") or "").strip()
     if current and current.casefold() == normalized_match.casefold():

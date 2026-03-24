@@ -11,6 +11,17 @@ class _StatusVar:
         self.value = str(value)
 
 
+class _BoolVar:
+    def __init__(self, value: bool) -> None:
+        self._value = bool(value)
+
+    def get(self) -> bool:
+        return self._value
+
+    def set(self, value: bool) -> None:
+        self._value = bool(value)
+
+
 class _Panel:
     def __init__(self, selected: str, order: list[str]) -> None:
         self._selected = selected
@@ -29,6 +40,14 @@ class _Panel:
 
     def _refresh_profile_state(self) -> None:
         self.refresh_count += 1
+
+
+class _StateAwareShipTable:
+    def __init__(self) -> None:
+        self.state_calls: list[tuple[str, ...]] = []
+
+    def state(self, tokens):
+        self.state_calls.append(tuple(tokens))
 
 
 class _ShipTable:
@@ -77,6 +96,15 @@ class _InsertProfileTable:
         row_id = f"row{len(self.rows) + 1}"
         self.rows[row_id] = dict(kwargs)
         return row_id
+
+    def selection(self):
+        if self.selection_id:
+            return (self.selection_id,)
+        return ()
+
+    def item(self, row_id: str, _field: str):
+        row = self.rows.get(row_id, {})
+        return row.get("values", ())
 
     def selection_set(self, item_id: str) -> None:
         self.selection_id = item_id
@@ -178,6 +206,46 @@ def test_sync_profile_table_prefers_pending_selected_profile_row() -> None:
     assert panel._profile_pending_selected_name == ""
 
 
+def test_sync_profile_table_preserves_user_selected_profile_over_active_row() -> None:
+    panel = _Panel(selected="Default", order=["Default"])
+    table = _InsertProfileTable()
+    table.rows = {
+        "old1": {"text": "1", "values": ("", "PvE", "", "", "", "", "", "", "")},
+        "old2": {"text": "2", "values": ("✅", "Default", "X", "X", "X", "X", "X", "X", "X")},
+    }
+    table.selection_id = "old1"
+    panel._profile_table = table
+    panel._status_rules_map = helpers.status_rules_map
+    panel._rule_context_state = helpers.rule_context_state
+
+    helpers.sync_profile_table(
+        panel,
+        status={"rules": {}},
+        profiles=["PvE", "Default"],
+        current_profile="Default",
+    )
+
+    assert panel._profile_table.selection_id == "row1"
+    assert panel._profile_table.focus_id == "row1"
+
+
+def test_sync_profile_table_marks_active_column_for_current_profile_row() -> None:
+    panel = _Panel(selected="Default", order=["Default"])
+    panel._profile_table = _InsertProfileTable()
+    panel._status_rules_map = helpers.status_rules_map
+    panel._rule_context_state = helpers.rule_context_state
+
+    helpers.sync_profile_table(
+        panel,
+        status={"rules": {}},
+        profiles=["PvE", "Default"],
+        current_profile="Default",
+    )
+
+    assert panel._profile_table.rows["row1"]["values"][0] == ""
+    assert panel._profile_table.rows["row2"]["values"][0] == helpers.ACTIVE_COLUMN_CHECKMARK
+
+
 def test_build_ship_table_rows_filters_unknown_names_and_formats_name() -> None:
     rows = helpers._build_ship_table_rows(
         [
@@ -277,8 +345,21 @@ def test_profile_ship_table_click_apply_heading_sorts_apply_column() -> None:
     assert calls == ["apply"]
 
 
-def test_extract_profile_name_strips_active_suffix() -> None:
-    assert helpers._extract_profile_name("Default ✅") == "Default"
+def test_profile_ship_table_click_ignored_when_in_main_ship_rule_unchecked() -> None:
+    panel = _Panel(selected="PvE", order=["Default", "PvE"])
+    panel._var_rule_in_main_ship = _BoolVar(False)
+    panel._profile_ship_table = _ShipTableClick()
+    calls: list[str] = []
+    panel._on_profile_ship_sort = lambda column: calls.append(column)
+
+    result = helpers.on_profile_ship_table_click(panel, _ClickEvent())
+
+    assert result == "break"
+    assert calls == []
+
+
+def test_extract_profile_name_returns_trimmed_token() -> None:
+    assert helpers._extract_profile_name("  Default ✅  ") == "Default ✅"
     assert helpers._extract_profile_name("PvE") == "PvE"
 
 
@@ -295,3 +376,48 @@ def test_profile_ship_table_double_click_toggles_apply_for_row() -> None:
     assert result == "break"
     assert panel._profile_ship_checked_ids == {91}
     assert table.updated["r1"]["text"] == "[x]"
+
+
+def test_profile_ship_table_double_click_ignored_when_in_main_ship_rule_unchecked() -> None:
+    panel = _Panel(selected="PvE", order=["Default", "PvE"])
+    panel._var_rule_in_main_ship = _BoolVar(False)
+    table = _ShipTableDoubleClick()
+    panel._profile_ship_table = table
+    panel._profile_ship_row_to_ship_id = {"r1": 91}
+    panel._profile_ship_checked_ids = set()
+    panel._profile_menu_icons = {}
+
+    result = helpers.on_profile_ship_table_double_click(panel, _ClickEvent(y=10))
+
+    assert result == "break"
+    assert panel._profile_ship_checked_ids == set()
+
+
+def test_in_main_ship_toggle_disables_ship_table_when_unchecked_for_custom_profile() -> None:
+    panel = _Panel(selected="PvE", order=["Default", "PvE"])
+    panel._var_rule_in_main_ship = _BoolVar(False)
+    panel._profile_ship_table = _StateAwareShipTable()
+
+    helpers.on_profile_in_main_ship_toggle(panel)
+
+    assert panel._profile_ship_table.state_calls[-1] == ("disabled",)
+
+
+def test_in_main_ship_toggle_enables_ship_table_when_checked_for_custom_profile() -> None:
+    panel = _Panel(selected="PvE", order=["Default", "PvE"])
+    panel._var_rule_in_main_ship = _BoolVar(True)
+    panel._profile_ship_table = _StateAwareShipTable()
+
+    helpers.on_profile_in_main_ship_toggle(panel)
+
+    assert panel._profile_ship_table.state_calls[-1] == ("!disabled",)
+
+
+def test_in_main_ship_toggle_keeps_ship_table_disabled_for_default_profile() -> None:
+    panel = _Panel(selected="Default", order=["PvE", "Default"])
+    panel._var_rule_in_main_ship = _BoolVar(True)
+    panel._profile_ship_table = _StateAwareShipTable()
+
+    helpers.on_profile_in_main_ship_toggle(panel)
+
+    assert panel._profile_ship_table.state_calls[-1] == ("disabled",)

@@ -75,6 +75,7 @@ CONTROLLER_TAB_CONTROL_LAUNCH_BUTTON = "launch_controller"
 CONTROLLER_TAB_CONTROL_LAUNCH_COMMAND = "launch_command"
 CONTROLLER_TAB_CONTROL_TOGGLE_ARGUMENT = "toggle_argument"
 DEFAULT_PROFILE_NAME = "Default"
+PROFILE_STATUS_POLL_INTERVAL_MS = 750
 
 LOGGER = logging.getLogger(__name__)
 
@@ -1169,6 +1170,8 @@ class PreferencesPanel:
         self._test_y_var = tk.StringVar()
         self._status_var = tk.StringVar(value="")
         self._profile_menu_icons: Dict[str, Any] = {}
+        self._profile_poll_after_id: Optional[str] = None
+        self._profile_poll_interval_ms = PROFILE_STATUS_POLL_INTERVAL_MS
         opacity_percent = int(round(initial_opacity * 100))
         self._opacity_label = tk.StringVar(value=f"{opacity_percent}%")
         self._payload_opacity_label = tk.StringVar(value=f"{int(preferences.global_payload_opacity)}%")
@@ -1279,7 +1282,7 @@ class PreferencesPanel:
         profile_table_frame.grid(row=profile_row, column=0, sticky="we", pady=ROW_PAD)
         profile_table_frame.columnconfigure(0, weight=1)
         nb.Label(profile_table_frame, text="Profiles:").grid(row=0, column=0, sticky="w")
-        profile_table_columns = ("name", "ims", "srv", "ftr", "foot", "wing", "taxi", "mc")
+        profile_table_columns = ("active", "name", "ims", "srv", "ftr", "foot", "wing", "taxi", "mc")
         profile_table = ttk.Treeview(
             profile_table_frame,
             columns=profile_table_columns,
@@ -1289,6 +1292,8 @@ class PreferencesPanel:
         )
         profile_table.heading("#0", text="#")
         profile_table.column("#0", width=36, minwidth=30, stretch=False, anchor="center")
+        profile_table.heading("active", text="Active")
+        profile_table.column("active", width=56, minwidth=52, stretch=False, anchor="center")
         profile_table.heading("name", text="Profile")
         profile_table.column("name", width=180, minwidth=120, stretch=True, anchor="w")
         for column, label in (
@@ -1336,6 +1341,7 @@ class PreferencesPanel:
                 variable=variable,
                 onvalue=True,
                 offvalue=False,
+                command=self._on_profile_in_main_ship_toggle if index == 0 else None,
             )
             if index == 0:
                 check.pack(side="left")
@@ -1346,7 +1352,7 @@ class PreferencesPanel:
         ships_row = ttk.Frame(rules_frame, style=self._frame_style)
         ships_row.grid(row=2, column=0, sticky="we", pady=(4, 0))
         ships_row.columnconfigure(0, weight=1)
-        nb.Label(ships_row, text="InMainShip ShipID rules:").grid(row=0, column=0, sticky="w")
+        nb.Label(ships_row, text="In scope ships (optional):").grid(row=0, column=0, sticky="w")
         ship_columns = ("name", "id", "type")
         profile_ship_table = ttk.Treeview(
             ships_row,
@@ -2013,6 +2019,11 @@ class PreferencesPanel:
         frame.columnconfigure(0, weight=1)
 
         self._frame = frame
+        try:
+            self._frame.bind("<Destroy>", self._on_preferences_frame_destroy, add="+")
+        except Exception:
+            pass
+        self._start_profile_state_monitor()
 
     @property
     def frame(self):  # pragma: no cover - Tk integration
@@ -2229,7 +2240,114 @@ class PreferencesPanel:
         profile_pref_helpers.load_profile_menu_icons(self)
 
     def _refresh_profile_state(self) -> None:
-        profile_pref_helpers.refresh_profile_state(self)
+        self._maybe_refresh_profile_state_from_callback(silent=False)
+
+    def _sync_profile_table_from_status(self, status: Mapping[str, Any]) -> None:
+        raw_profiles = status.get("profiles") if isinstance(status, Mapping) else None
+        profiles = [str(item).strip() for item in raw_profiles] if isinstance(raw_profiles, list) else []
+        profiles = [item for item in profiles if item]
+        if not profiles:
+            profiles = [DEFAULT_PROFILE_NAME]
+        current_profile = str(status.get("current_profile") or profiles[0]).strip() or profiles[0]
+
+        combo = getattr(self, "_profile_current_combo", None)
+        if combo is not None:
+            try:
+                combo.configure(values=profiles)
+            except Exception:
+                pass
+        var_current = getattr(self, "_var_profile_current", None)
+        if var_current is not None:
+            try:
+                var_current.set(current_profile)
+            except Exception:
+                pass
+        sync_profile_table = getattr(self, "_sync_profile_table", None)
+        if callable(sync_profile_table):
+            sync_profile_table(status=status, profiles=profiles, current_profile=current_profile)
+
+    def _maybe_refresh_profile_state_from_callback(self, *, silent: bool) -> bool:
+        callback = self._profile_status_callback
+        if not callable(callback):
+            self._profile_state_snapshot = {}
+            self._sync_profile_widgets()
+            return False
+        try:
+            status = callback()
+        except Exception as exc:
+            if not silent:
+                self._status_var.set(f"Failed to load profile state: {exc}")
+            return False
+        if not isinstance(status, Mapping):
+            if not silent:
+                self._status_var.set("Invalid profile state response.")
+            return False
+        previous = self._profile_state_snapshot if isinstance(self._profile_state_snapshot, Mapping) else {}
+        if status == previous:
+            return False
+        self._profile_state_snapshot = status
+        if silent:
+            # Silent background polling should update profile list/active marker
+            # without clobbering in-progress rule edits in the right-side controls.
+            self._sync_profile_table_from_status(status)
+        else:
+            self._sync_profile_widgets()
+        return True
+
+    def _profile_frame_exists(self) -> bool:
+        frame = getattr(self, "_frame", None)
+        if frame is None:
+            return False
+        try:
+            return bool(frame.winfo_exists())
+        except Exception:
+            return False
+
+    def _start_profile_state_monitor(self) -> None:
+        if not callable(self._profile_status_callback):
+            return
+        if self._profile_poll_after_id:
+            return
+        self._schedule_profile_state_monitor(delay_ms=self._profile_poll_interval_ms)
+
+    def _schedule_profile_state_monitor(self, *, delay_ms: int) -> None:
+        if not self._profile_frame_exists():
+            return
+        frame = self._frame
+        try:
+            self._profile_poll_after_id = frame.after(max(100, int(delay_ms)), self._poll_profile_state_monitor)
+        except Exception:
+            self._profile_poll_after_id = None
+
+    def _stop_profile_state_monitor(self) -> None:
+        after_id = self._profile_poll_after_id
+        self._profile_poll_after_id = None
+        if not after_id:
+            return
+        frame = getattr(self, "_frame", None)
+        if frame is None:
+            return
+        try:
+            frame.after_cancel(after_id)
+        except Exception:
+            pass
+
+    def _on_preferences_frame_destroy(self, event=None) -> None:  # pragma: no cover - Tk event
+        frame = getattr(self, "_frame", None)
+        if frame is None:
+            return
+        widget = getattr(event, "widget", None)
+        if widget is not None and widget is not frame:
+            return
+        self._stop_profile_state_monitor()
+
+    def _poll_profile_state_monitor(self) -> None:
+        self._profile_poll_after_id = None
+        if not self._profile_frame_exists():
+            return
+        if self._profile_table_editor is None:
+            self._maybe_refresh_profile_state_from_callback(silent=True)
+        self._schedule_profile_state_monitor(delay_ms=self._profile_poll_interval_ms)
 
     def _sync_profile_widgets(self) -> None:
         profile_pref_helpers.sync_profile_widgets(self)
@@ -2292,6 +2410,9 @@ class PreferencesPanel:
 
     def _on_profile_ship_table_double_click(self, event):  # pragma: no cover - Tk event
         return profile_pref_helpers.on_profile_ship_table_double_click(self, event)
+
+    def _on_profile_in_main_ship_toggle(self) -> None:
+        profile_pref_helpers.on_profile_in_main_ship_toggle(self)
 
     def _on_profile_list_selected(self, _event=None) -> None:  # pragma: no cover - Tk event
         profile_pref_helpers.on_profile_list_selected(self, _event)

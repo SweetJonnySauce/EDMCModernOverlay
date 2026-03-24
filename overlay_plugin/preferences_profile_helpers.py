@@ -17,7 +17,7 @@ RULE_CONTEXT_KEYS = (
     "InTaxi",
     "InMulticrew",
 )
-ACTIVE_PROFILE_SUFFIX = " ✅"
+ACTIVE_COLUMN_CHECKMARK = "✅"
 
 
 def load_profile_menu_icons(panel: Any) -> None:
@@ -28,13 +28,14 @@ def load_profile_menu_icons(panel: Any) -> None:
         return
     base = Path(plugin_dir).resolve() / "assets"
     icon_files = {
-        "insert": "icon_col_edit.png",
-        "delete": "icon_col_delete.png",
+        "insert_above": "add_row_above_24dp_555555_FILL0_wght400_GRAD0_opsz24.png",
+        "insert_below": "add_row_below_24dp_555555_FILL0_wght400_GRAD0_opsz24.png",
+        "delete": "delete_24dp_555555_FILL0_wght400_GRAD0_opsz24.png",
         "active": "icon_green_tick_16x16.png",
-        "copy": "icon_col_change_view.png",
-        "paste": "icon_col_right_arrow.png",
-        "move_up": "icon_col_move_up.png",
-        "move_down": "icon_col_move_down.png",
+        "copy": "content_copy_24dp_555555_FILL0_wght400_GRAD0_opsz24.png",
+        "paste": "content_paste_go_24dp_555555_FILL0_wght400_GRAD0_opsz24.png",
+        "move_up": "move_selection_up_24dp_555555_FILL0_wght400_GRAD0_opsz24.png",
+        "move_down": "move_selection_down_24dp_555555_FILL0_wght400_GRAD0_opsz24.png",
     }
     for key, filename in icon_files.items():
         path = base / filename
@@ -99,15 +100,7 @@ def _set_profile_rules_controls_enabled(panel: Any, *, enabled: bool) -> None:
         except Exception:
             continue
 
-    ship_table = getattr(panel, "_profile_ship_table", None)
-    if ship_table is not None:
-        try:
-            ship_table.state(("!disabled",) if enabled else ("disabled",))
-        except Exception:
-            try:
-                ship_table.configure(state=widget_state)
-            except Exception:
-                pass
+    _set_profile_ship_table_enabled(panel, enabled=enabled)
 
     apply_button = getattr(panel, "_profile_rules_apply_button", None)
     if apply_button is not None:
@@ -117,20 +110,46 @@ def _set_profile_rules_controls_enabled(panel: Any, *, enabled: bool) -> None:
             pass
 
 
-def _display_profile_name(profile_name: str, *, is_current: bool) -> str:
+def _set_profile_ship_table_enabled(panel: Any, *, enabled: bool) -> None:
+    ship_table = getattr(panel, "_profile_ship_table", None)
+    if ship_table is None:
+        return
+    try:
+        ship_table.state(("!disabled",) if enabled else ("disabled",))
+    except Exception:
+        try:
+            ship_table.configure(state="normal" if enabled else "disabled")
+        except Exception:
+            pass
+
+
+def _sync_ship_table_enabled_for_selected_profile(panel: Any) -> None:
+    selected_profile = panel._selected_profile_name()
+    if _is_default_profile_name(selected_profile):
+        _set_profile_ship_table_enabled(panel, enabled=False)
+        return
+    _set_profile_ship_table_enabled(panel, enabled=_in_main_ship_rule_enabled(panel))
+
+
+def _in_main_ship_rule_enabled(panel: Any) -> bool:
+    var = getattr(panel, "_var_rule_in_main_ship", None)
+    if var is None:
+        return True
+    try:
+        return bool(var.get())
+    except Exception:
+        return True
+
+
+def _display_profile_name(profile_name: str) -> str:
     token = str(profile_name or "").strip()
     if not token:
         return ""
-    if is_current:
-        return f"{token}{ACTIVE_PROFILE_SUFFIX}"
     return token
 
 
 def _extract_profile_name(token: Any) -> str:
-    raw = str(token or "").strip()
-    if raw.endswith(ACTIVE_PROFILE_SUFFIX):
-        return raw[: -len(ACTIVE_PROFILE_SUFFIX)].rstrip()
-    return raw
+    return str(token or "").strip()
 
 
 def refresh_profile_state(panel: Any) -> None:
@@ -200,6 +219,15 @@ def sync_profile_table(panel: Any, *, status: Mapping[str, Any], profiles: list[
     if table is None:
         return
     rules_map = panel._status_rules_map(status)
+    previously_selected_profile = ""
+    try:
+        existing_selection = table.selection()
+        if existing_selection:
+            existing_values = table.item(existing_selection[0], "values")
+            if existing_values and len(existing_values) >= 2:
+                previously_selected_profile = _extract_profile_name(existing_values[1])
+    except Exception:
+        previously_selected_profile = ""
     try:
         for item_id in table.get_children(""):
             table.delete(item_id)
@@ -217,7 +245,8 @@ def sync_profile_table(panel: Any, *, status: Mapping[str, Any], profiles: list[
             contexts = panel._rule_context_state(profile_rules)
         is_current = profile_name.casefold() == current_profile.casefold()
         values = (
-            _display_profile_name(profile_name, is_current=is_current),
+            ACTIVE_COLUMN_CHECKMARK if is_current else "",
+            _display_profile_name(profile_name),
             "X" if contexts["InMainShip"] else "",
             "X" if contexts["InSRV"] else "",
             "X" if contexts["InFighter"] else "",
@@ -226,8 +255,19 @@ def sync_profile_table(panel: Any, *, status: Mapping[str, Any], profiles: list[
             "X" if contexts["InTaxi"] else "",
             "X" if contexts["InMulticrew"] else "",
         )
-        item_id = table.insert("", "end", text=str(index), values=values)
+        item_id = table.insert(
+            "",
+            "end",
+            text=str(index),
+            values=values,
+        )
         if pending_selected and profile_name.casefold() == pending_selected.casefold():
+            selected_item = item_id
+        elif (
+            previously_selected_profile
+            and profile_name.casefold() == previously_selected_profile.casefold()
+            and selected_item is None
+        ):
             selected_item = item_id
         elif is_current and selected_item is None:
             selected_item = item_id
@@ -247,8 +287,8 @@ def selected_profile_name(panel: Any) -> str:
             selected = table.selection()
             if selected:
                 values = table.item(selected[0], "values")
-                if values:
-                    token = _extract_profile_name(values[0])
+                if values and len(values) >= 2:
+                    token = _extract_profile_name(values[1])
                     if token:
                         return token
         except Exception:
@@ -283,7 +323,8 @@ def on_profile_table_right_click(panel: Any, event) -> None:  # pragma: no cover
         except Exception:
             pass
     menu = tk.Menu(table, tearoff=False)
-    icon_insert = panel._profile_menu_icons.get("insert")
+    icon_insert_above = panel._profile_menu_icons.get("insert_above")
+    icon_insert_below = panel._profile_menu_icons.get("insert_below")
     icon_delete = panel._profile_menu_icons.get("delete")
     icon_active = panel._profile_menu_icons.get("active")
     icon_copy = panel._profile_menu_icons.get("copy")
@@ -293,13 +334,13 @@ def on_profile_table_right_click(panel: Any, event) -> None:  # pragma: no cover
     menu.add_command(
         label="Insert Row Above",
         command=lambda: panel._on_profile_insert_row("above"),
-        image=icon_insert,
+        image=icon_insert_above,
         compound="left",
     )
     menu.add_command(
         label="Insert Row Below",
         command=lambda: panel._on_profile_insert_row("below"),
-        image=icon_insert,
+        image=icon_insert_below,
         compound="left",
     )
     menu.add_command(
@@ -520,27 +561,27 @@ def on_profile_table_double_click(panel: Any, event) -> None:  # pragma: no cove
     if not row_id or not column_id:
         return
     column_to_context = {
-        "#2": "InMainShip",
-        "#3": "InSRV",
-        "#4": "InFighter",
-        "#5": "OnFoot",
-        "#6": "InWing",
-        "#7": "InTaxi",
-        "#8": "InMulticrew",
+        "#3": "InMainShip",
+        "#4": "InSRV",
+        "#5": "InFighter",
+        "#6": "OnFoot",
+        "#7": "InWing",
+        "#8": "InTaxi",
+        "#9": "InMulticrew",
     }
     if column_id in column_to_context:
         panel._toggle_profile_table_rule(column_to_context[column_id])
         return
-    if column_id != "#1":
+    if column_id != "#2":
         return
     bbox = table.bbox(row_id, column_id)
     if not bbox:
         return
     x, y, width, height = bbox
     values = table.item(row_id, "values")
-    if not values:
+    if not values or len(values) < 2:
         return
-    old_name = str(values[0]).strip()
+    old_name = str(values[1]).strip()
     old_name = _extract_profile_name(old_name)
     if not old_name:
         return
@@ -742,6 +783,8 @@ def on_profile_ship_sort(panel: Any, column: str) -> None:
 def on_profile_ship_table_click(panel: Any, event) -> str | None:  # pragma: no cover - Tk event
     if _is_default_profile_name(panel._selected_profile_name()):
         return "break"
+    if not _in_main_ship_rule_enabled(panel):
+        return "break"
     ship_table = panel._profile_ship_table
     if ship_table is None:
         return None
@@ -761,6 +804,8 @@ def on_profile_ship_table_click(panel: Any, event) -> str | None:  # pragma: no 
 
 def on_profile_ship_table_double_click(panel: Any, event) -> str | None:  # pragma: no cover - Tk event
     if _is_default_profile_name(panel._selected_profile_name()):
+        return "break"
+    if not _in_main_ship_rule_enabled(panel):
         return "break"
     ship_table = panel._profile_ship_table
     if ship_table is None:
@@ -802,6 +847,10 @@ def _is_int_like(value: Any) -> bool:
 
 def on_profile_list_selected(panel: Any, _event=None) -> None:  # pragma: no cover - Tk event
     panel._on_profile_table_selected(_event)
+
+
+def on_profile_in_main_ship_toggle(panel: Any) -> None:
+    _sync_ship_table_enabled_for_selected_profile(panel)
 
 
 def load_selected_profile_rules(panel: Any) -> None:
@@ -846,6 +895,7 @@ def load_selected_profile_rules(panel: Any) -> None:
     panel._var_rule_in_multicrew.set(contexts["InMulticrew"])
     panel._profile_ship_checked_ids = set(selected_ship_ids)
     _set_profile_rules_controls_enabled(panel, enabled=not selected_is_default)
+    _sync_ship_table_enabled_for_selected_profile(panel)
 
     ship_table = panel._profile_ship_table
     if ship_table is not None:
