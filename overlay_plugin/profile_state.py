@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import importlib
 import json
 import logging
 from datetime import datetime, timezone
@@ -32,6 +33,21 @@ CONTROLLER_PLACEMENT_FIELDS = (
     "backgroundBorderWidth",
 )
 _MISSING = object()
+
+_edmc_data: Any = None
+try:
+    _edmc_data = importlib.import_module("edmc_data")
+except Exception:  # pragma: no cover - running outside EDMC
+    pass
+_SHIP_NAME_MAP: Dict[str, str] = {}
+if _edmc_data is not None:
+    raw_ship_name_map = getattr(_edmc_data, "ship_name_map", None)
+    if isinstance(raw_ship_name_map, Mapping):
+        for raw_key, raw_value in raw_ship_name_map.items():
+            key = str(raw_key or "").strip().casefold()
+            value = str(raw_value or "").strip()
+            if key and value:
+                _SHIP_NAME_MAP[key] = value
 
 
 class ProfileStateError(ValueError):
@@ -248,15 +264,6 @@ def _normalise_ship_entry(raw: Mapping[str, Any], existing: Optional[Mapping[str
     merged: Dict[str, Any] = dict(existing or {})
     merged["ship_id"] = int(ship_id)
 
-    ship_type_localised = _first_non_empty(
-        raw,
-        (
-            "ShipType_Localised",
-            "ShipTypeLocalised",
-            "Shiptype_localised",
-            "ship_type_localised",
-        ),
-    )
     ship_type_fallback = _first_non_empty(
         raw,
         (
@@ -265,16 +272,17 @@ def _normalise_ship_entry(raw: Mapping[str, Any], existing: Optional[Mapping[str
             "ship_type",
         ),
     )
-    if ship_type_localised is not None:
-        token = str(ship_type_localised).strip()
-        if token and not token.startswith("$"):
-            merged["ship_type"] = token
-    elif ship_type_fallback is not None:
-        token = str(ship_type_fallback).strip()
-        existing_type = str(merged.get("ship_type") or "").strip()
-        # Avoid downgrading a previously localized display type with raw ship_type.
-        if token and not token.startswith("$") and not existing_type:
-            merged["ship_type"] = token
+    fallback_token = str(ship_type_fallback or "").strip()
+    fallback_label = _ship_type_label(fallback_token)
+    existing_type = str(merged.get("ship_type") or "").strip()
+    # Ship-type display names come exclusively from ShipType + edmc_data.ship_name_map.
+    # Update when empty or when the stored value is the same raw ShipType token.
+    if fallback_label and (
+        not existing_type or (
+            fallback_token and existing_type.casefold() == fallback_token.casefold()
+        )
+    ):
+        merged["ship_type"] = fallback_label
 
     ship_name = _first_non_empty(
         raw,
@@ -313,6 +321,13 @@ def _ship_id_from_mapping(raw: Mapping[str, Any]) -> Optional[int]:
         if ship_id is not None:
             return int(ship_id)
     return None
+
+
+def _ship_type_label(value: Any) -> str:
+    token = str(value or "").strip()
+    if not token or token.startswith("$"):
+        return ""
+    return _SHIP_NAME_MAP.get(token.casefold(), token)
 
 
 def _first_non_empty(raw: Mapping[str, Any], keys: tuple[str, ...]) -> Optional[str]:
