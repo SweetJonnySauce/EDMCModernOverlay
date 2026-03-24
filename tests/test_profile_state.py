@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import overlay_plugin.profile_state as profile_state
 from overlay_plugin.profile_state import DEFAULT_PROFILE_NAME, OverlayProfileStore
 
 
@@ -140,15 +141,16 @@ def test_profile_store_storedships_uses_localised_name_fields(tmp_path: Path) ->
     assert ship_91["ship_ident"] == "SW-29L"
 
 
-def test_profile_store_storedships_prefers_localised_ship_type(tmp_path: Path) -> None:
+def test_profile_store_storedships_uses_ship_name_map_for_ship_type(monkeypatch, tmp_path: Path) -> None:
     user_path = tmp_path / "overlay_groupings.user.json"
     user_path.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setitem(profile_state._SHIP_NAME_MAP, "type9", "Type-9 Heavy")
     store = OverlayProfileStore(user_path=user_path)
 
     changed = store.update_fleet_from_journal(
         entry={
             "event": "StoredShips",
-            "ShipsHere": [{"ShipID": 77, "ShipType": "type9", "ShipType_Localised": "Type-9 Heavy"}],
+            "ShipsHere": [{"ShipID": 77, "ShipType": "type9", "ShipType_Localised": "Wrong Localized Value"}],
             "ShipsRemote": [],
         }
     )
@@ -159,9 +161,38 @@ def test_profile_store_storedships_prefers_localised_ship_type(tmp_path: Path) -
     assert ship_77["ship_type"] == "Type-9 Heavy"
 
 
-def test_profile_store_shipyardswap_prefers_localised_ship_type(tmp_path: Path) -> None:
+def test_profile_store_storedships_ignores_localized_ship_type_for_mapping(
+    monkeypatch, tmp_path: Path
+) -> None:
     user_path = tmp_path / "overlay_groupings.user.json"
     user_path.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setitem(profile_state._SHIP_NAME_MAP, "panthermkii", "Panther Clipper Mk II")
+    store = OverlayProfileStore(user_path=user_path)
+
+    changed = store.update_fleet_from_journal(
+        entry={
+            "event": "StoredShips",
+            "ShipsHere": [
+                {
+                    "ShipID": 120,
+                    "ShipType": "panthermkii",
+                    "ShipType_Localised": "Wrong Localized Value",
+                }
+            ],
+            "ShipsRemote": [],
+        }
+    )
+    status = store.status()
+
+    assert changed is True
+    ship_120 = next(item for item in status["ships"] if item["ship_id"] == 120)
+    assert ship_120["ship_type"] == "Panther Clipper Mk II"
+
+
+def test_profile_store_shipyardswap_uses_ship_name_map_for_ship_type(monkeypatch, tmp_path: Path) -> None:
+    user_path = tmp_path / "overlay_groupings.user.json"
+    user_path.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setitem(profile_state._SHIP_NAME_MAP, "lakonminer", "Type-11 Prospector")
     store = OverlayProfileStore(user_path=user_path)
 
     changed = store.update_fleet_from_journal(
@@ -169,7 +200,7 @@ def test_profile_store_shipyardswap_prefers_localised_ship_type(tmp_path: Path) 
             "event": "ShipyardSwap",
             "ShipID": 91,
             "ShipType": "lakonminer",
-            "ShipType_Localised": "Type-11 Prospector",
+            "ShipType_Localised": "Wrong Localized Value",
             "ShipName_Localised": "Type-11 Prospector",
             "ShipIdent": "SW-29L",
         }
@@ -183,9 +214,10 @@ def test_profile_store_shipyardswap_prefers_localised_ship_type(tmp_path: Path) 
     assert ship_91["ship_ident"] == "SW-29L"
 
 
-def test_profile_store_shipyardswap_state_merge_does_not_downgrade_localised_type(tmp_path: Path) -> None:
+def test_profile_store_shipyardswap_state_merge_uses_ship_name_map_for_ship_type(monkeypatch, tmp_path: Path) -> None:
     user_path = tmp_path / "overlay_groupings.user.json"
     user_path.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setitem(profile_state._SHIP_NAME_MAP, "smallcombat01_nx", "Kestrel Mk II")
     store = OverlayProfileStore(user_path=user_path)
 
     changed = store.update_fleet_from_journal(
@@ -193,7 +225,7 @@ def test_profile_store_shipyardswap_state_merge_does_not_downgrade_localised_typ
             "event": "ShipyardSwap",
             "ShipID": 93,
             "ShipType": "smallcombat01_nx",
-            "ShipType_Localised": "Kestrel Mk II",
+            "ShipType_Localised": "Wrong Localized Value",
             "UserShipName": "Lily Phillips",
             "UserShipId": "PVE-05",
         },
