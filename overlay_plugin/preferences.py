@@ -372,11 +372,6 @@ def _attach_tooltip(widget, text: str, *, nb_module=None, delay_ms: int = 500) -
                 return
             except Exception:
                 LOGGER.debug("Failed to attach notebook tooltip helper", exc_info=True)
-    try:
-        import tkinter as tk
-    except Exception:
-        return
-
     tip_window = None
     after_id = None
 
@@ -981,7 +976,6 @@ class PreferencesPanel:
         set_payload_spam_detection_callback: Optional[Callable[[bool, float, int, float], None]] = None,
         payload_logging_initial: Optional[bool] = None,
     ) -> None:
-        import tkinter as tk
         from tkinter import ttk
         import tkinter.font as tkfont
         import myNotebook as nb

@@ -618,8 +618,15 @@ def on_profile_table_double_click(panel: Any, event) -> None:  # pragma: no cove
         panel._status_var.set(f"Renamed profile {old_name} to {new_name}.")
         panel._refresh_profile_state()
 
+    def _cancel(_event=None) -> None:
+        try:
+            editor.destroy()
+        except Exception:
+            pass
+        panel._profile_table_editor = None
+
     editor.bind("<Return>", _commit)
-    editor.bind("<Escape>", lambda _event=None: editor.destroy())
+    editor.bind("<Escape>", _cancel)
     editor.bind("<FocusOut>", _commit)
     panel._profile_table_editor = editor
 
@@ -738,28 +745,32 @@ def _sorted_ship_table_rows(
     token = str(column or "").strip().lower()
     checked = set(checked_ids or set())
     if token == "apply":
-        key = lambda row: (
-            0 if int(row.get("ship_id", 0)) in checked else 1,
-            str(row.get("name", "")).casefold(),
-            int(row.get("ship_id", 0)),
-        )
+        def key(row: Dict[str, Any]) -> tuple[object, ...]:
+            return (
+                0 if int(row.get("ship_id", 0)) in checked else 1,
+                str(row.get("name", "")).casefold(),
+                int(row.get("ship_id", 0)),
+            )
     elif token == "id":
-        key = lambda row: (
-            str(row.get("ship_ident", "")).casefold(),
-            str(row.get("name", "")).casefold(),
-            int(row.get("ship_id", 0)),
-        )
+        def key(row: Dict[str, Any]) -> tuple[object, ...]:
+            return (
+                str(row.get("ship_ident", "")).casefold(),
+                str(row.get("name", "")).casefold(),
+                int(row.get("ship_id", 0)),
+            )
     elif token == "type":
-        key = lambda row: (
-            str(row.get("type", "")).casefold(),
-            str(row.get("name", "")).casefold(),
-            int(row.get("ship_id", 0)),
-        )
+        def key(row: Dict[str, Any]) -> tuple[object, ...]:
+            return (
+                str(row.get("type", "")).casefold(),
+                str(row.get("name", "")).casefold(),
+                int(row.get("ship_id", 0)),
+            )
     else:
-        key = lambda row: (
-            str(row.get("name", "")).casefold(),
-            int(row.get("ship_id", 0)),
-        )
+        def key(row: Dict[str, Any]) -> tuple[object, ...]:
+            return (
+                str(row.get("name", "")).casefold(),
+                int(row.get("ship_id", 0)),
+            )
     return sorted(list(rows), key=key, reverse=bool(descending))
 
 

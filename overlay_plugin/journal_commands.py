@@ -493,23 +493,22 @@ def build_command_helper(
             log.warning("Failed to send overlay response '%s': %s", text, exc)
 
     set_profile_callback = getattr(plugin_runtime, "set_current_profile", None)
+    _set_profile: Optional[Callable[[str], Mapping[str, Any]]] = None
     if callable(set_profile_callback):
         def _set_profile(name: str) -> Mapping[str, Any]:
             try:
                 return set_profile_callback(name, source="chat")
             except TypeError:
                 return set_profile_callback(name)
-    else:
-        _set_profile = None
+
     cycle_profile_callback = getattr(plugin_runtime, "cycle_profile", None)
+    _cycle_profile: Optional[Callable[[int], Mapping[str, Any]]] = None
     if callable(cycle_profile_callback):
         def _cycle_profile(direction: int) -> Mapping[str, Any]:
             try:
                 return cycle_profile_callback(direction, source="chat")
             except TypeError:
                 return cycle_profile_callback(direction)
-    else:
-        _cycle_profile = None
 
     report_callback = report_plugins or default_report_plugins
     context = _OverlayCommandContext(

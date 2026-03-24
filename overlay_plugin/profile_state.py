@@ -83,7 +83,7 @@ def _normalise_profile_name(value: Any) -> Optional[str]:
 
 
 def _is_plugin_override_key(key: object) -> bool:
-    return isinstance(key, str) and key and not key.startswith("_")
+    return isinstance(key, str) and bool(key) and not key.startswith("_")
 
 
 def _extract_plugin_overrides(payload: Mapping[str, Any]) -> Dict[str, Any]:
