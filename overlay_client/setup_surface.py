@@ -228,6 +228,8 @@ class SetupSurfaceMixin:
         self._text_block_cache: Dict[Tuple[str, float, str, Tuple[str, ...], float, int], Tuple[int, int]] = {}
         self._text_cache_generation = 0
         self._text_cache_context: Optional[Tuple[str, Tuple[str, ...], float]] = None
+        self._image_pixmap_cache: Dict[str, QPixmap] = {}
+        self._image_pixmap_failures: Dict[str, float] = {}
         _CLIENT_LOGGER.debug(
             "Debug config loaded: dev_mode_enabled=%s group_bounds_outline=%s overlay_outline=%s payload_vertex_markers=%s (DEBUG_CONFIG_ENABLED=%s)",
             self._dev_mode_enabled,

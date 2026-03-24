@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, Sequence, Tuple
 
 from PyQt6.QtCore import QPoint, Qt
-from PyQt6.QtGui import QColor, QBrush, QFont, QFontMetrics, QPainter, QPen
+from PyQt6.QtGui import QColor, QBrush, QFont, QFontMetrics, QPainter, QPen, QPixmap
 
 from overlay_client.group_transform import GroupTransform  # type: ignore
 from overlay_client.grouping_adapter import GroupKey  # type: ignore
@@ -144,6 +144,36 @@ class _VectorPaintCommand(_LegacyPaintCommand):
         )
         if self.trace_fn:
             self.trace_fn("trace:complete", {"kind": "vector"})
+        if self.cycle_anchor:
+            anchor_x = int(round(self.cycle_anchor[0] + offset_x))
+            anchor_y = int(round(self.cycle_anchor[1] + offset_y))
+            window._register_cycle_anchor(self.legacy_item.item_id, anchor_x, anchor_y)
+
+
+@dataclass
+class _ImagePaintCommand(_LegacyPaintCommand):
+    x: int = 0
+    y: int = 0
+    width: int = 0
+    height: int = 0
+    pixmap: Optional[QPixmap] = None
+    cycle_anchor: Optional[Tuple[int, int]] = None
+    trace_fn: Optional[Callable[[str, Mapping[str, Any]], None]] = None
+
+    def paint(self, window: "OverlayWindow", painter: QPainter, offset_x: int, offset_y: int) -> None:
+        pixmap = self.pixmap
+        if pixmap is None or pixmap.isNull():
+            return
+        draw_x = int(round(self.x + offset_x))
+        draw_y = int(round(self.y + offset_y))
+        target_w = int(self.width)
+        target_h = int(self.height)
+        if target_w > 0 and target_h > 0:
+            painter.drawPixmap(draw_x, draw_y, target_w, target_h, pixmap)
+        else:
+            painter.drawPixmap(draw_x, draw_y, pixmap)
+        if self.trace_fn:
+            self.trace_fn("trace:complete", {"kind": "image"})
         if self.cycle_anchor:
             anchor_x = int(round(self.cycle_anchor[0] + offset_x))
             anchor_y = int(round(self.cycle_anchor[1] + offset_y))

@@ -5,11 +5,16 @@ import logging
 import sys
 import math
 import time
+import base64
+import binascii
+from pathlib import Path
+from urllib.parse import unquote_to_bytes, urlparse
+from urllib.request import Request, urlopen
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 from PyQt6.QtCore import QPoint, QRect, Qt
-from PyQt6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter, QPen
+from PyQt6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter, QPen, QPixmap
 
 from overlay_client.anchor_helpers import CommandContext, build_baseline_bounds, compute_justification_offsets
 from overlay_client.group_transform import GroupKey, GroupTransform
@@ -18,6 +23,7 @@ from overlay_client.legacy_store import LegacyItem
 from overlay_client.offscreen_logger import log_offscreen_payload
 from overlay_client.paint_commands import (
     _LegacyPaintCommand,
+    _ImagePaintCommand,
     _MessagePaintCommand,
     _RectPaintCommand,
     _VectorPaintCommand,
@@ -36,6 +42,14 @@ from overlay_client.opacity_utils import apply_global_payload_opacity, coerce_pe
 from overlay_client.window_utils import legacy_preset_point_size as util_legacy_preset_point_size, line_width as util_line_width
 
 _CLIENT_LOGGER = logging.getLogger("EDMC.ModernOverlay.Client")
+
+try:  # Optional dependency for SVG rendering.
+    from PyQt6.QtSvg import QSvgRenderer  # type: ignore
+except Exception:  # pragma: no cover - QtSvg might be unavailable in some envs
+    QSvgRenderer = None  # type: ignore[assignment]
+
+_IMAGE_FETCH_TIMEOUT_SECONDS = 2.5
+_IMAGE_FETCH_MAX_BYTES = 8 * 1024 * 1024
 
 
 @dataclass
@@ -799,6 +813,15 @@ class RenderSurfaceMixin:
                 )
             elif legacy_item.kind == "vector":
                 command = self._build_vector_command(
+                    legacy_item,
+                    mapper,
+                    group_key,
+                    group_transform,
+                    overlay_hint,
+                    collect_only=collect_only,
+                )
+            elif legacy_item.kind == "image":
+                command = self._build_image_command(
                     legacy_item,
                     mapper,
                     group_key,
@@ -1619,6 +1642,294 @@ class RenderSurfaceMixin:
             right_just_multiplier=2 if raw_min_x is not None else 0,
         )
         return command
+
+    def _build_image_command(
+        self,
+        legacy_item: LegacyItem,
+        mapper: LegacyMapper,
+        group_key: GroupKey,
+        group_transform: Optional[GroupTransform],
+        overlay_bounds_hint: Optional[_OverlayBounds],
+        collect_only: bool = False,
+    ) -> Optional[_ImagePaintCommand]:
+        item = legacy_item.data
+        item_id = legacy_item.item_id
+        plugin_name = legacy_item.plugin
+        source = str(item.get("source") or "").strip()
+        if not source:
+            return None
+        preserve_aspect = bool(item.get("preserve_aspect", False))
+        state = self._viewport_state()
+        offset_x, offset_y = self._group_offsets(group_transform)
+        group_ctx = build_group_context(
+            mapper,
+            state,
+            group_transform,
+            overlay_bounds_hint,
+            offset_x,
+            offset_y,
+            group_anchor_point=self._group_anchor_point,
+            group_base_point=self._group_base_point,
+        )
+        fill = group_ctx.fill
+        transform_context = group_ctx.transform_context
+        selected_anchor = group_ctx.selected_anchor
+        base_anchor_point = group_ctx.base_anchor_point
+        anchor_for_transform = group_ctx.anchor_for_transform
+        base_translation_dx = group_ctx.base_translation_dx
+        base_translation_dy = group_ctx.base_translation_dy
+        transform_meta = item.get("__mo_transform__")
+        trace_enabled = self._should_trace_payload(plugin_name, item_id)
+        trace_fn = None
+        if trace_enabled and not collect_only:
+            self._trace_paint_phase(plugin_name, item_id, kind="image")
+
+            def trace_fn(stage: str, details: Mapping[str, Any]) -> None:
+                self._log_legacy_trace(plugin_name, item_id, stage, details)
+
+        raw_x = float(item.get("x", 0))
+        raw_y = float(item.get("y", 0))
+        raw_w = float(item.get("w", 0))
+        raw_h = float(item.get("h", 0))
+        if raw_w <= 0.0 or raw_h <= 0.0:
+            return None
+        transformed_overlay, base_overlay_points, reference_overlay_bounds, effective_anchor = self._compute_rect_transform(
+            plugin_name,
+            item_id,
+            fill,
+            transform_context,
+            transform_meta,
+            mapper,
+            group_transform,
+            raw_x,
+            raw_y,
+            raw_w,
+            raw_h,
+            offset_x,
+            offset_y,
+            selected_anchor,
+            base_anchor_point,
+            anchor_for_transform,
+            base_translation_dx,
+            base_translation_dy,
+            trace_enabled,
+            collect_only,
+        )
+        xs_overlay = [pt[0] for pt in transformed_overlay]
+        ys_overlay = [pt[1] for pt in transformed_overlay]
+        min_x_overlay = min(xs_overlay)
+        max_x_overlay = max(xs_overlay)
+        min_y_overlay = min(ys_overlay)
+        max_y_overlay = max(ys_overlay)
+        x = int(round(fill.screen_x(min_x_overlay)))
+        y = int(round(fill.screen_y(min_y_overlay)))
+        w = max(1, int(round(max(0.0, max_x_overlay - min_x_overlay) * group_ctx.scale)))
+        h = max(1, int(round(max(0.0, max_y_overlay - min_y_overlay) * group_ctx.scale)))
+        center_x = x + (w // 2)
+        center_y = y + (h // 2)
+        bounds = (x, y, x + w, y + h)
+        overlay_bounds = (min_x_overlay, min_y_overlay, max_x_overlay, max_y_overlay)
+        base_overlay_bounds: Optional[Tuple[float, float, float, float]] = None
+        if base_overlay_points:
+            base_xs = [pt[0] for pt in base_overlay_points]
+            base_ys = [pt[1] for pt in base_overlay_points]
+            base_overlay_bounds = (min(base_xs), min(base_ys), max(base_xs), max(base_ys))
+        pixmap = None
+        if not collect_only:
+            pixmap = self._resolve_image_pixmap(source, w, h, preserve_aspect=preserve_aspect)
+        if trace_enabled and not collect_only:
+            self._log_legacy_trace(
+                plugin_name,
+                item_id,
+                "paint:image_output",
+                {
+                    "source": source,
+                    "adjusted_x": min_x_overlay,
+                    "adjusted_y": min_y_overlay,
+                    "adjusted_w": max_x_overlay - min_x_overlay,
+                    "adjusted_h": max_y_overlay - min_y_overlay,
+                    "pixel_x": x,
+                    "pixel_y": y,
+                    "pixel_w": w,
+                    "pixel_h": h,
+                    "mode": mapper.transform.mode.value,
+                },
+            )
+        return _ImagePaintCommand(
+            group_key=group_key,
+            group_transform=group_transform,
+            legacy_item=legacy_item,
+            bounds=bounds,
+            overlay_bounds=overlay_bounds,
+            effective_anchor=effective_anchor,
+            debug_log=None,
+            x=x,
+            y=y,
+            width=w,
+            height=h,
+            pixmap=pixmap,
+            cycle_anchor=(center_x, center_y),
+            trace_fn=trace_fn,
+            base_overlay_bounds=base_overlay_bounds,
+            reference_overlay_bounds=reference_overlay_bounds,
+            debug_vertices=[
+                (x, y),
+                (x + w, y),
+                (x, y + h),
+                (x + w, y + h),
+            ],
+            raw_min_x=raw_x,
+            right_just_multiplier=2,
+        )
+
+    def _resolve_image_pixmap(
+        self,
+        source: str,
+        width: int,
+        height: int,
+        *,
+        preserve_aspect: bool,
+    ) -> Optional[QPixmap]:
+        cache = getattr(self, "_image_pixmap_cache", None)
+        if not isinstance(cache, dict):
+            cache = {}
+            self._image_pixmap_cache = cache
+        failures = getattr(self, "_image_pixmap_failures", None)
+        if not isinstance(failures, dict):
+            failures = {}
+            self._image_pixmap_failures = failures
+        cache_key = f"{source}|{int(width)}x{int(height)}|{1 if preserve_aspect else 0}"
+        cached = cache.get(cache_key)
+        if isinstance(cached, QPixmap):
+            return cached
+        now = time.monotonic()
+        blocked_until = failures.get(cache_key)
+        if isinstance(blocked_until, (int, float)) and blocked_until > now:
+            return None
+        try:
+            payload = self._load_image_payload(source)
+            pixmap = self._decode_image_pixmap(
+                payload,
+                source,
+                width=width,
+                height=height,
+                preserve_aspect=preserve_aspect,
+            )
+            if pixmap is None or pixmap.isNull():
+                raise ValueError("Decoded image was empty")
+            cache[cache_key] = pixmap
+            if len(cache) > 128:
+                cache.pop(next(iter(cache)))
+            failures.pop(cache_key, None)
+            return pixmap
+        except Exception as exc:
+            failures[cache_key] = now + 5.0
+            _CLIENT_LOGGER.debug("Image payload load failed for %s: %s", source, exc)
+            return None
+
+    def _load_image_payload(self, source: str) -> bytes:
+        source = str(source or "").strip()
+        if not source:
+            raise ValueError("Empty image source")
+        lower = source.casefold()
+        if lower.startswith("data:"):
+            return self._decode_data_url_payload(source)
+        parsed = urlparse(source)
+        if parsed.scheme in {"http", "https"}:
+            request = Request(source, headers={"User-Agent": "EDMCModernOverlay/1.0"})
+            with urlopen(request, timeout=_IMAGE_FETCH_TIMEOUT_SECONDS) as response:
+                chunks: list[bytes] = []
+                total = 0
+                while True:
+                    chunk = response.read(64 * 1024)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > _IMAGE_FETCH_MAX_BYTES:
+                        raise ValueError("Image payload exceeded max size")
+                    chunks.append(chunk)
+            return b"".join(chunks)
+        if parsed.scheme == "file":
+            file_path = Path(unquote_to_bytes(parsed.path).decode("utf-8", errors="replace"))
+            return file_path.read_bytes()
+        if parsed.scheme:
+            raise ValueError(f"Unsupported image URL scheme: {parsed.scheme}")
+        return Path(source).expanduser().read_bytes()
+
+    @staticmethod
+    def _decode_data_url_payload(source: str) -> bytes:
+        if "," not in source:
+            raise ValueError("Malformed data URL")
+        header, encoded = source.split(",", 1)
+        if ";base64" in header.casefold():
+            try:
+                return base64.b64decode(encoded, validate=False)
+            except (ValueError, binascii.Error) as exc:
+                raise ValueError("Invalid base64 image data") from exc
+        return unquote_to_bytes(encoded)
+
+    def _decode_image_pixmap(
+        self,
+        payload: bytes,
+        source: str,
+        *,
+        width: int,
+        height: int,
+        preserve_aspect: bool,
+    ) -> Optional[QPixmap]:
+        source_l = source.casefold()
+        stripped = payload.lstrip()
+        is_svg = (
+            source_l.endswith(".svg")
+            or source_l.startswith("data:image/svg")
+            or stripped.startswith(b"<svg")
+            or (stripped.startswith(b"<?xml") and b"<svg" in stripped[:512])
+        )
+        if is_svg:
+            if QSvgRenderer is None:
+                raise RuntimeError("QtSvg is unavailable; cannot decode SVG payload")
+            renderer = QSvgRenderer(payload)
+            if not renderer.isValid():
+                raise ValueError("Invalid SVG payload")
+            default_size = renderer.defaultSize()
+            natural_w = max(1, default_size.width()) if default_size.isValid() else max(1, width)
+            natural_h = max(1, default_size.height()) if default_size.isValid() else max(1, height)
+            target_w = width if width > 0 else natural_w
+            target_h = height if height > 0 else natural_h
+            if preserve_aspect and width > 0 and height > 0 and natural_w > 0 and natural_h > 0:
+                natural_ratio = natural_w / natural_h
+                target_ratio = width / height
+                if natural_ratio > target_ratio:
+                    target_h = max(1, int(round(width / natural_ratio)))
+                    target_w = width
+                else:
+                    target_w = max(1, int(round(height * natural_ratio)))
+                    target_h = height
+            pixmap = QPixmap(max(1, int(target_w)), max(1, int(target_h)))
+            pixmap.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pixmap)
+            try:
+                renderer.render(painter)
+            finally:
+                painter.end()
+            return pixmap
+
+        pixmap = QPixmap()
+        if not pixmap.loadFromData(payload):
+            raise ValueError("Unsupported raster image payload")
+        if width > 0 and height > 0:
+            aspect_mode = (
+                Qt.AspectRatioMode.KeepAspectRatio
+                if preserve_aspect
+                else Qt.AspectRatioMode.IgnoreAspectRatio
+            )
+            pixmap = pixmap.scaled(
+                width,
+                height,
+                aspect_mode,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        return pixmap
 
     def _compute_group_nudges(
         self,

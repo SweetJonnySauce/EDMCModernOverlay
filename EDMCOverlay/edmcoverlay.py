@@ -140,6 +140,7 @@ def normalise_legacy_payload(message: Mapping[str, Any]) -> Optional[Dict[str, A
     item_id = _legacy_coerce_str(_lookup("id", "Id"))
     text = _lookup("text", "Text")
     shape = _legacy_coerce_str(_lookup("shape", "Shape"))
+    image_source = _legacy_coerce_str(_lookup("source", "Source", "url", "URL", "src", "Src", "image", "Image"))
     ttl = _legacy_coerce_int(_lookup("ttl", "TTL"), default=4)
     plugin = _legacy_coerce_str(_lookup("plugin", "Plugin", "plugin_name", "PluginName", "source_plugin"))
 
@@ -153,6 +154,22 @@ def normalise_legacy_payload(message: Mapping[str, Any]) -> Optional[Dict[str, A
             "x": _legacy_coerce_int(_lookup("x", "X"), 0),
             "y": _legacy_coerce_int(_lookup("y", "Y"), 0),
             "ttl": ttl,
+        }
+        if plugin:
+            payload["plugin"] = plugin
+        return payload
+
+    if image_source:
+        payload = {
+            "type": "image",
+            "id": item_id or "",
+            "source": image_source,
+            "x": _legacy_coerce_int(_lookup("x", "X"), 0),
+            "y": _legacy_coerce_int(_lookup("y", "Y"), 0),
+            "w": _legacy_coerce_int(_lookup("w", "W"), 0),
+            "h": _legacy_coerce_int(_lookup("h", "H"), 0),
+            "ttl": ttl,
+            "preserve_aspect": bool(_lookup("preserve_aspect", "PreserveAspect")),
         }
         if plugin:
             payload["plugin"] = plugin

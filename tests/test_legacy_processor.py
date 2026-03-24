@@ -140,6 +140,51 @@ def test_process_vector_single_point_without_marker_is_dropped():
     assert store.get("vect-single-no-marker") is None
 
 
+def test_process_image_payload():
+    store = LegacyItemStore()
+    changed = process_legacy_payload(
+        store,
+        {
+            "type": "image",
+            "id": "img1",
+            "source": "https://example.com/test.png",
+            "x": 10,
+            "y": 20,
+            "w": 80,
+            "h": 60,
+            "ttl": 4,
+            "preserve_aspect": True,
+        },
+    )
+    assert changed is True
+    item = store.get("img1")
+    assert item is not None
+    assert item.kind == "image"
+    assert item.data["source"] == "https://example.com/test.png"
+    assert item.data["x"] == 10
+    assert item.data["y"] == 20
+    assert item.data["w"] == 80
+    assert item.data["h"] == 60
+    assert item.data["preserve_aspect"] is True
+
+
+def test_process_image_payload_requires_source():
+    store = LegacyItemStore()
+    changed = process_legacy_payload(
+        store,
+        {
+            "type": "image",
+            "id": "img-missing",
+            "x": 1,
+            "y": 2,
+            "w": 3,
+            "h": 4,
+        },
+    )
+    assert changed is False
+    assert store.get("img-missing") is None
+
+
 def test_ttl_purge(monkeypatch: pytest.MonkeyPatch):
     store = LegacyItemStore()
 

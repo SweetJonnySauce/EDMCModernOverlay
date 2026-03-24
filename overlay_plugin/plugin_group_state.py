@@ -525,6 +525,16 @@ class PluginGroupStateManager:
                 return None
             return (x, y, x, y)
 
+        if payload_type == "image":
+            try:
+                x = float(payload.get("x", 0.0))
+                y = float(payload.get("y", 0.0))
+                w = float(payload.get("w", 0.0))
+                h = float(payload.get("h", 0.0))
+            except (TypeError, ValueError):
+                return None
+            return (x, y, x + w, y + h)
+
         if payload_type == "shape":
             shape = str(payload.get("shape") or "").strip().lower()
             if shape == "rect":

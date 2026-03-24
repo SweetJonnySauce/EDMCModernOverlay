@@ -190,6 +190,10 @@ FONT_PREVIEW_TTL = 5
 FONT_PREVIEW_BASE_X = 60
 FONT_PREVIEW_BASE_Y = 120
 FONT_PREVIEW_LINE_SPACING = 40
+TEST_OVERLAY_IMAGE_URL = "https://i.imgur.com/g5vV34y.png"
+TEST_OVERLAY_IMAGE_WIDTH = 256
+TEST_OVERLAY_IMAGE_HEIGHT = 256
+TEST_OVERLAY_IMAGE_GAP = 20
 
 # Expose dashboard bit flags for tests and runtime helpers.
 _FLAG_IN_WING = profile_runtime_helpers.FLAG_IN_WING
@@ -1775,6 +1779,39 @@ class _PluginRuntime:
             except Exception as exc:
                 raise RuntimeError(f"Failed to send test overlay version: {exc}") from exc
 
+        try:
+            image_x = 40
+            image_y = 40
+            bounds = rect_bounds or vector_bounds
+            if bounds is not None:
+                image_x = int(bounds[2] + TEST_OVERLAY_IMAGE_GAP)
+                image_y = int(bounds[1])
+            image_payload = {
+                "event": "LegacyOverlay",
+                "type": "image",
+                "id": f"{PLUGIN_NAME}-test-image",
+                "source": TEST_OVERLAY_IMAGE_URL,
+                "x": image_x,
+                "y": image_y,
+                "w": TEST_OVERLAY_IMAGE_WIDTH,
+                "h": TEST_OVERLAY_IMAGE_HEIGHT,
+                "ttl": ttl,
+                "preserve_aspect": True,
+            }
+            if not send_overlay_message(image_payload):
+                raise RuntimeError("Failed to queue image payload to overlay")
+            sent += 1
+            LOGGER.debug(
+                "Sent test image overlay payload: source=%s x=%s y=%s w=%s h=%s",
+                TEST_OVERLAY_IMAGE_URL,
+                image_x,
+                image_y,
+                TEST_OVERLAY_IMAGE_WIDTH,
+                TEST_OVERLAY_IMAGE_HEIGHT,
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Failed to send test overlay image: {exc}") from exc
+
         if not sent:
             raise RuntimeError("No test overlay payloads were sent.")
 
@@ -2715,6 +2752,28 @@ class _PluginRuntime:
                         vector = message.get("vector")
                         if not isinstance(vector, list) or len(vector) < 2:
                             raise ValueError("Vector shape payload requires a 'vector' list with at least two points")
+                elif payload_type == "image":
+                    source_raw = message.get("source")
+                    if not isinstance(source_raw, str) or not source_raw.strip():
+                        for key in ("url", "src", "image"):
+                            candidate = message.get(key)
+                            if isinstance(candidate, str) and candidate.strip():
+                                source_raw = candidate
+                                break
+                    source = str(source_raw or "").strip()
+                    if not source:
+                        raise ValueError("LegacyOverlay image payload requires 'source' URL")
+                    message["type"] = "image"
+                    message["source"] = source
+                    for key in ("x", "y", "w", "h"):
+                        if key not in message:
+                            continue
+                        try:
+                            message[key] = int(round(float(message.get(key))))
+                        except (TypeError, ValueError):
+                            raise ValueError(f"LegacyOverlay image payload field '{key}' must be numeric") from None
+                    if "preserve_aspect" in message:
+                        message["preserve_aspect"] = bool(message.get("preserve_aspect"))
                 else:
                     raise ValueError(f"Unsupported LegacyOverlay payload type: {payload_type}")
                 self._trace_payload_event("cli:legacy_overlay", message)

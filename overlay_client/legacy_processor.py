@@ -7,7 +7,10 @@ from collections.abc import Iterable, Sequence
 from typing import Any, Callable, Mapping, MutableMapping, Optional
 import json
 
-from overlay_client.legacy_store import LegacyItem, LegacyItemStore
+try:
+    from overlay_client.legacy_store import LegacyItem, LegacyItemStore
+except Exception:  # pragma: no cover - compatibility for direct module imports in tests/tools
+    from legacy_store import LegacyItem, LegacyItemStore  # type: ignore
 
 LOGGER = logging.getLogger("EDMC.ModernOverlay.LegacyProcessor")
 
@@ -82,6 +85,16 @@ def _hashable_payload_snapshot(item_type: str, payload: Mapping[str, Any]) -> tu
                 tuple(points),
                 payload.get("__mo_transform__", None),
             )
+    if item_type == "image":
+        return (
+            payload.get("source", ""),
+            payload.get("x", 0),
+            payload.get("y", 0),
+            payload.get("w", 0),
+            payload.get("h", 0),
+            bool(payload.get("preserve_aspect", False)),
+            payload.get("__mo_transform__", None),
+        )
     return (item_type, json.dumps(payload, sort_keys=True, default=str))
 
 
@@ -137,6 +150,14 @@ _LEGACY_CONTENT_KEYS = {
     "W",
     "h",
     "H",
+    "source",
+    "Source",
+    "url",
+    "URL",
+    "src",
+    "Src",
+    "image",
+    "Image",
 }
 
 
@@ -228,6 +249,45 @@ def process_legacy_payload(
                 raw_payload.setdefault("__mo_transform__", {}).update(raw_copy if isinstance(raw_copy, Mapping) else {})
         data["__mo_updated__"] = now_iso
         store.set(item_id, LegacyItem(item_id=item_id, kind="message", data=data, expiry=expiry, plugin=plugin_name))
+        return True
+
+    if item_type == "image":
+        source = str(payload.get("source") or "").strip()
+        if not source:
+            return False
+        data = {
+            "source": source,
+            "x": int(payload.get("x", 0)),
+            "y": int(payload.get("y", 0)),
+            "w": int(payload.get("w", 0)),
+            "h": int(payload.get("h", 0)),
+            "preserve_aspect": bool(payload.get("preserve_aspect", False)),
+        }
+        data["__mo_ttl__"] = ttl
+        transform_meta = payload.get("__mo_transform__")
+        if isinstance(transform_meta, Mapping):
+            try:
+                data["__mo_transform__"] = dict(transform_meta)
+            except Exception:
+                data["__mo_transform__"] = transform_meta
+        data["__mo_updated__"] = now_iso
+        if trace_fn:
+            snapshot = _hashable_payload_snapshot(item_type, payload)
+            trace_fn(
+                "legacy_processor:dedupe_snapshot",
+                payload,
+                {"item_id": item_id, "plugin": plugin_name, "snapshot": snapshot},
+            )
+        store.set(
+            item_id,
+            LegacyItem(
+                item_id=item_id,
+                kind="image",
+                data=data,
+                expiry=expiry,
+                plugin=plugin_name,
+            ),
+        )
         return True
 
     if item_type == "shape":

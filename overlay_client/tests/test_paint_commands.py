@@ -3,6 +3,7 @@ from typing import Any, Dict, Tuple
 from PyQt6.QtGui import QColor
 
 from overlay_client.paint_commands import (
+    _ImagePaintCommand,
     _MessagePaintCommand,
     _RectPaintCommand,
     _VectorPaintCommand,
@@ -65,6 +66,9 @@ class _RecordingPainter:
     def drawRect(self, x: int, y: int, w: int, h: int) -> None:  # noqa: N802
         self.calls.append(("drawRect", x, y, w, h))
 
+    def drawPixmap(self, *args) -> None:  # noqa: N802
+        self.calls.append(("drawPixmap",) + args)
+
     def drawLine(self, x1: int, y1: int, x2: int, y2: int) -> None:  # noqa: N802
         self.calls.append(("drawLine", x1, y1, x2, y2))
 
@@ -107,6 +111,34 @@ def test_rect_paint_draws_with_offsets():
     )
     cmd.paint(window, painter, offset_x=10, offset_y=20)
     assert ("drawRect", 11, 22, 3, 4) in painter.calls
+
+
+def test_image_paint_draws_with_offsets():
+    window = _StubWindow()
+    painter = _RecordingPainter()
+
+    class _FakePixmap:
+        def isNull(self) -> bool:  # noqa: N802
+            return False
+
+    cmd = _ImagePaintCommand(
+        group_key=("g", None),
+        group_transform=None,
+        legacy_item=_StubLegacyItem("item-image"),
+        bounds=None,
+        x=3,
+        y=4,
+        width=20,
+        height=30,
+        pixmap=_FakePixmap(),  # type: ignore[arg-type]
+        cycle_anchor=(7, 9),
+    )
+    cmd.paint(window, painter, offset_x=10, offset_y=20)
+
+    draw_calls = [call for call in painter.calls if call and call[0] == "drawPixmap"]
+    assert draw_calls
+    assert draw_calls[0][1:5] == (13, 24, 20, 30)
+    assert window._registered["item-image"] == (17, 29)
 
 
 def test_vector_paint_invokes_render_with_adapter(monkeypatch):
