@@ -3,6 +3,7 @@
 ## 0.9.0
 
 ### Features
+- Profiles! You can now create custom profiles and apply rules to them such as Ship, SRV, On Foot, etc. Each profile can have it's own overlay configuration. Supports Overlay Controller, hotkeys (requires [EDMCHotkeys](https://github.com/SweetJonnySauce/EDMCHotkeys) plugin), and chat commands. Addresses [#159](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/159) and [#180](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/180)
 - Overlay Controller now has a background slider for opacity. This controls the alpha channel for background and background border colors. [#199](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/199) 
 
 ### Maintenance
