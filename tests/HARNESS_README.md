@@ -19,7 +19,6 @@ integration-style plugin testing.
 - `tests/harness.py`
 - `tests/edmc/**`
 - Project-owned integration layer:
-- `harness.py` (stable local entrypoint)
 - `tests/harness_bootstrap.py`
 - `tests/overlay_adapter.py`
 - `tests/config/**`
@@ -41,6 +40,8 @@ It also provides:
 
 ## Running Harness Tests
 
+- Install dev dependencies first (includes `semantic-version`):
+- `python -m pip install -r requirements/dev.txt`
 - Run harness tests only:
 - `overlay_client/.venv/bin/python -m pytest -m harness -q`
 - Run chat-command replay test only:
