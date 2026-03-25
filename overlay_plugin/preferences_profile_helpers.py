@@ -18,6 +18,7 @@ RULE_CONTEXT_KEYS = (
     "InMulticrew",
 )
 ACTIVE_COLUMN_CHECKMARK = "✅"
+NO_SHIPS_HINT = "Swap ships in game and then close and reopen settings to have it show up on the ship list."
 
 
 def load_profile_menu_icons(panel: Any) -> None:
@@ -30,6 +31,7 @@ def load_profile_menu_icons(panel: Any) -> None:
     icon_files = {
         "insert_above": "add_row_above_24dp_555555_FILL0_wght400_GRAD0_opsz24.png",
         "insert_below": "add_row_below_24dp_555555_FILL0_wght400_GRAD0_opsz24.png",
+        "rename": "edit_24dp_555555_FILL0_wght400_GRAD0_opsz24.png",
         "delete": "delete_24dp_555555_FILL0_wght400_GRAD0_opsz24.png",
         "active": "icon_green_tick_16x16.png",
         "copy": "content_copy_24dp_555555_FILL0_wght400_GRAD0_opsz24.png",
@@ -326,6 +328,7 @@ def on_profile_table_right_click(panel: Any, event) -> None:  # pragma: no cover
     icon_insert_above = panel._profile_menu_icons.get("insert_above")
     icon_insert_below = panel._profile_menu_icons.get("insert_below")
     icon_delete = panel._profile_menu_icons.get("delete")
+    icon_rename = panel._profile_menu_icons.get("rename")
     icon_active = panel._profile_menu_icons.get("active")
     icon_copy = panel._profile_menu_icons.get("copy")
     icon_paste = panel._profile_menu_icons.get("paste")
@@ -355,6 +358,12 @@ def on_profile_table_right_click(panel: Any, event) -> None:  # pragma: no cover
         image=icon_move_down,
         compound="left",
     )
+    menu.add_command(
+        label="Rename",
+        command=lambda: _start_profile_table_rename_for_selected_row(panel),
+        image=icon_rename,
+        compound="left",
+    )
     menu.add_command(label="Delete Row", command=panel._on_profile_delete, image=icon_delete, compound="left")
     menu.add_separator()
     menu.add_command(label="Set Active", command=panel._on_profile_set_current, image=icon_active, compound="left")
@@ -362,6 +371,81 @@ def on_profile_table_right_click(panel: Any, event) -> None:  # pragma: no cover
     menu.add_command(label="Copy", command=panel._on_profile_copy, image=icon_copy, compound="left")
     menu.add_command(label="Paste", command=panel._on_profile_paste, image=icon_paste, compound="left")
     _show_profile_context_menu(panel, table, menu, event.x_root, event.y_root)
+
+
+def _start_profile_table_rename_for_selected_row(panel: Any) -> None:
+    table = panel._profile_table
+    if table is None:
+        return
+    try:
+        selected = table.selection()
+    except Exception:
+        selected = ()
+    if not selected:
+        panel._status_var.set("Select a profile first.")
+        return
+    _start_profile_table_rename(panel, row_id=selected[0])
+
+
+def _start_profile_table_rename(panel: Any, *, row_id: str) -> None:
+    table = panel._profile_table
+    if table is None:
+        return
+    bbox = table.bbox(row_id, "#2")
+    if not bbox:
+        return
+    x, y, width, height = bbox
+    values = table.item(row_id, "values")
+    if not values or len(values) < 2:
+        return
+    old_name = str(values[1]).strip()
+    old_name = _extract_profile_name(old_name)
+    if not old_name:
+        return
+    if panel._profile_table_editor is not None:
+        try:
+            panel._profile_table_editor.destroy()
+        except Exception:
+            pass
+        panel._profile_table_editor = None
+    editor = tk.Entry(table)
+    editor.insert(0, old_name)
+    editor.place(x=x, y=y, width=width, height=height)
+    editor.focus_set()
+    editor.selection_range(0, "end")
+
+    def _commit(_event=None) -> None:
+        new_name = str(editor.get() or "").strip()
+        try:
+            editor.destroy()
+        except Exception:
+            pass
+        panel._profile_table_editor = None
+        if not new_name or new_name.casefold() == old_name.casefold():
+            return
+        callback = panel._rename_profile_callback
+        if not callable(callback):
+            panel._status_var.set("Profile rename is unavailable.")
+            return
+        try:
+            callback(old_name, new_name)
+        except Exception as exc:
+            panel._status_var.set(f"Failed to rename profile: {exc}")
+            return
+        panel._status_var.set(f"Renamed profile {old_name} to {new_name}.")
+        panel._refresh_profile_state()
+
+    def _cancel(_event=None) -> None:
+        try:
+            editor.destroy()
+        except Exception:
+            pass
+        panel._profile_table_editor = None
+
+    editor.bind("<Return>", _commit)
+    editor.bind("<Escape>", _cancel)
+    editor.bind("<FocusOut>", _commit)
+    panel._profile_table_editor = editor
 
 
 def _show_profile_context_menu(panel: Any, table: Any, menu: tk.Menu, x_root: int, y_root: int) -> None:
@@ -560,6 +644,14 @@ def on_profile_table_double_click(panel: Any, event) -> None:  # pragma: no cove
     column_id = table.identify_column(event.x)
     if not row_id or not column_id:
         return
+    try:
+        table.selection_set(row_id)
+        table.focus(row_id)
+    except Exception:
+        pass
+    if column_id == "#1":
+        panel._on_profile_set_current()
+        return
     column_to_context = {
         "#3": "InMainShip",
         "#4": "InSRV",
@@ -574,61 +666,7 @@ def on_profile_table_double_click(panel: Any, event) -> None:  # pragma: no cove
         return
     if column_id != "#2":
         return
-    bbox = table.bbox(row_id, column_id)
-    if not bbox:
-        return
-    x, y, width, height = bbox
-    values = table.item(row_id, "values")
-    if not values or len(values) < 2:
-        return
-    old_name = str(values[1]).strip()
-    old_name = _extract_profile_name(old_name)
-    if not old_name:
-        return
-    if panel._profile_table_editor is not None:
-        try:
-            panel._profile_table_editor.destroy()
-        except Exception:
-            pass
-        panel._profile_table_editor = None
-    editor = tk.Entry(table)
-    editor.insert(0, old_name)
-    editor.place(x=x, y=y, width=width, height=height)
-    editor.focus_set()
-    editor.selection_range(0, "end")
-
-    def _commit(_event=None) -> None:
-        new_name = str(editor.get() or "").strip()
-        try:
-            editor.destroy()
-        except Exception:
-            pass
-        panel._profile_table_editor = None
-        if not new_name or new_name.casefold() == old_name.casefold():
-            return
-        callback = panel._rename_profile_callback
-        if not callable(callback):
-            panel._status_var.set("Profile rename is unavailable.")
-            return
-        try:
-            callback(old_name, new_name)
-        except Exception as exc:
-            panel._status_var.set(f"Failed to rename profile: {exc}")
-            return
-        panel._status_var.set(f"Renamed profile {old_name} to {new_name}.")
-        panel._refresh_profile_state()
-
-    def _cancel(_event=None) -> None:
-        try:
-            editor.destroy()
-        except Exception:
-            pass
-        panel._profile_table_editor = None
-
-    editor.bind("<Return>", _commit)
-    editor.bind("<Escape>", _cancel)
-    editor.bind("<FocusOut>", _commit)
-    panel._profile_table_editor = editor
+    _start_profile_table_rename(panel, row_id=row_id)
 
 
 def toggle_profile_table_rule(panel: Any, context: str) -> None:
@@ -691,7 +729,16 @@ def sync_profile_ship_list(panel: Any, status: Mapping[str, Any]) -> None:
     panel._profile_ship_checked_ids = checked_ids.intersection(row_ship_ids)
     if not rows:
         ship_table.insert("", "end", text="", values=("no ships yet", "", ""))
+        try:
+            panel._status_var.set(NO_SHIPS_HINT)
+        except Exception:
+            pass
         return
+    try:
+        if str(panel._status_var.get() or "").strip() == NO_SHIPS_HINT:
+            panel._status_var.set("")
+    except Exception:
+        pass
     for row in rows:
         ship_id = int(row["ship_id"])
         text, image = _ship_apply_visual(panel, ship_id in panel._profile_ship_checked_ids)
@@ -845,6 +892,7 @@ def _toggle_profile_ship_row(panel: Any, row_id: str) -> str:
         ship_table.item(row_id, text=text, image=image)
     except Exception:
         pass
+    on_profile_rules_apply(panel)
     return "break"
 
 
@@ -862,6 +910,11 @@ def on_profile_list_selected(panel: Any, _event=None) -> None:  # pragma: no cov
 
 def on_profile_in_main_ship_toggle(panel: Any) -> None:
     _sync_ship_table_enabled_for_selected_profile(panel)
+
+
+def on_profile_rule_toggle(panel: Any) -> None:
+    _sync_ship_table_enabled_for_selected_profile(panel)
+    on_profile_rules_apply(panel)
 
 
 def load_selected_profile_rules(panel: Any) -> None:

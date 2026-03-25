@@ -10,6 +10,9 @@ class _StatusVar:
     def set(self, value: str) -> None:
         self.value = str(value)
 
+    def get(self) -> str:
+        return self.value
+
 
 class _BoolVar:
     def __init__(self, value: bool) -> None:
@@ -137,6 +140,28 @@ class _ShipTableDoubleClick:
         if kwargs:
             self.updated[row_id] = dict(kwargs)
         return ()
+
+
+class _ProfileTableDoubleClick:
+    def __init__(self, *, row_id: str, column_id: str) -> None:
+        self._row_id = row_id
+        self._column_id = column_id
+        self.selection_id: str | None = None
+        self.focus_id: str | None = None
+
+    def identify_row(self, _y: int):
+        return self._row_id
+
+    def identify_column(self, _x: int):
+        return self._column_id
+
+    def selection_set(self, item_id: str) -> None:
+        self.selection_id = item_id
+
+    def focus(self, item_id: str | None = None):
+        if item_id is None:
+            return self.focus_id
+        self.focus_id = item_id
 
 
 class _ClickEvent:
@@ -333,6 +358,43 @@ def test_sync_profile_ship_list_renders_apply_in_tree_column() -> None:
     assert insert["values"] == ("Type-11 Prospector (SW-29L)", "SW-29L", "Type-11")
 
 
+def test_sync_profile_ship_list_shows_no_ships_hint_in_status_message() -> None:
+    panel = _Panel(selected="Default", order=["Default"])
+    panel._profile_ship_table = _InsertShipTable()
+    panel._profile_ship_checked_ids = set()
+    panel._profile_menu_icons = {}
+
+    helpers.sync_profile_ship_list(panel, {"ships": []})
+
+    insert = panel._profile_ship_table.insert_calls[0]
+    assert insert["values"] == ("no ships yet", "", "")
+    assert panel._status_var.value == helpers.NO_SHIPS_HINT
+
+
+def test_sync_profile_ship_list_clears_no_ships_hint_when_ships_exist() -> None:
+    panel = _Panel(selected="Default", order=["Default"])
+    panel._profile_ship_table = _InsertShipTable()
+    panel._profile_ship_checked_ids = set()
+    panel._profile_menu_icons = {}
+    panel._status_var.set(helpers.NO_SHIPS_HINT)
+
+    helpers.sync_profile_ship_list(
+        panel,
+        {
+            "ships": [
+                {
+                    "ship_id": 91,
+                    "ship_name": "Type-11 Prospector",
+                    "ship_ident": "SW-29L",
+                    "ship_type": "Type-11",
+                }
+            ]
+        },
+    )
+
+    assert panel._status_var.value == ""
+
+
 def test_profile_ship_table_click_apply_heading_sorts_apply_column() -> None:
     panel = _Panel(selected="PvE", order=["Default", "PvE"])
     panel._profile_ship_table = _ShipTableClick()
@@ -421,3 +483,73 @@ def test_in_main_ship_toggle_keeps_ship_table_disabled_for_default_profile() -> 
     helpers.on_profile_in_main_ship_toggle(panel)
 
     assert panel._profile_ship_table.state_calls[-1] == ("disabled",)
+
+
+def test_profile_rule_toggle_applies_immediately() -> None:
+    panel = _Panel(selected="PvE", order=["Default", "PvE"])
+    panel._profile_ship_table = _StateAwareShipTable()
+    panel._var_rule_in_main_ship = _BoolVar(False)
+    panel._var_rule_in_srv = _BoolVar(True)
+    panel._var_rule_in_fighter = _BoolVar(False)
+    panel._var_rule_on_foot = _BoolVar(False)
+    panel._var_rule_in_wing = _BoolVar(False)
+    panel._var_rule_in_taxi = _BoolVar(False)
+    panel._var_rule_in_multicrew = _BoolVar(False)
+    panel._selected_ship_ids_for_rules = lambda: []
+    calls: list[tuple[str, list[dict[str, str]]]] = []
+
+    def _set_rules(profile_name: str, rules: list[dict[str, str]]) -> None:
+        calls.append((profile_name, list(rules)))
+
+    panel._set_profile_rules_callback = _set_rules
+
+    helpers.on_profile_rule_toggle(panel)
+
+    assert panel._profile_ship_table.state_calls[-1] == ("disabled",)
+    assert calls == [("PvE", [{"context": "InSRV"}])]
+    assert panel.refresh_count == 1
+
+
+def test_profile_ship_table_double_click_applies_rules_immediately() -> None:
+    panel = _Panel(selected="PvE", order=["Default", "PvE"])
+    table = _ShipTableDoubleClick()
+    panel._profile_ship_table = table
+    panel._profile_ship_row_to_ship_id = {"r1": 91}
+    panel._profile_ship_checked_ids = set()
+    panel._profile_menu_icons = {}
+    panel._var_rule_in_main_ship = _BoolVar(True)
+    panel._var_rule_in_srv = _BoolVar(False)
+    panel._var_rule_in_fighter = _BoolVar(False)
+    panel._var_rule_on_foot = _BoolVar(False)
+    panel._var_rule_in_wing = _BoolVar(False)
+    panel._var_rule_in_taxi = _BoolVar(False)
+    panel._var_rule_in_multicrew = _BoolVar(False)
+    panel._selected_ship_ids_for_rules = lambda: helpers.selected_ship_ids_for_rules(panel)
+    calls: list[tuple[str, list[dict[str, int | str]]]] = []
+
+    def _set_rules(profile_name: str, rules: list[dict[str, int | str]]) -> None:
+        calls.append((profile_name, list(rules)))
+
+    panel._set_profile_rules_callback = _set_rules
+
+    result = helpers.on_profile_ship_table_double_click(panel, _ClickEvent(y=10))
+
+    assert result == "break"
+    assert panel._profile_ship_checked_ids == {91}
+    assert table.updated["r1"]["text"] == "[x]"
+    assert calls == [("PvE", [{"context": "InMainShip", "ship_id": 91}])]
+    assert panel.refresh_count == 1
+
+
+def test_profile_table_double_click_active_column_sets_current_profile() -> None:
+    panel = _Panel(selected="PvE", order=["Default", "PvE"])
+    table = _ProfileTableDoubleClick(row_id="row2", column_id="#1")
+    panel._profile_table = table
+    calls: list[str] = []
+    panel._on_profile_set_current = lambda: calls.append("set_current")
+
+    helpers.on_profile_table_double_click(panel, _ClickEvent(x=5, y=10))
+
+    assert table.selection_id == "row2"
+    assert table.focus_id == "row2"
+    assert calls == ["set_current"]
