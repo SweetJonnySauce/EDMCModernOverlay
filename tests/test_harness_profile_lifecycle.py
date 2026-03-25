@@ -14,7 +14,7 @@ from tests.harness_bootstrap import create_harness, stop_plugin_runtime
 
 pytestmark = pytest.mark.harness
 
-PROFILE_LIFECYCLE_PAUSE_SECONDS = max(0.0, float(os.environ.get("HARNESS_PROFILE_LIFECYCLE_PAUSE_SECONDS", "3")))
+PROFILE_LIFECYCLE_PAUSE_SECONDS = max(0.0, float(os.environ.get("HARNESS_PROFILE_LIFECYCLE_PAUSE_SECONDS", "0")))
 
 
 class _GroupStateStub:
