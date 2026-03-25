@@ -36,6 +36,7 @@ from overlay_client.debug_config import DEBUG_CONFIG_ENABLED
 from overlay_client.logging_utils import build_rotating_file_handler, resolve_log_level, resolve_logs_dir
 from overlay_client.window_tracking import create_elite_window_tracker
 try:  # When run as a package (`python -m overlay_controller.overlay_controller`)
+    import overlay_controller.profile_ui as profile_ui_helpers
     from overlay_controller.input_bindings import BindingConfig, BindingManager
     from overlay_controller.gamepad import GamepadBridge
     from overlay_controller.services import ModeTimers, PluginBridge
@@ -54,6 +55,7 @@ try:  # When run as a package (`python -m overlay_controller.overlay_controller`
     )
     from overlay_controller.widgets import AnchorSelectorWidget, alt_modifier_active  # noqa: F401
 except ImportError:  # Fallback for spec-from-file/test harness
+    import profile_ui as profile_ui_helpers  # type: ignore
     from input_bindings import BindingConfig, BindingManager  # type: ignore
     from gamepad import GamepadBridge  # type: ignore
     from services import ModeTimers, PluginBridge  # type: ignore
@@ -254,6 +256,10 @@ class OverlayConfigApp(tk.Tk):
         self._suppress_group_enabled_command = False
         self._last_plugin_group_state_refresh_ts: float = 0.0
         self._group_controls_align_handle: str | None = None
+        self._profile_names: list[str] = []
+        self._current_profile_name: str = "Default"
+        self._suppress_profile_selection_command = False
+        self._last_profile_state_refresh_ts: float = 0.0
 
         self._groupings_cache = self._load_groupings_cache()
         layout_builder = LayoutBuilder(self)
@@ -273,6 +279,7 @@ class OverlayConfigApp(tk.Tk):
             on_sidebar_click=self._handle_sidebar_click,
             on_placement_click=lambda: self._handle_placement_click(),
             on_idprefix_selected=self._handle_idprefix_selected,
+            on_profile_selected=self._handle_profile_selected,
             on_offset_changed=self._handle_offset_changed,
             on_absolute_changed=self._handle_absolute_changed,
             on_anchor_changed=self._handle_anchor_changed,
@@ -281,6 +288,7 @@ class OverlayConfigApp(tk.Tk):
             on_group_enabled_changed=self._handle_group_enabled_changed,
             on_reset_clicked=self._handle_reset_clicked,
             load_idprefix_options=self._load_idprefix_options,
+            load_profile_options=self._load_profile_options,
         )
         self.container = layout["container"]
         self.placement_frame = layout["placement_frame"]
@@ -293,13 +301,14 @@ class OverlayConfigApp(tk.Tk):
         self.indicator_canvas = layout["indicator_canvas"]
         self.sidebar_overlay = layout["sidebar_overlay"]
         self.placement_overlay = layout["placement_overlay"]
+        self.profile_widget = layout.get("profile_widget")
         self.idprefix_widget = layout["idprefix_widget"]
         self.offset_widget = layout["offset_widget"]
         self.absolute_widget = layout["absolute_widget"]
         self.anchor_widget = layout["anchor_widget"]
         self.justification_widget = layout["justification_widget"]
         self.background_widget = layout["background_widget"]
-        self.tip_helper = layout["tip_helper"]
+        self.group_controls_widget = layout.get("group_controls_widget")
         self.group_enabled_var = layout.get("group_enabled_var")
         self.group_enabled_checkbox = layout.get("group_enabled_checkbox")
         self.reset_button = layout["reset_button"]
@@ -320,6 +329,8 @@ class OverlayConfigApp(tk.Tk):
                         sequences.append(sequence)
                 if sequences:
                     self.idprefix_widget.set_exit_focus_sequences(sequences)
+                    if self.profile_widget is not None:
+                        self.profile_widget.set_exit_focus_sequences(sequences)
             except Exception:
                 pass
         self._gamepad_bridge = GamepadBridge(
@@ -331,6 +342,8 @@ class OverlayConfigApp(tk.Tk):
         self._apply_placement_state()
         self._refresh_widget_focus()
         self._handle_idprefix_selected()
+        self._update_reset_button_label()
+        self._emit_startup_override_reload()
         if sys.platform.startswith("win"):
             self.bind_all("<KeyPress-Alt_L>", self._handle_alt_press, add="+")
             self.bind_all("<KeyPress-Alt_R>", self._handle_alt_press, add="+")
@@ -370,6 +383,18 @@ class OverlayConfigApp(tk.Tk):
         frame_width = target_inner_width + (self.preview_canvas_padding * 2) + horizontal_slack
         column_width = frame_width + (self.placement_overlay_padding * 2)
         return int(ceil(column_width))
+
+    def _resolve_min_window_height(self) -> int:
+        """Return the effective minimum height needed to keep controls visible."""
+
+        min_height = int(getattr(self, "base_min_height", 640) or 640)
+        try:
+            req_height = int(self.winfo_reqheight())
+        except Exception:
+            req_height = 0
+        if req_height > 0:
+            min_height = max(min_height, req_height)
+        return min_height
 
     def _register_widget_specific_bindings(self) -> None:
         absolute_widget = getattr(self, "absolute_widget", None)
@@ -552,9 +577,6 @@ class OverlayConfigApp(tk.Tk):
     def _update_placement_focus_highlight(self) -> None:
         self._focus_manager.update_placement_focus_highlight()
 
-    def _update_contextual_tip(self) -> None:
-        self._focus_manager.update_contextual_tip()
-
     def _refresh_widget_focus(self) -> None:
         manager = safe_getattr(self, "_focus_manager")
         if manager is not None:
@@ -608,13 +630,45 @@ class OverlayConfigApp(tk.Tk):
         if sys.platform.startswith("win"):
             self._alt_active = False
 
+    @staticmethod
+    def _is_window_drag_blocked_widget(widget: object | None) -> bool:
+        if widget is None:
+            return False
+        try:
+            widget_class = str(widget.winfo_class()).lower()
+        except Exception:
+            return False
+        return widget_class in {
+            "entry",
+            "ttk::entry",
+            "text",
+            "spinbox",
+            "scale",
+            "listbox",
+            "button",
+            "ttk::button",
+            "checkbutton",
+            "ttk::checkbutton",
+            "combobox",
+            "ttk::combobox",
+            "scrollbar",
+            "ttk::scrollbar",
+            "treeview",
+            "ttk::treeview",
+            "menubutton",
+            "ttk::menubutton",
+        }
+
     def _start_window_drag(self, event: tk.Event[tk.Misc]) -> None:  # type: ignore[name-defined]
         """Begin window drag tracking when a mouse button is pressed."""
 
+        self._drag_offset = None
         try:
             if event.widget.winfo_toplevel() is not self:
                 return
         except Exception:
+            return
+        if self._is_window_drag_blocked_widget(getattr(event, "widget", None)):
             return
         try:
             self._drag_offset = (
@@ -752,6 +806,16 @@ class OverlayConfigApp(tk.Tk):
             return None
         return self._focus_widgets.get(key)
 
+    @staticmethod
+    def _is_text_input_widget(widget: object | None) -> bool:
+        if widget is None:
+            return False
+        try:
+            widget_class = str(widget.winfo_class()).lower()
+        except Exception:
+            return False
+        return widget_class in {"entry", "ttk::entry", "text"}
+
     def _handle_active_widget_key(self, keysym: str, event: tk.Event[tk.Misc] | None = None) -> bool:  # type: ignore[name-defined]
         if self.widget_select_mode:
             return False
@@ -764,6 +828,9 @@ class OverlayConfigApp(tk.Tk):
             self.exit_focus_mode()
             return True
         if lower_keysym == "space":
+            event_widget = getattr(event, "widget", None) if event is not None else None
+            if self._is_text_input_widget(event_widget):
+                return False
             handler = getattr(widget, "handle_key", None)
             try:
                 handled = bool(handler(keysym, event)) if handler is not None else False
@@ -792,6 +859,25 @@ class OverlayConfigApp(tk.Tk):
                 handler()
             except Exception:
                 pass
+
+    def _apply_profile_dropdown_selection(self) -> None:
+        profile_ui_helpers.apply_profile_dropdown_selection(self)
+
+    def _update_reset_button_label(self) -> None:
+        profile_ui_helpers.update_reset_button_label(self)
+
+    def _refresh_profile_state_cache(self, *, force: bool = False, min_interval_seconds: float = 1.0) -> None:
+        profile_ui_helpers.refresh_profile_state_cache(
+            self,
+            force=force,
+            min_interval_seconds=min_interval_seconds,
+        )
+
+    def _load_profile_options(self) -> list[str]:
+        return profile_ui_helpers.load_profile_options(self)
+
+    def _handle_profile_selected(self, selected_profile: str | None) -> None:
+        profile_ui_helpers.handle_profile_selected(self, selected_profile)
 
     def _on_focus_mode_exited(self) -> None:
         widget = self._get_active_focus_widget()
@@ -922,6 +1008,14 @@ class OverlayConfigApp(tk.Tk):
                     setter(enabled)
                 except Exception:
                     continue
+        group_controls_widget = getattr(self, "group_controls_widget", None)
+        if group_controls_widget is not None:
+            setter = getattr(group_controls_widget, "set_enabled", None)
+            if callable(setter):
+                try:
+                    setter(enabled)
+                except Exception:
+                    pass
         reset_button = getattr(self, "reset_button", None)
         if reset_button is not None:
             try:
@@ -937,7 +1031,6 @@ class OverlayConfigApp(tk.Tk):
         if not enabled and not self.widget_select_mode and self.widget_focus_area == "sidebar":
             if getattr(self, "_sidebar_focus_index", 0) > 0:
                 self.exit_focus_mode()
-        self._update_contextual_tip()
 
     def _schedule_group_controls_alignment(self, _event: object | None = None) -> None:
         handle = getattr(self, "_group_controls_align_handle", None)
@@ -954,6 +1047,10 @@ class OverlayConfigApp(tk.Tk):
         reset_button = getattr(self, "reset_button", None)
         background = getattr(self, "background_widget", None)
         if checkbox is None or reset_button is None or background is None:
+            return
+        if str(getattr(checkbox, "winfo_manager", lambda: "")()) != "place":
+            return
+        if str(getattr(reset_button, "winfo_manager", lambda: "")()) != "place":
             return
         pick_button = getattr(background, "_picker_btn", None)
         if pick_button is None:
@@ -1189,7 +1286,6 @@ class OverlayConfigApp(tk.Tk):
             widget.set_text_color(None)
         except Exception:
             pass
-        self._update_contextual_tip()
 
     def _apply_snapshot_to_absolute_widget(
         self, selection: tuple[str, str], snapshot: GroupSnapshot, force_ui: bool = True
@@ -1271,6 +1367,7 @@ class OverlayConfigApp(tk.Tk):
         if reload_groupings:
             _controller_debug("Groupings reloaded from disk at %s", time.strftime("%H:%M:%S"))
             self._refresh_idprefix_options()
+        self._refresh_profile_state_cache(force=False)
         self._refresh_current_group_snapshot(force_ui=False)
         selection = self._get_current_group_selection()
         if selection is not None:
@@ -1386,6 +1483,12 @@ class OverlayConfigApp(tk.Tk):
         if not sent:
             self._send_plugin_cli(payload)
         _controller_debug("Controller override reload signal sent (nonce=%s)", nonce)
+
+    def _emit_startup_override_reload(self) -> None:
+        try:
+            self.after(0, self._emit_override_reload_signal)
+        except Exception:
+            pass
 
     def _apply_mode_profile(self, mode: str, reason: str = "apply") -> None:
         timers = getattr(self, "_mode_timers", None)
@@ -1512,6 +1615,11 @@ class OverlayConfigApp(tk.Tk):
                 self.absolute_widget.set_px_values(state.get("x"), state.get("y"))
             except Exception:
                 pass
+        try:
+            self._handle_absolute_changed("")
+            return
+        except Exception:
+            pass
         self._sync_absolute_for_current_group(force_ui=True, debounce_ms=self._offset_write_debounce_ms, prefer_user=True)
         self._draw_preview()
 
@@ -1641,6 +1749,7 @@ class OverlayConfigApp(tk.Tk):
         selection = self._get_current_group_selection()
         if selection is None:
             return
+        captured = self._capture_anchor_restore_state(selection)
         plugin_name, label = selection
         if not isinstance(self._groupings_data, dict):
             return
@@ -1683,6 +1792,9 @@ class OverlayConfigApp(tk.Tk):
             except Exception:
                 pass
         self._edit_nonce = f"{time.time():.6f}-{os.getpid()}"
+        self._refresh_current_group_snapshot(force_ui=True)
+        if captured:
+            self._schedule_anchor_restore(selection)
 
     def _handle_background_changed(
         self,
@@ -1788,7 +1900,7 @@ class OverlayConfigApp(tk.Tk):
         bridge = getattr(self, "_plugin_bridge", None)
         if bridge is not None:
             try:
-                bridge.reset_active_group_cache()
+                profile_ui_helpers.reset_group_visibility_for_custom_profile(self, group_name=label)
             except Exception:
                 pass
         self._last_active_group_sent = None
@@ -2448,16 +2560,17 @@ class OverlayConfigApp(tk.Tk):
         """Show the correct placement frame for the current state."""
 
         self.update_idletasks()
+        min_height = self._resolve_min_window_height()
         viewable = False
         try:
             viewable = bool(self.winfo_viewable())
         except Exception:
             viewable = False
         if viewable and not self._initial_geometry_applied:
-            current_height = max(self.base_min_height, self.winfo_reqheight())
+            current_height = max(min_height, self.winfo_reqheight())
             self._initial_geometry_applied = True
         else:
-            current_height = max(self.winfo_height(), self.base_min_height)
+            current_height = max(self.winfo_height(), min_height)
         open_outer_padding = self.container_pad_left + self.container_pad_right_open
         closed_outer_padding = self.container_pad_left + self.container_pad_right_closed
         sidebar_total_open = self.sidebar_width + self.sidebar_pad
@@ -2482,7 +2595,7 @@ class OverlayConfigApp(tk.Tk):
             self.container.grid_columnconfigure(1, weight=1, minsize=self.placement_min_width)
             self.update_idletasks()
             target_width = max(self._open_width, self.winfo_reqwidth(), open_min_width)
-            self.minsize(open_min_width, self.base_min_height)
+            self.minsize(open_min_width, min_height)
             self.geometry(f"{int(target_width)}x{int(current_height)}")
             self._open_width = max(self._open_width, self.winfo_width(), self.winfo_reqwidth(), open_min_width)
             self._current_direction = "left"
@@ -2504,7 +2617,7 @@ class OverlayConfigApp(tk.Tk):
                 + self.indicator_hit_width
             )
             collapsed_width = max(collapsed_width, closed_min_width)
-            self.minsize(collapsed_width, self.base_min_height)
+            self.minsize(collapsed_width, min_height)
             self.geometry(f"{int(collapsed_width)}x{int(current_height)}")
             self._current_direction = "right"
 

@@ -8,12 +8,12 @@ from overlay_controller.widgets import (
     AbsoluteXYWidget,
     AnchorSelectorWidget,
     BackgroundWidget,
-    IdPrefixGroupWidget,
+    GroupControlsWidget,
     JustificationWidget,
+    OverlaySelectorWidget,
     OffsetSelectorWidget,
-    SidebarTipHelper,
+    ProfileSelectorWidget,
 )
-from overlay_controller.widgets.tooltip import ToolTip
 
 
 class LayoutBuilder:
@@ -40,6 +40,7 @@ class LayoutBuilder:
         on_sidebar_click: Callable[[int], None],
         on_placement_click: Callable[[], None],
         on_idprefix_selected: Callable[[], None],
+        on_profile_selected: Callable[[str | None], None],
         on_offset_changed: Callable[[str, bool], None],
         on_absolute_changed: Callable[[str], None],
         on_anchor_changed: Callable[[str, bool], None],
@@ -48,6 +49,7 @@ class LayoutBuilder:
         on_group_enabled_changed: Callable[[bool], None],
         on_reset_clicked: Callable[[], None],
         load_idprefix_options: Callable[[], list[str]],
+        load_profile_options: Callable[[], list[str]],
     ) -> dict[str, object]:
         app = self.app
         container = tk.Frame(app)
@@ -122,13 +124,14 @@ class LayoutBuilder:
         )
 
         sections = [
-            ("idprefix group selector", 0, True),
+            ("profile selector", 0, True),
+            ("overlay selector", 0, True),
             ("offset selector", 0, True),
             ("absolute x/y", 0, True),
             ("anchor selector", 0, True),
             ("payload justification", 0, True),
             ("background color", 0, True),
-            ("Handy tips will show up here in the future", 1, False),
+            ("group controls", 1, True),
         ]
 
         sidebar_cells: list[tk.Frame] = []
@@ -136,13 +139,14 @@ class LayoutBuilder:
         selectable_index = 0
         sidebar_context_frame = None
 
+        profile_widget = None
         idprefix_widget = None
         offset_widget = None
         absolute_widget = None
         anchor_widget = None
         justification_widget = None
         background_widget = None
-        tip_helper = None
+        group_controls_widget = None
         reset_button = None
         group_enabled_var: Optional[tk.BooleanVar] = None
         group_enabled_checkbox = None
@@ -173,14 +177,22 @@ class LayoutBuilder:
                 selectable_index += 1
 
             if index == 0:
-                idprefix_widget = IdPrefixGroupWidget(frame, options=load_idprefix_options())
+                profile_widget = ProfileSelectorWidget(frame, options=load_profile_options())
+                if is_selectable and focus_index is not None:
+                    profile_widget.set_focus_request_callback(lambda idx=focus_index: on_sidebar_click(idx))
+                profile_widget.set_selection_change_callback(on_profile_selected)
+                profile_widget.pack(fill="both", expand=True, padx=0, pady=0)
+                if is_selectable and focus_index is not None:
+                    focus_widgets[("sidebar", focus_index)] = profile_widget
+            elif index == 1:
+                idprefix_widget = OverlaySelectorWidget(frame, options=load_idprefix_options())
                 if is_selectable and focus_index is not None:
                     idprefix_widget.set_focus_request_callback(lambda idx=focus_index: on_sidebar_click(idx))
                 idprefix_widget.set_selection_change_callback(lambda _sel=None: on_idprefix_selected())
                 idprefix_widget.pack(fill="both", expand=True, padx=0, pady=0)
                 if is_selectable and focus_index is not None:
                     focus_widgets[("sidebar", focus_index)] = idprefix_widget
-            elif index == 1:
+            elif index == 2:
                 offset_widget = OffsetSelectorWidget(frame)
                 if is_selectable and focus_index is not None:
                     offset_widget.set_focus_request_callback(lambda idx=focus_index: on_sidebar_click(idx))
@@ -188,7 +200,7 @@ class LayoutBuilder:
                 offset_widget.pack(expand=True)
                 if is_selectable and focus_index is not None:
                     focus_widgets[("sidebar", focus_index)] = offset_widget
-            elif index == 2:
+            elif index == 3:
                 absolute_widget = AbsoluteXYWidget(frame)
                 if is_selectable and focus_index is not None:
                     absolute_widget.set_focus_request_callback(lambda idx=focus_index: on_sidebar_click(idx))
@@ -196,7 +208,7 @@ class LayoutBuilder:
                 absolute_widget.pack(fill="both", expand=True, padx=0, pady=0)
                 if is_selectable and focus_index is not None:
                     focus_widgets[("sidebar", focus_index)] = absolute_widget
-            elif index == 3:
+            elif index == 4:
                 frame.configure(height=140)
                 frame.grid_propagate(False)
                 anchor_widget = AnchorSelectorWidget(frame)
@@ -206,7 +218,7 @@ class LayoutBuilder:
                 anchor_widget.pack(fill="both", expand=True, padx=4, pady=4)
                 if is_selectable and focus_index is not None:
                     focus_widgets[("sidebar", focus_index)] = anchor_widget
-            elif index == 4:
+            elif index == 5:
                 justification_widget = JustificationWidget(frame)
                 if is_selectable and focus_index is not None:
                     justification_widget.set_focus_request_callback(lambda idx=focus_index: on_sidebar_click(idx))
@@ -214,7 +226,7 @@ class LayoutBuilder:
                 justification_widget.pack(fill="both", expand=True, padx=4, pady=4)
                 if is_selectable and focus_index is not None:
                     focus_widgets[("sidebar", focus_index)] = justification_widget
-            elif index == 5:
+            elif index == 6:
                 background_widget = BackgroundWidget(frame)
                 if is_selectable and focus_index is not None:
                     background_widget.set_focus_request_callback(lambda idx=focus_index: on_sidebar_click(idx))
@@ -223,51 +235,25 @@ class LayoutBuilder:
                 if is_selectable and focus_index is not None:
                     focus_widgets[("sidebar", focus_index)] = background_widget
             else:
-                context_height = 132
-                controls_reserved_width = 112
-                frame.configure(height=140)
-                frame.grid_propagate(False)
-                frame.grid_rowconfigure(0, weight=1)
-                frame.grid_columnconfigure(0, weight=1)
-                tip_wrapper = tk.Frame(frame, bd=0, highlightthickness=0, bg=frame.cget("background"))
-                tip_wrapper.grid(row=0, column=0, sticky="nsew")
-                tip_wrapper.configure(height=context_height)
-
-                tip_helper = SidebarTipHelper(tip_wrapper, wraplength=180)
-                tip_helper.place(
-                    x=2,
-                    y=2,
-                    relwidth=1.0,
-                    width=-(controls_reserved_width + 2),
-                    height=context_height - 4,
-                )
-
-                group_enabled_var = tk.BooleanVar(value=True)
-                group_enabled_checkbox = tk.Checkbutton(
-                    tip_wrapper,
-                    text="Enabled",
-                    variable=group_enabled_var,
-                    command=lambda var=group_enabled_var: on_group_enabled_changed(bool(var.get())),
-                )
-                group_enabled_checkbox.place(relx=1.0, x=-4, y=2, anchor="ne")
-
-                reset_button = tk.Button(
-                    tip_wrapper,
-                    text="Reset",
-                    command=on_reset_clicked,
-                    width=6,
-                )
-                reset_button.place(relx=1.0, x=-4, y=30, anchor="ne")
-                ToolTip(reset_button, "Reset returns the overlay to the plugin defaults")
+                group_controls_widget = GroupControlsWidget(frame)
+                if is_selectable and focus_index is not None:
+                    group_controls_widget.set_focus_request_callback(lambda idx=focus_index: on_sidebar_click(idx))
+                group_controls_widget.set_enabled_change_callback(on_group_enabled_changed)
+                group_controls_widget.set_reset_callback(on_reset_clicked)
+                group_controls_widget.pack(fill="x", expand=False, padx=4, pady=4)
+                group_enabled_var = group_controls_widget.group_enabled_var
+                group_enabled_checkbox = group_controls_widget.enabled_checkbox
+                reset_button = group_controls_widget.reset_button
+                if is_selectable and focus_index is not None:
+                    focus_widgets[("sidebar", focus_index)] = group_controls_widget
 
             if is_selectable and focus_index is not None:
                 frame.bind("<Button-1>", lambda _e, idx=focus_index: on_sidebar_click(idx), add="+")
                 for child in frame.winfo_children():
                     child.bind("<Button-1>", lambda _e, idx=focus_index: on_sidebar_click(idx), add="+")
 
-            grow_weight = 1 if index == len(sections) - 1 else 0
-            row_opts = {"weight": grow_weight}
-            if index == 3:
+            row_opts = {"weight": 0}
+            if index == 4:
                 row_opts["minsize"] = 220
             sidebar.grid_rowconfigure(index, **row_opts)
             if is_selectable and focus_index is not None:
@@ -276,6 +262,8 @@ class LayoutBuilder:
                 sidebar_context_frame = frame
 
         sidebar.grid_columnconfigure(0, weight=1)
+        # Keep controls row content-sized; dedicate spare height to a trailing spacer row.
+        sidebar.grid_rowconfigure(len(sections), weight=1)
 
         return {
             "container": container,
@@ -289,13 +277,14 @@ class LayoutBuilder:
             "indicator_canvas": indicator_canvas,
             "sidebar_overlay": sidebar_overlay,
             "placement_overlay": placement_overlay,
+            "profile_widget": profile_widget,
             "idprefix_widget": idprefix_widget,
             "offset_widget": offset_widget,
             "absolute_widget": absolute_widget,
             "anchor_widget": anchor_widget,
             "justification_widget": justification_widget,
             "background_widget": background_widget,
-            "tip_helper": tip_helper,
+            "group_controls_widget": group_controls_widget,
             "group_enabled_var": group_enabled_var,
             "group_enabled_checkbox": group_enabled_checkbox,
             "reset_button": reset_button,

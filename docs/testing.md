@@ -11,6 +11,9 @@ This guide documents the automated suites and manual spot checks that keep the F
 | Group transform cache | `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_group_transform.py` | Confirms `GroupTransformCache` tracks bounds per plugin/prefix and resets cleanly between frames. |
 | Override grouping parser | `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_override_grouping.py` | Guards the JSON parser that turns `overlay_groupings.json` into grouping metadata (prefix matching, anchors, plugin-level group detection). |
 | Plugin group API | `overlay_client/.venv/bin/python -m pytest tests/test_overlay_api.py` | Ensures the public API enforces schema rules (required prefixes, anchors) while updating `overlay_groupings.json`. |
+| Harness startup + adapter | `overlay_client/.venv/bin/python -m pytest tests/test_harness_integration.py -q` | Verifies vendored harness bootstrap works and the local overlay adapter captures emitted payloads. |
+| Harness chat command replay | `overlay_client/.venv/bin/python -m pytest tests/test_harness_chat_commands.py -q` | Replays `SendText` journal fixtures through the harness and asserts callback-driven `!ovr` command handling. |
+| Harness marker slice | `overlay_client/.venv/bin/python -m pytest -m harness -q` | Runs all harness-backed integration tests together. |
 | Overlay render cache (PyQt) | `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_overlay_client_cache.py` | Verifies grid pixmap reuse and legacy render caching aren’t rebuilt every paint; requires PyQt6. |
 | Payload bounds (PyQt) | `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_payload_bounds.py` | Uses PyQt’s font metrics to prove that message/rect bounds scale correctly before grouping. Skipped automatically if PyQt6 is missing. |
 | Payload text metrics (PyQt) | `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_payload_text_metrics.py` | Tests `_measure_text_block` so multi-line labels produce consistent bounds. Requires PyQt6. |
@@ -35,6 +38,8 @@ All of the above assume a local venv:
    pip install -e .[dev]
    ```
 3. Run whichever test target you need. `overlay_client/.venv/bin/python -m pytest` without arguments executes everything that does not require PyQt, while adding `-k` filters narrows the run.
+
+Harness fixtures live under `tests/config/` (`journal_events.json` is shared) and are driven via the vendored BGS-Tally harness snapshot plus local bootstrap adapters.
 
 For PyQt-dependent suites, ensure PyQt6 is installed and set `PYQT_TESTS=1`:
 ```bash

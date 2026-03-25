@@ -8,7 +8,7 @@ from overlay_plugin.overlay_api import PluginGroupingError
 
 def test_ensure_runtime_command_groups_calls_define_plugin_group_for_plugins_and_status(monkeypatch) -> None:
     calls: list[dict[str, object]] = []
-    results = [True, False]
+    results = [True, False, False]
 
     def _fake_define_plugin_group(**kwargs):
         calls.append(dict(kwargs))
@@ -19,12 +19,19 @@ def test_ensure_runtime_command_groups_calls_define_plugin_group_for_plugins_and
     updated = command_overlay_groups.ensure_runtime_command_groups(logger=logging.getLogger("test-command-groups"))
 
     assert updated is True
-    assert len(calls) == 2
+    assert len(calls) == 3
     group_names = [str(call.get("plugin_group_name")) for call in calls]
     assert group_names == [
         command_overlay_groups.COMMAND_PLUGIN_STATUS_GROUP_NAME,
         command_overlay_groups.COMMAND_GROUP_STATUS_GROUP_NAME,
+        command_overlay_groups.COMMAND_PROFILE_STATUS_GROUP_NAME,
     ]
+    profile_call = next(
+        call for call in calls if str(call.get("plugin_group_name")) == command_overlay_groups.COMMAND_PROFILE_STATUS_GROUP_NAME
+    )
+    assert profile_call["plugin_group_background_color"] == "black"
+    assert profile_call["plugin_group_border_color"] == "black"
+    assert profile_call["plugin_group_border_width"] == 3
     for call in calls:
         assert call["plugin_name"] == command_overlay_groups.COMMAND_GROUP_PLUGIN_NAME
         assert call["plugin_matching_prefixes"] == command_overlay_groups.COMMAND_GROUP_MATCHING_PREFIXES
@@ -45,7 +52,7 @@ def test_ensure_runtime_command_groups_continues_after_grouping_error(monkeypatc
         updated = command_overlay_groups.ensure_runtime_command_groups(logger=logging.getLogger("test-command-groups"))
 
     assert updated is True
-    assert calls["count"] == 2
+    assert calls["count"] == 3
     assert "Command overlay group setup failed" in caplog.text
 
 

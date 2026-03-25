@@ -114,8 +114,63 @@ class PluginBridge:
             payload["plugin_group"] = group_name
         return self.request_cli(payload)
 
+    def reset_plugin_group_to_default(self, *, group_name: Optional[str] = None) -> Optional[JsonDict]:
+        payload: JsonDict = {"cli": "plugin_group_reset_default"}
+        if group_name:
+            payload["plugin_group"] = group_name
+        return self.request_cli(payload)
+
     def send_heartbeat(self) -> bool:
         return self.send_cli({"cli": "controller_heartbeat"})
+
+    def profile_status(self) -> Optional[JsonDict]:
+        return self.request_cli({"cli": "profile_status"})
+
+    def set_profile(self, profile_name: str) -> Optional[JsonDict]:
+        token = str(profile_name or "").strip()
+        if not token:
+            return None
+        return self.request_cli({"cli": "profile_set", "profile": token})
+
+    def create_profile(self, profile_name: str) -> Optional[JsonDict]:
+        token = str(profile_name or "").strip()
+        if not token:
+            return None
+        return self.request_cli({"cli": "profile_create", "profile": token})
+
+    def clone_profile(self, source_profile: str, new_profile: str) -> Optional[JsonDict]:
+        source_token = str(source_profile or "").strip()
+        target_token = str(new_profile or "").strip()
+        if not source_token or not target_token:
+            return None
+        return self.request_cli(
+            {"cli": "profile_clone", "source_profile": source_token, "new_profile": target_token}
+        )
+
+    def rename_profile(self, old_name: str, new_name: str) -> Optional[JsonDict]:
+        old_token = str(old_name or "").strip()
+        new_token = str(new_name or "").strip()
+        if not old_token or not new_token:
+            return None
+        return self.request_cli({"cli": "profile_rename", "old_profile": old_token, "new_profile": new_token})
+
+    def delete_profile(self, profile_name: str) -> Optional[JsonDict]:
+        token = str(profile_name or "").strip()
+        if not token:
+            return None
+        return self.request_cli({"cli": "profile_delete", "profile": token})
+
+    def reorder_profile(self, profile_name: str, target_index: int) -> Optional[JsonDict]:
+        token = str(profile_name or "").strip()
+        if not token:
+            return None
+        return self.request_cli({"cli": "profile_reorder", "profile": token, "target_index": int(target_index)})
+
+    def set_profile_rules(self, profile_name: str, rules: list[dict[str, Any]]) -> Optional[JsonDict]:
+        token = str(profile_name or "").strip()
+        if not token:
+            return None
+        return self.request_cli({"cli": "profile_set_rules", "profile": token, "rules": list(rules)})
 
     def send_active_group(
         self,

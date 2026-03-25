@@ -13,6 +13,8 @@ class _HostState:
         self.toggle_calls: list[tuple[Optional[tuple[str, ...]], str]] = []
         self.launch_calls = 0
         self.launch_should_fail = False
+        self.profile_calls: list[str] = []
+        self.profile_cycle_calls: list[int] = []
         self.states = {
             "Group A": True,
             "Group B": True,
@@ -41,6 +43,12 @@ class _HostState:
         if self.launch_should_fail:
             raise RuntimeError("boom")
         self.launch_calls += 1
+
+    def set_profile(self, name: str) -> None:
+        self.profile_calls.append(str(name))
+
+    def cycle_profile(self, direction: int) -> None:
+        self.profile_cycle_calls.append(int(direction))
 
 
 class _FakeAction:
@@ -74,6 +82,8 @@ def _make_manager(state: _HostState) -> hotkeys.HotkeysManager:
         set_group_state=state.set_group_state,
         toggle_group_state=state.toggle_group_state,
         launch_controller=state.launch_controller,
+        set_profile=state.set_profile,
+        cycle_profile=state.cycle_profile,
         logger=logging.getLogger("test-hotkeys"),
         plugin_name="EDMCModernOverlay",
     )
@@ -113,15 +123,37 @@ def test_hotkeys_start_registers_overlay_actions(monkeypatch):
         "Overlay Off",
         "Toggle Overlay",
         hotkeys.HOTKEYS_LAUNCH_CONTROLLER_LABEL,
+        hotkeys.HOTKEYS_SET_PROFILE_LABEL,
+        hotkeys.HOTKEYS_PROFILE_NEXT_LABEL,
+        hotkeys.HOTKEYS_PROFILE_PREV_LABEL,
     ]
     assert [action.id for action in api.registered] == [
         hotkeys.HOTKEYS_OVERLAY_ON_ACTION_ID,
         hotkeys.HOTKEYS_OVERLAY_OFF_ACTION_ID,
         hotkeys.HOTKEYS_OVERLAY_TOGGLE_ACTION_ID,
         hotkeys.HOTKEYS_LAUNCH_CONTROLLER_ACTION_ID,
+        hotkeys.HOTKEYS_SET_PROFILE_ACTION_ID,
+        hotkeys.HOTKEYS_PROFILE_NEXT_ACTION_ID,
+        hotkeys.HOTKEYS_PROFILE_PREV_ACTION_ID,
     ]
-    assert [action.thread_policy for action in api.registered] == ["main", "main", "main", "main"]
-    assert [action.cardinality for action in api.registered] == ["multi", "multi", "multi", "single"]
+    assert [action.thread_policy for action in api.registered] == [
+        "main",
+        "main",
+        "main",
+        "main",
+        "main",
+        "main",
+        "main",
+    ]
+    assert [action.cardinality for action in api.registered] == [
+        "multi",
+        "multi",
+        "multi",
+        "single",
+        "single",
+        "single",
+        "single",
+    ]
 
 
 def test_hotkeys_launch_controller_callback_delegates():
@@ -141,6 +173,34 @@ def test_hotkeys_launch_controller_callback_handles_errors():
     manager._launch_controller_callback()
 
     assert state.launch_calls == 0
+
+
+def test_hotkeys_set_profile_callback_delegates() -> None:
+    state = _HostState()
+    manager = _make_manager(state)
+
+    manager._set_profile_callback(payload={"profile": "Mining"})
+
+    assert state.profile_calls == ["Mining"]
+
+
+def test_hotkeys_set_profile_callback_requires_profile_name() -> None:
+    state = _HostState()
+    manager = _make_manager(state)
+
+    manager._set_profile_callback(payload={})
+
+    assert state.profile_calls == []
+
+
+def test_hotkeys_profile_cycle_callbacks_delegate() -> None:
+    state = _HostState()
+    manager = _make_manager(state)
+
+    manager._cycle_profile_callback(direction=1)
+    manager._cycle_profile_callback(direction=-1)
+
+    assert state.profile_cycle_calls == [1, -1]
 
 
 def test_hotkeys_callbacks_apply_global_and_targeted_actions():
@@ -253,6 +313,9 @@ def test_registration_false_schedules_retry(monkeypatch):
         hotkeys.HOTKEYS_OVERLAY_OFF_ACTION_ID,
         hotkeys.HOTKEYS_OVERLAY_TOGGLE_ACTION_ID,
         hotkeys.HOTKEYS_LAUNCH_CONTROLLER_ACTION_ID,
+        hotkeys.HOTKEYS_SET_PROFILE_ACTION_ID,
+        hotkeys.HOTKEYS_PROFILE_NEXT_ACTION_ID,
+        hotkeys.HOTKEYS_PROFILE_PREV_ACTION_ID,
     }
 
 
@@ -322,5 +385,8 @@ def test_stop_cancels_retry_and_leaves_registrations_managed(monkeypatch):
             hotkeys.HOTKEYS_OVERLAY_OFF_ACTION_ID,
             hotkeys.HOTKEYS_OVERLAY_TOGGLE_ACTION_ID,
             hotkeys.HOTKEYS_LAUNCH_CONTROLLER_ACTION_ID,
+            hotkeys.HOTKEYS_SET_PROFILE_ACTION_ID,
+            hotkeys.HOTKEYS_PROFILE_NEXT_ACTION_ID,
+            hotkeys.HOTKEYS_PROFILE_PREV_ACTION_ID,
         ]
     )

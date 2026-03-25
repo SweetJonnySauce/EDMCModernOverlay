@@ -5,10 +5,13 @@ import json
 import logging
 import math
 import re
+import tkinter as tk
 import webbrowser
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
+
+import overlay_plugin.preferences_profile_helpers as profile_pref_helpers
 
 from overlay_plugin.standalone_support import (
     STANDALONE_MODE_LABEL,
@@ -66,10 +69,13 @@ SPAM_WARN_COOLDOWN_MIN = 0.0
 SPAM_WARN_COOLDOWN_MAX = 600.0
 PREFERENCES_TAB_OVERLAY = "Overlay"
 PREFERENCES_TAB_CONTROLLER = "Controller"
+PREFERENCES_TAB_PROFILES = "Profiles"
 PREFERENCES_TAB_EXPERIMENTAL = "Experimental"
 CONTROLLER_TAB_CONTROL_LAUNCH_BUTTON = "launch_controller"
 CONTROLLER_TAB_CONTROL_LAUNCH_COMMAND = "launch_command"
 CONTROLLER_TAB_CONTROL_TOGGLE_ARGUMENT = "toggle_argument"
+DEFAULT_PROFILE_NAME = "Default"
+PROFILE_STATUS_POLL_INTERVAL_MS = 750
 
 LOGGER = logging.getLogger(__name__)
 
@@ -86,10 +92,11 @@ class TroubleshootingPanelState:
     payload_spam_warn_cooldown_seconds: float = 30.0
 
 
-def _preferences_tab_order() -> tuple[str, str, str]:
+def _preferences_tab_order() -> tuple[str, str, str, str]:
     return (
         PREFERENCES_TAB_OVERLAY,
         PREFERENCES_TAB_CONTROLLER,
+        PREFERENCES_TAB_PROFILES,
         PREFERENCES_TAB_EXPERIMENTAL,
     )
 
@@ -365,11 +372,6 @@ def _attach_tooltip(widget, text: str, *, nb_module=None, delay_ms: int = 500) -
                 return
             except Exception:
                 LOGGER.debug("Failed to attach notebook tooltip helper", exc_info=True)
-    try:
-        import tkinter as tk
-    except Exception:
-        return
-
     tip_window = None
     after_id = None
 
@@ -956,6 +958,14 @@ class PreferencesPanel:
         set_toggle_argument_callback: Optional[Callable[[str], None]] = None,
         set_payload_opacity_callback: Optional[Callable[[int], None]] = None,
         reset_group_cache_callback: Optional[Callable[[], bool]] = None,
+        profile_status_callback: Optional[Callable[[], Mapping[str, Any]]] = None,
+        create_profile_callback: Optional[Callable[[str], Mapping[str, Any]]] = None,
+        clone_profile_callback: Optional[Callable[[str, str], Mapping[str, Any]]] = None,
+        rename_profile_callback: Optional[Callable[[str, str], Mapping[str, Any]]] = None,
+        delete_profile_callback: Optional[Callable[[str], Mapping[str, Any]]] = None,
+        reorder_profile_callback: Optional[Callable[[str, int], Mapping[str, Any]]] = None,
+        set_current_profile_callback: Optional[Callable[[str], Mapping[str, Any]]] = None,
+        set_profile_rules_callback: Optional[Callable[[str, list[Mapping[str, Any]]], Mapping[str, Any]]] = None,
         dev_mode: bool = False,
         plugin_version: Optional[str] = None,
         version_update_available: bool = False,
@@ -966,7 +976,6 @@ class PreferencesPanel:
         set_payload_spam_detection_callback: Optional[Callable[[bool, float, int, float], None]] = None,
         payload_logging_initial: Optional[bool] = None,
     ) -> None:
-        import tkinter as tk
         from tkinter import ttk
         import tkinter.font as tkfont
         import myNotebook as nb
@@ -1010,6 +1019,16 @@ class PreferencesPanel:
         self._var_cycle_copy = tk.BooleanVar(value=preferences.copy_payload_id_on_cycle)
         self._var_launch_command = tk.StringVar(value=preferences.controller_launch_command)
         self._var_toggle_argument = tk.StringVar(value=preferences.controller_toggle_argument)
+        self._var_profile_current = tk.StringVar(value=DEFAULT_PROFILE_NAME)
+        self._var_profile_new_name = tk.StringVar(value="")
+        self._var_profile_rename_name = tk.StringVar(value="")
+        self._var_rule_in_main_ship = tk.BooleanVar(value=False)
+        self._var_rule_in_srv = tk.BooleanVar(value=False)
+        self._var_rule_in_fighter = tk.BooleanVar(value=False)
+        self._var_rule_on_foot = tk.BooleanVar(value=False)
+        self._var_rule_in_wing = tk.BooleanVar(value=False)
+        self._var_rule_in_taxi = tk.BooleanVar(value=False)
+        self._var_rule_in_multicrew = tk.BooleanVar(value=False)
         state = troubleshooting_state or TroubleshootingPanelState(
             diagnostics_enabled=False,
             capture_enabled=False,
@@ -1090,6 +1109,14 @@ class PreferencesPanel:
         self._set_toggle_argument = set_toggle_argument_callback
         self._set_payload_opacity = set_payload_opacity_callback
         self._reset_group_cache = reset_group_cache_callback
+        self._profile_status_callback = profile_status_callback
+        self._create_profile_callback = create_profile_callback
+        self._clone_profile_callback = clone_profile_callback
+        self._rename_profile_callback = rename_profile_callback
+        self._delete_profile_callback = delete_profile_callback
+        self._reorder_profile_callback = reorder_profile_callback
+        self._set_current_profile_callback = set_current_profile_callback
+        self._set_profile_rules_callback = set_profile_rules_callback
         self._set_capture_override = set_capture_override_callback
         self._set_log_retention_override = set_log_retention_override_callback
         self._set_payload_exclusions = set_payload_exclusion_callback
@@ -1110,6 +1137,22 @@ class PreferencesPanel:
         self._payload_spam_cooldown_spin = None
         self._payload_spam_apply_btn = None
         self._payload_spam_checkbox = None
+        self._profile_listbox = None
+        self._profile_table = None
+        self._profile_table_columns: tuple[str, ...] = ()
+        self._profile_table_order: list[str] = []
+        self._profile_table_clipboard: Optional[str] = None
+        self._profile_table_editor = None
+        self._profile_ship_table = None
+        self._profile_current_combo = None
+        self._profile_state_snapshot: Mapping[str, Any] = {}
+        self._profile_ship_ids: list[int] = []
+        self._profile_ship_row_to_ship_id: Dict[str, int] = {}
+        self._profile_ship_checked_ids: set[int] = set()
+        self._profile_ship_sort_column = "name"
+        self._profile_ship_sort_desc = False
+        self._profile_rule_checkbuttons: list[Any] = []
+        self._profile_rules_apply_button = None
         self._managed_fonts = []
         self._status_gutter_apply_in_progress = False
         self._payload_spam_apply_in_progress = False
@@ -1120,10 +1163,14 @@ class PreferencesPanel:
         self._test_x_var = tk.StringVar()
         self._test_y_var = tk.StringVar()
         self._status_var = tk.StringVar(value="")
+        self._profile_menu_icons: Dict[str, Any] = {}
+        self._profile_poll_after_id: Optional[str] = None
+        self._profile_poll_interval_ms = PROFILE_STATUS_POLL_INTERVAL_MS
         opacity_percent = int(round(initial_opacity * 100))
         self._opacity_label = tk.StringVar(value=f"{opacity_percent}%")
         self._payload_opacity_label = tk.StringVar(value=f"{int(preferences.global_payload_opacity)}%")
         self._dev_mode = bool(dev_mode)
+        self._load_profile_menu_icons()
 
         frame = nb.Frame(parent)
 
@@ -1168,10 +1215,12 @@ class PreferencesPanel:
         tabs = nb.Notebook(frame)
         overlay_tab = nb.Frame(tabs)
         controller_tab = nb.Frame(tabs)
+        profiles_tab = nb.Frame(tabs)
         experimental_tab = nb.Frame(tabs)
-        overlay_tab_label, controller_tab_label, experimental_tab_label = _preferences_tab_order()
+        overlay_tab_label, controller_tab_label, profiles_tab_label, experimental_tab_label = _preferences_tab_order()
         tabs.add(overlay_tab, text=overlay_tab_label)
         tabs.add(controller_tab, text=controller_tab_label)
+        tabs.add(profiles_tab, text=profiles_tab_label)
         tabs.add(experimental_tab, text=experimental_tab_label)
         tabs.grid(row=1, column=0, sticky="we")
 
@@ -1185,6 +1234,10 @@ class PreferencesPanel:
         controller_section.grid(row=0, column=0, sticky="we")
         controller_section.columnconfigure(0, weight=1)
         controller_tab.columnconfigure(0, weight=1)
+        profiles_section = ttk.Frame(profiles_tab, style=self._frame_style)
+        profiles_section.grid(row=0, column=0, sticky="nsew")
+        profiles_section.columnconfigure(0, weight=1)
+        profiles_tab.columnconfigure(0, weight=1)
         controller_row = 0
 
         launch_controller_row = ttk.Frame(controller_section, style=self._frame_style)
@@ -1216,6 +1269,110 @@ class PreferencesPanel:
         toggle_entry.bind("<Return>", self._on_toggle_argument_event)
         toggle_row.grid(row=controller_row, column=0, sticky="w", pady=ROW_PAD)
         controller_row += 1
+
+        profile_row = 0
+
+        profile_table_frame = ttk.Frame(profiles_section, style=self._frame_style)
+        profile_table_frame.grid(row=profile_row, column=0, sticky="we", pady=ROW_PAD)
+        profile_table_frame.columnconfigure(0, weight=1)
+        nb.Label(profile_table_frame, text="Profiles (right click for options):").grid(row=0, column=0, sticky="w")
+        profile_table_columns = ("active", "name", "ims", "srv", "ftr", "foot", "wing", "taxi", "mc")
+        profile_table = ttk.Treeview(
+            profile_table_frame,
+            columns=profile_table_columns,
+            show="tree headings",
+            height=8,
+            selectmode="browse",
+        )
+        profile_table.heading("#0", text="#")
+        profile_table.column("#0", width=36, minwidth=30, stretch=False, anchor="center")
+        profile_table.heading("active", text="Active")
+        profile_table.column("active", width=56, minwidth=52, stretch=False, anchor="center")
+        profile_table.heading("name", text="Profile")
+        profile_table.column("name", width=180, minwidth=120, stretch=True, anchor="w")
+        for column, label in (
+            ("ims", "Ship"),
+            ("srv", "SRV"),
+            ("ftr", "SLF"),
+            ("foot", "Foot"),
+            ("wing", "Wing"),
+            ("taxi", "Taxi"),
+            ("mc", "MC"),
+        ):
+            profile_table.heading(column, text=label)
+            profile_table.column(column, width=44, minwidth=36, stretch=False, anchor="center")
+        profile_table.grid(row=1, column=0, sticky="we")
+        profile_table.bind("<<TreeviewSelect>>", self._on_profile_table_selected)
+        profile_table.bind("<Button-3>", self._on_profile_table_right_click)
+        profile_table.bind("<Double-1>", self._on_profile_table_double_click)
+        self._profile_table = profile_table
+        self._profile_table_clipboard: Optional[str] = None
+        self._profile_table_editor = None
+        self._profile_table_columns = profile_table_columns
+        self._profile_table_order: list[str] = []
+        profile_row += 1
+
+        rules_frame = ttk.Frame(profiles_section, style=self._frame_style)
+        rules_frame.grid(row=profile_row, column=0, sticky="we", pady=ROW_PAD)
+        rules_frame.columnconfigure(0, weight=1)
+        nb.Label(rules_frame, text="Auto rules for selected profile:").grid(row=0, column=0, sticky="w")
+        rules_toggle_row = ttk.Frame(rules_frame, style=self._frame_style)
+        rules_toggle_row.grid(row=1, column=0, sticky="w", pady=(4, 0))
+        self._profile_rule_checkbuttons = []
+        rule_controls = (
+            ("In Main Ship", self._var_rule_in_main_ship),
+            ("In SRV", self._var_rule_in_srv),
+            ("In SLF", self._var_rule_in_fighter),
+            ("On Foot", self._var_rule_on_foot),
+            ("In Wing", self._var_rule_in_wing),
+            ("In Taxi", self._var_rule_in_taxi),
+            ("In Multicrew", self._var_rule_in_multicrew),
+        )
+        for index, (label, variable) in enumerate(rule_controls):
+            check = nb.Checkbutton(
+                rules_toggle_row,
+                text=label,
+                variable=variable,
+                onvalue=True,
+                offvalue=False,
+                command=self._on_profile_rule_toggle,
+            )
+            if index == 0:
+                check.pack(side="left")
+            else:
+                check.pack(side="left", padx=(8, 0))
+            self._profile_rule_checkbuttons.append(check)
+
+        ships_row = ttk.Frame(rules_frame, style=self._frame_style)
+        ships_row.grid(row=2, column=0, sticky="we", pady=(4, 0))
+        ships_row.columnconfigure(0, weight=1)
+        nb.Label(ships_row, text="In scope ships (optional):").grid(row=0, column=0, sticky="w")
+        ship_columns = ("name", "id", "type")
+        profile_ship_table = ttk.Treeview(
+            ships_row,
+            columns=ship_columns,
+            show="tree headings",
+            selectmode="extended",
+            height=8,
+        )
+        profile_ship_table.heading("#0", text="Apply", command=lambda: self._on_profile_ship_sort("apply"))
+        profile_ship_table.column("#0", width=56, minwidth=48, stretch=False, anchor="center")
+        profile_ship_table.heading("name", text="Name", command=lambda: self._on_profile_ship_sort("name"))
+        profile_ship_table.column("name", width=220, minwidth=120, stretch=True, anchor="w")
+        profile_ship_table.heading("id", text="ID", command=lambda: self._on_profile_ship_sort("id"))
+        profile_ship_table.column("id", width=64, minwidth=54, stretch=False, anchor="center")
+        profile_ship_table.heading("type", text="Type", command=lambda: self._on_profile_ship_sort("type"))
+        profile_ship_table.column("type", width=160, minwidth=100, stretch=True, anchor="w")
+        profile_ship_table.grid(row=1, column=0, sticky="nsew")
+        profile_ship_scroll = ttk.Scrollbar(ships_row, orient="vertical", command=profile_ship_table.yview)
+        profile_ship_scroll.grid(row=1, column=1, sticky="ns")
+        profile_ship_table.configure(yscrollcommand=profile_ship_scroll.set)
+        profile_ship_table.bind("<Button-1>", self._on_profile_ship_table_click)
+        profile_ship_table.bind("<Double-1>", self._on_profile_ship_table_double_click)
+        self._profile_ship_table = profile_ship_table
+        profile_row += 1
+
+        self._refresh_profile_state()
 
         user_row = 0
 
@@ -1848,6 +2005,11 @@ class PreferencesPanel:
         frame.columnconfigure(0, weight=1)
 
         self._frame = frame
+        try:
+            self._frame.bind("<Destroy>", self._on_preferences_frame_destroy, add="+")
+        except Exception:
+            pass
+        self._start_profile_state_monitor()
 
     @property
     def frame(self):  # pragma: no cover - Tk integration
@@ -2059,6 +2221,211 @@ class PreferencesPanel:
         self._status_var.set(f"Overlay toggle argument set to {normalised}")
         LOGGER.info("Overlay toggle argument updated (UI): %s -> %s", old_value, normalised)
         self._toggle_argument_apply_in_progress = False
+
+    def _load_profile_menu_icons(self) -> None:
+        profile_pref_helpers.load_profile_menu_icons(self)
+
+    def _refresh_profile_state(self) -> None:
+        self._maybe_refresh_profile_state_from_callback(silent=False)
+
+    def _sync_profile_table_from_status(self, status: Mapping[str, Any]) -> None:
+        raw_profiles = status.get("profiles") if isinstance(status, Mapping) else None
+        profiles = [str(item).strip() for item in raw_profiles] if isinstance(raw_profiles, list) else []
+        profiles = [item for item in profiles if item]
+        if not profiles:
+            profiles = [DEFAULT_PROFILE_NAME]
+        current_profile = str(status.get("current_profile") or profiles[0]).strip() or profiles[0]
+
+        combo = getattr(self, "_profile_current_combo", None)
+        if combo is not None:
+            try:
+                combo.configure(values=profiles)
+            except Exception:
+                pass
+        var_current = getattr(self, "_var_profile_current", None)
+        if var_current is not None:
+            try:
+                var_current.set(current_profile)
+            except Exception:
+                pass
+        sync_profile_table = getattr(self, "_sync_profile_table", None)
+        if callable(sync_profile_table):
+            sync_profile_table(status=status, profiles=profiles, current_profile=current_profile)
+
+    def _maybe_refresh_profile_state_from_callback(self, *, silent: bool) -> bool:
+        callback = self._profile_status_callback
+        if not callable(callback):
+            self._profile_state_snapshot = {}
+            self._sync_profile_widgets()
+            return False
+        try:
+            status = callback()
+        except Exception as exc:
+            if not silent:
+                self._status_var.set(f"Failed to load profile state: {exc}")
+            return False
+        if not isinstance(status, Mapping):
+            if not silent:
+                self._status_var.set("Invalid profile state response.")
+            return False
+        previous = self._profile_state_snapshot if isinstance(self._profile_state_snapshot, Mapping) else {}
+        if status == previous:
+            return False
+        self._profile_state_snapshot = status
+        if silent:
+            # Silent background polling should update profile list/active marker
+            # without clobbering in-progress rule edits in the right-side controls.
+            self._sync_profile_table_from_status(status)
+        else:
+            self._sync_profile_widgets()
+        return True
+
+    def _profile_frame_exists(self) -> bool:
+        frame = getattr(self, "_frame", None)
+        if frame is None:
+            return False
+        try:
+            return bool(frame.winfo_exists())
+        except Exception:
+            return False
+
+    def _start_profile_state_monitor(self) -> None:
+        if not callable(self._profile_status_callback):
+            return
+        if self._profile_poll_after_id:
+            return
+        self._schedule_profile_state_monitor(delay_ms=self._profile_poll_interval_ms)
+
+    def _schedule_profile_state_monitor(self, *, delay_ms: int) -> None:
+        if not self._profile_frame_exists():
+            return
+        frame = self._frame
+        try:
+            self._profile_poll_after_id = frame.after(max(100, int(delay_ms)), self._poll_profile_state_monitor)
+        except Exception:
+            self._profile_poll_after_id = None
+
+    def _stop_profile_state_monitor(self) -> None:
+        after_id = self._profile_poll_after_id
+        self._profile_poll_after_id = None
+        if not after_id:
+            return
+        frame = getattr(self, "_frame", None)
+        if frame is None:
+            return
+        try:
+            frame.after_cancel(after_id)
+        except Exception:
+            pass
+
+    def _on_preferences_frame_destroy(self, event=None) -> None:  # pragma: no cover - Tk event
+        frame = getattr(self, "_frame", None)
+        if frame is None:
+            return
+        widget = getattr(event, "widget", None)
+        if widget is not None and widget is not frame:
+            return
+        self._stop_profile_state_monitor()
+
+    def _poll_profile_state_monitor(self) -> None:
+        self._profile_poll_after_id = None
+        if not self._profile_frame_exists():
+            return
+        if self._profile_table_editor is None:
+            self._maybe_refresh_profile_state_from_callback(silent=True)
+        self._schedule_profile_state_monitor(delay_ms=self._profile_poll_interval_ms)
+
+    def _sync_profile_widgets(self) -> None:
+        profile_pref_helpers.sync_profile_widgets(self)
+
+    @staticmethod
+    def _status_rules_map(status: Mapping[str, Any]) -> Dict[str, list[Mapping[str, Any]]]:
+        return profile_pref_helpers.status_rules_map(status)
+
+    @staticmethod
+    def _rule_context_state(rules: list[Mapping[str, Any]]) -> Dict[str, bool]:
+        return profile_pref_helpers.rule_context_state(rules)
+
+    def _sync_profile_table(self, *, status: Mapping[str, Any], profiles: list[str], current_profile: str) -> None:
+        profile_pref_helpers.sync_profile_table(
+            self,
+            status=status,
+            profiles=profiles,
+            current_profile=current_profile,
+        )
+
+    def _selected_profile_name(self) -> str:
+        return profile_pref_helpers.selected_profile_name(self)
+
+    def _on_profile_table_selected(self, _event=None) -> None:  # pragma: no cover - Tk event
+        profile_pref_helpers.on_profile_table_selected(self, _event)
+
+    def _on_profile_table_right_click(self, event) -> None:  # pragma: no cover - Tk event
+        profile_pref_helpers.on_profile_table_right_click(self, event)
+
+    @staticmethod
+    def _next_profile_copy_name(source_name: str, existing: list[str]) -> str:
+        return profile_pref_helpers.next_profile_copy_name(source_name, existing)
+
+    def _on_profile_copy(self) -> None:
+        profile_pref_helpers.on_profile_copy(self)
+
+    def _on_profile_paste(self) -> None:
+        profile_pref_helpers.on_profile_paste(self)
+
+    def _on_profile_insert_row(self, _where: str) -> None:
+        profile_pref_helpers.on_profile_insert_row(self, _where)
+
+    def _on_profile_move_row(self, direction: str) -> None:
+        profile_pref_helpers.on_profile_move_row(self, direction)
+
+    def _on_profile_table_double_click(self, event) -> None:  # pragma: no cover - Tk event
+        profile_pref_helpers.on_profile_table_double_click(self, event)
+
+    def _toggle_profile_table_rule(self, context: str) -> None:
+        profile_pref_helpers.toggle_profile_table_rule(self, context)
+
+    def _sync_profile_ship_list(self, status: Mapping[str, Any]) -> None:
+        profile_pref_helpers.sync_profile_ship_list(self, status)
+
+    def _on_profile_ship_sort(self, column: str) -> None:
+        profile_pref_helpers.on_profile_ship_sort(self, column)
+
+    def _on_profile_ship_table_click(self, event):  # pragma: no cover - Tk event
+        return profile_pref_helpers.on_profile_ship_table_click(self, event)
+
+    def _on_profile_ship_table_double_click(self, event):  # pragma: no cover - Tk event
+        return profile_pref_helpers.on_profile_ship_table_double_click(self, event)
+
+    def _on_profile_in_main_ship_toggle(self) -> None:
+        profile_pref_helpers.on_profile_in_main_ship_toggle(self)
+
+    def _on_profile_rule_toggle(self) -> None:
+        profile_pref_helpers.on_profile_rule_toggle(self)
+
+    def _on_profile_list_selected(self, _event=None) -> None:  # pragma: no cover - Tk event
+        profile_pref_helpers.on_profile_list_selected(self, _event)
+
+    def _load_selected_profile_rules(self) -> None:
+        profile_pref_helpers.load_selected_profile_rules(self)
+
+    def _on_profile_set_current(self) -> None:
+        profile_pref_helpers.on_profile_set_current(self)
+
+    def _on_profile_create(self, _event=None) -> None:  # pragma: no cover - Tk event
+        profile_pref_helpers.on_profile_create(self, _event)
+
+    def _on_profile_rename(self, _event=None) -> None:  # pragma: no cover - Tk event
+        profile_pref_helpers.on_profile_rename(self, _event)
+
+    def _on_profile_delete(self) -> None:
+        profile_pref_helpers.on_profile_delete(self)
+
+    def _on_profile_rules_apply(self) -> None:
+        profile_pref_helpers.on_profile_rules_apply(self)
+
+    def _selected_ship_ids_for_rules(self) -> list[int]:
+        return profile_pref_helpers.selected_ship_ids_for_rules(self)
 
     def _open_release_link(self, _event=None) -> None:
         try:

@@ -39,6 +39,9 @@ class _OverlayCommandContext:
     group_status_lines: Optional[Callable[[], Sequence[str]]] = None
     send_group_status_overlay: Optional[Callable[[Sequence[str]], None]] = None
     test_overlay: Optional[Callable[[], None]] = None
+    set_profile: Optional[Callable[[str], Mapping[str, Any]]] = None
+    cycle_profile: Optional[Callable[[int], Mapping[str, Any]]] = None
+    profile_status: Optional[Callable[[], Mapping[str, Any]]] = None
 
 
 def _normalise_prefix(value: str) -> str:
@@ -122,6 +125,8 @@ class JournalCommandHelper:
         self._help_text = (
             f"Overlay commands: {help_prefix} (launch controller), {help_prefix} {self._toggle_argument} "
             f"(toggle overlay), {help_prefix} on|off [\"plugin group\"], {help_prefix} status, "
+            f"{help_prefix} profile <name>|next|prev, {help_prefix} profile status, "
+            f"{help_prefix} next|prev, {help_prefix} profiles, "
             f"{help_prefix} test (show test logo), {help_prefix} plugins (log installed plugins), "
             f"{help_prefix} help"
         )
@@ -175,6 +180,14 @@ class JournalCommandHelper:
             return self._test_overlay()
         if action in {"plugins", "plugin"}:
             return self._report_plugins()
+        if action in {"next"}:
+            return self._cycle_profile(1)
+        if action in {"prev", "previous"}:
+            return self._cycle_profile(-1)
+        if action in {"profile"}:
+            return self._handle_profile_command(args[1:])
+        if action in {"profiles"}:
+            return self._emit_profiles()
 
         opacity = None
         invalid_opacity = False
@@ -207,6 +220,87 @@ class JournalCommandHelper:
             return self._toggle_group_enabled(None)
 
         _LOGGER.debug("Ignoring unknown overlay command: %s", action)
+        return True
+
+    def _handle_profile_command(self, args: list[str]) -> bool:
+        if not args:
+            self._ctx.send_message("Usage: profile <name> | profile next | profile prev | profile status")
+            return True
+        action = args[0].lower()
+        if action == "next":
+            return self._cycle_profile(1)
+        if action in {"prev", "previous"}:
+            return self._cycle_profile(-1)
+        if args[0].lower() in {"status", "list", "ls"}:
+            return self._emit_profiles()
+        profile_name = " ".join(str(token) for token in args).strip()
+        if not profile_name:
+            self._ctx.send_message("Profile name is required.")
+            return True
+        callback = self._ctx.set_profile
+        if callback is None:
+            self._ctx.send_message("Overlay profile command unavailable.")
+            return True
+        try:
+            result = callback(profile_name)
+        except RuntimeError as exc:
+            self._ctx.send_message(f"Profile switch unavailable: {exc}")
+            return True
+        except Exception as exc:  # pragma: no cover - defensive guard
+            _LOGGER.warning("Overlay profile callback failed: %s", exc, exc_info=exc)
+            self._ctx.send_message("Profile switch failed; see EDMC log.")
+            return True
+        current_profile = str(result.get("current_profile") or profile_name).strip()
+        self._ctx.send_message(f"Overlay profile set to {current_profile}.")
+        return True
+
+    def _cycle_profile(self, direction: int) -> bool:
+        callback = self._ctx.cycle_profile
+        if callback is None:
+            self._ctx.send_message("Overlay profile cycle command unavailable.")
+            return True
+        try:
+            result = callback(int(direction))
+        except RuntimeError as exc:
+            self._ctx.send_message(f"Profile cycle unavailable: {exc}")
+            return True
+        except Exception as exc:  # pragma: no cover - defensive guard
+            _LOGGER.warning("Overlay profile cycle callback failed: %s", exc, exc_info=exc)
+            self._ctx.send_message("Profile cycle failed; see EDMC log.")
+            return True
+        profile_name = str(result.get("current_profile") or "").strip()
+        if profile_name:
+            self._ctx.send_message(f"Overlay profile set to {profile_name}.")
+        return True
+
+    def _emit_profiles(self) -> bool:
+        callback = self._ctx.profile_status
+        if callback is None:
+            self._ctx.send_message("Overlay profile status unavailable.")
+            return True
+        try:
+            status = callback()
+        except RuntimeError as exc:
+            self._ctx.send_message(f"Overlay profile status unavailable: {exc}")
+            return True
+        except Exception as exc:  # pragma: no cover - defensive guard
+            _LOGGER.warning("Overlay profile status callback failed: %s", exc, exc_info=exc)
+            self._ctx.send_message("Overlay profile status failed; see EDMC log.")
+            return True
+        profiles_raw = status.get("profiles")
+        profiles = [str(item).strip() for item in profiles_raw] if isinstance(profiles_raw, list) else []
+        profiles = [item for item in profiles if item]
+        current = str(status.get("current_profile") or "").strip()
+        if not profiles:
+            self._ctx.send_message("Overlay profiles: none")
+            return True
+        rendered: list[str] = []
+        for profile_name in profiles:
+            if profile_name.casefold() == current.casefold():
+                rendered.append(f"[{profile_name}]")
+            else:
+                rendered.append(profile_name)
+        self._ctx.send_message("Overlay profiles: " + ", ".join(rendered))
         return True
 
     def _report_plugins(self) -> bool:
@@ -398,6 +492,24 @@ def build_command_helper(
         except Exception as exc:  # pragma: no cover - defensive guard
             log.warning("Failed to send overlay response '%s': %s", text, exc)
 
+    set_profile_callback = getattr(plugin_runtime, "set_current_profile", None)
+    _set_profile: Optional[Callable[[str], Mapping[str, Any]]] = None
+    if callable(set_profile_callback):
+        def _set_profile(name: str) -> Mapping[str, Any]:
+            try:
+                return set_profile_callback(name, source="chat")
+            except TypeError:
+                return set_profile_callback(name)
+
+    cycle_profile_callback = getattr(plugin_runtime, "cycle_profile", None)
+    _cycle_profile: Optional[Callable[[int], Mapping[str, Any]]] = None
+    if callable(cycle_profile_callback):
+        def _cycle_profile(direction: int) -> Mapping[str, Any]:
+            try:
+                return cycle_profile_callback(direction, source="chat")
+            except TypeError:
+                return cycle_profile_callback(direction)
+
     report_callback = report_plugins or default_report_plugins
     context = _OverlayCommandContext(
         send_message=_send_overlay_message,
@@ -409,6 +521,9 @@ def build_command_helper(
         group_status_lines=getattr(plugin_runtime, "get_plugin_group_status_lines", None),
         send_group_status_overlay=getattr(plugin_runtime, "send_group_status_overlay", None),
         test_overlay=getattr(plugin_runtime, "send_test_overlay", None),
+        set_profile=_set_profile,
+        cycle_profile=_cycle_profile,
+        profile_status=getattr(plugin_runtime, "get_profile_status", None),
     )
     legacy = legacy_prefixes if legacy_prefixes is not None else []
     if command_prefix in legacy:

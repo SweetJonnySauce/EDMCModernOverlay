@@ -308,6 +308,43 @@ def test_persist_offsets_writes_diff_and_invalidates_cache(tmp_path: Path) -> No
     assert isinstance(entry["last_updated"], float)
 
 
+def test_persist_offsets_preserves_profile_metadata(tmp_path: Path) -> None:
+    shipped = tmp_path / "overlay_groupings.json"
+    user = tmp_path / "overlay_groupings.user.json"
+    cache = tmp_path / "overlay_group_cache.json"
+
+    shipped.write_text(
+        json.dumps({"PluginA": {"idPrefixGroups": {"G1": {"idPrefixes": ["Foo-"], "offsetX": 0, "offsetY": 0}}}}),
+        encoding="utf-8",
+    )
+    user.write_text(
+        json.dumps(
+            {
+                "_overlay_profile_state": {"current_profile": "Default"},
+                "_overlay_profile_overrides": {"Default": {}},
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    cache.write_text(json.dumps({"groups": {}}), encoding="utf-8")
+    service = GroupStateService(shipped_path=shipped, user_groupings_path=user, cache_path=cache)
+    service._groupings_data = {
+        "PluginA": {
+            "idPrefixGroups": {
+                "G1": {"idPrefixes": ["Foo-"], "offsetX": 0.0, "offsetY": 0.0, "idPrefixGroupAnchor": "nw"}
+            }
+        }
+    }
+
+    service.persist_offsets("PluginA", "G1", 3.0, 4.0, edit_nonce="n-meta")
+
+    saved = json.loads(user.read_text(encoding="utf-8"))
+    assert saved["_overlay_profile_state"]["current_profile"] == "Default"
+    assert "_overlay_profile_overrides" in saved
+    assert saved["PluginA"]["idPrefixGroups"]["G1"]["offsetX"] == 3.0
+
+
 def test_persist_anchor_can_skip_write_and_invalidate(tmp_path: Path) -> None:
     service = GroupStateService(
         shipped_path=tmp_path / "overlay_groupings.json",
@@ -320,7 +357,9 @@ def test_persist_anchor_can_skip_write_and_invalidate(tmp_path: Path) -> None:
 
     assert service._groupings_data["PluginA"]["idPrefixGroups"]["G1"]["idPrefixGroupAnchor"] == "se"
     assert not service._cache_path.exists()
-    assert not service._user_path.exists()
+    assert service._user_path.exists()
+    payload = json.loads(service._user_path.read_text(encoding="utf-8"))
+    assert payload["PluginA"]["idPrefixGroups"]["G1"]["idPrefixGroupAnchor"] == "se"
 
 
 def test_reload_groupings_skips_recent_edits_and_detects_changes(tmp_path: Path) -> None:
@@ -416,8 +455,54 @@ def test_reset_group_overrides_keeps_empty_group(tmp_path: Path) -> None:
     service.reset_group_overrides("PluginA", "Group1", edit_nonce="new")
 
     updated = json.loads(user.read_text(encoding="utf-8"))
-    assert updated["PluginA"]["idPrefixGroups"]["Group1"] == {}
+    assert updated["PluginA"]["idPrefixGroups"]["Group1"] == {"offsetX": 5}
     assert updated["PluginA"]["idPrefixGroups"]["Group2"] == {"offsetY": 2}
     assert updated["PluginA"]["disabled"] is True
     assert updated["_edit_nonce"] == "new"
     assert json.loads(cache.read_text(encoding="utf-8")) == cache_payload
+
+
+def test_reset_group_overrides_for_custom_profile_uses_default_values(tmp_path: Path) -> None:
+    shipped = tmp_path / "overlay_groupings.json"
+    user = tmp_path / "overlay_groupings.user.json"
+    cache = tmp_path / "overlay_group_cache.json"
+    shipped.write_text(
+        json.dumps(
+            {
+                "PluginA": {
+                    "idPrefixGroups": {
+                        "Group1": {"offsetX": 5, "offsetY": 1},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    user.write_text(
+        json.dumps(
+            {
+                "PluginA": {"idPrefixGroups": {"Group1": {"offsetX": 99, "offsetY": 1}}},
+                "_overlay_profile_state": {
+                    "current_profile": "Mining",
+                    "manual_profile": "Mining",
+                    "profiles": ["Default", "Mining"],
+                    "rules": {"Default": [], "Mining": []},
+                },
+                "_overlay_profile_overrides": {
+                    "Default": {"PluginA": {"idPrefixGroups": {"Group1": {"offsetX": 5, "offsetY": 1}}}},
+                    "Mining": {"PluginA": {"idPrefixGroups": {"Group1": {"offsetX": 99, "offsetY": 1}}}},
+                },
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    cache.write_text(json.dumps({"groups": {}}), encoding="utf-8")
+
+    service = GroupStateService(shipped_path=shipped, user_groupings_path=user, cache_path=cache)
+    service.reset_group_overrides("PluginA", "Group1", edit_nonce="n-custom")
+
+    updated = json.loads(user.read_text(encoding="utf-8"))
+    mining = updated["_overlay_profile_overrides"]["Mining"]["PluginA"]["idPrefixGroups"]["Group1"]
+    assert mining["offsetX"] == 5
+    assert mining["offsetY"] == 1

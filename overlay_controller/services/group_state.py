@@ -12,6 +12,7 @@ from typing import Dict, Optional, Tuple
 from overlay_plugin.groupings_diff import diff_groupings, is_empty_diff
 from overlay_plugin.overlay_api import PluginGroupingError, _normalise_background_color, _normalise_border_width
 from overlay_plugin.groupings_loader import GroupingsLoader
+from overlay_plugin.profile_state import OverlayProfileStore
 
 ABS_BASE_WIDTH = 1280.0
 ABS_BASE_HEIGHT = 960.0
@@ -56,6 +57,7 @@ class GroupStateService:
         )
         self._cache_path = cache_path or (self._root / "overlay_group_cache.json")
         self._loader = loader or GroupingsLoader(self._shipped_path, self._user_path)
+        self._profile_store = OverlayProfileStore(user_path=self._user_path)
         self._groupings_data: Dict[str, object] = {}
         self._groupings_cache: Dict[str, object] = self._load_groupings_cache()
         self._idprefix_entries: list[tuple[str, str]] = []
@@ -292,9 +294,14 @@ class GroupStateService:
         invalidate_cache: bool = True,
     ) -> None:
         self._edit_nonce = edit_nonce
-        self._set_config_offsets(plugin_name, label, offset_x, offset_y)
-        if write:
-            self._write_groupings_config(edit_nonce=edit_nonce)
+        self._apply_profile_patch(
+            plugin_name=plugin_name,
+            label=label,
+            updates={"offsetX": float(offset_x), "offsetY": float(offset_y)},
+            clear_fields=(),
+            edit_nonce=edit_nonce,
+            write=write,
+        )
         if invalidate_cache:
             self._invalidate_group_cache_entry(plugin_name, label, edit_nonce=edit_nonce)
 
@@ -309,9 +316,14 @@ class GroupStateService:
         invalidate_cache: bool = True,
     ) -> None:
         self._edit_nonce = edit_nonce
-        self._set_group_value(plugin_name, label, "idPrefixGroupAnchor", anchor)
-        if write:
-            self._write_groupings_config(edit_nonce=edit_nonce)
+        self._apply_profile_patch(
+            plugin_name=plugin_name,
+            label=label,
+            updates={"idPrefixGroupAnchor": anchor},
+            clear_fields=(),
+            edit_nonce=edit_nonce,
+            write=write,
+        )
         if invalidate_cache:
             self._invalidate_group_cache_entry(plugin_name, label, edit_nonce=edit_nonce)
 
@@ -326,9 +338,14 @@ class GroupStateService:
         invalidate_cache: bool = True,
     ) -> None:
         self._edit_nonce = edit_nonce
-        self._set_group_value(plugin_name, label, "payloadJustification", justification)
-        if write:
-            self._write_groupings_config(edit_nonce=edit_nonce)
+        self._apply_profile_patch(
+            plugin_name=plugin_name,
+            label=label,
+            updates={"payloadJustification": justification},
+            clear_fields=(),
+            edit_nonce=edit_nonce,
+            write=write,
+        )
         if invalidate_cache:
             self._invalidate_group_cache_entry(plugin_name, label, edit_nonce=edit_nonce)
 
@@ -345,9 +362,28 @@ class GroupStateService:
         invalidate_cache: bool = True,
     ) -> None:
         self._edit_nonce = edit_nonce
-        self._set_group_background(plugin_name, label, color, border_color, border_width)
-        if write:
-            self._write_groupings_config(edit_nonce=edit_nonce)
+        updates: Dict[str, object] = {}
+        clear_fields: list[str] = []
+        if color is None:
+            clear_fields.append("backgroundColor")
+        else:
+            updates["backgroundColor"] = color
+        if border_color is None:
+            clear_fields.append("backgroundBorderColor")
+        else:
+            updates["backgroundBorderColor"] = border_color
+        if border_width is None:
+            clear_fields.append("backgroundBorderWidth")
+        else:
+            updates["backgroundBorderWidth"] = int(border_width)
+        self._apply_profile_patch(
+            plugin_name=plugin_name,
+            label=label,
+            updates=updates,
+            clear_fields=clear_fields,
+            edit_nonce=edit_nonce,
+            write=write,
+        )
         if invalidate_cache:
             self._invalidate_group_cache_entry(plugin_name, label, edit_nonce=edit_nonce)
 
@@ -358,24 +394,18 @@ class GroupStateService:
         *,
         edit_nonce: str = "",
     ) -> None:
-        """Clear all user override fields for a group but keep an empty group entry."""
-
+        """Reset selected group according to active profile reset contract."""
         self._edit_nonce = edit_nonce
-        payload = self._load_user_groupings()
-        if not isinstance(payload, dict):
-            payload = {}
-        plugin_entry = payload.get(plugin_name)
-        if not isinstance(plugin_entry, dict):
-            plugin_entry = {}
-            payload[plugin_name] = plugin_entry
-        groups = plugin_entry.get("idPrefixGroups")
-        if not isinstance(groups, dict):
-            groups = {}
-            plugin_entry["idPrefixGroups"] = groups
-        groups[label] = {}
+        shipped_group = self._read_shipped_group(plugin_name, label)
+        self._profile_store.reset_group_for_active_profile(
+            plugin_name=plugin_name,
+            group_label=label,
+            shipped_group=shipped_group,
+        )
         if edit_nonce:
+            payload = self._load_user_groupings()
             payload["_edit_nonce"] = edit_nonce
-        self._write_user_groupings(payload)
+            self._write_user_groupings(payload)
         try:
             self._loader.load()
             self._groupings_data = self._loader.merged()
@@ -395,6 +425,65 @@ class GroupStateService:
         groups = payload.get("groups") if isinstance(payload, dict) else None
         payload["groups"] = groups if isinstance(groups, dict) else {}
         return payload
+
+    def _apply_profile_patch(
+        self,
+        *,
+        plugin_name: str,
+        label: str,
+        updates: Dict[str, object],
+        clear_fields: tuple[str, ...] | list[str],
+        edit_nonce: str,
+        write: bool,
+    ) -> None:
+        try:
+            self._profile_store.apply_group_fields(
+                plugin_name=plugin_name,
+                group_label=label,
+                updates=updates,
+                clear_fields=clear_fields,
+            )
+        except Exception:
+            # Fallback for malformed profile metadata.
+            for field in clear_fields:
+                self._set_group_value(plugin_name, label, field, None)
+            for field, value in updates.items():
+                self._set_group_value(plugin_name, label, field, value)
+            if write:
+                self._write_groupings_config(edit_nonce=edit_nonce)
+            return
+        if edit_nonce:
+            payload = self._load_user_groupings()
+            payload["_edit_nonce"] = edit_nonce
+            self._write_user_groupings(payload)
+        try:
+            self._loader.load()
+            self._groupings_data = self._loader.merged()
+        except Exception:
+            try:
+                self._groupings_data = self._loader.merged()
+            except Exception:
+                pass
+        if write:
+            self._write_groupings_config(edit_nonce=edit_nonce)
+
+    def _read_shipped_group(self, plugin_name: str, label: str) -> Dict[str, object]:
+        try:
+            payload = json.loads(self._shipped_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        plugin_entry = payload.get(plugin_name)
+        if not isinstance(plugin_entry, dict):
+            return {}
+        groups = plugin_entry.get("idPrefixGroups")
+        if not isinstance(groups, dict):
+            return {}
+        group = groups.get(label)
+        if not isinstance(group, dict):
+            return {}
+        return dict(group)
 
     def _load_user_groupings(self) -> Dict[str, object]:
         try:
@@ -522,6 +611,12 @@ class GroupStateService:
     def _write_groupings_config(self, *, edit_nonce: str = "") -> None:
         user_path = self._user_path
         shipped_path = self._shipped_path
+        existing_payload = self._load_user_groupings()
+        preserved_metadata: Dict[str, object] = {}
+        if isinstance(existing_payload, dict):
+            for key, value in existing_payload.items():
+                if isinstance(key, str) and key.startswith("_"):
+                    preserved_metadata[key] = value
 
         try:
             shipped_raw = json.loads(shipped_path.read_text(encoding="utf-8"))
@@ -537,15 +632,25 @@ class GroupStateService:
             return
 
         if is_empty_diff(diff):
-            if user_path.exists():
+            payload: Dict[str, object] = dict(preserved_metadata)
+            if edit_nonce:
+                payload["_edit_nonce"] = edit_nonce
+            if user_path.exists() or payload:
                 try:
-                    user_path.write_text("{}\n", encoding="utf-8")
+                    text = json.dumps(payload, indent=2) + "\n"
+                    tmp_path = user_path.with_suffix(user_path.suffix + ".tmp")
+                    tmp_path.write_text(text, encoding="utf-8")
+                    tmp_path.replace(user_path)
                 except Exception:
                     pass
             return
 
         try:
             payload = dict(diff) if isinstance(diff, dict) else {}
+            for key, value in preserved_metadata.items():
+                if key == "_edit_nonce":
+                    continue
+                payload[key] = value
             payload["_edit_nonce"] = edit_nonce
             text = json.dumps(payload, indent=2) + "\n"
             tmp_path = user_path.with_suffix(user_path.suffix + ".tmp")

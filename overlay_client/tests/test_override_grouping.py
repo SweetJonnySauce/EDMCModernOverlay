@@ -27,6 +27,69 @@ def _make_manager(config_path: Path) -> PluginOverrideManager:
     return PluginOverrideManager(config_path, logger)
 
 
+def test_force_reload_uses_loader_when_available(override_file: Path) -> None:
+    override_file.write_text(
+        json.dumps(
+            {
+                "Example": {
+                    "idPrefixGroups": {
+                        "alerts": {"idPrefixes": ["example.alert."], "offsetX": 10, "offsetY": 1}
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class _LoaderStub:
+        def __init__(self) -> None:
+            self._payload = {
+                "Example": {
+                    "idPrefixGroups": {
+                        "alerts": {"idPrefixes": ["example.alert."], "offsetX": 20, "offsetY": 2}
+                    }
+                }
+            }
+            self._reload_ts = 1.0
+
+        def load(self):
+            self._reload_ts += 1.0
+            return self._payload
+
+        def reload_if_changed(self):
+            return False
+
+        def merged(self):
+            return self._payload
+
+        def diagnostics(self):
+            return {"last_reload_ts": self._reload_ts}
+
+    loader = _LoaderStub()
+    logger = logging.getLogger("test-plugin-overrides-loader-force-reload")
+    logger.handlers = []
+    logger.addHandler(logging.NullHandler())
+    logger.setLevel(logging.INFO)
+
+    manager = PluginOverrideManager(override_file, logger, groupings_loader=loader)
+
+    # Initial load uses loader-backed merged values.
+    assert manager.group_offsets("Example", "alerts") == (20.0, 2.0)
+
+    # Update loader payload without marking file-change and force reload.
+    loader._payload = {
+        "Example": {
+            "idPrefixGroups": {
+                "alerts": {"idPrefixes": ["example.alert."], "offsetX": 30, "offsetY": 3}
+            }
+        }
+    }
+    manager.force_reload()
+
+    # Force reload must apply loader data, not fall back to shipped defaults.
+    assert manager.group_offsets("Example", "alerts") == (30.0, 3.0)
+
+
 def test_grouping_by_id_prefix(override_file: Path) -> None:
     override_file.write_text(
         json.dumps(

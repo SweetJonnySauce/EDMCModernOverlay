@@ -18,6 +18,9 @@ COMMAND_PLUGIN_STATUS_ID_PREFIX = "edmcmodernoverlay-plugin-status-"
 COMMAND_GROUP_STATUS_GROUP_NAME = "EDMCModernOverlay Group Status"
 COMMAND_GROUP_STATUS_ID_PREFIX = "edmcmodernoverlay-group-status-"
 
+COMMAND_PROFILE_STATUS_GROUP_NAME = "EDMCModernOverlay Profile Status"
+COMMAND_PROFILE_STATUS_ID_PREFIX = "edmcmodernoverlay-profile-status-"
+
 
 @dataclass(frozen=True)
 class _CommandGroupDefinition:
@@ -60,6 +63,19 @@ _COMMAND_GROUP_DEFINITIONS: tuple[_CommandGroupDefinition, ...] = (
         background_color="black",
         border_color="blue",
         border_width=10,
+    ),
+    _CommandGroupDefinition(
+        name=COMMAND_PROFILE_STATUS_GROUP_NAME,
+        prefix=COMMAND_PROFILE_STATUS_ID_PREFIX,
+        anchor="nw",
+        offset_x=0.0,
+        offset_y=0.0,
+        payload_justification="left",
+        marker_label_position="below",
+        preview_box_mode="last",
+        background_color="black",
+        border_color="black",
+        border_width=3,
     ),
 )
 

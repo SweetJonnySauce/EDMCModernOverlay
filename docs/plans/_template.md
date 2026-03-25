@@ -10,6 +10,7 @@ If something is unclear, capture it under `Open Questions`.
 - <required behavior/outcome #1>
 - <required behavior/outcome #2>
 - <required behavior/outcome #3>
+- Keep `load.py` minimal: new feature/business logic should be implemented in helper modules/services, with `load.py` limited to orchestration/wiring and thin delegating methods.
 
 ## Out Of Scope (This Change)
 - <explicit non-goal #1>
