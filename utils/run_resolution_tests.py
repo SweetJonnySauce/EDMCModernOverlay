@@ -16,12 +16,11 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-TESTS_DIR = PROJECT_ROOT / "tests"
-CONFIG_PATH = TESTS_DIR / "test_resolution.json"
+CONFIG_PATH = PROJECT_ROOT / "tests" / "config" / "test_resolution.json"
 PORT_PATH = PROJECT_ROOT / "port.json"
 
 MOCK_WINDOW_PATH = PROJECT_ROOT / "utils" / "mock_elite_window.py"
-SEND_FROM_LOG_PATH = TESTS_DIR / "send_overlay_from_log.py"
+SEND_FROM_LOG_PATH = PROJECT_ROOT / "utils" / "send_overlay_from_log.py"
 
 DEFAULT_TITLE = "Elite - Dangerous (Stub)"
 

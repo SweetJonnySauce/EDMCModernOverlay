@@ -1629,7 +1629,7 @@ class _PluginRuntime:
     def send_test_overlay(self) -> None:
         if not self._running:
             raise RuntimeError("Overlay is not running")
-        log_path = self.plugin_dir / "payload_store" / "ed-logo-test.log"
+        log_path = self.plugin_dir / "assets" / "ed-logo-test.log"
         try:
             raw_lines = log_path.read_text(encoding="utf-8").splitlines()
         except FileNotFoundError as exc:

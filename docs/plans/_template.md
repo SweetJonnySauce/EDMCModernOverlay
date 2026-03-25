@@ -12,6 +12,23 @@ If something is unclear, capture it under `Open Questions`.
 - <required behavior/outcome #3>
 - Keep `load.py` minimal: new feature/business logic should be implemented in helper modules/services, with `load.py` limited to orchestration/wiring and thin delegating methods.
 
+## Testing Strategy (Required Before Implementation)
+
+| Change Area | Behavior / Invariant | Test Type (Unit/Harness) | Why This Level | Test File(s) | Command |
+| --- | --- | --- | --- | --- | --- |
+| <area> | <invariant> | <Unit/Harness> | <why> | <path> | `<command>` |
+
+## Test Scope Decision (Required)
+- Unit-only? Why: <answer>
+- Harness required? Why: <answer>
+- Mixed (Unit + Harness)? Why: <answer>
+
+## Test Acceptance Gates (Required)
+- [ ] Unit tests added/updated for pure logic changes.
+- [ ] Harness tests added/updated for lifecycle/wiring changes.
+- [ ] Exact commands listed and executed.
+- [ ] Any skips documented with reasons.
+
 ## Out Of Scope (This Change)
 - <explicit non-goal #1>
 - <explicit non-goal #2>

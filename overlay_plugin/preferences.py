@@ -3251,7 +3251,7 @@ class PreferencesPanel:
             "purposes. It is not endorsed by nor reflects the views or opinions of Frontier Developments and no employee of Frontier Developments was involved in the making of it."
         )
         plugin_dir = self._preferences.plugin_dir
-        log_path = plugin_dir / "payload_store" / "ed-logo-test.log"
+        log_path = plugin_dir / "assets" / "ed-logo-test.log"
         try:
             raw_lines = log_path.read_text(encoding="utf-8").splitlines()
         except FileNotFoundError:

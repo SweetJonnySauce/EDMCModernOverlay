@@ -19,6 +19,24 @@
 - Record tests run (or skipped with reasons) when landing changes; default to headless tests for pure helpers.
 - Prefer fast/no-op paths in release builds; keep debug logging/dev overlays gated behind dev mode.
 
+## Test Type Selection (Required Before Refactoring)
+- Decide and document test type before code edits for each touched behavior.
+- Use **unit tests** for pure/data-only seams and deterministic helpers.
+- Use **harness tests** when refactors touch `load.py`, hook wiring, startup/shutdown lifecycle, EDMC callback flow, or runtime state integration.
+- For refactors that split pure logic from wiring, require both test types (unit for lifted logic, harness for integration contract).
+
+## Testing Strategy Matrix (Required)
+
+| Refactor Slice | Existing Behavior/Invariants To Preserve | Test Type (Unit/Harness) | Why This Level | Test File(s) | Command |
+| --- | --- | --- | --- | --- | --- |
+| <slice> | <invariant> | <Unit/Harness> | <why> | <path> | `<command>` |
+
+## Test Acceptance Gates (Required)
+- [ ] Unit tests added/updated for extracted pure logic.
+- [ ] Harness tests added/updated for lifecycle/wiring surfaces.
+- [ ] Commands executed and outcomes recorded.
+- [ ] Skips/failures documented with reason and follow-up action.
+
 ## Per-Iteration Test Plan
 - **Env setup (once per machine):** `python3 -m venv .venv && source .venv/bin/activate && pip install -U pip && pip install -e .[dev]`
 - **Headless quick pass (default for each step):** `source .venv/bin/activate && python -m pytest` (scope with `tests/…` or `-k` as needed).

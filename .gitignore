@@ -5,7 +5,7 @@ __pycache__/
 *.py[cod]
 port.json
 overlay_controller.pid
-payload_store/new-payloads.json
+utils/new-payloads.json
 overlay_group_cache.json
 overlay_group_cache.json.tmp
 overlay_groupings.user.json
@@ -21,4 +21,7 @@ _external/**
 logs/
 logs/**
 *.log
+!assets/ed-logo-test.log
+!payload_store/
+!payload_store/*.log
 overlay_client/fonts/EUROCAPS.TTF
