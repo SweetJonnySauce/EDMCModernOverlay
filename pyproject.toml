@@ -4,6 +4,7 @@ requires-python = ">=3.10"
 [tool.ruff]
 target-version = "py310"
 line-length = 120
+extend-exclude = ["tests/harness.py", "tests/edmc"]
 
 [tool.ruff.lint]
 select = ["E", "F"]
@@ -29,6 +30,7 @@ ignore_errors = true
 [tool.pytest.ini_options]
 markers = [
     "pyqt_required: marks tests that require PyQt and PYQT_TESTS=1",
+    "harness: marks vendored test-harness integration tests",
 ]
 
 [tool.windows_python_install]
