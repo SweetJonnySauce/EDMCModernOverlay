@@ -9,3 +9,4 @@ Ownership rules:
 
 Primary fixture path used by harness tests:
 - `tests/config/journal_events.json`
+- `tests/config/overlay_groupings.user.json` (seed profile/group override store for harness profile lifecycle tests)
