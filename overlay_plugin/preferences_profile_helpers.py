@@ -670,7 +670,7 @@ def on_profile_table_double_click(panel: Any, event) -> None:  # pragma: no cove
 
 
 def toggle_profile_table_rule(panel: Any, context: str) -> None:
-    callback = panel._set_profile_rules_callback
+    callback = getattr(panel, "_set_profile_rules_callback", None)
     if not callable(callback):
         panel._status_var.set("Profile rule updates are unavailable.")
         return
@@ -1061,7 +1061,7 @@ def on_profile_delete(panel: Any) -> None:
 
 
 def on_profile_rules_apply(panel: Any) -> None:
-    callback = panel._set_profile_rules_callback
+    callback = getattr(panel, "_set_profile_rules_callback", None)
     if not callable(callback):
         panel._status_var.set("Profile rule updates are unavailable.")
         return
