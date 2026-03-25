@@ -370,7 +370,7 @@ if __name__ == "__main__":
         )
         print(f"[overlay-cli] DETAILS: {exc}", file=sys.stderr)
         print(
-            "[overlay-cli] usage: PYTHONPATH=. python3 tests/send_overlay_from_log.py --logfile PATH [--max-payloads N] [--ttl SECONDS]",
+            "[overlay-cli] usage: PYTHONPATH=. python3 utils/send_overlay_from_log.py --logfile PATH [--max-payloads N] [--ttl SECONDS]",
             file=sys.stderr,
         )
         raise SystemExit(1)
