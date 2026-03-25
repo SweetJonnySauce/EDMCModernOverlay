@@ -1275,7 +1275,7 @@ class PreferencesPanel:
         profile_table_frame = ttk.Frame(profiles_section, style=self._frame_style)
         profile_table_frame.grid(row=profile_row, column=0, sticky="we", pady=ROW_PAD)
         profile_table_frame.columnconfigure(0, weight=1)
-        nb.Label(profile_table_frame, text="Profiles:").grid(row=0, column=0, sticky="w")
+        nb.Label(profile_table_frame, text="Profiles (right click for options):").grid(row=0, column=0, sticky="w")
         profile_table_columns = ("active", "name", "ims", "srv", "ftr", "foot", "wing", "taxi", "mc")
         profile_table = ttk.Treeview(
             profile_table_frame,
@@ -1291,9 +1291,9 @@ class PreferencesPanel:
         profile_table.heading("name", text="Profile")
         profile_table.column("name", width=180, minwidth=120, stretch=True, anchor="w")
         for column, label in (
-            ("ims", "MS"),
+            ("ims", "Ship"),
             ("srv", "SRV"),
-            ("ftr", "FTR"),
+            ("ftr", "SLF"),
             ("foot", "Foot"),
             ("wing", "Wing"),
             ("taxi", "Taxi"),
@@ -1322,7 +1322,7 @@ class PreferencesPanel:
         rule_controls = (
             ("In Main Ship", self._var_rule_in_main_ship),
             ("In SRV", self._var_rule_in_srv),
-            ("In Fighter", self._var_rule_in_fighter),
+            ("In SLF", self._var_rule_in_fighter),
             ("On Foot", self._var_rule_on_foot),
             ("In Wing", self._var_rule_in_wing),
             ("In Taxi", self._var_rule_in_taxi),
@@ -1335,7 +1335,7 @@ class PreferencesPanel:
                 variable=variable,
                 onvalue=True,
                 offvalue=False,
-                command=self._on_profile_in_main_ship_toggle if index == 0 else None,
+                command=self._on_profile_rule_toggle,
             )
             if index == 0:
                 check.pack(side="left")
@@ -1370,14 +1370,6 @@ class PreferencesPanel:
         profile_ship_table.bind("<Button-1>", self._on_profile_ship_table_click)
         profile_ship_table.bind("<Double-1>", self._on_profile_ship_table_double_click)
         self._profile_ship_table = profile_ship_table
-        rules_apply_button = nb.Button(rules_frame, text="Apply Rules", command=self._on_profile_rules_apply)
-        rules_apply_button.grid(
-            row=3,
-            column=0,
-            sticky="w",
-            pady=(6, 0),
-        )
-        self._profile_rules_apply_button = rules_apply_button
         profile_row += 1
 
         self._refresh_profile_state()
@@ -2407,6 +2399,9 @@ class PreferencesPanel:
 
     def _on_profile_in_main_ship_toggle(self) -> None:
         profile_pref_helpers.on_profile_in_main_ship_toggle(self)
+
+    def _on_profile_rule_toggle(self) -> None:
+        profile_pref_helpers.on_profile_rule_toggle(self)
 
     def _on_profile_list_selected(self, _event=None) -> None:  # pragma: no cover - Tk event
         profile_pref_helpers.on_profile_list_selected(self, _event)
