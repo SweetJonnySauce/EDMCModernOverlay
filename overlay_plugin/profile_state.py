@@ -293,6 +293,7 @@ def _normalise_ship_entry(raw: Mapping[str, Any], existing: Optional[Mapping[str
             "ShipNameLocalised",
             "Name_Localised",
             "NameLocalised",
+            "ShipType_Localised",
             "ship_name",
             "Name",
         ),

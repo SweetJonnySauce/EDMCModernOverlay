@@ -124,6 +124,17 @@
         "backgroundColor": "red",
         "backgroundBorderColor": "red",
         "backgroundBorderWidth": 3
+      },
+      "BGS-Tally Fleetcarrier": {
+        "idPrefixes": [
+          "bgstally-msg-fleetcarrier-"
+        ],
+        "idPrefixGroupAnchor": "ne",
+        "payloadJustification": "right",
+        "offsetX": -5.0,
+        "backgroundColor": "None",
+        "backgroundBorderColor": "None",
+        "backgroundBorderWidth": 3
       }
     }
   },
