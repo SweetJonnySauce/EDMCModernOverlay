@@ -141,6 +141,28 @@ def test_profile_store_storedships_uses_localised_name_fields(tmp_path: Path) ->
     assert ship_91["ship_ident"] == "SW-29L"
 
 
+def test_profile_store_storedships_falls_back_to_ship_type_localised_for_ship_name(tmp_path: Path) -> None:
+    user_path = tmp_path / "overlay_groupings.user.json"
+    user_path.write_text("{}\n", encoding="utf-8")
+    store = OverlayProfileStore(user_path=user_path)
+
+    changed = store.update_fleet_from_journal(
+        entry={
+            "event": "StoredShips",
+            "ShipsHere": [
+                {"ShipID": 91, "ShipType": "lakonminer", "ShipType_Localised": "Type-11 Prospector", "ShipIdent": "SW-29L"}
+            ],
+            "ShipsRemote": [],
+        }
+    )
+    status = store.status()
+
+    assert changed is True
+    ship_91 = next(item for item in status["ships"] if item["ship_id"] == 91)
+    assert ship_91["ship_name"] == "Type-11 Prospector"
+    assert ship_91["ship_ident"] == "SW-29L"
+
+
 def test_profile_store_storedships_uses_ship_name_map_for_ship_type(monkeypatch, tmp_path: Path) -> None:
     user_path = tmp_path / "overlay_groupings.user.json"
     user_path.write_text("{}\n", encoding="utf-8")
@@ -210,6 +232,28 @@ def test_profile_store_shipyardswap_uses_ship_name_map_for_ship_type(monkeypatch
     assert changed is True
     ship_91 = next(item for item in status["ships"] if item["ship_id"] == 91)
     assert ship_91["ship_type"] == "Type-11 Prospector"
+    assert ship_91["ship_name"] == "Type-11 Prospector"
+    assert ship_91["ship_ident"] == "SW-29L"
+
+
+def test_profile_store_shipyardswap_falls_back_to_ship_type_localised_for_ship_name(tmp_path: Path) -> None:
+    user_path = tmp_path / "overlay_groupings.user.json"
+    user_path.write_text("{}\n", encoding="utf-8")
+    store = OverlayProfileStore(user_path=user_path)
+
+    changed = store.update_fleet_from_journal(
+        entry={
+            "event": "ShipyardSwap",
+            "ShipID": 91,
+            "ShipType": "lakonminer",
+            "ShipType_Localised": "Type-11 Prospector",
+            "ShipIdent": "SW-29L",
+        }
+    )
+    status = store.status()
+
+    assert changed is True
+    ship_91 = next(item for item in status["ships"] if item["ship_id"] == 91)
     assert ship_91["ship_name"] == "Type-11 Prospector"
     assert ship_91["ship_ident"] == "SW-29L"
 
