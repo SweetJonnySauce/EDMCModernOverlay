@@ -73,3 +73,78 @@ Use this evidence checklist for each release when deciding the `Stay aligned wit
 
 ## Exceptions
 - 0.9.0 waiver: EDMC Releases/Discussions review findings log is not required for 0.9.0 release sign-off.
+
+## Audit scope (2026-04-02)
+- Date: 2026-04-02
+- Scope used for EDMC plugin compliance: `load.py` and `overlay_plugin/*` (plugin-runtime code).
+- Out of scope for EDMC plugin-runtime compliance decisions: `overlay_client/*`, `overlay_controller/*`, and test/archive utilities except where installer/docs evidence is needed for dependency packaging expectations.
+- Code changes made during this audit: none (compliance review only).
+
+## Phase Overview
+
+| Phase | Description | Status |
+| --- | --- | --- |
+| 1 | Evidence collection | Completed |
+| 2 | Rule-by-rule evaluation | Completed |
+| 3 | Reporting and audit log updates | Completed |
+
+## Phase Details
+
+### Phase 1: Evidence collection
+
+| Stage | Description | Status |
+| --- | --- | --- |
+| 1.1 | Run baseline/version checks | Completed |
+| 1.2 | Scan hooks/imports/logging/threading/prefs/network usage | Completed |
+| 1.3 | Gather dependency/debug-routing/release-process evidence | Completed |
+
+### Phase 2: Rule-by-rule evaluation
+
+| Stage | Description | Status |
+| --- | --- | --- |
+| 2.1 | Evaluate each EDMC compliance rule with explicit Yes/No | Completed |
+| 2.2 | Capture required fix for every No finding | Completed |
+
+### Phase 3: Reporting and audit log updates
+
+| Stage | Description | Status |
+| --- | --- | --- |
+| 3.1 | Record commands run and skipped checks in Implementation Results | Completed |
+| 3.2 | Document open questions/blockers for release sign-off | Completed |
+
+## Implementation Results
+- Ran: `python3 scripts/check_edmc_python.py`
+  - Result: passed minimum compatibility check (`>= 3.10.3`) with non-fatal preferred-arch warning (found `64bit`, preferred parity is `32bit`).
+- Ran: `test -f load.py && echo "load.py present"`
+  - Result: `load.py present`.
+- Ran: `rg -n "def plugin_start3|name = PLUGIN_NAME|plugin_name = PLUGIN_NAME" load.py`
+  - Result: found required plugin entrypoint/metadata lines.
+- Ran: `rg -n "^\s*print\(" load.py overlay_plugin`
+  - Result: no `print` usage in plugin-runtime code.
+- Ran: static scans for EDMC API/helper usage, threading, prefs hooks, and HTTP/debug routing:
+  - `rg -n "plugin_prefs|prefs_changed|plugin_app|myNotebook|number_from_string|config.get_(int|str|bool|list)|config.set(|_config_key(" load.py overlay_plugin`
+  - `rg -n "import monitor|monitor.game_running|monitor.is_live_galaxy|timeout_session.new_session|config.user_agent|requests.|urllib" load.py overlay_plugin`
+  - `rg -n "event_generate|shutting_down" load.py overlay_plugin`
+  - `rg -n "threading.Thread|Thread\(" load.py overlay_plugin`
+- Ran: dependency/process evidence scans:
+  - `rg -n "venv|virtualenv|.venv|pip install -r|requirements" scripts/install_linux.sh scripts/install_windows.ps1 docs/FAQ.md README.md`
+  - `rg -n "EDMC Releases/Discussions reviewed|compliance items" .github/pull_request_template.md`
+- Recorded release waiver:
+  - EDMC Releases/Discussions findings log waived for 0.9.0 in `Exceptions`.
+- Checks not run:
+  - `python -m pytest`, `make check`, and GUI-enabled suites were intentionally skipped for this audit because the compliance tracker asks for policy/structure evidence, not behavioral regression testing.
+  - Direct verification of upstream EDMC `docs/Releasing` was skipped in this run (external repo/network not consulted as part of this local compliance pass).
+
+## Current compliance assessment (2026-04-02)
+
+| Item | Status | Why / evidence | Required change (if No) |
+| --- | --- | --- | --- |
+| Stay aligned with EDMC core (PLUGINS.md:12/24/297/41) | Yes | Structure and entrypoint checks pass (`load.py` present; `plugin_start3` at `load.py:3583`; `name/plugin_name = PLUGIN_NAME` at `load.py:3806-3807`) and Python baseline check passes (`python3 scripts/check_edmc_python.py`). EDMC Releases/Discussions logging is explicitly waived for 0.9.0 in `Exceptions`, which satisfies the status rubric for waived sub-requirements. | N/A |
+| Use only supported plugin API/helpers (PLUGINS.md:74/85/113/128/156/452) | Yes | Uses `monitor` helpers via wrappers (`load.py:20`, `load.py:255-270`, used in `load.py:702-707`), uses `timeout_session.new_session` + `config.user_agent`/`config.debug_senders` for HTTP (`overlay_plugin/version_helper.py:21`, `31`, `26`, `148-183`), and persists namespaced config keys via helper wrappers (`overlay_plugin/preferences.py:49`, `128-130`, `162-190`). | N/A |
+| Adopt EDMC logging/versioning patterns (PLUGINS.md:168/212/230/263) | Yes | Logger wiring aligns with plugin name (`PLUGIN_NAME`, `LOGGER_NAME = PLUGIN_NAME` in `load.py:180-184`), metadata aligns (`load.py:3806-3808`), and traceback logging uses `LOGGER.exception`/`exc_info` (`load.py:3733-3734`, `3782-3783`, `load.py:1015`). No `print` in plugin runtime (`rg` scan). Version gating via `config.appversion` exists (`overlay_plugin/version_helper.py:82-107`). | N/A |
+| Keep runtime work responsive and Tk-safe (PLUGINS.md:335/349/362/371/397/599) | Yes | Long-running/background work is threaded (`load.py:1017-1033`, `overlay_plugin/prefs_services.py` worker thread model, `overlay_plugin/overlay_watchdog.py` background watchdog). HTTP uses `requests` with `timeout_session` preference and no plugin-runtime `urllib` usage (`overlay_plugin/version_helper.py:120-162`, scan result). No `event_generate` usage found; no risky shutdown signaling path found in this runtime scan. | N/A |
+| Integrate with EDMC prefs/UI hooks (PLUGINS.md:417/452/455/530/585/587) | Yes | Hooks are present (`plugin_prefs`/`prefs_changed`/`plugin_app` at `load.py:3604-3753`), preferences UI frame is returned from `plugin_prefs` (`load.py:3738-3740`), `myNotebook` is used (`overlay_plugin/preferences.py:981`), and config access uses `config.get_*`/set wrappers and locale-aware `number_from_string` (`overlay_plugin/preferences.py:23-30`, `162-190`, `223-230`). | N/A |
+| Package dependencies and debug HTTP responsibly (PLUGINS.md:1323/1346/1358/1378/1387/1391) | Yes | Installers/docs provision dedicated venvs and requirement install flow (`scripts/install_linux.sh:2133-2199`, `scripts/install_windows.ps1:813-852`, `docs/FAQ.md:84`), plugin folder is importable (`EDMCModernOverlay` with root `load.py`), and debug HTTP routing through `config.debug_senders` is implemented (`overlay_plugin/version_helper.py:26`, `165-183`). | N/A |
+
+## Open Questions
+- Should this tracker also capture a manually verified EDMC-core `docs/Releasing` check date/reference for each release cycle?
