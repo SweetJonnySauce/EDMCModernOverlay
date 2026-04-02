@@ -72,4 +72,13 @@ A CMDR using the Windows version of EDMCModernOverlay within Proton reported hea
 Modern Overlay as of 0.7.4 now installs into the `EDMCModernOverlay/` directory. Running the installer will disable any existing `EDMC-ModernOverlay/` folder by renaming it to `EDMC-ModernOverlay.disabled`, `EDMC-ModernOverlay.1.disabled`, etc. Settings are **not** migrated automatically; keep the disabled folder if you need to roll back.
 
 ## Launching issues with `min-ed-launcher` on CachyOS (maybe others)
-Some CMDRs have reported problems with the overlay using [`min-ed-launcher`](https://github.com/rfvgyhn/min-ed-launcher). While I've not been able to reproduce this or solve the problem, one user has offered a workaround that can be found on [Issue #169](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/169) (Search for "MinEdLauncher")
+Some CMDRs have reported problems with the overlay using [`min-ed-launcher`](https://github.com/rfvgyhn/min-ed-launcher). As of fix [#211](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/211), EDMCModernOverlay sanitizes inherited linker/runtime vars when launching the overlay client to avoid Qt/PyQt mismatch crashes in Steam/Proton environments.
+
+Sanitizer behavior:
+- Removes `LD_PRELOAD`
+- Removes `QT_PLUGIN_PATH`
+- Removes `QT_QPA_PLATFORM_PLUGIN_PATH`
+- Sets `LD_LIBRARY_PATH` from `MEL_LD_LIBRARY_PATH` when available; otherwise removes `LD_LIBRARY_PATH`
+
+Troubleshooting override:
+- Set `EDMC_OVERLAY_PRESERVE_LD_ENV=1` to bypass this sanitizer if you need to test your custom environment.

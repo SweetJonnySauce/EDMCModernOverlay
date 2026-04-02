@@ -48,6 +48,7 @@ if __package__:
         schedule_version_notice_rebroadcasts,
     )
     from .overlay_plugin.standalone_support import standalone_mode_preference_value
+    from .overlay_plugin.overlay_env_sanitizer import sanitize_overlay_environment
     from .overlay_plugin.overlay_config_payload import build_overlay_config_payload
     from .overlay_plugin.preferences import (
         CLIENT_LOG_RETENTION_MAX,
@@ -123,6 +124,7 @@ else:  # pragma: no cover - EDMC loads as top-level module
         schedule_version_notice_rebroadcasts,
     )
     from overlay_plugin.standalone_support import standalone_mode_preference_value
+    from overlay_plugin.overlay_env_sanitizer import sanitize_overlay_environment
     from overlay_plugin.overlay_config_payload import build_overlay_config_payload
     from overlay_plugin.preferences import (
         CLIENT_LOG_RETENTION_MAX,
@@ -3459,6 +3461,15 @@ class _PluginRuntime:
                 env["EDMC_OVERLAY_ENV_OVERRIDES_SKIPPED_EXISTING"] = ",".join(merge_result.skipped_existing)
         except Exception as exc:
             LOGGER.debug("Failed to apply env overrides: %s", exc)
+        env, sanitize_result = sanitize_overlay_environment(env)
+        if sanitize_result.skipped_opt_out:
+            LOGGER.debug(
+                "Overlay env sanitizer bypassed due to EDMC_OVERLAY_PRESERVE_LD_ENV=1; keys=%s",
+                ", ".join(sorted(sanitize_result.actions.keys())) if sanitize_result.actions else "none",
+            )
+        elif sanitize_result.actions:
+            action_pairs = [f"{key}:{sanitize_result.actions[key]}" for key in sorted(sanitize_result.actions)]
+            LOGGER.debug("Overlay env sanitizer actions: %s", ", ".join(action_pairs))
         return env
 
     def _overlay_controller_active(self) -> bool:

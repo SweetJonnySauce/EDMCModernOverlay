@@ -11,6 +11,7 @@
 
 ### Bug Fixes
 - Fix [#183](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/183) - Enabled checkbox on Overlay Controller is confusing.
+- Fix [#211](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/211) - Overlay launch now sanitizes inherited runtime linker vars (`LD_PRELOAD`, `LD_LIBRARY_PATH`, Qt plugin path vars) to prevent PyQt/Qt library mismatch crashes when EDMC is launched via MinEDLauncher/Steam/Proton. Set `EDMC_OVERLAY_PRESERVE_LD_ENV=1` to bypass sanitization for troubleshooting.
 
 ## 0.8.0
 
