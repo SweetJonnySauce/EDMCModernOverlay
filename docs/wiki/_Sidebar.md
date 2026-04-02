@@ -7,11 +7,12 @@
     * [[Overlay Controller]]
     * [[Chat Command]]
     * [[Overlay Actions]]
+    * [[Profiles]]
     * [[Changing Fonts]]
 * [[FAQs]]
 * [[Troubleshooting]]
 * [[How To Guides]]
-    * [VoiceAttack Integration](https://github.com/SweetJonnySauce/EDMCModernOverlay/blob/develop-0.8.0/docs/wiki/VoiceAttack_Integration.md)
+    * [VoiceAttack Integration](https://github.com/SweetJonnySauce/EDMCModernOverlay/blob/main/docs/wiki/VoiceAttack_Integration.md)
 ***
 ### Plugin Developers Section
 * [[Developing Plugins]]

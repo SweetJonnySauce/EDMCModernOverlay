@@ -7,7 +7,7 @@
 - Overlay Controller now has a background slider for opacity. This controls the alpha channel for background and background border colors. [#199](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/199) 
 
 ### Maintenance
-- Set up Navl's test harness to do headless EDMC testing (copied from BGS-Tally). Fix [#207](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/207)
+- Set up @dwomble's test harness to do headless EDMC testing (copied from BGS-Tally). Fix [#207](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/207)
 
 ### Bug Fixes
 - Fix [#183](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/183) - Enabled checkbox on Overlay Controller is confusing.

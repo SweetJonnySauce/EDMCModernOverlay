@@ -1,26 +1,39 @@
-EDMCModernOverlay now supports [EDMCHotkey](github.com/SweetJonnySauce/EDMCHotkeys) actions. These allow you to map plugin actions to hotkey combinations (e.g. LCtrl+LSfhit+F1) that you can bind to controller buttons or to VoiceAttack commands. 
+EDMCModernOverlay supports [EDMCHotkeys](https://github.com/SweetJonnySauce/EDMCHotkeys) actions. These let you map overlay actions to hotkey combinations (for example `LCtrl+LShift+F1`) that can also be triggered from controller bindings or VoiceAttack commands.
 
-See:
-- [EDMCHotkeys Usage](https://github.com/SweetJonnySauce/EDMCHotkeys#Usage) for information on how to set up hotkey ations
-- [VoiceAttack Integration](./VoiceAttack_Integration.md) for information on how to set up VoiceAttack with hotkey actions
+See [EDMCHotkeys Usage](https://github.com/SweetJonnySauce/EDMCHotkeys#Usage) for setup details.
 
 ## Hotkey Actions Supported
-- `Overlay On`: Turn all overlay plugin groups on. Optionally, you can specify specific plugin groups to turn on.
-- `Overlay Off`: Turn all ovelay plugin groups off. Optionally, you can specify specific plugin groups to turn off.
-- `Toggle Overlay`: Toggle all overlay plugin groups on or off depending on current state. Optionally, you can specify specific plugin groups to toggle.
-- `Launch Overlay Controller`: Launch the Overlay Controller
+- `Overlay On`: Turn all overlay plugin groups on, or target specific groups via payload.
+- `Overlay Off`: Turn all overlay plugin groups off, or target specific groups via payload.
+- `Toggle Overlay`: Toggle all overlay plugin groups, or target specific groups via payload.
+- `Launch Overlay Controller`: Launch the Overlay Controller.
+- `Set Overlay Profile`: Switch to a specific profile.
+- `Next Overlay Profile`: Cycle to the next profile.
+- `Previous Overlay Profile`: Cycle to the previous profile.
 
-You can specify specific plugin groups to turn on/off/toggle by adding a short json string to the EDMCHotkey payload field. 
+## Payload Examples
+Use the EDMCHotkeys action payload field with JSON.
 
-**Examples:**
+### Group Targeting (`Overlay On` / `Overlay Off` / `Toggle Overlay`)
+- Single target:
+```json
+{"plugin_group": "BGS-Tally Objectives"}
+```
+- Multiple targets:
+```json
+{"plugin_groups": ["BGS-Tally Colonisation", "BGS-Tally Objectives"]}
+```
 
-- Single plugin group target
-  ```json
-  {"plugin_group": "BGS-Tally Objectives"}
-  ```
+### Profile Selection (`Set Overlay Profile`)
+- Any of these keys are accepted: `profile`, `profile_name`, or `name`.
+```json
+{"profile": "Mining"}
+```
+```json
+{"profile_name": "On Foot"}
+```
+```json
+{"name": "Default"}
+```
 
-- `Multi-target plugin group target
-
-  ```json
-  {"plugin_groups": ["BGS-Tally Colonisation", "BGS-Tally Objectives"]}
-  ```
+`Next Overlay Profile` and `Previous Overlay Profile` do not require a payload.

@@ -82,7 +82,12 @@ if __package__:
     from .overlay_plugin.journal_commands import build_command_helper
     from .overlay_plugin.group_status_enrichment import build_enriched_group_status_lines
     from .overlay_plugin.plugin_scan_services import get_cached_plugin_statuses
-    from .overlay_plugin.command_overlay_groups import ensure_runtime_command_groups, render_group_status_payloads
+    from .overlay_plugin.command_overlay_groups import (
+        ensure_runtime_command_groups,
+        render_command_status_payloads,
+        render_group_status_payloads,
+        render_profile_list_payloads,
+    )
     from .overlay_plugin.plugin_group_controls import (
         PluginGroupControlService,
         dedupe_group_names,
@@ -152,7 +157,12 @@ else:  # pragma: no cover - EDMC loads as top-level module
     from overlay_plugin.journal_commands import build_command_helper
     from overlay_plugin.group_status_enrichment import build_enriched_group_status_lines
     from overlay_plugin.plugin_scan_services import get_cached_plugin_statuses
-    from overlay_plugin.command_overlay_groups import ensure_runtime_command_groups, render_group_status_payloads
+    from overlay_plugin.command_overlay_groups import (
+        ensure_runtime_command_groups,
+        render_command_status_payloads,
+        render_group_status_payloads,
+        render_profile_list_payloads,
+    )
     from overlay_plugin.plugin_group_controls import (
         PluginGroupControlService,
         dedupe_group_names,
@@ -1792,6 +1802,39 @@ class _PluginRuntime:
                 failures += 1
         if failures:
             raise RuntimeError(f"Failed to send {failures} status overlay payload(s)")
+
+    def send_command_status_overlay(self, message: str) -> None:
+        if not self._running:
+            raise RuntimeError("Overlay is not running")
+        payloads = render_command_status_payloads(message)
+        if not payloads:
+            return
+        failures = 0
+        for payload in payloads:
+            stamped = dict(payload)
+            stamped.setdefault("timestamp", datetime.now(UTC).isoformat())
+            if not send_overlay_message(stamped):
+                failures += 1
+        if failures:
+            raise RuntimeError(f"Failed to send {failures} command status overlay payload(s)")
+
+    def send_profile_status_overlay(self, profiles: Sequence[str], current_profile: str = "") -> None:
+        if not self._running:
+            raise RuntimeError("Overlay is not running")
+        payloads = render_profile_list_payloads(
+            profiles,
+            current_profile=current_profile,
+        )
+        if not payloads:
+            return
+        failures = 0
+        for payload in payloads:
+            stamped = dict(payload)
+            stamped.setdefault("timestamp", datetime.now(UTC).isoformat())
+            if not send_overlay_message(stamped):
+                failures += 1
+        if failures:
+            raise RuntimeError(f"Failed to send {failures} profile status overlay payload(s)")
 
     def preview_font_sizes(self) -> None:
         if not self._running:
