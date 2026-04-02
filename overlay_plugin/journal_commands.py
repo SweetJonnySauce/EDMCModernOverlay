@@ -42,6 +42,7 @@ class _OverlayCommandContext:
     set_profile: Optional[Callable[[str], Mapping[str, Any]]] = None
     cycle_profile: Optional[Callable[[int], Mapping[str, Any]]] = None
     profile_status: Optional[Callable[[], Mapping[str, Any]]] = None
+    send_profile_status_overlay: Optional[Callable[[Sequence[str], str], None]] = None
 
 
 def _normalise_prefix(value: str) -> str:
@@ -291,6 +292,18 @@ class JournalCommandHelper:
         profiles = [str(item).strip() for item in profiles_raw] if isinstance(profiles_raw, list) else []
         profiles = [item for item in profiles if item]
         current = str(status.get("current_profile") or "").strip()
+        overlay_callback = self._ctx.send_profile_status_overlay
+        if overlay_callback is not None:
+            try:
+                overlay_callback(profiles, current)
+            except RuntimeError as exc:
+                self._ctx.send_message(f"Overlay profile status unavailable: {exc}")
+                return True
+            except Exception as exc:  # pragma: no cover - defensive guard
+                _LOGGER.warning("Overlay profile status overlay callback failed: %s", exc, exc_info=exc)
+                self._ctx.send_message("Overlay profile status failed; see EDMC log.")
+                return True
+            return True
         if not profiles:
             self._ctx.send_message("Overlay profiles: none")
             return True
@@ -485,8 +498,15 @@ def build_command_helper(
     """Construct a :class:`JournalCommandHelper` for the active plugin runtime."""
 
     log = logger or _LOGGER
+    grouped_status_callback = getattr(plugin_runtime, "send_command_status_overlay", None)
 
     def _send_overlay_message(text: str) -> None:
+        if callable(grouped_status_callback):
+            try:
+                grouped_status_callback(text)
+                return
+            except Exception as exc:  # pragma: no cover - defensive guard
+                log.warning("Failed to send grouped overlay response '%s': %s", text, exc)
         try:
             plugin_runtime.send_test_message(text)
         except Exception as exc:  # pragma: no cover - defensive guard
@@ -524,6 +544,7 @@ def build_command_helper(
         set_profile=_set_profile,
         cycle_profile=_cycle_profile,
         profile_status=getattr(plugin_runtime, "get_profile_status", None),
+        send_profile_status_overlay=getattr(plugin_runtime, "send_profile_status_overlay", None),
     )
     legacy = legacy_prefixes if legacy_prefixes is not None else []
     if command_prefix in legacy:

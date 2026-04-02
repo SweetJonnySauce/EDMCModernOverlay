@@ -1,6 +1,7 @@
 Launch the Overlay Controller by typing `!ovr` (See [Chat Command](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Chat-Command)) in the in-game Comms panel on any channel.
 
 Top to bottom on the image below:
+  - Select the Profile you want to manage. Create new profiles on the EDMCModernOverlay setting tab in EDMC Settings.
   - Select a Plugin Group to manage in the drop down
   - Toggle the selected Plugin Group on/off with the `Enabled`
   - Change X/Y position via selectors on the screen with "pinning" capabilities (i.e. hug an edge of the screen)

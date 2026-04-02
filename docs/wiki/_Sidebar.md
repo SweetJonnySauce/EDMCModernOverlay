@@ -7,6 +7,7 @@
     * [[Overlay Controller]]
     * [[Chat Command]]
     * [[Overlay Actions]]
+    * [[Profiles]]
     * [[Changing Fonts]]
 * [[FAQs]]
 * [[Troubleshooting]]

@@ -7,6 +7,7 @@ class _DummyRuntime:
     def __init__(self) -> None:
         self.messages: list[str] = []
         self.status_overlay_calls: list[tuple[str, ...]] = []
+        self.profile_overlay_calls: list[tuple[tuple[str, ...], str]] = []
         self.controller_launches = 0
         self.controller_enabled = True
         self.controller_should_fail = False
@@ -77,6 +78,9 @@ class _DummyRuntime:
     def send_group_status_overlay(self, lines: list[str]) -> None:
         self.status_overlay_calls.append(tuple(lines))
 
+    def send_profile_status_overlay(self, profiles: list[str], current_profile: str = "") -> None:
+        self.profile_overlay_calls.append((tuple(profiles), str(current_profile)))
+
     def set_current_profile(self, profile_name: str, source: str = "chat") -> dict[str, object]:
         self.profile_switch_calls.append(profile_name)
         self.current_profile = profile_name
@@ -141,6 +145,22 @@ def test_overlay_help_command():
     runtime, helper = build_helper()
     assert helper.handle_entry({"event": "SendText", "Message": "!overlay help"}) is True
     assert runtime.messages[-1].startswith("Overlay commands:")
+
+
+def test_overlay_help_uses_grouped_status_callback_when_available() -> None:
+    runtime, helper = build_helper()
+    grouped_messages: list[str] = []
+
+    def _send_grouped(text: str) -> None:
+        grouped_messages.append(text)
+
+    runtime.send_command_status_overlay = _send_grouped  # type: ignore[attr-defined]
+    runtime.send_test_message = lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("unexpected fallback"))  # type: ignore[method-assign]
+    runtime, helper = build_helper(runtime)
+    assert helper.handle_entry({"event": "SendText", "Message": "!overlay help"}) is True
+    assert grouped_messages
+    assert grouped_messages[-1].startswith("Overlay commands:")
+    assert runtime.messages == []
 
 
 def test_overlay_launch_command():
@@ -383,7 +403,8 @@ def test_overlay_profiles_command() -> None:
     runtime, helper = build_helper()
     runtime.current_profile = "Mining"
     assert helper.handle_entry({"event": "SendText", "Message": "!overlay profiles"}) is True
-    assert runtime.messages[-1] == "Overlay profiles: Default, [Mining]"
+    assert runtime.profile_overlay_calls == [(("Default", "Mining"), "Mining")]
+    assert runtime.messages == []
 
 
 def test_overlay_logical_commands_do_not_mutate_opacity_and_numeric_opacity_still_works():
