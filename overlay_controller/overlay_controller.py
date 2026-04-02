@@ -312,6 +312,7 @@ class OverlayConfigApp(tk.Tk):
         self.group_enabled_var = layout.get("group_enabled_var")
         self.group_enabled_checkbox = layout.get("group_enabled_checkbox")
         self.reset_button = layout["reset_button"]
+        self._apply_profile_dropdown_selection()
         self._sidebar_focus_index = 0
         self.widget_select_mode = True
         self.sidebar.grid_propagate(True)

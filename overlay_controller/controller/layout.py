@@ -16,6 +16,16 @@ from overlay_controller.widgets import (
 )
 
 
+def _selected_option_index(options: list[str], selected_name: str) -> Optional[int]:
+    target = str(selected_name or "").strip().casefold()
+    if not target:
+        return None
+    for idx, option in enumerate(options):
+        if str(option).casefold() == target:
+            return idx
+    return None
+
+
 class LayoutBuilder:
     """Builds placement/sidebar layout and focus map."""
 
@@ -177,7 +187,14 @@ class LayoutBuilder:
                 selectable_index += 1
 
             if index == 0:
-                profile_widget = ProfileSelectorWidget(frame, options=load_profile_options())
+                profile_options = load_profile_options()
+                profile_widget = ProfileSelectorWidget(frame, options=profile_options)
+                selected_index = _selected_option_index(
+                    profile_options,
+                    str(getattr(self.app, "_current_profile_name", "Default") or "Default"),
+                )
+                if selected_index is not None:
+                    profile_widget.update_options(profile_options, selected_index)
                 if is_selectable and focus_index is not None:
                     profile_widget.set_focus_request_callback(lambda idx=focus_index: on_sidebar_click(idx))
                 profile_widget.set_selection_change_callback(on_profile_selected)

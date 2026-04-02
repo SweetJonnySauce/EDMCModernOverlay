@@ -70,3 +70,6 @@ A CMDR using the Windows version of EDMCModernOverlay within Proton reported hea
 
 ## ⚠️ Breaking upgrade notice:
 Modern Overlay as of 0.7.4 now installs into the `EDMCModernOverlay/` directory. Running the installer will disable any existing `EDMC-ModernOverlay/` folder by renaming it to `EDMC-ModernOverlay.disabled`, `EDMC-ModernOverlay.1.disabled`, etc. Settings are **not** migrated automatically; keep the disabled folder if you need to roll back.
+
+## Launching issues with `min-ed-launcher` on CachyOS (maybe others)
+Some CMDRs have reported problems with the overlay using [`min-ed-launcher`](https://github.com/rfvgyhn/min-ed-launcher). While I've not been able to reproduce this or solve the problem, one user has offered a workaround that can be found on [Issue #169](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/169) (Search for "MinEdLauncher")
