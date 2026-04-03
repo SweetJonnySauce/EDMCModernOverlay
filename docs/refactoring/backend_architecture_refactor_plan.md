@@ -103,6 +103,49 @@ If something is unclear, capture it under `Open Questions`.
 - No currently working environment may be downgraded without explicit owner review.
 - Short-term stabilization comes first in sequencing, but long-term backend cleanup remains mandatory.
 
+## Architecture Diagram
+
+```mermaid
+flowchart LR
+    subgraph EDMC["EDMC Host Process (Tk main loop)"]
+        Core["EDMC Core"]
+        Plugin["EDMCModernOverlay Plugin (load.py)\nControl plane: launch/config/prefs/CLI"]
+        Prefs["Plugin Preferences UI"]
+        Ctrl["Overlay Controller (Tk)"]
+        EDMCLog["EDMC debug log"]
+    end
+
+    subgraph ClientProc["Overlay Client Process (Qt)"]
+        Ingest["Config + platform_context ingest"]
+        Probe["PlatformProbe (runtime evidence)"]
+        Selector["Single BackendSelector\n(client authoritative)"]
+        Status["BackendSelectionStatus + report\n(source=client_runtime)"]
+        Bundles["Backend bundles/consumers\n(native_x11, xwayland_compat, native_wayland_*)"]
+        ClientLog["overlay_client.log"]
+    end
+
+    subgraph Runtime["Local Runtime Channels"]
+        Socket["Plugin↔Client socket channel\n(port.json + JSON messages)"]
+        Helper["Optional compositor helpers\n(local IPC boundary)"]
+        Diag["Diagnostics collector scripts"]
+    end
+
+    Core --> Plugin
+    Plugin -->|overlay_config + platform_context + shadow_backend_status| Socket
+    Socket --> Ingest
+    Ingest --> Probe --> Selector --> Status --> Bundles
+    Helper -->|helper->client only (no plugin in transport path)| Bundles
+
+    Plugin -->|backend_status CLI (currently returns plugin_hint)| Prefs
+    Plugin -->|backend_status CLI (currently returns plugin_hint)| Ctrl
+
+    Status -->|client-runtime status lines| ClientLog
+    ClientLog --> Diag
+    Plugin -->|plugin shadow status lines| EDMCLog
+
+    Plugin -. advisory only .->|shadow_backend_status (source=plugin_hint)| Selector
+```
+
 ## Per-Iteration Test Plan
 - **Env setup (once per machine):** `python3 -m venv .venv && source .venv/bin/activate && python -m pip install -U pip && python -m pip install -r requirements/dev.txt`
 - **Headless quick pass (default for each step):** `source .venv/bin/activate && python -m pytest`
@@ -906,3 +949,8 @@ If something is unclear, capture it under `Open Questions`.
 - Result: pass (`ruff`, `mypy`, `PYQT_TESTS=1 python -m pytest`; `798 passed, 21 skipped`)
 - `make test`
 - Result: pass (`798 passed, 21 skipped`)
+
+## Outstanding follow-up items
+- Don't put the backend info on the Overlay controller title bar. Let's leave it off for now. 
+- Backend choice shown in preferences is from the plugin suggestion, not the client determination. I want to expose client-authoritative backend status (source=client_runtime) to plugin preferences via the existing plugin↔client socket path, with current plugin shadow status (source=plugin_hint) retained as fallback and explicitly labeled advisory.
+- Add backend choice to the test logo and debug overlay metrics
