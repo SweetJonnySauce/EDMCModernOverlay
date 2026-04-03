@@ -134,7 +134,7 @@ flowchart LR
     Plugin -->|overlay_config + platform_context + shadow_backend_status| Socket
     Socket --> Ingest
     Ingest --> Probe --> Selector --> Status --> Bundles
-    Helper -->|helper to client only (plugin not in transport path)| Bundles
+    Helper -->|helper_client_only| Bundles
 
     Plugin -->|backend_status CLI (currently returns plugin_hint)| Prefs
     Plugin -->|backend_status CLI (currently returns plugin_hint)| Ctrl
