@@ -37,12 +37,37 @@
 - [ ] Commands executed and outcomes recorded.
 - [ ] Skips/failures documented with reason and follow-up action.
 
+## Scope
+- In scope:
+- <refactor scope #1>
+- <refactor scope #2>
+- Out of scope:
+- <non-goal #1>
+- <non-goal #2>
+
+## Current Touch Points
+- Code:
+- `<path/to/file.py>` (<what is touched>)
+- `<path/to/file2.py>` (<what is touched>)
+- Tests:
+- `<path/to/test_file.py>`
+- Docs/notes:
+- `<path/to/doc.md>`
+
+## Open Questions
+- None currently.
+
+## Decisions (Locked)
+- <decision #1>
+- <decision #2>
+
 ## Per-Iteration Test Plan
-- **Env setup (once per machine):** `python3 -m venv .venv && source .venv/bin/activate && pip install -U pip && pip install -e .[dev]`
-- **Headless quick pass (default for each step):** `source .venv/bin/activate && python -m pytest` (scope with `tests/…` or `-k` as needed).
-- **Core project checks:** `make check` (lint/typecheck/pytest defaults) and `make test` (project test target) from repo root.
+- **Env setup (once per machine):** `python3 -m venv .venv && source .venv/bin/activate && python -m pip install -U pip && python -m pip install -r requirements-dev.txt`
+- **Headless quick pass (default for each step):** `source .venv/bin/activate && python -m pytest`
+- **Targeted tests:** `source .venv/bin/activate && python -m pytest <path/to/tests> -k "<pattern>"`
+- **Milestone checks:** `make check` and `make test`
+- **Compliance baseline check (release/compliance work):** `python scripts/check_edmc_python.py`
 - **Full suite with GUI deps (as applicable):** ensure GUI/runtime deps are installed (e.g., PyQt for Qt projects), then set the required env flag (e.g., `PYQT_TESTS=1`) and run the full suite.
-- **Targeted filters:** use `-k` to scope to touched areas; document skips (e.g., long-running/system tests) with reasons.
 - **After wiring changes:** rerun headless tests plus the full GUI-enabled suite once per milestone to catch integration regressions.
 
 ## Guiding Traits for Readable, Maintainable Code
@@ -77,3 +102,20 @@
 
 | Stage | Description | Status |
 | --- | --- | --- |
+
+## Execution Log
+- Plan created on <YYYY-MM-DD>.
+- Record one execution summary subsection per completed phase.
+- Record exact test commands and outcomes for each completed phase.
+
+### Phase N Execution Summary
+- Stage N.1:
+- <result>
+- Stage N.2:
+- <result>
+
+Duplicate as needed for additional stages and phases.
+
+### Tests Run For Phase N
+- `<command>`
+- Result: <passed/failed/skipped + brief notes>

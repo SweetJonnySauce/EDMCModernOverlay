@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import sys
 import time
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
 from PyQt6.QtGui import QGuiApplication, QPainter
 
+from overlay_client.backend import ProbeSource
 from overlay_client.group_transform import GroupTransform
 from overlay_client.legacy_store import LegacyItem
 from overlay_client.override_reload import force_reload_overrides, parse_reload_nonce
@@ -18,7 +20,7 @@ from overlay_client.payload_transform import (
     remap_axis_value,
     transform_components,
 )
-from overlay_client.platform_context import PlatformContext
+from overlay_client.platform_context import PlatformContext, _backend_status_signature, _client_backend_status
 from overlay_client.viewport_helper import BASE_HEIGHT, BASE_WIDTH, ScaleMode
 from overlay_client.viewport_transform import LegacyMapper, build_viewport
 
@@ -923,6 +925,9 @@ class ControlSurfaceMixin:
     def update_platform_context(self, context_payload: Optional[Dict[str, Any]]) -> None:
         if context_payload is None:
             return
+        plugin_backend_hint = context_payload.get("shadow_backend_status")
+        if not isinstance(plugin_backend_hint, Mapping):
+            plugin_backend_hint = None
         session = str(context_payload.get("session_type") or self._platform_context.session_type)
         compositor = str(context_payload.get("compositor") or self._platform_context.compositor)
         force_value = context_payload.get("force_xwayland")
@@ -947,21 +952,59 @@ class ControlSurfaceMixin:
             flatpak=flatpak_flag,
             flatpak_app=flatpak_app_label,
         )
-        if new_context == self._platform_context:
-            return
-        self._platform_context = new_context
-        self._platform_controller.update_context(new_context)
-        self._platform_controller.prepare_window(self.windowHandle())
-        self._platform_controller.apply_click_through(True)
-        self._interaction_controller.reapply_current(reason="platform_context_update")
-        self._restore_drag_interactivity()
-        _CLIENT_LOGGER.debug(
-            "Platform context updated: session=%s compositor=%s force_xwayland=%s flatpak=%s",
-            new_context.session_type or "unknown",
-            new_context.compositor or "unknown",
-            new_context.force_xwayland,
-            new_context.flatpak,
+        client_backend_status = _client_backend_status(
+            new_context,
+            source=ProbeSource.RUNTIME_UPDATE,
+            qt_platform_name=(QGuiApplication.platformName() or "").lower(),
+            env=os.environ,
         )
+        plugin_signature = _backend_status_signature(plugin_backend_hint)
+        client_signature = _backend_status_signature(client_backend_status)
+        self._plugin_backend_status_hint = plugin_backend_hint
+        self._client_backend_status = client_backend_status
+
+        mismatch_signature = None
+        if plugin_signature is not None and plugin_signature != client_signature:
+            mismatch_signature = plugin_signature + client_signature
+        if mismatch_signature is not None and mismatch_signature != self._last_backend_mismatch_signature:
+            selected_backend = plugin_backend_hint.get("selected_backend") if plugin_backend_hint is not None else {}
+            if not isinstance(selected_backend, Mapping):
+                selected_backend = {}
+            _CLIENT_LOGGER.info(
+                "Plugin backend hint differs from client runtime selection: plugin=%s / %s classification=%s client=%s classification=%s",
+                str(selected_backend.get("family") or "unknown"),
+                str(selected_backend.get("instance") or "unknown"),
+                str(plugin_backend_hint.get("classification") or "unknown") if plugin_backend_hint is not None else "unknown",
+                client_backend_status.selected_backend.support_label,
+                client_backend_status.classification.value,
+            )
+            self._last_backend_mismatch_signature = mismatch_signature
+        elif mismatch_signature is None:
+            self._last_backend_mismatch_signature = None
+
+        if client_signature != getattr(self, "_last_client_backend_status_signature", None):
+            _CLIENT_LOGGER.debug(
+                "Client backend status updated: backend=%s classification=%s",
+                client_backend_status.selected_backend.support_label,
+                client_backend_status.classification.value,
+            )
+            self._last_client_backend_status_signature = client_signature
+
+        if new_context != self._platform_context:
+            self._platform_context = new_context
+            self._platform_controller.update_context(new_context)
+            self._platform_controller.update_backend_status(client_backend_status)
+            self._platform_controller.prepare_window(self.windowHandle())
+            self._platform_controller.apply_click_through(True)
+            self._interaction_controller.reapply_current(reason="platform_context_update")
+            self._restore_drag_interactivity()
+            _CLIENT_LOGGER.debug(
+                "Platform context updated: session=%s compositor=%s force_xwayland=%s flatpak=%s",
+                new_context.session_type or "unknown",
+                new_context.compositor or "unknown",
+                new_context.force_xwayland,
+                new_context.flatpak,
+            )
         self._status = self._format_status_message(self._status_raw)
         if self._show_status and self._status:
             self._show_overlay_status_message(self._status)

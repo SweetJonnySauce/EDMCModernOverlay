@@ -101,6 +101,7 @@ if __package__:
     from .EDMCOverlay.edmcoverlay import normalise_legacy_payload
     from .group_cache import GroupPlacementCache
     from .overlay_client import env_overrides as env_overrides_helper
+    from .overlay_client.backend import BackendSelector, ProbeInputs, ProbeSource, collect_platform_probe
 else:  # pragma: no cover - EDMC loads as top-level module
     from version import __version__ as MODERN_OVERLAY_VERSION, DEV_MODE_ENV_VAR, is_dev_build
     from overlay_plugin.lifecycle import LifecycleTracker
@@ -176,6 +177,7 @@ else:  # pragma: no cover - EDMC loads as top-level module
     from EDMCOverlay.edmcoverlay import normalise_legacy_payload
     from group_cache import GroupPlacementCache
     import overlay_client.env_overrides as env_overrides_helper
+    from overlay_client.backend import BackendSelector, ProbeInputs, ProbeSource, collect_platform_probe
 
 PLUGIN_NAME = "EDMCModernOverlay"
 PLUGIN_VERSION = MODERN_OVERLAY_VERSION
@@ -3496,6 +3498,34 @@ class _PluginRuntime:
                 return True
         return False
 
+    def _shadow_qt_platform_name(self, session_type: str, *, force_xwayland: bool) -> str:
+        configured = str(os.environ.get("QT_QPA_PLATFORM") or "").strip().lower()
+        if configured:
+            return configured
+        if not sys.platform.startswith("linux"):
+            return ""
+        if session_type == "wayland" and not force_xwayland:
+            return "wayland"
+        return "xcb"
+
+    def _shadow_backend_status_payload(self, context: Mapping[str, Any]) -> Dict[str, Any]:
+        session_type = str(context.get("session_type") or "")
+        force_xwayland = bool(context.get("force_xwayland"))
+        probe = collect_platform_probe(
+            ProbeInputs(
+                source=ProbeSource.INITIAL_HINTS,
+                sys_platform=sys.platform,
+                qt_platform_name=self._shadow_qt_platform_name(session_type, force_xwayland=force_xwayland),
+                session_type=session_type,
+                compositor=str(context.get("compositor") or ""),
+                force_xwayland=force_xwayland,
+                is_flatpak=bool(context.get("flatpak")),
+                flatpak_app_id=str(context.get("flatpak_app") or ""),
+                env=os.environ,
+            )
+        )
+        return BackendSelector().select(probe).to_payload()
+
     def _platform_context_payload(self) -> Dict[str, Any]:
         session = (os.environ.get("XDG_SESSION_TYPE") or "").lower()
         context = {
@@ -3507,6 +3537,7 @@ class _PluginRuntime:
             context["flatpak"] = True
             if self._flatpak_context.get("app_id"):
                 context["flatpak_app"] = self._flatpak_context["app_id"]
+        context["shadow_backend_status"] = self._shadow_backend_status_payload(context)
         return context
 
     def _legacy_overlay_active(self) -> bool:

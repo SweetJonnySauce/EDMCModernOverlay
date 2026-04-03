@@ -388,7 +388,7 @@ class FollowSurfaceMixin:
     def _ensure_transient_parent(self, state: WindowState) -> None:
         if not sys.platform.startswith("linux"):
             return
-        if self._is_wayland():
+        if not self._platform_controller.uses_transient_parent():
             if self._transient_parent_window is not None:
                 window_handle = self.windowHandle()
                 if window_handle is not None:

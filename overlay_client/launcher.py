@@ -271,7 +271,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     window.set_data_client(data_client)
     helper.apply_initial_window_state(window, initial_settings)
     _warn_transparent_on_startup(window)
-    tracker = create_elite_window_tracker(_CLIENT_LOGGER, monitor_provider=window.monitor_snapshots)
+    tracker = create_elite_window_tracker(
+        _CLIENT_LOGGER,
+        monitor_provider=window.monitor_snapshots,
+        backend_status=window.current_backend_status(),
+    )
     if tracker is not None:
         window.set_window_tracker(tracker)
     else:

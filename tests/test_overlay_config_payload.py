@@ -12,6 +12,7 @@ class _StubPrefs:
         self.gridlines_enabled = False
         self.gridline_spacing = 100
         self.force_render = False
+        self.force_xwayland = False
         self.title_bar_enabled = False
         self.title_bar_height = 0
         self.show_debug_overlay = False
@@ -91,3 +92,26 @@ def test_overlay_config_defaults_keep_clamp_off(monkeypatch):
     assert payload["physical_clamp_overrides"] == {}
     assert runtime._last_config.get("physical_clamp_enabled") is False
     assert runtime._last_config.get("physical_clamp_overrides") == {}
+
+
+def test_platform_context_payload_includes_shadow_backend_status(monkeypatch):
+    runtime = object.__new__(load._PluginRuntime)
+    runtime._preferences = _StubPrefs()
+    runtime._flatpak_context = {}
+
+    monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
+    monkeypatch.setenv("XDG_CURRENT_DESKTOP", "KDE")
+    monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
+
+    context = runtime._platform_context_payload()
+
+    assert context["session_type"] == "wayland"
+    assert context["compositor"] == "kwin"
+    assert context["force_xwayland"] is False
+    shadow = context["shadow_backend_status"]
+    assert shadow["shadow_mode"] is True
+    assert shadow["selected_backend"] == {
+        "family": "native_wayland",
+        "instance": "kwin_wayland",
+    }
+    assert shadow["probe"]["qt_platform_name"] == "wayland"

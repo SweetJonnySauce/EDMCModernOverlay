@@ -9,7 +9,10 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, List, Optional, Protocol, Tuple
+from typing import TYPE_CHECKING, Any, Callable, List, Optional, Protocol, Tuple
+
+if TYPE_CHECKING:
+    from overlay_client.backend import BackendSelectionStatus
 
 
 @dataclass(slots=True)
@@ -165,6 +168,7 @@ def create_elite_window_tracker(
     logger: logging.Logger,
     title_hint: str = "elite - dangerous",
     monitor_provider: Optional[MonitorProvider] = None,
+    backend_status: Optional["BackendSelectionStatus"] = None,
 ) -> Optional[WindowTracker]:
     """Instantiate a platform-specific tracker for the Elite client."""
 
@@ -177,64 +181,92 @@ def create_elite_window_tracker(
             logger.warning("Windows tracker unavailable: %s", exc)
             return None
     if platform.startswith("linux"):
+        from overlay_client.backend.consumers import (
+            create_bundle_tracker,
+            resolve_legacy_linux_bundle,
+            resolve_linux_bundle_from_status,
+            resolve_tracker_fallback_bundle,
+        )
+
+        if backend_status is not None:
+            bundle = resolve_linux_bundle_from_status(backend_status)
+            try:
+                tracker = create_bundle_tracker(
+                    bundle,
+                    logger,
+                    title_hint=title_hint,
+                    monitor_provider=monitor_provider,
+                )
+            except Exception as exc:  # pragma: no cover - defensive guard
+                logger.warning("Tracker backend unavailable: %s", exc)
+                return None
+            if tracker is not None:
+                return tracker
+            fallback_bundle = resolve_tracker_fallback_bundle(backend_status)
+            if fallback_bundle is None:
+                return None
+            if backend_status.probe.session_type.value == "wayland":
+                logger.debug(
+                    "Wayland backend '%s' does not provide a tracker; attempting X11 fallback",
+                    bundle.descriptor.instance.value,
+                )
+            try:
+                return create_bundle_tracker(
+                    fallback_bundle,
+                    logger,
+                    title_hint=title_hint,
+                    monitor_provider=monitor_provider,
+                )
+            except Exception as exc:  # pragma: no cover - defensive guard
+                logger.warning("X11 tracker unavailable: %s", exc)
+                return None
+
         session = (os.environ.get("EDMC_OVERLAY_SESSION_TYPE") or os.environ.get("XDG_SESSION_TYPE") or "").lower()
         compositor = (os.environ.get("EDMC_OVERLAY_COMPOSITOR") or "").lower()
         force_xwayland = os.environ.get("EDMC_OVERLAY_FORCE_XWAYLAND") == "1"
+        bundle = resolve_legacy_linux_bundle(
+            session_type=session,
+            compositor=compositor,
+            force_xwayland=force_xwayland,
+            env=os.environ,
+        )
+        try:
+            tracker = create_bundle_tracker(
+                bundle,
+                logger,
+                title_hint=title_hint,
+                monitor_provider=monitor_provider,
+            )
+        except Exception as exc:  # pragma: no cover - defensive guard
+            logger.warning("Tracker backend unavailable: %s", exc)
+            return None
+        if tracker is not None:
+            return tracker
         if session == "wayland" and not force_xwayland:
-            tracker = _create_wayland_tracker(logger, title_hint, monitor_provider, compositor)
-            if tracker is not None:
-                return tracker
             logger.debug(
                 "Wayland compositor '%s' not yet supported for follow mode; attempting X11 fallback",
                 compositor or "unknown",
             )
+        fallback_bundle = resolve_legacy_linux_bundle(
+            session_type="wayland" if session == "wayland" else "x11",
+            compositor=compositor,
+            force_xwayland=(session == "wayland"),
+            qt_platform_name="xcb" if session == "wayland" else "",
+            env=os.environ,
+        )
         try:
-            return _WmctrlTracker(logger, title_hint, monitor_provider)
+            return create_bundle_tracker(
+                fallback_bundle,
+                logger,
+                title_hint=title_hint,
+                monitor_provider=monitor_provider,
+            )
         except Exception as exc:  # pragma: no cover - defensive guard
             logger.warning("X11 tracker unavailable: %s", exc)
             return None
 
     logger.info("Window tracking not implemented for platform '%s'; follow mode disabled", platform)
     return None
-
-
-def _create_wayland_tracker(
-    logger: logging.Logger,
-    title_hint: str,
-    monitor_provider: Optional[MonitorProvider],
-    compositor_hint: str,
-) -> Optional[WindowTracker]:
-    compositor = (compositor_hint or "").lower()
-    env = os.environ
-    if not compositor:
-        if env.get("SWAYSOCK"):
-            compositor = "sway"
-        elif env.get("HYPRLAND_INSTANCE_SIGNATURE"):
-            compositor = "hyprland"
-        elif "KDE" in (env.get("XDG_CURRENT_DESKTOP") or "").upper() or env.get("KDE_FULL_SESSION"):
-            compositor = "kwin"
-        elif "GNOME" in (env.get("XDG_CURRENT_DESKTOP") or "").upper() or env.get("GNOME_SHELL_SESSION_MODE"):
-            compositor = "gnome-shell"
-    if compositor in {"sway", "wlroots", "wayfire"}:
-        return _SwayTracker(logger, title_hint, monitor_provider)
-    if compositor == "hyprland":
-        return _HyprlandTracker(logger, title_hint, monitor_provider)
-    if compositor == "kwin":
-        return _KWinTracker(logger, title_hint, monitor_provider)
-    if compositor in {"gnome-shell", "mutter"}:
-        logger.info(
-            "GNOME Shell Wayland compositor detected; follow mode requires the EDMC Modern Overlay GNOME extension."
-        )
-        return None
-    if compositor == "cosmic":
-        logger.info("COSMIC Wayland compositor detected; follow mode backend not yet implemented.")
-        return None
-    if compositor:
-        logger.info("No Wayland tracker available for compositor '%s'", compositor)
-    else:
-        logger.info("Wayland compositor not reported; no follow-mode backend selected")
-    return None
-
 
 ctypes: Any
 wintypes: Any
@@ -565,6 +597,16 @@ class _WmctrlTracker:
             return None
 
 
+def create_wmctrl_tracker(
+    logger: logging.Logger,
+    title_hint: str = "elite - dangerous",
+    monitor_provider: Optional[MonitorProvider] = None,
+) -> WindowTracker:
+    """Create the shipped X11 wmctrl/xwininfo tracker used by X11-derived paths."""
+
+    return _WmctrlTracker(logger, title_hint, monitor_provider)
+
+
 class _WaylandTrackerBase:
     """Shared helpers for Wayland-based trackers."""
 
@@ -696,6 +738,16 @@ class _SwayTracker(_WaylandTrackerBase):
         return target, best
 
 
+def create_sway_tracker(
+    logger: logging.Logger,
+    title_hint: str = "elite - dangerous",
+    monitor_provider: Optional[MonitorProvider] = None,
+) -> WindowTracker:
+    """Create the shipped wlroots/Sway tracker used by native Wayland bundles."""
+
+    return _SwayTracker(logger, title_hint, monitor_provider)
+
+
 class _HyprlandTracker(_WaylandTrackerBase):
     """Use hyprctl JSON output on Hyprland."""
 
@@ -803,6 +855,16 @@ class _HyprlandTracker(_WaylandTrackerBase):
         return self._complete(augmented)
 
 
+def create_hyprland_tracker(
+    logger: logging.Logger,
+    title_hint: str = "elite - dangerous",
+    monitor_provider: Optional[MonitorProvider] = None,
+) -> WindowTracker:
+    """Create the shipped Hyprland tracker used by native Wayland bundles."""
+
+    return _HyprlandTracker(logger, title_hint, monitor_provider)
+
+
 class _KWinTracker(_WaylandTrackerBase):
     """Use the KWin DBus interface on KDE Plasma Wayland."""
 
@@ -907,3 +969,13 @@ class _KWinTracker(_WaylandTrackerBase):
         monitors = self._monitors()
         augmented = _augment_state_with_monitors(state, monitors, self._logger)
         return self._complete(augmented)
+
+
+def create_kwin_tracker(
+    logger: logging.Logger,
+    title_hint: str = "elite - dangerous",
+    monitor_provider: Optional[MonitorProvider] = None,
+) -> WindowTracker:
+    """Create the shipped KWin tracker used by native Wayland bundles."""
+
+    return _KWinTracker(logger, title_hint, monitor_provider)

@@ -680,6 +680,9 @@ class OverlayWindow(SetupSurfaceMixin, InteractionSurfaceMixin, QWidget, RenderS
     def monitor_snapshots(self) -> List[MonitorSnapshot]:
         return self._platform_controller.monitors()
 
+    def current_backend_status(self):
+        return self._client_backend_status
+
     def _is_wayland(self) -> bool:
         platform_name = (QGuiApplication.platformName() or "").lower()
         return "wayland" in platform_name

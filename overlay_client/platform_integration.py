@@ -11,6 +11,16 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QGuiApplication, QWindow
 from PyQt6.QtWidgets import QWidget
 
+from overlay_client.backend import BackendSelectionStatus
+from overlay_client.backend.consumers import (
+    create_bundle_integration,
+    is_wayland_bundle,
+    platform_label_for_bundle,
+    resolve_legacy_linux_bundle,
+    resolve_linux_bundle_from_status,
+    uses_transient_parent,
+)
+
 MonitorSnapshot = Tuple[str, int, int, int, int]
 
 
@@ -86,6 +96,12 @@ class _XcbIntegration(_IntegrationBase):
 
     # No extra logic; base implementation suffices.
     pass
+
+
+def create_xcb_integration(widget: QWidget, logger: logging.Logger, context: PlatformContext) -> _IntegrationBase:
+    """Create the shipped XCB/X11 integration used by both X11 and XWayland paths."""
+
+    return _XcbIntegration(widget, logger, context)
 
 
 class _WaylandIntegration(_IntegrationBase):
@@ -238,32 +254,70 @@ class _WaylandIntegration(_IntegrationBase):
             self._logger.debug("Unable to query Wayland native resources: %s", exc)
 
 
+def create_wayland_integration(widget: QWidget, logger: logging.Logger, context: PlatformContext) -> _IntegrationBase:
+    """Create the shipped Wayland integration used by native Wayland backend bundles."""
+
+    return _WaylandIntegration(widget, logger, context)
+
+
 class PlatformController:
     """Facade that selects the correct integration for the running platform."""
 
-    def __init__(self, widget: QWidget, logger: logging.Logger, context: PlatformContext) -> None:
+    def __init__(
+        self,
+        widget: QWidget,
+        logger: logging.Logger,
+        context: PlatformContext,
+        *,
+        backend_status: Optional[BackendSelectionStatus] = None,
+    ) -> None:
         self._widget = widget
         self._logger = logger
         self._context = context
         self._platform_name = (QGuiApplication.platformName() or "").lower()
+        self._backend_status = backend_status
         self._integration = self._select_integration()
 
     def _select_integration(self) -> _IntegrationBase:
         if sys.platform.startswith("win"):
             self._logger.debug("Selecting Windows integration for overlay client")
             return _WindowsIntegration(self._widget, self._logger, self._context)
-        if self._context.force_xwayland or self._platform_name.startswith("xcb"):
-            self._logger.debug("Selecting XCB/X11 integration for overlay client")
-            return _XcbIntegration(self._widget, self._logger, self._context)
-        if (os.environ.get("XDG_SESSION_TYPE") or "").lower() == "x11":
-            self._logger.debug("XDG_SESSION_TYPE indicates X11; using XCB integration")
-            return _XcbIntegration(self._widget, self._logger, self._context)
-        self._logger.debug("Selecting Wayland integration for overlay client")
-        return _WaylandIntegration(self._widget, self._logger, self._context)
+        bundle = self._current_linux_bundle()
+        self._logger.debug("Selecting bundle-backed integration for overlay client: %s", bundle.descriptor.support_label)
+        return create_bundle_integration(bundle, self._widget, self._logger, self._context)
+
+    def _current_linux_bundle(self):
+        if self._backend_status is not None:
+            return resolve_linux_bundle_from_status(self._backend_status)
+        return resolve_legacy_linux_bundle(
+            session_type=self._context.session_type,
+            compositor=self._context.compositor,
+            force_xwayland=self._context.force_xwayland,
+            qt_platform_name=self._platform_name,
+            env=os.environ,
+        )
 
     def update_context(self, context: PlatformContext) -> None:
         self._context = context
         self._integration.update_context(context)
+
+    def update_backend_status(self, status: Optional[BackendSelectionStatus]) -> None:
+        if sys.platform.startswith("win"):
+            self._backend_status = status
+            return
+        previous_bundle = self._current_linux_bundle()
+        previous_window = getattr(self._integration, "_window", None)
+        self._backend_status = status
+        next_bundle = self._current_linux_bundle()
+        if previous_bundle.descriptor != next_bundle.descriptor:
+            self._logger.debug(
+                "Switching bundle-backed integration for overlay client: %s -> %s",
+                previous_bundle.descriptor.support_label,
+                next_bundle.descriptor.support_label,
+            )
+            self._integration = create_bundle_integration(next_bundle, self._widget, self._logger, self._context)
+            if previous_window is not None:
+                self._integration.prepare_window(previous_window)
 
     def prepare_window(self, window: Optional[QWindow]) -> None:
         self._integration.prepare_window(window)
@@ -274,24 +328,18 @@ class PlatformController:
     def monitors(self) -> List[MonitorSnapshot]:
         return self._integration.monitors()
 
+    def is_wayland_backend(self) -> bool:
+        if sys.platform.startswith("win"):
+            return False
+        return is_wayland_bundle(self._current_linux_bundle())
+
+    def uses_transient_parent(self) -> bool:
+        if not sys.platform.startswith("linux"):
+            return False
+        return uses_transient_parent(self._current_linux_bundle())
+
     def platform_label(self) -> str:
         """Return a human-readable platform label for status messages."""
         if sys.platform.startswith("win"):
             return "Windows"
-        session = (self._context.session_type or "").lower()
-        if not session:
-            session = (os.environ.get("XDG_SESSION_TYPE") or "").lower()
-        platform_name = (QGuiApplication.platformName() or self._platform_name or "").lower()
-        if session == "wayland" and (self._context.force_xwayland or platform_name.startswith("xcb")):
-            return "Wayland (XWayland)"
-        if platform_name.startswith("wayland"):
-            return "Wayland"
-        if session == "wayland":
-            return "Wayland"
-        if self._context.force_xwayland:
-            return "X11"
-        if session == "x11":
-            return "X11"
-        if platform_name.startswith("xcb"):
-            return "X11"
-        return "Wayland"
+        return platform_label_for_bundle(self._current_linux_bundle())

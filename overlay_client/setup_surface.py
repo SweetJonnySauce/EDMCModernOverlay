@@ -17,13 +17,14 @@ from group_cache import GroupPlacementCache, resolve_cache_path
 from overlay_client.client_config import InitialClientSettings
 from overlay_client.controller_mode import ControllerModeProfile, ControllerModeTracker, ModeProfile
 from overlay_client.data_client import OverlayDataClient
+from overlay_client.backend import ProbeSource
 from overlay_client.debug_config import DEBUG_CONFIG_ENABLED, DebugConfig
 from overlay_client.debug_cycle_overlay import CycleOverlayView, DebugOverlayView
 from overlay_client.follow_controller import FollowController
 from overlay_client.group_coordinator import GroupCoordinator
 from overlay_client.grouping_adapter import GroupingAdapter
 from overlay_client.grouping_helper import FillGroupingHelper
-from overlay_client.platform_context import _initial_platform_context
+from overlay_client.platform_context import _backend_status_signature, _client_backend_status, _initial_platform_context
 from overlay_client.platform_integration import PlatformController
 from overlay_client.plugin_overrides import PluginOverrideManager
 from overlay_client.render_pipeline import LegacyRenderPipeline
@@ -140,17 +141,36 @@ class SetupSurfaceMixin:
         self._follow_enabled: bool = True
         self._last_logged_scale: Optional[Tuple[float, float, float]] = None
         self._platform_context = _initial_platform_context(initial)
-        self._platform_controller = PlatformController(self, _CLIENT_LOGGER, self._platform_context)
+        self._plugin_backend_status_hint: Optional[Dict[str, Any]] = None
+        self._client_backend_status = _client_backend_status(
+            self._platform_context,
+            source=ProbeSource.INITIAL_HINTS,
+            qt_platform_name=(QGuiApplication.platformName() or "").lower(),
+            env=os.environ,
+        )
+        self._last_client_backend_status_signature = _backend_status_signature(self._client_backend_status)
+        self._last_backend_mismatch_signature: Optional[Tuple[str, str, str, str, bool]] = None
+        self._platform_controller = PlatformController(
+            self,
+            _CLIENT_LOGGER,
+            self._platform_context,
+            backend_status=self._client_backend_status,
+        )
         _CLIENT_LOGGER.debug(
             "Platform controller initialised: session=%s compositor=%s force_xwayland=%s",
             self._platform_context.session_type or "unknown",
             self._platform_context.compositor or "unknown",
             self._platform_context.force_xwayland,
         )
+        _CLIENT_LOGGER.debug(
+            "Client backend status initialised: backend=%s classification=%s",
+            self._client_backend_status.selected_backend.support_label,
+            self._client_backend_status.classification.value,
+        )
         self._window_controller = WindowController(log_fn=_CLIENT_LOGGER.debug)
         self._visibility_helper = VisibilityHelper(log_fn=_CLIENT_LOGGER.debug)
         self._interaction_controller = InteractionController(
-            is_wayland_fn=self._is_wayland,
+            is_wayland_fn=lambda: self._platform_controller.is_wayland_backend(),
             log_fn=_CLIENT_LOGGER.debug,
             prepare_window_fn=lambda window: self._platform_controller.prepare_window(window),
             apply_click_through_fn=lambda transparent: self._platform_controller.apply_click_through(transparent),

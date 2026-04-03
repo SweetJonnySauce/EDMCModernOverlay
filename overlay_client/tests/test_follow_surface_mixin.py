@@ -28,6 +28,7 @@ class _StubWindowHandle:
     def __init__(self, dpr: float = 1.5) -> None:
         self._dpr = dpr
         self._screen = None
+        self.transient_parents = []
 
     def devicePixelRatio(self) -> float:
         return self._dpr
@@ -37,6 +38,9 @@ class _StubWindowHandle:
 
     def setFlag(self, *_args, **_kwargs) -> None:
         return None
+
+    def setTransientParent(self, parent) -> None:
+        self.transient_parents.append(parent)
 
 
 class _StubFollowController:
@@ -150,12 +154,16 @@ class _FollowSurfaceStub(FollowSurfaceMixin):
             {
                 "apply_click_through": lambda *args, **kwargs: None,
                 "platform_label": lambda self=None: "stub",
+                "uses_transient_parent": lambda self=None: False,
+                "is_wayland_backend": lambda self=None: False,
             },
         )()
 
     # Qt shell shims
     def windowHandle(self):
-        return _StubWindowHandle()
+        if not hasattr(self, "_stub_window_handle"):
+            self._stub_window_handle = _StubWindowHandle()
+        return self._stub_window_handle
 
     def frameGeometry(self):
         return _StubFrame()
@@ -257,3 +265,28 @@ def test_handle_missing_follow_state_force_render_enables_visibility(monkeypatch
 
     assert applied == [True, True]  # click-through and restore
     assert stub._visibility_helper.calls == [True]
+
+
+def test_ensure_transient_parent_uses_platform_controller_policy():
+    stub = _FollowSurfaceStub()
+    stub._transient_parent_window = object()
+    stub._transient_parent_id = "0x123"
+    handle = stub.windowHandle()
+    stub._platform_controller = type(
+        "StubPlatform",
+        (),
+        {
+            "uses_transient_parent": lambda self=None: False,
+            "apply_click_through": lambda *args, **kwargs: None,
+            "platform_label": lambda self=None: "stub",
+            "is_wayland_backend": lambda self=None: False,
+        },
+    )()
+
+    stub._ensure_transient_parent(
+        WindowState(x=1, y=2, width=3, height=4, is_foreground=True, is_visible=True, identifier="0x456")
+    )
+
+    assert handle.transient_parents == [None]
+    assert stub._transient_parent_window is None
+    assert stub._transient_parent_id is None
