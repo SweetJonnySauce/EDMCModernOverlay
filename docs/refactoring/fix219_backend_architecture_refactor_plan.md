@@ -1,10 +1,41 @@
 ## Goal: Refactor EDMCModernOverlay into an explicit backend architecture without breaking current behavior
 
-This plan turns the locked decisions from `docs/refactoring/cross_platform_overlay_architecture_research.md` into a staged refactor sequence.
+This plan turns the locked decisions from `docs/refactoring/fix219_cross_platform_overlay_architecture_research.md` into a staged refactor sequence.
+Follow-up cleanup work for the remaining runtime platform-policy leakage is tracked in `docs/refactoring/fix219_backend_architecture_followup_cleanup_plan.md`.
 Document implementation results in the `Execution Log` section.
 After each stage is complete, change stage status to `Completed`.
 When all stages in a phase are complete, change phase status to `Completed`.
 If something is unclear, capture it under `Open Questions`.
+
+## Architecture Progress Snapshot
+
+- The original backend-architecture cutover in this plan is complete.
+- The codebase is now in the post-cutover cleanup/convergence stage tracked in `docs/refactoring/fix219_backend_architecture_followup_cleanup_plan.md`.
+- Current overall position: original refactor Phases `1`-`5` are complete; follow-up cleanup Phase `1` is the next active architectural step.
+- The next planned architecture tracks after `fix219` cleanup are dedicated post-`fix219` phases for Windows backend-contract cleanup, Linux standalone runtime/presentation work, and deeper physical-clamp / geometry-follow redesign; all are deferred from `fix219`, but they remain part of the overall architecture direction.
+
+```mermaid
+flowchart TD
+    A["Architecture Research\nfix219_cross_platform_overlay_architecture_research.md"]
+    B["Original Backend Refactor\nfix219_backend_architecture_refactor_plan.md"]
+    C["Follow-up Cleanup\nfix219_backend_architecture_followup_cleanup_plan.md"]
+
+    A --> B
+    B --> B1["Phase 1\nContracts + shadow selector\nCompleted"]
+    B1 --> B2["Phase 2\nBackend bundles extracted\nCompleted"]
+    B2 --> B3["Phase 3\nClient-authoritative selector cutover\nCompleted"]
+    B3 --> B4["Phase 4\nCapability visibility + override + diagnostics\nCompleted"]
+    B4 --> B5["Phase 5\nHelper boundary foundations + cleanup/archive\nCompleted"]
+
+    B5 --> C
+    C --> C1["Follow-up Phase 1\nPresentation/Input ownership cleanup\nNext"]
+    C1 --> C2["Follow-up Phase 2\nTracker ownership cleanup"]
+    C2 --> C3["Follow-up Phase 3\nStatus/UI leakage cleanup + retained boundaries"]
+    C3 --> C4["Follow-up Phase 4\nValidation + compliance + signoff"]
+    C4 --> D["Post-fix219 Phase\nWindows backend-contract cleanup\nPlanned"]
+    C4 --> E["Post-fix219 Phase\nLinux standalone runtime/presentation\nPlanned"]
+    C4 --> F["Post-fix219 Phase\nPhysical clamp / geometry-follow redesign\nPlanned"]
+```
 
 ## Refactorer Persona
 - Bias toward carving out modules aggressively while guarding behavior: no feature changes, no silent regressions.
@@ -81,14 +112,14 @@ If something is unclear, capture it under `Open Questions`.
 - `tests/HARNESS_README.md`
 - `tests/config/README.md`
 - Docs/notes:
-- `docs/refactoring/cross_platform_overlay_architecture_research.md`
+- `docs/refactoring/fix219_cross_platform_overlay_architecture_research.md`
 - `docs/archive/refactoring/client_refactor.md`
 - `docs/archive/refactoring/load_refactory.md`
 - `docs/archive/refactoring/compositor_aware_install.md`
 - `docs/archive/README.md`
 
 ## Open Questions
-- None currently. Environment-specific helper packaging details beyond the generic approval/security policy should be captured in follow-up helper plans when Phase 5 is reached.
+- None currently. Post-`fix219` Windows backend-contract cleanup, Linux standalone runtime/presentation work, and physical-clamp / geometry-follow redesign are planned explicitly in the `Architecture Progress Snapshot` rather than treated as open questions in this plan.
 
 ## Decisions (Locked)
 - Linux backend tracks remain explicit: `native_x11`, `xwayland_compat`, and `native_wayland_*`.
@@ -619,7 +650,7 @@ flowchart LR
 - `overlay_client/tests/test_backend_consumers.py`
 - `overlay_client/tests/test_platform_controller_backend_status.py`
 - `overlay_client/tests/test_window_tracking_bundle_routing.py`
-- `docs/refactoring/backend_architecture_refactor_plan.md`
+- `docs/refactoring/fix219_backend_architecture_refactor_plan.md`
 - `docs/archive/refactoring/client_refactor.md`
 - `docs/archive/refactoring/load_refactory.md`
 - `docs/archive/refactoring/compositor_aware_install.md`
@@ -958,6 +989,9 @@ flowchart LR
 - Result: pass (`798 passed, 21 skipped`)
 
 ## Outstanding follow-up items
+- See `docs/refactoring/fix219_backend_architecture_followup_cleanup_plan.md` for the maintained gap register, release signoff checklist, and staged closure plan.
+- `standalone_mode` remains outside the `fix219` backend cleanup scope: keep the current Windows behavior, and defer Linux standalone behavior/support to a separate post-`fix219` feature track.
+- `physical_clamp_enabled` / `physical_clamp_overrides` remain outside the `fix219` backend cleanup scope as shared geometry-normalization escape hatches; preserve current behavior during backend/tracker ownership cleanup and defer deeper coordinate-space redesign to a separate post-`fix219` geometry/follow plan.
 - Don't put the backend info on the Overlay controller title bar. Let's leave it off for now. 
 - Backend choice shown in preferences is from the plugin suggestion, not the client determination. I want to expose client-authoritative backend status (source=client_runtime) to plugin preferences via the existing plugin↔client socket path, with current plugin shadow status (source=plugin_hint) retained as fallback and explicitly labeled advisory.
-- Add backend choice to the test logo and debug overlay metrics
+- Add backend choice to the test logo and debug overlay metrics in lower left hand corner of the test logo

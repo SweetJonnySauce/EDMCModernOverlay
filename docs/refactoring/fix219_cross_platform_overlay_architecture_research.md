@@ -289,6 +289,50 @@ And the immediate backlog/investigation set should be:
 
 The plan should also keep `flatpak` as a capability/context axis rather than turning it into another backend family.
 
+## Standalone Mode Boundary
+
+`standalone_mode` should be treated as a runtime/presentation feature, not as a backend-selection policy surface.
+
+### Planning rules
+
+- Preserve the current shipped Windows standalone behavior during the backend-architecture cleanup.
+- Do not expand Linux standalone behavior/support as part of the `fix219` backend cleanup sequence.
+- If Linux standalone support is revisited later, treat it as a separate post-`fix219` feature track with explicit per-environment expectations rather than as one generic "Linux standalone" checkbox.
+- Later Linux standalone planning should validate behavior separately for the actual runtime environments involved, such as `native_x11`, `xwayland_compat`, `kwin_wayland`, `gnome_shell_wayland`, `sway_wayfire_wlroots`, and `hyprland`, because capture/window-role behavior is likely to vary by backend/compositor.
+
+### Planning takeaway
+
+This keeps the backend cleanup focused on backend ownership and selector authority while preserving the current Windows behavior and avoiding accidental scope creep into a separate Linux runtime/presentation feature.
+
+## Physical Clamp Boundary
+
+`physical_clamp_enabled` and `physical_clamp_overrides` should be treated as shared geometry-normalization escape hatches, not as backend-selection controls.
+
+### Problem being addressed
+
+- Overlay tracking sources and Qt window placement do not always agree on coordinate space under fractional scaling, mixed-DPI setups, or compositor/XWayland combinations.
+- The practical failure mode is overlay geometry that appears shrunk, offset, or partially off-screen even when target tracking itself is otherwise working.
+- This is a post-tracking normalization problem rather than a backend-family selection problem.
+
+### Planning rules
+
+- Preserve the current opt-in physical-clamp behavior during the `fix219` backend cleanup.
+- Do not move physical-clamp policy into backend bundles as part of backend ownership cleanup.
+- Keep tracker/backend cleanup focused on producing correct tracked target rects; keep physical clamp as the shared layer that normalizes those rects into Qt/window geometry when needed.
+- Treat per-monitor clamp overrides as escape-hatch calibration data, not as compositor/backend policy.
+- If deeper cleanup is pursued later, handle it as a separate post-`fix219` geometry/follow refactor that introduces clearer coordinate-space contracts rather than expanding backend selection logic.
+
+### Recommended follow-up strategies
+
+- Introduce an explicit coordinate-space contract for tracker outputs instead of inferring it indirectly from geometry heuristics alone.
+- Prefer window-effective DPI/scale data where available, especially where window and screen scale can diverge under fractional scaling.
+- Recompute normalization assumptions when the overlay window changes screens or effective scale.
+- Replace screen-name-only override identity with a more stable monitor identity if override persistence is revisited later.
+
+### Planning takeaway
+
+Physical clamp should remain a shared runtime geometry correction layer through `fix219`. The backend cleanup must preserve it, but should not absorb it into backend-selection architecture or per-backend policy.
+
 ## Classification And Downgrade Policy
 
 The refactor plan may classify environments as:
@@ -380,11 +424,13 @@ However, `xwayland_compat` must remain available as an explicit fallback during 
 - Do not silently remove or hide `xwayland_compat` while native replacements are still being validated in real user environments.
 - Selection logic must report which backend was chosen and why.
 - Manual override must remain available so support and users can force `xwayland_compat` when needed.
-- If a native Wayland backend fails capability checks or is explicitly classified below the required support bar for the current environment, the selector may fall back to `xwayland_compat` with a logged reason.
+- For `fix219`, `xwayland_compat` should remain an explicit manual fallback/override rather than a silent `Auto` fallback.
+- Because Qt startup transport cannot switch in-process, selecting `xwayland_compat` requires an explicit restart-bound override path rather than an automatic runtime transition from native Wayland.
+- If a native Wayland backend fails capability checks or is classified below the required support bar, status/diagnostics should report that honestly and preserve the explicit `xwayland_compat` recovery path for the user instead of silently switching transports under `Auto`.
 
 ### Planning takeaway
 
-The migration target is not "replace XWayland immediately." The migration target is "make native Wayland the preferred path where it is truly ready, while preserving XWayland as an operational fallback until it is no longer needed."
+The migration target is not "replace XWayland immediately." The migration target is "make native Wayland the preferred path where it is truly ready, while preserving XWayland as an explicit operational fallback until it is no longer needed."
 
 ## First Refactor Milestone Policy: Extraction Without Behavior Changes
 
