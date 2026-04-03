@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 from PyQt6.QtGui import QGuiApplication, QPainter
 
 from overlay_client.backend import ProbeSource
+from overlay_client.backend.status import format_status_report_line
 from overlay_client.group_transform import GroupTransform
 from overlay_client.legacy_store import LegacyItem
 from overlay_client.override_reload import force_reload_overrides, parse_reload_nonce
@@ -935,6 +936,13 @@ class ControlSurfaceMixin:
             force_flag = self._platform_context.force_xwayland
         else:
             force_flag = bool(force_value)
+        override_value = context_payload.get("manual_backend_override")
+        if override_value is None:
+            manual_backend_override = self._platform_context.manual_backend_override
+        else:
+            manual_backend_override = str(override_value or "").strip().lower()
+            if manual_backend_override == "auto":
+                manual_backend_override = ""
         flatpak_value = context_payload.get("flatpak")
         if flatpak_value is None:
             flatpak_flag = self._platform_context.flatpak
@@ -949,6 +957,7 @@ class ControlSurfaceMixin:
             session_type=session,
             compositor=compositor,
             force_xwayland=force_flag,
+            manual_backend_override=manual_backend_override,
             flatpak=flatpak_flag,
             flatpak_app=flatpak_app_label,
         )
@@ -967,16 +976,10 @@ class ControlSurfaceMixin:
         if plugin_signature is not None and plugin_signature != client_signature:
             mismatch_signature = plugin_signature + client_signature
         if mismatch_signature is not None and mismatch_signature != self._last_backend_mismatch_signature:
-            selected_backend = plugin_backend_hint.get("selected_backend") if plugin_backend_hint is not None else {}
-            if not isinstance(selected_backend, Mapping):
-                selected_backend = {}
             _CLIENT_LOGGER.info(
-                "Plugin backend hint differs from client runtime selection: plugin=%s / %s classification=%s client=%s classification=%s",
-                str(selected_backend.get("family") or "unknown"),
-                str(selected_backend.get("instance") or "unknown"),
-                str(plugin_backend_hint.get("classification") or "unknown") if plugin_backend_hint is not None else "unknown",
-                client_backend_status.selected_backend.support_label,
-                client_backend_status.classification.value,
+                "Plugin backend hint differs from client runtime selection: plugin=%s client=%s",
+                format_status_report_line(plugin_backend_hint) if plugin_backend_hint is not None else "none",
+                format_status_report_line(client_backend_status),
             )
             self._last_backend_mismatch_signature = mismatch_signature
         elif mismatch_signature is None:
@@ -984,9 +987,8 @@ class ControlSurfaceMixin:
 
         if client_signature != getattr(self, "_last_client_backend_status_signature", None):
             _CLIENT_LOGGER.debug(
-                "Client backend status updated: backend=%s classification=%s",
-                client_backend_status.selected_backend.support_label,
-                client_backend_status.classification.value,
+                "Client backend status updated: %s",
+                format_status_report_line(client_backend_status),
             )
             self._last_client_backend_status_signature = client_signature
 

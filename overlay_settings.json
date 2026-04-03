@@ -10,6 +10,7 @@
   "force_render": false,
   "standalone_mode": false,
   "force_xwayland": true,
+  "manual_backend_override": "",
   "physical_clamp_enabled": false,
   "physical_clamp_overrides": {},
   "show_debug_overlay": false,

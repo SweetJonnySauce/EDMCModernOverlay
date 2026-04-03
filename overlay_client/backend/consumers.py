@@ -6,6 +6,8 @@ import logging
 from typing import TYPE_CHECKING, Mapping, Optional
 
 from overlay_client.backend.contracts import BackendBundle, BackendFamily, BackendInstance, SessionType
+from overlay_client.backend.probe import ProbeInputs, ProbeSource, collect_platform_probe
+from overlay_client.backend.selector import BackendSelector
 from overlay_client.backend.status import BackendSelectionStatus
 
 if TYPE_CHECKING:
@@ -39,6 +41,69 @@ def create_bundle_tracker(
     return factory(logger, title_hint=title_hint, monitor_provider=monitor_provider)
 
 
+_COMPAT_SELECTOR = BackendSelector(shadow_mode=False)
+
+
+def derive_linux_backend_status(
+    *,
+    session_type: str = "",
+    compositor: str = "",
+    force_xwayland: bool = False,
+    qt_platform_name: str = "",
+    manual_override: str = "",
+    flatpak: bool = False,
+    flatpak_app_id: str = "",
+    env: Optional[Mapping[str, str]] = None,
+    source: ProbeSource = ProbeSource.RUNTIME_UPDATE,
+) -> BackendSelectionStatus:
+    """Derive a Linux backend status through the shared pure probe/selector path."""
+
+    probe = collect_platform_probe(
+        ProbeInputs(
+            source=source,
+            sys_platform="linux",
+            qt_platform_name=qt_platform_name,
+            session_type=session_type,
+            compositor=compositor,
+            force_xwayland=force_xwayland,
+            is_flatpak=flatpak,
+            flatpak_app_id=flatpak_app_id,
+            env=dict(env or {}),
+        )
+    )
+    return _COMPAT_SELECTOR.select(probe, manual_override=manual_override)
+
+
+def ensure_linux_backend_status(
+    status: Optional[BackendSelectionStatus],
+    *,
+    session_type: str = "",
+    compositor: str = "",
+    force_xwayland: bool = False,
+    qt_platform_name: str = "",
+    manual_override: str = "",
+    flatpak: bool = False,
+    flatpak_app_id: str = "",
+    env: Optional[Mapping[str, str]] = None,
+    source: ProbeSource = ProbeSource.RUNTIME_UPDATE,
+) -> BackendSelectionStatus:
+    """Return the provided Linux backend status, or derive one through the shared selector."""
+
+    if status is not None:
+        return status
+    return derive_linux_backend_status(
+        session_type=session_type,
+        compositor=compositor,
+        force_xwayland=force_xwayland,
+        qt_platform_name=qt_platform_name,
+        manual_override=manual_override,
+        flatpak=flatpak,
+        flatpak_app_id=flatpak_app_id,
+        env=env,
+        source=source,
+    )
+
+
 def resolve_legacy_linux_bundle(
     *,
     session_type: str = "",
@@ -47,35 +112,16 @@ def resolve_legacy_linux_bundle(
     qt_platform_name: str = "",
     env: Optional[Mapping[str, str]] = None,
 ) -> BackendBundle:
-    """Resolve the current shipped Linux runtime path to an explicit backend bundle."""
+    """Compatibility shim for older no-status callers; resolves through the shared selector."""
 
-    from overlay_client.backend.bundles.gnome_shell_wayland import build_gnome_shell_wayland_bundle
-    from overlay_client.backend.bundles.hyprland import build_hyprland_bundle
-    from overlay_client.backend.bundles.kwin_wayland import build_kwin_wayland_bundle
-    from overlay_client.backend.bundles.native_x11 import build_native_x11_bundle
-    from overlay_client.backend.bundles.sway_wayfire_wlroots import build_sway_wayfire_wlroots_bundle
-    from overlay_client.backend.bundles.wayland_layer_shell_generic import build_wayland_layer_shell_generic_bundle
-    from overlay_client.backend.bundles.xwayland_compat import build_xwayland_compat_bundle
-
-    env_map = dict(env or {})
-    session = str(session_type or env_map.get("XDG_SESSION_TYPE") or "").strip().lower()
-    platform_name = str(qt_platform_name or "").strip().lower()
-
-    if session == "wayland" and (force_xwayland or platform_name.startswith("xcb")):
-        return build_xwayland_compat_bundle()
-    if session == "x11" or platform_name.startswith("xcb") or force_xwayland:
-        return build_native_x11_bundle()
-
-    compositor_name = _resolve_wayland_compositor(compositor, env_map)
-    if compositor_name in {"sway", "wayfire", "wlroots"}:
-        return build_sway_wayfire_wlroots_bundle()
-    if compositor_name == "hyprland":
-        return build_hyprland_bundle()
-    if compositor_name == "kwin":
-        return build_kwin_wayland_bundle()
-    if compositor_name == "gnome-shell":
-        return build_gnome_shell_wayland_bundle()
-    return build_wayland_layer_shell_generic_bundle()
+    status = derive_linux_backend_status(
+        session_type=session_type,
+        compositor=compositor,
+        force_xwayland=force_xwayland,
+        qt_platform_name=qt_platform_name,
+        env=env,
+    )
+    return resolve_linux_bundle_from_status(status)
 
 
 def resolve_linux_bundle_from_status(status: BackendSelectionStatus) -> BackendBundle:
@@ -153,21 +199,3 @@ def platform_label_for_bundle(bundle: BackendBundle) -> str:
     if bundle.descriptor.family is BackendFamily.NATIVE_X11:
         return "X11"
     return "Wayland"
-
-
-def _resolve_wayland_compositor(compositor: str, env: Mapping[str, str]) -> str:
-    token = str(compositor or "").strip().lower()
-    if token in {"mutter", "gnome"}:
-        return "gnome-shell"
-    if token:
-        return token
-    if env.get("SWAYSOCK"):
-        return "sway"
-    if env.get("HYPRLAND_INSTANCE_SIGNATURE"):
-        return "hyprland"
-    desktop = (env.get("XDG_CURRENT_DESKTOP") or "").upper()
-    if "KDE" in desktop or env.get("KDE_FULL_SESSION"):
-        return "kwin"
-    if "GNOME" in desktop or env.get("GNOME_SHELL_SESSION_MODE"):
-        return "gnome-shell"
-    return ""

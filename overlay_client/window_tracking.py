@@ -183,53 +183,20 @@ def create_elite_window_tracker(
     if platform.startswith("linux"):
         from overlay_client.backend.consumers import (
             create_bundle_tracker,
-            resolve_legacy_linux_bundle,
+            ensure_linux_backend_status,
             resolve_linux_bundle_from_status,
             resolve_tracker_fallback_bundle,
         )
 
-        if backend_status is not None:
-            bundle = resolve_linux_bundle_from_status(backend_status)
-            try:
-                tracker = create_bundle_tracker(
-                    bundle,
-                    logger,
-                    title_hint=title_hint,
-                    monitor_provider=monitor_provider,
-                )
-            except Exception as exc:  # pragma: no cover - defensive guard
-                logger.warning("Tracker backend unavailable: %s", exc)
-                return None
-            if tracker is not None:
-                return tracker
-            fallback_bundle = resolve_tracker_fallback_bundle(backend_status)
-            if fallback_bundle is None:
-                return None
-            if backend_status.probe.session_type.value == "wayland":
-                logger.debug(
-                    "Wayland backend '%s' does not provide a tracker; attempting X11 fallback",
-                    bundle.descriptor.instance.value,
-                )
-            try:
-                return create_bundle_tracker(
-                    fallback_bundle,
-                    logger,
-                    title_hint=title_hint,
-                    monitor_provider=monitor_provider,
-                )
-            except Exception as exc:  # pragma: no cover - defensive guard
-                logger.warning("X11 tracker unavailable: %s", exc)
-                return None
-
-        session = (os.environ.get("EDMC_OVERLAY_SESSION_TYPE") or os.environ.get("XDG_SESSION_TYPE") or "").lower()
-        compositor = (os.environ.get("EDMC_OVERLAY_COMPOSITOR") or "").lower()
-        force_xwayland = os.environ.get("EDMC_OVERLAY_FORCE_XWAYLAND") == "1"
-        bundle = resolve_legacy_linux_bundle(
-            session_type=session,
-            compositor=compositor,
-            force_xwayland=force_xwayland,
+        effective_status = ensure_linux_backend_status(
+            backend_status,
+            session_type=(os.environ.get("EDMC_OVERLAY_SESSION_TYPE") or os.environ.get("XDG_SESSION_TYPE") or ""),
+            compositor=(os.environ.get("EDMC_OVERLAY_COMPOSITOR") or ""),
+            force_xwayland=os.environ.get("EDMC_OVERLAY_FORCE_XWAYLAND") == "1",
+            qt_platform_name="xcb" if os.environ.get("EDMC_OVERLAY_FORCE_XWAYLAND") == "1" else "",
             env=os.environ,
         )
+        bundle = resolve_linux_bundle_from_status(effective_status)
         try:
             tracker = create_bundle_tracker(
                 bundle,
@@ -242,18 +209,14 @@ def create_elite_window_tracker(
             return None
         if tracker is not None:
             return tracker
-        if session == "wayland" and not force_xwayland:
+        fallback_bundle = resolve_tracker_fallback_bundle(effective_status)
+        if fallback_bundle is None:
+            return None
+        if effective_status.probe.session_type.value == "wayland":
             logger.debug(
-                "Wayland compositor '%s' not yet supported for follow mode; attempting X11 fallback",
-                compositor or "unknown",
+                "Wayland backend '%s' does not provide a tracker; attempting X11 fallback",
+                bundle.descriptor.instance.value,
             )
-        fallback_bundle = resolve_legacy_linux_bundle(
-            session_type="wayland" if session == "wayland" else "x11",
-            compositor=compositor,
-            force_xwayland=(session == "wayland"),
-            qt_platform_name="xcb" if session == "wayland" else "",
-            env=os.environ,
-        )
         try:
             return create_bundle_tracker(
                 fallback_bundle,

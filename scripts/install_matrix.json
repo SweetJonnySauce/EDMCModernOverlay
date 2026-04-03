@@ -257,6 +257,16 @@
         "KDE/Wayland with Xwayland can double-scale Qt windows; disabling Qt HiDPI scaling avoids oversized UI.",
         "Applied only when compositor detection matches and user opts in."
       ],
+      "helper": {
+        "kind": "kwin_script",
+        "label": "KWin helper script",
+        "required_for_true_overlay": false,
+        "install_mode": "manual_enable",
+        "notes": [
+          "Optional future helper path for stronger KWin-native tracking and input behavior.",
+          "This installer does not install or enable KWin scripts automatically."
+        ]
+      },
       "provenance": "Detected KDE/KWin on Wayland; disable Qt HiDPI scaling to avoid double scaling when Qt apps fall back to Xwayland."
     },
     {
@@ -276,6 +286,16 @@
       "notes": [
         "No Qt scaling override by default."
       ],
+      "helper": {
+        "kind": "gnome_shell_extension",
+        "label": "GNOME Shell extension",
+        "required_for_true_overlay": true,
+        "install_mode": "manual_enable",
+        "notes": [
+          "Required for the long-term GNOME helper-backed path and full compositor-native behavior.",
+          "This installer does not install or enable GNOME Shell extensions automatically."
+        ]
+      },
       "provenance": "Detected GNOME Shell on Wayland."
     },
     {

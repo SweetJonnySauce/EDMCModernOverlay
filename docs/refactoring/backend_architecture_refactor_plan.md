@@ -82,9 +82,9 @@ If something is unclear, capture it under `Open Questions`.
 - `tests/config/README.md`
 - Docs/notes:
 - `docs/refactoring/cross_platform_overlay_architecture_research.md`
-- `docs/refactoring/client_refactor.md`
-- `docs/refactoring/load_refactory.md`
-- `docs/refactoring/compositor_aware_install.md`
+- `docs/archive/refactoring/client_refactor.md`
+- `docs/archive/refactoring/load_refactory.md`
+- `docs/archive/refactoring/compositor_aware_install.md`
 - `docs/archive/README.md`
 
 ## Open Questions
@@ -134,9 +134,9 @@ If something is unclear, capture it under `Open Questions`.
 | --- | --- | --- |
 | 1 | Introduce backend contracts, status schema, and a shadow selector without changing behavior | Completed |
 | 2 | Extract current runtime behavior into explicit backend bundles while preserving behavior | Completed |
-| 3 | Cut over to a client-authoritative selector and remove secondary backend selection | In Progress |
-| 4 | Surface capability state, manual override, and diagnostics with minimal controller changes | Pending |
-| 5 | Add helper-boundary foundations, helper-aware approval flows, and final cleanup/archive work | Pending |
+| 3 | Cut over to a client-authoritative selector and remove secondary backend selection | Completed |
+| 4 | Surface capability state, manual override, and diagnostics with minimal controller changes | Completed |
+| 5 | Add helper-boundary foundations, helper-aware approval flows, and final cleanup/archive work | Completed |
 
 ## Phase Details
 
@@ -326,7 +326,7 @@ If something is unclear, capture it under `Open Questions`.
 | --- | --- | --- |
 | 3.1 | Move final capability probe/backend selection authority into the client; keep plugin hints advisory | Completed |
 | 3.2 | Remove secondary backend selection from runtime consumers so they use selector results only | Completed |
-| 3.3 | Preserve native-first fallback policy, no-silent-downgrade safeguards, and explicit fallback reasons | Pending |
+| 3.3 | Preserve native-first fallback policy, no-silent-downgrade safeguards, and explicit fallback reasons | Completed |
 
 #### Stage 3.1 Detailed Plan
 - Objective:
@@ -380,19 +380,23 @@ If something is unclear, capture it under `Open Questions`.
 
 #### Stage 3.3 Detailed Plan
 - Objective:
-- Carry forward the agreed selection/classification safeguards during the cutover.
+- Carry forward the agreed selection/classification safeguards during the cutover by turning implicit fallback and downgrade-protection policy into explicit selector/status data.
 - Primary touch points:
 - `overlay_client/backend/selector.py`
 - `overlay_client/backend/status.py`
-- `overlay_plugin/preferences.py`
+- `overlay_client/tests/test_backend_selector.py`
+- `overlay_client/tests/test_backend_status.py` (new)
 - Steps:
-- Encode native-first/fallback-available policy and explicit fallback reasons.
-- Preserve `xwayland_compat` as a named fallback and block silent downgrades of currently working environments.
+- Encode explicit fallback metadata for current selector outcomes instead of leaving fallback policy hidden in selector notes.
+- Preserve `xwayland_compat` as a named fallback path by reporting what native backend it fell back from and why.
+- Add explicit review/downgrade-guard metadata for cases where conservative classification is intentionally preserving current shipped behavior.
+- Keep this stage pure: no prefs/controller/load.py changes, and no new manual-override UI plumbing yet.
 - Acceptance criteria:
 - Fallback reasons are explicit and testable.
-- Downgrade-sensitive environments require review rather than being silently reclassified.
+- Downgrade-sensitive environments are marked for review rather than being silently reclassified.
+- Current behavior and classification remain unchanged unless an existing test already required otherwise.
 - Verification to run:
-- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_selector.py overlay_client/tests/test_backend_status.py -q`
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_selector.py overlay_client/tests/test_backend_status.py overlay_client/tests/test_platform_context.py -q`
 
 #### Phase 3 Execution Order
 - Implement in strict order: `3.1` -> `3.2` -> `3.3`.
@@ -409,58 +413,89 @@ If something is unclear, capture it under `Open Questions`.
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 4.1 | Implement capability status reporting, support-family labels, and diagnostics/log surfaces | Pending |
-| 4.2 | Add always-visible status and conditional warnings with minimal plugin/controller changes | Pending |
-| 4.3 | Add visible manual override and end-to-end diagnostics/override round-trip coverage | Pending |
+| 4.1 | Implement capability status reporting, support-family labels, and diagnostics/log surfaces | Completed |
+| 4.2 | Add always-visible status and conditional warnings with minimal plugin/controller changes | Completed |
+| 4.3 | Add visible manual override and end-to-end diagnostics/override round-trip coverage | Completed |
 
 #### Stage 4.1 Detailed Plan
 - Objective:
 - Build the status/reporting layer that makes backend family, backend instance, classification, fallback reason, and helper state visible.
 - Primary touch points:
 - `overlay_client/backend/status.py`
+- `overlay_client/setup_surface.py`
+- `overlay_client/control_surface.py`
 - `utils/collect_overlay_debug_linux.sh`
 - `load.py`
+- `overlay_client/tests/test_backend_status.py`
+- `tests/test_overlay_config_payload.py`
+- `tests/test_harness_backend_selection_wiring.py`
 - Steps:
-- Add status formatting and report payloads using the stable support-family labels plus specific backend instances.
-- Push the same truth into logs and support diagnostics.
+- Add pure status-report formatting helpers and derived report payload fields using the stable support-family labels plus specific backend instances.
+- Push the same formatted truth into plugin-side shadow status payloads and client/plugin log lines without changing backend selection behavior.
+- Extend the Linux debug collector to extract and print the latest backend-selection summary from overlay client logs so support does not need to read raw log lines.
 - Acceptance criteria:
 - Capability state is no longer hidden internal data.
 - Support diagnostics can display family/instance/classification/fallback clearly.
+- No selector or runtime behavior changes are introduced in this stage; only status/reporting surfaces change.
 - Verification to run:
-- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_status.py -q`
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_status.py tests/test_overlay_config_payload.py tests/test_harness_backend_selection_wiring.py -q`
 
 #### Stage 4.2 Detailed Plan
 - Objective:
-- Add quiet-by-default UI visibility with minimal controller/prefs changes.
+- Add quiet-by-default UI visibility with minimal controller/prefs changes, without mislabeling plugin-side shadow status as client-final truth.
 - Primary touch points:
+- `overlay_client/backend/status.py`
+- `load.py`
 - `overlay_controller/services/plugin_bridge.py`
 - `overlay_controller/overlay_controller.py`
 - `overlay_plugin/preferences.py`
+- `overlay_client/tests/test_backend_status.py`
+- `overlay_controller/tests/test_plugin_bridge.py`
+- `overlay_controller/tests/test_backend_status_title.py` (new)
+- `tests/test_preferences_panel_controller_tab.py`
+- `tests/test_harness_backend_status_roundtrip.py` (new)
 - Steps:
-- Surface compact status, conditional warnings for degraded/unsupported/fallback states, and helper-missing visibility.
+- Extend the pure status helpers with user-facing summary and warning formatting that can explicitly label the current source as `plugin_hint` when only advisory shadow status is available.
+- Add a minimal plugin runtime status endpoint plus controller bridge pass-through so prefs and controller can request backend status without re-running selection logic themselves.
+- Surface compact status plus conditional warning text in the EDMC preferences panel, and keep the controller change minimal by updating only an always-visible status/title surface instead of restructuring Tk layouts.
 - Keep the Tk controller structure intact; limit changes to status display and pass-through wiring.
 - Acceptance criteria:
 - The controller remains a stable boundary.
 - Users can see backend family/classification without requiring debug logs.
+- UI surfaces do not misrepresent plugin shadow status as client-authoritative runtime truth.
 - Verification to run:
-- `source .venv/bin/activate && python -m pytest tests/test_harness_backend_status_roundtrip.py -q`
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_status.py overlay_controller/tests/test_plugin_bridge.py overlay_controller/tests/test_backend_status_title.py tests/test_preferences_panel_controller_tab.py tests/test_harness_backend_status_roundtrip.py -q`
 
 #### Stage 4.3 Detailed Plan
 - Objective:
 - Add the manual backend override escape hatch while keeping capability truth intact.
 - Primary touch points:
+- `overlay_client/backend/selector.py`
+- `overlay_client/backend/status.py`
+- `overlay_client/platform_context.py`
+- `overlay_client/control_surface.py`
 - `overlay_plugin/preferences.py`
 - `overlay_client/client_config.py`
 - `load.py`
-- `overlay_controller/services/plugin_bridge.py`
+- `overlay_client/tests/test_backend_selector.py`
+- `overlay_client/tests/test_backend_status.py`
+- `overlay_client/tests/test_platform_context.py`
+- `overlay_client/tests/test_client_config.py` (new)
+- `tests/test_preferences_panel_controller_tab.py`
+- `tests/test_preferences_persistence.py`
+- `tests/test_overlay_config_payload.py`
+- `tests/test_harness_backend_override_roundtrip.py` (new)
 - Steps:
-- Add an explicit `Auto` plus valid forced-backend choices for the relevant platform family.
-- Ensure overrides are visible, easy to clear, and do not rewrite classification truth.
+- Add an explicit `Auto` plus relevant forced-backend choices in the preferences UI, with persistence through the existing EDMC-config plus `overlay_settings.json` shadow path.
+- Carry the requested override through the existing bootstrap and live config surfaces (`overlay_settings.json` and `platform_context`) instead of introducing a second transport.
+- Apply the override only in the selector path so backend choice still happens in one place, and keep the default `Auto` path behavior-equivalent to the current shipped behavior.
+- Surface active override and invalid-override state in backend status/reporting so status, diagnostics, and warnings stay truthful.
 - Acceptance criteria:
 - Forced backends are visible in status/diagnostics.
 - Invalid forced backends fail clearly instead of silently.
+- `Auto` remains the default and preserves current behavior.
 - Verification to run:
-- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_status.py tests/test_harness_backend_override_roundtrip.py -q`
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_selector.py overlay_client/tests/test_backend_status.py overlay_client/tests/test_platform_context.py overlay_client/tests/test_client_config.py tests/test_preferences_panel_controller_tab.py tests/test_preferences_persistence.py tests/test_overlay_config_payload.py tests/test_harness_backend_override_roundtrip.py -q`
 
 #### Phase 4 Execution Order
 - Implement in strict order: `4.1` -> `4.2` -> `4.3`.
@@ -477,25 +512,29 @@ If something is unclear, capture it under `Open Questions`.
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 5.1 | Introduce `HelperIpcBackend` and a secured local-only helper boundary on the client side | Pending |
-| 5.2 | Add helper-aware classification plus user-approved install/enable plumbing for helper-backed paths | Pending |
-| 5.3 | Remove leftover distributed platform logic, archive superseded docs, and finalize verification hardening | Pending |
+| 5.1 | Introduce `HelperIpcBackend` and a secured local-only helper boundary on the client side | Completed |
+| 5.2 | Add helper-aware classification plus user-approved install/enable plumbing for helper-backed paths | Completed |
+| 5.3 | Remove leftover distributed platform logic, archive superseded docs, and finalize verification hardening | Completed |
 
 #### Stage 5.1 Detailed Plan
 - Objective:
 - Create the client-owned helper boundary and protocol constraints without turning the plugin into a runtime transport hub.
 - Primary touch points:
+- `overlay_client/backend/__init__.py`
 - `overlay_client/backend/helper_ipc.py` (new)
 - `overlay_client/backend/contracts.py`
+- `overlay_client/tests/test_backend_contracts.py`
 - `overlay_client/tests/test_helper_ipc_boundary.py` (new)
 - Steps:
-- Define local-only helper transport expectations, schema validation, version checks, and fail-closed behavior.
-- Keep the helper surface minimal and backend-specific.
+- Tighten the existing placeholder `HelperIpcBackend` contract just enough to carry helper identity metadata, without introducing live transport wiring in this stage.
+- Define pure local-only helper boundary models covering endpoint shape, protocol version checks, schema validation, and fail-closed message parsing.
+- Keep the helper surface minimal and helper-to-client only; defer actual socket/DBus startup and bundle hookup to later stages.
 - Acceptance criteria:
 - The helper boundary is narrow, local-only, and schema-validated.
 - The plugin is not in the middle of runtime helper communication.
+- No live runtime transport or helper installation behavior changes are introduced in this stage.
 - Verification to run:
-- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_helper_ipc_boundary.py -q`
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_contracts.py overlay_client/tests/test_helper_ipc_boundary.py -q`
 
 #### Stage 5.2 Detailed Plan
 - Objective:
@@ -503,36 +542,50 @@ If something is unclear, capture it under `Open Questions`.
 - Primary touch points:
 - `overlay_client/backend/selector.py`
 - `overlay_client/backend/status.py`
+- `overlay_client/backend/contracts.py`
 - `scripts/install_linux.sh`
 - `scripts/install_matrix.json`
+- `overlay_client/tests/test_backend_selector.py`
 - `tests/test_install_linux.py`
+- `overlay_client/tests/test_backend_status.py`
 - Steps:
-- Add missing-helper classification/results for helper-backed backends such as GNOME/KWin where appropriate.
-- Add explicit approval/install-or-enable plumbing for helper-backed environments, keeping installation optional and visible.
+- Add helper-aware selector/status metadata for GNOME and KWin without changing the default runtime path when helpers are absent; preserve conservative existing classifications for shipped environments.
+- Populate explicit helper-state details so required missing helpers are visible in diagnostics, while optional helper paths do not create misleading warnings.
+- Extend the compositor install matrix with helper metadata and add explicit installer approval recording/guidance for helper-backed environments, keeping helper installation or enablement optional and visible.
 - Acceptance criteria:
 - Missing helper state degrades cleanly and visibly.
 - Helper install/enable remains explicit and user-approved.
+- No live helper deployment is introduced in this stage; approval/guidance plumbing only.
 - Verification to run:
-- `source .venv/bin/activate && python -m pytest tests/test_install_linux.py overlay_client/tests/test_backend_status.py -q`
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_selector.py overlay_client/tests/test_backend_status.py tests/test_install_linux.py -q`
 
 #### Stage 5.3 Detailed Plan
 - Objective:
 - Remove leftover distributed platform logic, archive superseded docs, and finish the verification matrix for the new architecture.
 - Primary touch points:
-- `load.py`
+- `overlay_client/backend/consumers.py`
 - `overlay_client/platform_integration.py`
 - `overlay_client/window_tracking.py`
-- `docs/refactoring/*.md`
+- `overlay_client/tests/test_backend_consumers.py`
+- `overlay_client/tests/test_platform_controller_backend_status.py`
+- `overlay_client/tests/test_window_tracking_bundle_routing.py`
+- `docs/refactoring/backend_architecture_refactor_plan.md`
+- `docs/archive/refactoring/client_refactor.md`
+- `docs/archive/refactoring/load_refactory.md`
+- `docs/archive/refactoring/compositor_aware_install.md`
+- `docs/archive/refactoring/refactor-plan.md`
 - `docs/archive/`
 - Steps:
-- Delete or simplify residual duplicated platform-selection branches that are obsolete after selector cutover.
+- Replace the remaining Linux no-status fallback branches in runtime consumers with a single compatibility helper that derives backend status through the pure probe/selector path, so runtime modules stop re-encoding platform selection locally.
+- Keep auxiliary fallback behavior intact where removing it would change behavior, but make the fallback consume the same selector path instead of raw ad hoc branching.
 - Archive superseded planning/refactor docs instead of deleting them.
 - Run the full planned test matrix and record the remaining environment-specific validation gaps.
 - Acceptance criteria:
-- Secondary selection logic is gone.
+- Secondary platform-selection branching is gone from runtime consumers; any remaining compatibility fallback goes through the shared selector path.
 - Document history is preserved under `docs/archive/`.
 - Final verification status is explicit for first-party and user-assisted environments.
 - Verification to run:
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_platform_controller_backend_status.py overlay_client/tests/test_window_tracking_bundle_routing.py -q`
 - `source .venv/bin/activate && python -m pytest -m harness -q`
 - `source .venv/bin/activate && python -m pytest overlay_client/tests -q`
 - `source .venv/bin/activate && PYQT_TESTS=1 python -m pytest overlay_client/tests -q`
@@ -663,6 +716,20 @@ If something is unclear, capture it under `Open Questions`.
   - `overlay_client/tests/test_window_tracking_bundle_routing.py`
   - `overlay_client/tests/test_control_surface_platform_context.py`
 - Kept `load.py`, plugin lifecycle wiring, and controller surfaces unchanged in this stage; the cutover stayed client-only.
+- Stage `3.3` completed on 2026-04-03.
+- Tightened `overlay_client/backend/selector.py` so explicit fallback metadata is now part of the selector result instead of being implied only through selector notes.
+- Preserved native-first, fallback-available policy in explicit selector output by:
+  - reporting `xwayland_compat` as a named fallback from the compositor-specific native Wayland backend
+  - reporting GNOME helper-missing fallback metadata without downgrading current shipped behavior
+  - retaining conservative classification for downgrade-sensitive `xwayland_compat` paths while marking the preserved classification as review-required
+- Extended `overlay_client/backend/status.py` so selection status payloads can surface review-guard metadata alongside fallback metadata.
+- Added Stage `3.3` unit coverage in:
+  - `overlay_client/tests/test_backend_selector.py`
+  - `overlay_client/tests/test_backend_status.py`
+  - `overlay_client/tests/test_platform_context.py`
+  - `overlay_client/tests/test_backend_contracts.py`
+- Kept this stage pure: no `load.py`, preferences, controller, or runtime-consumer wiring changes were required.
+- Phase `3` completed with client-authoritative selection, runtime consumer cutover, explicit fallback metadata, and no secondary backend selection logic left in the active client path.
 
 ### Tests Run For Phase 3
 - `source .venv/bin/activate && python -m pytest overlay_client/tests/test_platform_context.py overlay_client/tests/test_control_surface_platform_context.py tests/test_harness_backend_selection_wiring.py tests/test_harness_plugin_hooks_contract.py -q`
@@ -671,3 +738,171 @@ If something is unclear, capture it under `Open Questions`.
 - Result: pass (`24 passed`)
 - `make check`
 - Result: pass (`ruff`, `mypy`, `PYQT_TESTS=1 python -m pytest`; `759 passed, 21 skipped`)
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_selector.py overlay_client/tests/test_backend_status.py overlay_client/tests/test_platform_context.py -q`
+- Result: pass (`16 passed`)
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_contracts.py -q`
+- Result: pass (`5 passed`)
+- `make check`
+- Result: pass (`ruff`, `mypy`, `PYQT_TESTS=1 python -m pytest`; `762 passed, 21 skipped`)
+
+### Phase 4 Execution Summary
+- Stage `4.1` completed on 2026-04-03.
+- Added derived backend status reporting helpers in `overlay_client/backend/status.py` so selection payloads now carry:
+  - flattened family/instance/classification/fallback report fields
+  - a compact parseable summary line for logs and support tooling
+- Updated client-side backend-status logs in:
+  - `overlay_client/setup_surface.py`
+  - `overlay_client/control_surface.py`
+  so the overlay client emits the same stable family/instance/classification/fallback truth in a collector-friendly format.
+- Updated `load.py` so plugin-side shadow selector status is logged in the same compact format at launch/config publish time, while preserving the existing advisory shadow payload behavior.
+- Extended `tests/test_overlay_config_payload.py` and `tests/test_harness_backend_selection_wiring.py` to prove shadow backend status payloads now include the derived report block.
+- Extended `utils/collect_overlay_debug_linux.sh` so the Linux support collector extracts the latest backend-selection summary and mismatch state from overlay client logs and prints a dedicated backend section.
+- Kept this stage reporting-only: no selector, runtime behavior, or manual-override behavior changed.
+- Stage `4.2` completed on 2026-04-03.
+- Extended the pure status helpers in `overlay_client/backend/status.py` with:
+  - user-facing summary formatting
+  - conditional warning formatting
+  - window-title formatting
+  - explicit `source` labeling so `shadow_mode=True` is surfaced as `plugin_hint` instead of being misrepresented as client-final truth
+- Added a minimal plugin runtime backend-status endpoint in `load.py` and routed it through the existing CLI surface so UI consumers can request backend visibility without re-running selection logic.
+- Added controller bridge support in `overlay_controller/services/plugin_bridge.py` for backend-status requests.
+- Kept the controller structure intact by updating only the always-visible window title in `overlay_controller/overlay_controller.py`; no controller layout restructuring or secondary selector logic was introduced.
+- Added quiet-by-default backend visibility to the EDMC preferences panel in `overlay_plugin/preferences.py`:
+  - always-visible backend summary
+  - conditional warning line for degraded/fallback/helper-missing/review-required states
+  - reuse of the existing background poll loop instead of introducing a second Tk timer
+- Added Stage `4.2` coverage in:
+  - `overlay_client/tests/test_backend_status.py`
+  - `overlay_controller/tests/test_plugin_bridge.py`
+  - `overlay_controller/tests/test_backend_status_title.py`
+  - `tests/test_preferences_panel_controller_tab.py`
+  - `tests/test_harness_backend_status_roundtrip.py`
+- Kept this stage visibility-only: no backend selection behavior, fallback behavior, or manual-override behavior changed.
+- Stage `4.3` completed on 2026-04-03.
+- Added manual override support to the pure selector and status layers in:
+  - `overlay_client/backend/selector.py`
+  - `overlay_client/backend/status.py`
+  so the selected backend can be forced explicitly, invalid overrides are surfaced clearly, and capability truth remains separate from override state.
+- Completed the override transport on existing config paths without introducing a second selection channel:
+  - `overlay_client/client_config.py` now reads `manual_backend_override` from `overlay_settings.json`
+  - `overlay_client/platform_context.py` and `overlay_client/control_surface.py` now carry the override through client bootstrap and runtime platform-context updates
+  - `load.py` now persists the preference, publishes it in `platform_context`, and applies it to the plugin-side shadow selector status
+- Added a visible manual override control to the EDMC preferences panel in `overlay_plugin/preferences.py`:
+  - explicit `Auto` option
+  - platform-relevant backend choices
+  - persistence through EDMC config plus `overlay_settings.json`
+  - status text for both active and cleared overrides
+- Kept override behavior bounded to the selector path only:
+  - `Auto` still preserves the shipped behavior
+  - invalid override tokens no longer silently disappear
+  - status/diagnostics now report both active overrides and invalid override errors
+- Added Stage `4.3` coverage in:
+  - `overlay_client/tests/test_backend_selector.py`
+  - `overlay_client/tests/test_backend_status.py`
+  - `overlay_client/tests/test_platform_context.py`
+  - `overlay_client/tests/test_client_config.py`
+  - `tests/test_preferences_panel_controller_tab.py`
+  - `tests/test_preferences_persistence.py`
+  - `tests/test_overlay_config_payload.py`
+  - `tests/test_harness_backend_override_roundtrip.py`
+- Phase `4` is now complete: capability visibility, quiet warnings, and visible override plumbing are all in place without expanding controller scope or introducing a second backend selector.
+
+### Tests Run For Phase 4
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_status.py overlay_client/tests/test_control_surface_platform_context.py tests/test_overlay_config_payload.py tests/test_harness_backend_selection_wiring.py -q`
+- Result: pass (`9 passed`)
+- `make check`
+- Result: pass (`ruff`, `mypy`, `PYQT_TESTS=1 python -m pytest`; `763 passed, 21 skipped`)
+- `bash -n utils/collect_overlay_debug_linux.sh`
+- Result: pass
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_status.py overlay_controller/tests/test_plugin_bridge.py overlay_controller/tests/test_backend_status_title.py tests/test_preferences_panel_controller_tab.py tests/test_harness_backend_status_roundtrip.py -q`
+- Result: pass (`27 passed`)
+- `make check`
+- Result: pass (`ruff`, `mypy`, `PYQT_TESTS=1 python -m pytest`; `771 passed, 21 skipped`)
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_selector.py overlay_client/tests/test_backend_status.py overlay_client/tests/test_platform_context.py overlay_client/tests/test_client_config.py tests/test_preferences_panel_controller_tab.py tests/test_preferences_persistence.py tests/test_overlay_config_payload.py tests/test_harness_backend_override_roundtrip.py -q`
+- Result: pass (`50 passed`)
+- `make check`
+- Result: pass (`ruff`, `mypy`, `PYQT_TESTS=1 python -m pytest`; `785 passed, 21 skipped`)
+
+### Phase 5 Execution Summary
+- Stage `5.1` completed on 2026-04-03.
+- Tightened the existing placeholder `HelperIpcBackend` contract in `overlay_client/backend/contracts.py` so helper-backed components now expose explicit helper identity metadata in addition to backend identity.
+- Added a new pure helper-boundary module in `overlay_client/backend/helper_ipc.py` with:
+  - local-only transport families (`unix_socket`, `session_dbus`)
+  - validated endpoint configuration models
+  - client-owned helper boundary configuration
+  - fail-closed helper message parsing with protocol-version, session-token, helper-kind, and allowed-event checks
+- Re-exported the new helper-boundary types and validators from `overlay_client/backend/__init__.py` so later stages can consume the boundary through the existing backend package.
+- Added Stage `5.1` contract and boundary coverage in:
+  - `overlay_client/tests/test_backend_contracts.py`
+  - `overlay_client/tests/test_helper_ipc_boundary.py`
+- Kept this stage pure and non-invasive:
+  - no live socket or DBus transport was started
+  - no helper installation flow changed
+  - no plugin/runtime transport hub was introduced
+- Stage `5.2` completed on 2026-04-03.
+- Made helper-aware selector/status behavior more explicit without changing the default shipped runtime path when helpers are absent:
+  - `overlay_client/backend/selector.py` now treats GNOME helper state as required and KWin helper state as an explicit optional helper-backed path when a helper is actually present in the probe.
+  - `overlay_client/backend/status.py` now distinguishes required missing helpers from optional missing helpers so diagnostics can carry helper truth without creating misleading warnings for optional future helper paths.
+  - `overlay_client/backend/contracts.py` now serializes helper requirement state through `HelperCapabilityState`.
+- Extended the Linux compositor install matrix in `scripts/install_matrix.json` with helper metadata for:
+  - `gnome-shell`
+  - `kwin-wayland`
+- Added explicit helper approval/guidance plumbing in `scripts/install_linux.sh`:
+  - helper metadata now flows out of `matrix_helper compositor-match`
+  - installer records an explicit helper approval decision in `overlay_client/helper_approval.json`
+  - helper install/enable remains manual and visible; no helper is installed automatically
+- Added Stage `5.2` coverage in:
+  - `overlay_client/tests/test_backend_selector.py`
+  - `overlay_client/tests/test_backend_status.py`
+  - `tests/test_install_linux.py`
+- Kept this stage conservative:
+  - GNOME still uses the existing conservative shipped classification path
+  - KWin helper support is first-class only when a helper is explicitly present in the probe
+  - no live helper deployment was introduced
+- Stage `5.3` completed on 2026-04-03.
+- Removed the last duplicated Linux runtime selection branches from active consumers by centralizing no-status fallback derivation in `overlay_client/backend/consumers.py`:
+  - `derive_linux_backend_status(...)` now builds a Linux fallback status through the shared pure probe/selector path
+  - `ensure_linux_backend_status(...)` lets runtime consumers keep compatibility fallback behavior without re-encoding raw session/compositor branching locally
+- Updated active runtime consumers to use the shared compatibility helper instead of local ad hoc selection:
+  - `overlay_client/platform_integration.py`
+  - `overlay_client/window_tracking.py`
+- Updated Stage `5.3` coverage in:
+  - `overlay_client/tests/test_backend_consumers.py`
+  - `overlay_client/tests/test_platform_controller_backend_status.py`
+  - `overlay_client/tests/test_window_tracking_bundle_routing.py`
+- Archived superseded refactor/architecture planning docs under `docs/archive/refactoring/` instead of deleting them:
+  - `client_refactor.md`
+  - `load_refactory.md`
+  - `compositor_aware_install.md`
+  - `refactor-plan.md`
+- Updated active refactoring notes that still referenced the archived client plan:
+  - `docs/refactoring/pref_refactor.md`
+  - `docs/refactoring/overlay_client_performance.md`
+- Final verification status for the backend architecture is now explicit:
+  - automated verification matrix passed
+  - first-party manual validation coverage remains `windows_desktop`, `gnome_x11`, and `gnome_wayland`
+  - user-assisted validation coverage remains `fedora / kde_wayland`
+  - remaining gap: no first-party manual validation yet for wlroots/Hyprland/COSMIC/gamescope paths or actual installed helper-backed GNOME/KWin flows
+- Phase `5` is now complete: the helper boundary exists, helper-aware approval/classification is in place, distributed runtime backend selection logic has been collapsed behind the shared selector path, and superseded planning history has been archived rather than deleted.
+
+### Tests Run For Phase 5
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_contracts.py overlay_client/tests/test_helper_ipc_boundary.py -q`
+- Result: pass (`13 passed`)
+- `make check`
+- Result: pass (`ruff`, `mypy`, `PYQT_TESTS=1 python -m pytest`; `793 passed, 21 skipped`)
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_selector.py overlay_client/tests/test_backend_status.py tests/test_install_linux.py -q`
+- Result: pass (`32 passed`)
+- `make check`
+- Result: pass (`ruff`, `mypy`, `PYQT_TESTS=1 python -m pytest`; `797 passed, 21 skipped`)
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_platform_controller_backend_status.py overlay_client/tests/test_window_tracking_bundle_routing.py -q`
+- Result: pass (`23 passed`)
+- `source .venv/bin/activate && python -m pytest -m harness -q`
+- Result: pass (`28 passed, 6 skipped, 768 deselected`)
+- `source .venv/bin/activate && python -m pytest overlay_client/tests -q`
+- Result: pass (`301 passed, 18 skipped`)
+- `source .venv/bin/activate && PYQT_TESTS=1 python -m pytest overlay_client/tests -q`
+- Result: pass (`336 passed`)
+- `make check`
+- Result: pass (`ruff`, `mypy`, `PYQT_TESTS=1 python -m pytest`; `798 passed, 21 skipped`)
+- `make test`
+- Result: pass (`798 passed, 21 skipped`)

@@ -54,6 +54,7 @@ def test_preferences_save_persists_config_and_shadow(plugin_dir: Path, monkeypat
     preferences.physical_clamp_overrides = {"DisplayPort-2": 1.0}
     preferences.standalone_mode = True
     preferences.controller_toggle_argument = "tog"
+    preferences.manual_backend_override = "xwayland_compat"
     preferences.global_payload_opacity = 73
     preferences.last_on_payload_opacity = 80
     preferences.save()
@@ -65,6 +66,7 @@ def test_preferences_save_persists_config_and_shadow(plugin_dir: Path, monkeypat
     assert shadow["physical_clamp_overrides"] == {"DisplayPort-2": 1.0}
     assert shadow["standalone_mode"] is True
     assert shadow["controller_toggle_argument"] == "tog"
+    assert shadow["manual_backend_override"] == "xwayland_compat"
     assert shadow["global_payload_opacity"] == 73
     assert shadow["last_on_payload_opacity"] == 80
 
@@ -74,6 +76,7 @@ def test_preferences_save_persists_config_and_shadow(plugin_dir: Path, monkeypat
     assert json.loads(config.store[prefs._config_key("physical_clamp_overrides")]) == {"DisplayPort-2": 1.0}
     assert config.store[prefs._config_key(STANDALONE_MODE_PREF_KEY)] is True
     assert config.store[prefs._config_key("controller_toggle_argument")] == "tog"
+    assert config.store[prefs._config_key("manual_backend_override")] == "xwayland_compat"
     assert config.store[prefs._config_key("global_payload_opacity")] == 73
     assert config.store[prefs._config_key("last_on_payload_opacity")] == 80
 
@@ -89,6 +92,7 @@ def test_preferences_reload_merges_shadow_when_config_empty(plugin_dir: Path, mo
     first.physical_clamp_overrides = {"DisplayPort-2": 1.0, "HDMI-0": 1.25}
     first.standalone_mode = True
     first.controller_toggle_argument = "toggle"
+    first.manual_backend_override = "xwayland_compat"
     first.global_payload_opacity = 64
     first.last_on_payload_opacity = 75
     first.save()
@@ -104,6 +108,7 @@ def test_preferences_reload_merges_shadow_when_config_empty(plugin_dir: Path, mo
     assert reloaded.physical_clamp_overrides == {"DisplayPort-2": 1.0, "HDMI-0": 1.25}
     assert reloaded.standalone_mode is True
     assert reloaded.controller_toggle_argument == "toggle"
+    assert reloaded.manual_backend_override == "xwayland_compat"
     assert reloaded.global_payload_opacity == 64
     assert reloaded.last_on_payload_opacity == 75
 
@@ -117,6 +122,7 @@ def test_preferences_reload_merges_shadow_when_config_empty(plugin_dir: Path, mo
     }
     assert reloaded_config.store[prefs._config_key(STANDALONE_MODE_PREF_KEY)] is True
     assert reloaded_config.store[prefs._config_key("controller_toggle_argument")] == "toggle"
+    assert reloaded_config.store[prefs._config_key("manual_backend_override")] == "xwayland_compat"
     assert reloaded_config.store[prefs._config_key("global_payload_opacity")] == 64
     assert reloaded_config.store[prefs._config_key("last_on_payload_opacity")] == 75
 

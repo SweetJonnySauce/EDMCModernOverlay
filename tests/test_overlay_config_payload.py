@@ -13,6 +13,7 @@ class _StubPrefs:
         self.gridline_spacing = 100
         self.force_render = False
         self.force_xwayland = False
+        self.manual_backend_override = ""
         self.title_bar_enabled = False
         self.title_bar_height = 0
         self.show_debug_overlay = False
@@ -108,10 +109,34 @@ def test_platform_context_payload_includes_shadow_backend_status(monkeypatch):
     assert context["session_type"] == "wayland"
     assert context["compositor"] == "kwin"
     assert context["force_xwayland"] is False
+    assert context["manual_backend_override"] == ""
     shadow = context["shadow_backend_status"]
     assert shadow["shadow_mode"] is True
     assert shadow["selected_backend"] == {
         "family": "native_wayland",
         "instance": "kwin_wayland",
     }
+    assert shadow["report"]["family"] == "native_wayland"
+    assert shadow["report"]["instance"] == "kwin_wayland"
+    assert shadow["report"]["classification"] == "true_overlay"
+    assert shadow["report"]["summary"].startswith(
+        "family=native_wayland instance=kwin_wayland classification=true_overlay"
+    )
     assert shadow["probe"]["qt_platform_name"] == "wayland"
+
+
+def test_platform_context_payload_carries_manual_backend_override(monkeypatch):
+    runtime = object.__new__(load._PluginRuntime)
+    runtime._preferences = _StubPrefs()
+    runtime._preferences.manual_backend_override = "xwayland_compat"
+    runtime._flatpak_context = {}
+
+    monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
+    monkeypatch.setenv("XDG_CURRENT_DESKTOP", "KDE")
+    monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
+
+    context = runtime._platform_context_payload()
+
+    assert context["manual_backend_override"] == "xwayland_compat"
+    assert context["shadow_backend_status"]["manual_override"] == "xwayland_compat"
+    assert context["shadow_backend_status"]["fallback_reason"] == "manual_override"

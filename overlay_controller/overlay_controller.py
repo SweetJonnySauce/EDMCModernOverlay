@@ -20,7 +20,7 @@ import threading
 from math import ceil
 from pathlib import Path
 import tempfile
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
 from overlay_plugin.overlay_api import PluginGroupingError, _normalise_background_color, _normalise_border_width
 
@@ -32,6 +32,7 @@ if __name__ == "overlay_controller":
 _CONTROLLER_LOGGER: Optional[logging.Logger] = None
 
 from overlay_client.controller_mode import ControllerModeProfile, ModeProfile  # noqa: F401
+from overlay_client.backend.status import format_status_window_title
 from overlay_client.debug_config import DEBUG_CONFIG_ENABLED
 from overlay_client.logging_utils import build_rotating_file_handler, resolve_log_level, resolve_logs_dir
 from overlay_client.window_tracking import create_elite_window_tracker
@@ -138,7 +139,8 @@ class OverlayConfigApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.withdraw()
-        self.title("Overlay Controller")
+        self._base_window_title = "Overlay Controller"
+        self.title(self._base_window_title)
         self.geometry("740x760")
         self._alt_active = False
         self.protocol("WM_DELETE_WINDOW", self.close_application)
@@ -255,6 +257,8 @@ class OverlayConfigApp(tk.Tk):
         self._plugin_group_enabled_states: Dict[str, bool] = {}
         self._suppress_group_enabled_command = False
         self._last_plugin_group_state_refresh_ts: float = 0.0
+        self._backend_status_snapshot: Dict[str, Any] = {}
+        self._last_backend_status_refresh_ts: float = 0.0
         self._group_controls_align_handle: str | None = None
         self._profile_names: list[str] = []
         self._current_profile_name: str = "Default"
@@ -1369,6 +1373,7 @@ class OverlayConfigApp(tk.Tk):
             _controller_debug("Groupings reloaded from disk at %s", time.strftime("%H:%M:%S"))
             self._refresh_idprefix_options()
         self._refresh_profile_state_cache(force=False)
+        self._refresh_backend_status_cache(force=False)
         self._refresh_current_group_snapshot(force_ui=False)
         selection = self._get_current_group_selection()
         if selection is not None:
@@ -1384,6 +1389,37 @@ class OverlayConfigApp(tk.Tk):
                     self._suppress_group_enabled_command = False
         if self._mode_timers is None:
             self._status_poll_handle = self.after(self._status_poll_interval_ms, self._poll_cache_and_status)
+
+    def _refresh_backend_status_cache(self, *, force: bool = False, min_interval_seconds: float = 1.0) -> None:
+        now = time.time()
+        if not force and now - float(getattr(self, "_last_backend_status_refresh_ts", 0.0) or 0.0) < min_interval_seconds:
+            return
+        bridge = getattr(self, "_plugin_bridge", None)
+        if bridge is None:
+            return
+        try:
+            response = bridge.backend_status()
+        except Exception:
+            return
+        if not isinstance(response, dict):
+            return
+        if str(response.get("status") or "").strip().lower() != "ok":
+            return
+        raw_status = response.get("backend_status")
+        if not isinstance(raw_status, dict):
+            return
+        self._backend_status_snapshot = raw_status
+        self._last_backend_status_refresh_ts = now
+        self._update_backend_status_title(raw_status)
+
+    def _update_backend_status_title(self, status: Optional[Mapping[str, Any]]) -> None:
+        title = self._base_window_title
+        if isinstance(status, Mapping) and status:
+            title = format_status_window_title(status, base_title=self._base_window_title)
+        try:
+            self.title(title)
+        except Exception:
+            pass
     def _refresh_idprefix_options(self) -> None:
         selection = self._get_current_group_selection()
         options = self._load_idprefix_options()

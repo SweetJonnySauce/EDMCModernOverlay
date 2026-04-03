@@ -1,6 +1,6 @@
 # Overlay Client Performance Plan
 
-This file tracks prospective changes to improve overlay-client runtime smoothness (reduce frame hitches when many plugins update in quick succession). It mirrors the structure of `client_refactor.md`: keep items ordered, scoped, and testable; document intent before coding.
+This file tracks prospective changes to improve overlay-client runtime smoothness (reduce frame hitches when many plugins update in quick succession). It mirrors the structure of the archived `docs/archive/refactoring/client_refactor.md` plan: keep items ordered, scoped, and testable; document intent before coding.
 
 
 ## Guardrails

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import sys
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
@@ -14,9 +13,9 @@ from PyQt6.QtWidgets import QWidget
 from overlay_client.backend import BackendSelectionStatus
 from overlay_client.backend.consumers import (
     create_bundle_integration,
+    ensure_linux_backend_status,
     is_wayland_bundle,
     platform_label_for_bundle,
-    resolve_legacy_linux_bundle,
     resolve_linux_bundle_from_status,
     uses_transient_parent,
 )
@@ -31,6 +30,7 @@ class PlatformContext:
     session_type: str = ""
     compositor: str = ""
     force_xwayland: bool = False
+    manual_backend_override: str = ""
     flatpak: bool = False
     flatpak_app: str = ""
 
@@ -286,16 +286,20 @@ class PlatformController:
         self._logger.debug("Selecting bundle-backed integration for overlay client: %s", bundle.descriptor.support_label)
         return create_bundle_integration(bundle, self._widget, self._logger, self._context)
 
-    def _current_linux_bundle(self):
-        if self._backend_status is not None:
-            return resolve_linux_bundle_from_status(self._backend_status)
-        return resolve_legacy_linux_bundle(
+    def _current_linux_status(self) -> BackendSelectionStatus:
+        return ensure_linux_backend_status(
+            self._backend_status,
             session_type=self._context.session_type,
             compositor=self._context.compositor,
             force_xwayland=self._context.force_xwayland,
             qt_platform_name=self._platform_name,
-            env=os.environ,
+            manual_override=self._context.manual_backend_override,
+            flatpak=self._context.flatpak,
+            flatpak_app_id=self._context.flatpak_app,
         )
+
+    def _current_linux_bundle(self):
+        return resolve_linux_bundle_from_status(self._current_linux_status())
 
     def update_context(self, context: PlatformContext) -> None:
         self._context = context

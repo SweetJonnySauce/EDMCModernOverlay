@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 
 import overlay_plugin.preferences_profile_helpers as profile_pref_helpers
+from overlay_client.backend import BackendInstance
+from overlay_client.backend.status import format_status_ui_summary, format_status_ui_warning
 
 from overlay_plugin.standalone_support import (
     STANDALONE_MODE_LABEL,
@@ -74,6 +76,8 @@ PREFERENCES_TAB_EXPERIMENTAL = "Experimental"
 CONTROLLER_TAB_CONTROL_LAUNCH_BUTTON = "launch_controller"
 CONTROLLER_TAB_CONTROL_LAUNCH_COMMAND = "launch_command"
 CONTROLLER_TAB_CONTROL_TOGGLE_ARGUMENT = "toggle_argument"
+CONTROLLER_TAB_CONTROL_BACKEND_OVERRIDE = "backend_override"
+BACKEND_OVERRIDE_AUTO = "auto"
 DEFAULT_PROFILE_NAME = "Default"
 PROFILE_STATUS_POLL_INTERVAL_MS = 750
 
@@ -101,11 +105,12 @@ def _preferences_tab_order() -> tuple[str, str, str, str]:
     )
 
 
-def _controller_tab_control_order() -> tuple[str, str, str]:
+def _controller_tab_control_order() -> tuple[str, str, str, str]:
     return (
         CONTROLLER_TAB_CONTROL_LAUNCH_BUTTON,
         CONTROLLER_TAB_CONTROL_LAUNCH_COMMAND,
         CONTROLLER_TAB_CONTROL_TOGGLE_ARGUMENT,
+        CONTROLLER_TAB_CONTROL_BACKEND_OVERRIDE,
     )
 
 
@@ -548,6 +553,60 @@ def _validate_toggle_argument(value: Any, *, default: str, previous: str) -> tup
     return text, None
 
 
+def _normalise_manual_backend_override(value: Any, default: str = "") -> str:
+    try:
+        token = str(value or "").strip().lower()
+    except Exception:
+        return default
+    if token == BACKEND_OVERRIDE_AUTO:
+        return ""
+    return token
+
+
+def _backend_override_choices_for_status(status: Mapping[str, Any], *, current_value: str = "") -> tuple[str, ...]:
+    probe = status.get("probe") if isinstance(status, Mapping) else None
+    selected_backend = status.get("selected_backend") if isinstance(status, Mapping) else None
+    choices: list[str] = [BACKEND_OVERRIDE_AUTO]
+
+    def _add(token: str) -> None:
+        text = _normalise_manual_backend_override(token)
+        if not text:
+            return
+        if text not in choices:
+            choices.append(text)
+
+    if isinstance(selected_backend, Mapping):
+        _add(str(selected_backend.get("instance") or ""))
+    if isinstance(probe, Mapping):
+        operating_system = str(probe.get("operating_system") or "")
+        session_type = str(probe.get("session_type") or "")
+        compositor = str(probe.get("compositor") or "").lower()
+        if operating_system == "windows":
+            _add(BackendInstance.WINDOWS_DESKTOP.value)
+        elif operating_system == "linux":
+            if session_type == "x11":
+                _add(BackendInstance.NATIVE_X11.value)
+            elif session_type == "wayland":
+                _add(BackendInstance.XWAYLAND_COMPAT.value)
+                if compositor in {"kwin"}:
+                    _add(BackendInstance.KWIN_WAYLAND.value)
+                elif compositor in {"gnome-shell"}:
+                    _add(BackendInstance.GNOME_SHELL_WAYLAND.value)
+                elif compositor in {"hyprland"}:
+                    _add(BackendInstance.HYPRLAND.value)
+                elif compositor in {"sway", "wayfire", "wlroots"}:
+                    _add(BackendInstance.SWAY_WAYFIRE_WLROOTS.value)
+                elif compositor in {"cosmic"}:
+                    _add(BackendInstance.COSMIC.value)
+                elif compositor in {"gamescope"}:
+                    _add(BackendInstance.GAMESCOPE.value)
+                else:
+                    _add(BackendInstance.WAYLAND_LAYER_SHELL_GENERIC.value)
+    if current_value and current_value not in choices:
+        choices.append(current_value)
+    return tuple(choices)
+
+
 def _coerce_last_on_payload_opacity(value: Any, default: int) -> int:
     try:
         numeric = int(value)
@@ -574,6 +633,7 @@ class Preferences:
     force_render: bool = False
     standalone_mode: bool = False
     force_xwayland: bool = False
+    manual_backend_override: str = ""
     physical_clamp_enabled: bool = False
     physical_clamp_overrides: Dict[str, float] = field(default_factory=dict)
     show_debug_overlay: bool = False
@@ -670,6 +730,10 @@ class Preferences:
                 self.standalone_mode,
             ),
             "force_xwayland": _config_get_bool(_config_key("force_xwayland"), self.force_xwayland),
+            "manual_backend_override": _config_get_str(
+                _config_key("manual_backend_override"),
+                self.manual_backend_override,
+            ),
             "physical_clamp_enabled": _config_get_bool(
                 _config_key("physical_clamp_enabled"),
                 self.physical_clamp_enabled,
@@ -751,6 +815,10 @@ class Preferences:
             self.standalone_mode,
         )
         self.force_xwayland = _coerce_bool(data.get("force_xwayland"), self.force_xwayland)
+        self.manual_backend_override = _normalise_manual_backend_override(
+            data.get("manual_backend_override"),
+            self.manual_backend_override,
+        )
         self.physical_clamp_enabled = _coerce_bool(
             data.get("physical_clamp_enabled"),
             self.physical_clamp_enabled,
@@ -844,6 +912,7 @@ class Preferences:
             "force_render": bool(self.force_render),
             STANDALONE_MODE_PREF_KEY: bool(self.standalone_mode),
             "force_xwayland": bool(self.force_xwayland),
+            "manual_backend_override": str(self.manual_backend_override or ""),
             "physical_clamp_enabled": bool(self.physical_clamp_enabled),
             "physical_clamp_overrides": dict(self.physical_clamp_overrides or {}),
             "show_debug_overlay": bool(self.show_debug_overlay),
@@ -884,6 +953,7 @@ class Preferences:
         _config_set_value(_config_key("force_render"), bool(self.force_render))
         _config_set_value(_config_key(STANDALONE_MODE_PREF_KEY), bool(self.standalone_mode))
         _config_set_value(_config_key("force_xwayland"), bool(self.force_xwayland))
+        _config_set_value(_config_key("manual_backend_override"), str(self.manual_backend_override or ""))
         _config_set_value(_config_key("physical_clamp_enabled"), bool(self.physical_clamp_enabled))
         try:
             overrides_payload = json.dumps(self.physical_clamp_overrides)
@@ -956,9 +1026,11 @@ class PreferencesPanel:
         launch_controller_callback: Optional[Callable[[], None]] = None,
         set_launch_command_callback: Optional[Callable[[str], None]] = None,
         set_toggle_argument_callback: Optional[Callable[[str], None]] = None,
+        set_manual_backend_override_callback: Optional[Callable[[str], None]] = None,
         set_payload_opacity_callback: Optional[Callable[[int], None]] = None,
         reset_group_cache_callback: Optional[Callable[[], bool]] = None,
         profile_status_callback: Optional[Callable[[], Mapping[str, Any]]] = None,
+        backend_status_callback: Optional[Callable[[], Mapping[str, Any]]] = None,
         create_profile_callback: Optional[Callable[[str], Mapping[str, Any]]] = None,
         clone_profile_callback: Optional[Callable[[str, str], Mapping[str, Any]]] = None,
         rename_profile_callback: Optional[Callable[[str, str], Mapping[str, Any]]] = None,
@@ -1019,6 +1091,9 @@ class PreferencesPanel:
         self._var_cycle_copy = tk.BooleanVar(value=preferences.copy_payload_id_on_cycle)
         self._var_launch_command = tk.StringVar(value=preferences.controller_launch_command)
         self._var_toggle_argument = tk.StringVar(value=preferences.controller_toggle_argument)
+        self._var_manual_backend_override = tk.StringVar(
+            value=preferences.manual_backend_override or BACKEND_OVERRIDE_AUTO
+        )
         self._var_profile_current = tk.StringVar(value=DEFAULT_PROFILE_NAME)
         self._var_profile_new_name = tk.StringVar(value="")
         self._var_profile_rename_name = tk.StringVar(value="")
@@ -1079,6 +1154,7 @@ class PreferencesPanel:
         self._font_step_apply_in_progress = False
         self._launch_command_apply_in_progress = False
         self._toggle_argument_apply_in_progress = False
+        self._backend_override_apply_in_progress = False
         self._payload_opacity_apply_in_progress = False
 
         self._send_test = send_test_callback
@@ -1107,9 +1183,11 @@ class PreferencesPanel:
         self._launch_controller = launch_controller_callback
         self._set_launch_command = set_launch_command_callback
         self._set_toggle_argument = set_toggle_argument_callback
+        self._set_manual_backend_override = set_manual_backend_override_callback
         self._set_payload_opacity = set_payload_opacity_callback
         self._reset_group_cache = reset_group_cache_callback
         self._profile_status_callback = profile_status_callback
+        self._backend_status_callback = backend_status_callback
         self._create_profile_callback = create_profile_callback
         self._clone_profile_callback = clone_profile_callback
         self._rename_profile_callback = rename_profile_callback
@@ -1137,6 +1215,11 @@ class PreferencesPanel:
         self._payload_spam_cooldown_spin = None
         self._payload_spam_apply_btn = None
         self._payload_spam_checkbox = None
+        self._backend_override_combo = None
+        self._backend_override_options = _backend_override_choices_for_status(
+            {},
+            current_value=preferences.manual_backend_override,
+        )
         self._profile_listbox = None
         self._profile_table = None
         self._profile_table_columns: tuple[str, ...] = ()
@@ -1146,6 +1229,7 @@ class PreferencesPanel:
         self._profile_ship_table = None
         self._profile_current_combo = None
         self._profile_state_snapshot: Mapping[str, Any] = {}
+        self._backend_status_snapshot: Mapping[str, Any] = {}
         self._profile_ship_ids: list[int] = []
         self._profile_ship_row_to_ship_id: Dict[str, int] = {}
         self._profile_ship_checked_ids: set[int] = set()
@@ -1163,6 +1247,8 @@ class PreferencesPanel:
         self._test_x_var = tk.StringVar()
         self._test_y_var = tk.StringVar()
         self._status_var = tk.StringVar(value="")
+        self._backend_status_var = tk.StringVar(value="Backend: unknown | Mode: unknown | Source: unknown")
+        self._backend_warning_var = tk.StringVar(value="")
         self._profile_menu_icons: Dict[str, Any] = {}
         self._profile_poll_after_id: Optional[str] = None
         self._profile_poll_interval_ms = PROFILE_STATUS_POLL_INTERVAL_MS
@@ -1268,6 +1354,21 @@ class PreferencesPanel:
         toggle_entry.bind("<FocusOut>", self._on_toggle_argument_event)
         toggle_entry.bind("<Return>", self._on_toggle_argument_event)
         toggle_row.grid(row=controller_row, column=0, sticky="w", pady=ROW_PAD)
+        controller_row += 1
+
+        backend_override_row = ttk.Frame(controller_section, style=self._frame_style)
+        nb.Label(backend_override_row, text="Manual backend override:").pack(side="left")
+        backend_override_combo = ttk.Combobox(
+            backend_override_row,
+            width=28,
+            state="readonly",
+            textvariable=self._var_manual_backend_override,
+            values=self._backend_override_options,
+        )
+        backend_override_combo.pack(side="left", padx=(8, 0))
+        backend_override_combo.bind("<<ComboboxSelected>>", self._on_manual_backend_override_selected)
+        self._backend_override_combo = backend_override_combo
+        backend_override_row.grid(row=controller_row, column=0, sticky="w", pady=ROW_PAD)
         controller_row += 1
 
         profile_row = 0
@@ -2000,8 +2101,18 @@ class PreferencesPanel:
 
         self._update_cycle_button_state()
 
+        backend_status_label = nb.Label(frame, textvariable=self._backend_status_var, wraplength=800, justify="left")
+        backend_status_label.grid(row=2, column=0, sticky="w", pady=ROW_PAD)
+        backend_warning_label = nb.Label(
+            frame,
+            textvariable=self._backend_warning_var,
+            wraplength=800,
+            justify="left",
+            foreground="#c62828",
+        )
+        backend_warning_label.grid(row=3, column=0, sticky="w", pady=ROW_PAD)
         status_label = nb.Label(frame, textvariable=self._status_var, wraplength=800, justify="left")
-        status_label.grid(row=2, column=0, sticky="w", pady=ROW_PAD)
+        status_label.grid(row=4, column=0, sticky="w", pady=ROW_PAD)
         frame.columnconfigure(0, weight=1)
 
         self._frame = frame
@@ -2009,6 +2120,7 @@ class PreferencesPanel:
             self._frame.bind("<Destroy>", self._on_preferences_frame_destroy, add="+")
         except Exception:
             pass
+        self._maybe_refresh_backend_status_from_callback(silent=True)
         self._start_profile_state_monitor()
 
     @property
@@ -2156,6 +2268,60 @@ class PreferencesPanel:
     def _on_toggle_argument_event(self, _event=None) -> None:  # pragma: no cover - Tk event
         self._apply_toggle_argument()
 
+    def _refresh_backend_override_choices(self, status: Mapping[str, Any]) -> None:
+        current_pref = _normalise_manual_backend_override(
+            getattr(self._preferences, "manual_backend_override", ""),
+            "",
+        )
+        current_value = current_pref or str(self._var_manual_backend_override.get() or "")
+        choices = _backend_override_choices_for_status(status, current_value=current_value)
+        self._backend_override_options = choices
+        combo = getattr(self, "_backend_override_combo", None)
+        if combo is not None:
+            try:
+                combo.configure(values=choices)
+            except Exception:
+                pass
+        selected = current_pref or BACKEND_OVERRIDE_AUTO
+        if current_value and current_value not in {BACKEND_OVERRIDE_AUTO, current_pref}:
+            selected = current_value
+        try:
+            if self._var_manual_backend_override.get() != selected:
+                self._var_manual_backend_override.set(selected)
+        except Exception:
+            pass
+
+    def _on_manual_backend_override_selected(self, _event=None) -> None:  # pragma: no cover - Tk event
+        self._apply_manual_backend_override()
+
+    def _apply_manual_backend_override(self) -> None:
+        if self._backend_override_apply_in_progress:
+            return
+        self._backend_override_apply_in_progress = True
+        try:
+            raw_value = self._var_manual_backend_override.get()
+            normalised = _normalise_manual_backend_override(raw_value, "")
+            selected = normalised or BACKEND_OVERRIDE_AUTO
+            if selected != str(self._var_manual_backend_override.get() or ""):
+                self._var_manual_backend_override.set(selected)
+            if normalised == self._preferences.manual_backend_override:
+                return
+            self._preferences.manual_backend_override = normalised
+            self._preferences.save()
+            if callable(self._set_manual_backend_override):
+                try:
+                    self._set_manual_backend_override(normalised)
+                except Exception:
+                    LOGGER.debug("Failed to propagate manual backend override change", exc_info=True)
+                    self._status_var.set("Failed to propagate manual backend override change.")
+                    return
+            if normalised:
+                self._status_var.set(f"Manual backend override set to {normalised}.")
+            else:
+                self._status_var.set("Manual backend override cleared (Auto).")
+        finally:
+            self._backend_override_apply_in_progress = False
+
     def _apply_launch_command(self) -> None:
         if self._launch_command_apply_in_progress:
             return
@@ -2280,6 +2446,44 @@ class PreferencesPanel:
             self._sync_profile_widgets()
         return True
 
+    def _sync_backend_status_from_status(self, status: Mapping[str, Any]) -> None:
+        summary_var = getattr(self, "_backend_status_var", None)
+        if summary_var is not None:
+            summary_var.set(format_status_ui_summary(status))
+        warning_var = getattr(self, "_backend_warning_var", None)
+        if warning_var is not None:
+            warning_var.set(format_status_ui_warning(status))
+        self._refresh_backend_override_choices(status)
+
+    def _maybe_refresh_backend_status_from_callback(self, *, silent: bool) -> bool:
+        callback = getattr(self, "_backend_status_callback", None)
+        if not callable(callback):
+            return False
+        try:
+            response = callback()
+        except Exception as exc:
+            if not silent:
+                self._status_var.set(f"Failed to load backend status: {exc}")
+            return False
+        if not isinstance(response, Mapping):
+            if not silent:
+                self._status_var.set("Invalid backend status response.")
+            return False
+        status = response.get("backend_status")
+        if not isinstance(status, Mapping):
+            if "selected_backend" in response:
+                status = response
+            else:
+                if not silent:
+                    self._status_var.set("Backend status response missing backend_status payload.")
+                return False
+        previous = self._backend_status_snapshot if isinstance(self._backend_status_snapshot, Mapping) else {}
+        if status == previous:
+            return False
+        self._backend_status_snapshot = status
+        self._sync_backend_status_from_status(status)
+        return True
+
     def _profile_frame_exists(self) -> bool:
         frame = getattr(self, "_frame", None)
         if frame is None:
@@ -2290,7 +2494,7 @@ class PreferencesPanel:
             return False
 
     def _start_profile_state_monitor(self) -> None:
-        if not callable(self._profile_status_callback):
+        if not callable(self._profile_status_callback) and not callable(self._backend_status_callback):
             return
         if self._profile_poll_after_id:
             return
@@ -2333,6 +2537,7 @@ class PreferencesPanel:
             return
         if self._profile_table_editor is None:
             self._maybe_refresh_profile_state_from_callback(silent=True)
+        self._maybe_refresh_backend_status_from_callback(silent=True)
         self._schedule_profile_state_monitor(delay_ms=self._profile_poll_interval_ms)
 
     def _sync_profile_widgets(self) -> None:

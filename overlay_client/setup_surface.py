@@ -18,6 +18,7 @@ from overlay_client.client_config import InitialClientSettings
 from overlay_client.controller_mode import ControllerModeProfile, ControllerModeTracker, ModeProfile
 from overlay_client.data_client import OverlayDataClient
 from overlay_client.backend import ProbeSource
+from overlay_client.backend.status import format_status_report_line
 from overlay_client.debug_config import DEBUG_CONFIG_ENABLED, DebugConfig
 from overlay_client.debug_cycle_overlay import CycleOverlayView, DebugOverlayView
 from overlay_client.follow_controller import FollowController
@@ -163,9 +164,8 @@ class SetupSurfaceMixin:
             self._platform_context.force_xwayland,
         )
         _CLIENT_LOGGER.debug(
-            "Client backend status initialised: backend=%s classification=%s",
-            self._client_backend_status.selected_backend.support_label,
-            self._client_backend_status.classification.value,
+            "Client backend status initialised: %s",
+            format_status_report_line(self._client_backend_status),
         )
         self._window_controller = WindowController(log_fn=_CLIENT_LOGGER.debug)
         self._visibility_helper = VisibilityHelper(log_fn=_CLIENT_LOGGER.debug)

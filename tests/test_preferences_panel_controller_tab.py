@@ -11,6 +11,9 @@ class _StatusVar:
     def set(self, value: str) -> None:
         self.value = str(value)
 
+    def get(self) -> str:
+        return self.value
+
 
 class _FakeFrame:
     def __init__(self) -> None:
@@ -35,6 +38,18 @@ class _FakeFrame:
         return "bind-id"
 
 
+class _FakeCombo:
+    def __init__(self) -> None:
+        self.values: tuple[str, ...] = ()
+
+    def configure(self, **kwargs) -> None:
+        values = kwargs.get("values")
+        if isinstance(values, tuple):
+            self.values = values
+        elif isinstance(values, list):
+            self.values = tuple(str(value) for value in values)
+
+
 def test_preferences_tab_order_contract() -> None:
     assert prefs._preferences_tab_order() == ("Overlay", "Controller", "Profiles", "Experimental")
 
@@ -44,6 +59,7 @@ def test_controller_tab_control_order_contract() -> None:
         "launch_controller",
         "launch_command",
         "toggle_argument",
+        "backend_override",
     )
 
 
@@ -84,6 +100,7 @@ def test_plugin_prefs_wires_launch_controller_callback(monkeypatch) -> None:
 
         def __init__(self) -> None:
             self.launch_sources: list[str] = []
+            self.manual_backend_override_values: list[str] = []
 
         def launch_overlay_controller(self, *, source: load.LaunchSource = "chat") -> None:
             self.launch_sources.append(source)
@@ -93,6 +110,9 @@ def test_plugin_prefs_wires_launch_controller_callback(monkeypatch) -> None:
 
         def get_troubleshooting_panel_state(self):
             return load.TroubleshootingPanelState()
+
+        def set_manual_backend_override_preference(self, value: str) -> None:
+            self.manual_backend_override_values.append(value)
 
         def __getattr__(self, _name: str):
             return lambda *args, **kwargs: None
@@ -115,7 +135,10 @@ def test_plugin_prefs_wires_launch_controller_callback(monkeypatch) -> None:
     assert frame is load._prefs_panel.frame
     launch_callback = captured["kwargs"]["launch_controller_callback"]
     launch_callback()
+    override_callback = captured["kwargs"]["set_manual_backend_override_callback"]
+    override_callback("xwayland_compat")
     assert plugin.launch_sources == ["settings"]
+    assert plugin.manual_backend_override_values == ["xwayland_compat"]
 
 
 def test_profile_status_refresh_only_syncs_on_change() -> None:
@@ -228,3 +251,102 @@ def test_profile_state_monitor_start_and_stop_manage_after_id() -> None:
 
     assert panel._profile_poll_after_id is None
     assert panel._frame.cancelled == ["after-1"]
+
+
+def test_backend_status_refresh_updates_summary_and_warning() -> None:
+    panel = object.__new__(prefs.PreferencesPanel)
+    panel._status_var = _StatusVar()
+    panel._backend_status_var = _StatusVar()
+    panel._backend_warning_var = _StatusVar()
+    panel._preferences = type("_Prefs", (), {"manual_backend_override": ""})()
+    panel._var_manual_backend_override = _StatusVar()
+    panel._backend_override_combo = _FakeCombo()
+    panel._backend_status_snapshot = {}
+    panel._backend_status_callback = lambda: {
+        "status": "ok",
+        "backend_status": {
+            "selected_backend": {"family": "xwayland_compat", "instance": "xwayland_compat"},
+            "classification": "degraded_overlay",
+            "fallback_from": {"family": "native_wayland", "instance": "kwin_wayland"},
+            "fallback_reason": "xwayland_compat_only",
+            "shadow_mode": True,
+            "helper_states": [],
+            "review_required": False,
+            "review_reasons": [],
+        },
+    }
+
+    changed = panel._maybe_refresh_backend_status_from_callback(silent=True)
+
+    assert changed is True
+    assert panel._backend_status_var.value == (
+        "Backend: xwayland_compat / xwayland_compat | Mode: degraded_overlay | Source: plugin_hint"
+    )
+    assert panel._backend_warning_var.value == (
+        "Warning: Mode: degraded_overlay; Fallback from native_wayland / kwin_wayland (xwayland_compat_only)"
+    )
+    assert panel._backend_override_combo.values == ("auto", "xwayland_compat")
+
+
+def test_apply_manual_backend_override_persists_and_calls_callback() -> None:
+    panel = object.__new__(prefs.PreferencesPanel)
+    panel._status_var = _StatusVar()
+    panel._preferences = type(
+        "_Prefs",
+        (),
+        {
+            "manual_backend_override": "",
+            "save": lambda self: None,
+        },
+    )()
+    panel._var_manual_backend_override = _StatusVar()
+    panel._var_manual_backend_override.set("xwayland_compat")
+    panel._backend_override_apply_in_progress = False
+    applied: list[str] = []
+    panel._set_manual_backend_override = lambda value: applied.append(value)
+
+    panel._apply_manual_backend_override()
+
+    assert panel._preferences.manual_backend_override == "xwayland_compat"
+    assert applied == ["xwayland_compat"]
+    assert panel._status_var.value == "Manual backend override set to xwayland_compat."
+
+
+def test_apply_manual_backend_override_clears_auto_value() -> None:
+    panel = object.__new__(prefs.PreferencesPanel)
+    panel._status_var = _StatusVar()
+    panel._preferences = type(
+        "_Prefs",
+        (),
+        {
+            "manual_backend_override": "xwayland_compat",
+            "save": lambda self: None,
+        },
+    )()
+    panel._var_manual_backend_override = _StatusVar()
+    panel._var_manual_backend_override.set("auto")
+    panel._backend_override_apply_in_progress = False
+    applied: list[str] = []
+    panel._set_manual_backend_override = lambda value: applied.append(value)
+
+    panel._apply_manual_backend_override()
+
+    assert panel._preferences.manual_backend_override == ""
+    assert applied == [""]
+    assert panel._status_var.value == "Manual backend override cleared (Auto)."
+
+
+def test_profile_state_monitor_starts_with_backend_status_callback_only() -> None:
+    panel = object.__new__(prefs.PreferencesPanel)
+    panel._frame = _FakeFrame()
+    panel._status_var = _StatusVar()
+    panel._profile_status_callback = None
+    panel._backend_status_callback = lambda: {"status": "ok", "backend_status": {}}
+    panel._profile_poll_interval_ms = 555
+    panel._profile_poll_after_id = None
+    panel._profile_table_editor = None
+
+    panel._start_profile_state_monitor()
+
+    assert panel._profile_poll_after_id == "after-1"
+    assert panel._frame.after_calls[-1][0] == 555

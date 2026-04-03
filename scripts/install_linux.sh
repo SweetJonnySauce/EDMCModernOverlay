@@ -60,6 +60,11 @@ COMPOSITOR_REQUIRES_FORCE_XWAYLAND=0
 COMPOSITOR_SESSION=""
 COMPOSITOR_DESKTOPS=""
 declare -a COMPOSITOR_NOTES=()
+COMPOSITOR_HELPER_KIND=""
+COMPOSITOR_HELPER_LABEL=""
+COMPOSITOR_HELPER_REQUIRED=0
+COMPOSITOR_HELPER_INSTALL_MODE=""
+declare -a COMPOSITOR_HELPER_NOTES=()
 
 print_usage() {
     cat <<'EOF'
@@ -302,10 +307,16 @@ def emit_compositor(entry):
     match_payload = entry.get("match") or {}
     overrides = entry.get("env_overrides") or {}
     notes = entry.get("notes") or []
+    helper = entry.get("helper") or {}
     provenance = entry.get("provenance") or ""
     print(f"COMPOSITOR_MATCH_JSON={shlex.quote(json.dumps(match_payload, separators=(',', ':')))}")
     print(f"COMPOSITOR_ENV_OVERRIDES_JSON={shlex.quote(json.dumps(overrides, separators=(',', ':')))}")
     emit_array("COMPOSITOR_NOTES", notes)
+    print(f"COMPOSITOR_HELPER_KIND={shlex.quote(str(helper.get('kind') or ''))}")
+    print(f"COMPOSITOR_HELPER_LABEL={shlex.quote(str(helper.get('label') or ''))}")
+    print(f"COMPOSITOR_HELPER_REQUIRED={'1' if helper.get('required_for_true_overlay') else '0'}")
+    print(f"COMPOSITOR_HELPER_INSTALL_MODE={shlex.quote(str(helper.get('install_mode') or ''))}")
+    emit_array("COMPOSITOR_HELPER_NOTES", helper.get("notes") or [])
     print(f"COMPOSITOR_PROVENANCE={shlex.quote(provenance)}")
 
 with open(sys.argv[1], encoding="utf-8") as handle:
@@ -947,6 +958,11 @@ reset_compositor_selection() {
     COMPOSITOR_SESSION=""
     COMPOSITOR_DESKTOPS=""
     COMPOSITOR_NOTES=()
+    COMPOSITOR_HELPER_KIND=""
+    COMPOSITOR_HELPER_LABEL=""
+    COMPOSITOR_HELPER_REQUIRED=0
+    COMPOSITOR_HELPER_INSTALL_MODE=""
+    COMPOSITOR_HELPER_NOTES=()
 }
 
 parse_requires_force_xwayland() {
@@ -1230,6 +1246,88 @@ PY
         apply_compositor_overrides "$dest_dir"
     else
         echo "ℹ️  Skipped compositor overrides at user request."
+    fi
+}
+
+write_compositor_helper_approval() {
+    local dest_dir="$1"
+    local approved="$2"
+    local approval_source="$3"
+    local target_file="${dest_dir}/overlay_client/helper_approval.json"
+    local target_dirname
+    target_dirname="$(dirname "$target_file")"
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "📝 [dry-run] Would write helper approval record to '$target_file' (approved=${approved})."
+        return
+    fi
+    mkdir -p "$target_dirname"
+    HELPER_TARGET_FILE="$target_file" \
+    HELPER_APPROVED="$approved" \
+    HELPER_APPROVAL_SOURCE="$approval_source" \
+    COMPOSITOR_ID="$COMPOSITOR_ID" \
+    COMPOSITOR_LABEL="$COMPOSITOR_LABEL" \
+    COMPOSITOR_HELPER_KIND="$COMPOSITOR_HELPER_KIND" \
+    COMPOSITOR_HELPER_LABEL="$COMPOSITOR_HELPER_LABEL" \
+    COMPOSITOR_HELPER_REQUIRED="$COMPOSITOR_HELPER_REQUIRED" \
+    COMPOSITOR_HELPER_INSTALL_MODE="$COMPOSITOR_HELPER_INSTALL_MODE" \
+    python3 - <<'PY'
+import json
+import os
+
+path = os.environ["HELPER_TARGET_FILE"]
+payload = {
+    "version": 1,
+    "compositor_id": os.environ.get("COMPOSITOR_ID", ""),
+    "compositor_label": os.environ.get("COMPOSITOR_LABEL", ""),
+    "helper_kind": os.environ.get("COMPOSITOR_HELPER_KIND", ""),
+    "helper_label": os.environ.get("COMPOSITOR_HELPER_LABEL", ""),
+    "required_for_true_overlay": os.environ.get("COMPOSITOR_HELPER_REQUIRED", "0") == "1",
+    "install_mode": os.environ.get("COMPOSITOR_HELPER_INSTALL_MODE", ""),
+    "approved": os.environ.get("HELPER_APPROVED", "0") == "1",
+    "approval_source": os.environ.get("HELPER_APPROVAL_SOURCE", ""),
+}
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(payload, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PY
+}
+
+handle_compositor_helper_guidance() {
+    local dest_dir="$1"
+    if [[ "${COMPOSITOR_SELECTED:-0}" -ne 1 || "${COMPOSITOR_FOUND:-0}" -ne 1 ]]; then
+        return
+    fi
+    if [[ -z "${COMPOSITOR_HELPER_KIND:-}" ]]; then
+        return
+    fi
+    echo "ℹ️  Compositor helper guidance: ${COMPOSITOR_HELPER_LABEL:-unknown} (${COMPOSITOR_HELPER_KIND})"
+    if [[ "${COMPOSITOR_HELPER_REQUIRED:-0}" -eq 1 ]]; then
+        echo "    This helper is required for the long-term true-overlay path on this compositor."
+    else
+        echo "    This helper is optional and is not required for the current shipped compatibility path."
+    fi
+    if [[ ${#COMPOSITOR_HELPER_NOTES[@]} -gt 0 ]]; then
+        local note
+        for note in "${COMPOSITOR_HELPER_NOTES[@]}"; do
+            echo "    Helper note: $note"
+        done
+    fi
+    local approved=0
+    local approval_source="declined"
+    local prompt_message="Record approval for ${COMPOSITOR_HELPER_LABEL:-this helper} guidance? The installer will not install or enable it automatically."
+    if [[ "$ASSUME_YES" == true ]]; then
+        echo "${prompt_message} [y/N]: y (auto-approved)"
+        approved=1
+        approval_source="assume_yes"
+    elif prompt_yes_no_default_no "$prompt_message"; then
+        approved=1
+        approval_source="prompt_yes_no_default_no"
+    fi
+    write_compositor_helper_approval "$dest_dir" "$approved" "$approval_source"
+    if [[ "$approved" -eq 1 ]]; then
+        echo "ℹ️  Helper approval recorded; no helper was installed or enabled automatically."
+    else
+        echo "ℹ️  Helper approval not granted; recorded as declined and continuing without helper install/enable."
     fi
 }
 
@@ -2389,6 +2487,7 @@ PY
 
     maybe_install_eurocaps "$dest_dir"
     handle_compositor_overrides "$dest_dir"
+    handle_compositor_helper_guidance "$dest_dir"
     final_notes
     if [[ "$DRY_RUN" != true && "$ASSUME_YES" != true && -t 0 ]]; then
         read -r -p $'Install finished, hit Enter to continue...'

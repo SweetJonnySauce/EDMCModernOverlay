@@ -126,6 +126,9 @@ class PluginBridge:
     def profile_status(self) -> Optional[JsonDict]:
         return self.request_cli({"cli": "profile_status"})
 
+    def backend_status(self) -> Optional[JsonDict]:
+        return self.request_cli({"cli": "backend_status"})
+
     def set_profile(self, profile_name: str) -> Optional[JsonDict]:
         token = str(profile_name or "").strip()
         if not token:

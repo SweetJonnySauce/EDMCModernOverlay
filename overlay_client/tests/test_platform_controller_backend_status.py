@@ -75,6 +75,31 @@ def test_platform_controller_prefers_backend_status_over_legacy_context(monkeypa
     assert controller.platform_label() == "Wayland"
 
 
+def test_platform_controller_derives_backend_status_when_none_is_provided(monkeypatch):
+    created = []
+
+    def _factory(bundle, widget, logger, context):
+        del widget, logger, context
+        created.append(bundle.descriptor.instance)
+        return _FakeIntegration(bundle.descriptor.instance.value)
+
+    monkeypatch.setattr("overlay_client.platform_integration.sys.platform", "linux")
+    monkeypatch.setattr("overlay_client.platform_integration.QGuiApplication.platformName", lambda: "wayland")
+    monkeypatch.setattr("overlay_client.platform_integration.create_bundle_integration", _factory)
+
+    controller = PlatformController(
+        object(),
+        logging.getLogger("test.platform_controller.derived_bundle"),
+        PlatformContext(session_type="wayland", compositor="kwin", force_xwayland=False),
+        backend_status=None,
+    )
+
+    assert created == [BackendInstance.KWIN_WAYLAND]
+    assert controller.is_wayland_backend() is True
+    assert controller.uses_transient_parent() is False
+    assert controller.platform_label() == "Wayland"
+
+
 def test_platform_controller_rebuilds_integration_when_backend_status_changes(monkeypatch):
     created = []
     integrations = []

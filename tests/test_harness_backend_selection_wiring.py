@@ -54,5 +54,11 @@ def test_runtime_publishes_shadow_backend_status_in_overlay_config(
         "instance": "kwin_wayland",
     }
     assert shadow["classification"] == "true_overlay"
+    assert shadow["report"]["family"] == "native_wayland"
+    assert shadow["report"]["instance"] == "kwin_wayland"
+    assert shadow["report"]["classification"] == "true_overlay"
+    assert shadow["report"]["summary"].startswith(
+        "family=native_wayland instance=kwin_wayland classification=true_overlay"
+    )
     assert shadow["probe"]["qt_platform_name"] == "wayland"
     assert "shadow_selector_result" in shadow["notes"]

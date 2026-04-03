@@ -179,6 +179,10 @@ class HelperIpcBackend(Protocol):
     def backend_instance(self) -> BackendInstance:
         """Return the backend instance identifier for this component."""
 
+    @property
+    def helper_kind(self) -> HelperKind:
+        """Return the helper identity this component communicates with."""
+
 
 @dataclass(frozen=True, slots=True)
 class BackendBundle:

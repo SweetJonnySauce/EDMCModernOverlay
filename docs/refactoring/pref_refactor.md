@@ -1,6 +1,6 @@
 # Preferences Refactor Plan
 
-This plan tracks the work to make preference persistence platform-agnostic and easier to reason about. It mirrors the structure of `client_refactor.md` but scoped to preference storage and bootstrap flows. Keep stages small, testable, and behavior-preserving.
+This plan tracks the work to make preference persistence platform-agnostic and easier to reason about. It mirrors the structure of the archived `docs/archive/refactoring/client_refactor.md` plan but scoped to preference storage and bootstrap flows. Keep stages small, testable, and behavior-preserving.
 
 ## Current Preference storage differences (i.e. issues)
 

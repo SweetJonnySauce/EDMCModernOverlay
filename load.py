@@ -62,6 +62,7 @@ if __package__:
         _apply_font_bounds_edit,
         _apply_font_step_edit,
         _coerce_toggle_argument,
+        _normalise_manual_backend_override,
         _normalise_launch_command,
     )
     from .overlay_plugin.spam_detection import (
@@ -102,6 +103,7 @@ if __package__:
     from .group_cache import GroupPlacementCache
     from .overlay_client import env_overrides as env_overrides_helper
     from .overlay_client.backend import BackendSelector, ProbeInputs, ProbeSource, collect_platform_probe
+    from .overlay_client.backend.status import format_status_report_line
 else:  # pragma: no cover - EDMC loads as top-level module
     from version import __version__ as MODERN_OVERLAY_VERSION, DEV_MODE_ENV_VAR, is_dev_build
     from overlay_plugin.lifecycle import LifecycleTracker
@@ -138,6 +140,7 @@ else:  # pragma: no cover - EDMC loads as top-level module
         _apply_font_bounds_edit,
         _apply_font_step_edit,
         _coerce_toggle_argument,
+        _normalise_manual_backend_override,
         _normalise_launch_command,
     )
     from overlay_plugin.spam_detection import (
@@ -178,6 +181,7 @@ else:  # pragma: no cover - EDMC loads as top-level module
     from group_cache import GroupPlacementCache
     import overlay_client.env_overrides as env_overrides_helper
     from overlay_client.backend import BackendSelector, ProbeInputs, ProbeSource, collect_platform_probe
+    from overlay_client.backend.status import format_status_report_line
 
 PLUGIN_NAME = "EDMCModernOverlay"
 PLUGIN_VERSION = MODERN_OVERLAY_VERSION
@@ -777,6 +781,20 @@ class _PluginRuntime:
 
     def get_profile_status(self) -> Dict[str, Any]:
         return profile_runtime_helpers.get_profile_status(self, logger=LOGGER)
+
+    def get_backend_status(self) -> Dict[str, Any]:
+        context = self._platform_context_payload()
+        backend_status = context.get("shadow_backend_status")
+        if not isinstance(backend_status, Mapping):
+            raise RuntimeError("Backend status unavailable")
+        report = backend_status.get("report")
+        if not isinstance(report, Mapping):
+            report = {}
+        return {
+            "status": "ok",
+            "backend_status": dict(backend_status),
+            "report": dict(report),
+        }
 
     def _sync_profile_scoped_group_state(self, status: Optional[Mapping[str, Any]] = None) -> None:
         profile_runtime_helpers.sync_profile_scoped_group_state(self, status=status, logger=LOGGER)
@@ -1454,6 +1472,9 @@ class _PluginRuntime:
             platform_context.get("force_xwayland"),
             launch_env.get("QT_QPA_PLATFORM"),
         )
+        shadow_backend_status = platform_context.get("shadow_backend_status")
+        if isinstance(shadow_backend_status, Mapping):
+            LOGGER.debug("Plugin shadow backend status: %s", format_status_report_line(shadow_backend_status))
         self.watchdog = OverlayWatchdog(
             command,
             overlay_cwd,
@@ -1926,6 +1947,20 @@ class _PluginRuntime:
         current_prefix = self._command_helper_prefix or getattr(self._preferences, "controller_launch_command", "!ovr")
         self._command_helper = self._build_command_helper(current_prefix, previous_prefix=current_prefix)
         LOGGER.info("Overlay toggle argument preference updated to %s", normalised)
+
+    def set_manual_backend_override_preference(self, value: str) -> None:
+        normalised = _normalise_manual_backend_override(value, "")
+        with self._prefs_lock:
+            current = str(getattr(self._preferences, "manual_backend_override", "") or "")
+            if normalised == current:
+                return
+            self._preferences.manual_backend_override = normalised
+            self._preferences.save()
+        LOGGER.info(
+            "Manual backend override preference updated to %s",
+            normalised or "auto",
+        )
+        self._send_overlay_config()
 
     def set_payload_opacity_preference(self, value: int) -> None:
         """Set visual payload transparency only (not logical overlay/group on/off)."""
@@ -2821,6 +2856,8 @@ class _PluginRuntime:
                 }
             if command == "profile_status":
                 return {"status": "ok", **self.get_profile_status()}
+            if command == "backend_status":
+                return self.get_backend_status()
             if command == "profile_set":
                 raw_name = payload.get("profile")
                 profile_name = str(raw_name or "").strip()
@@ -2983,6 +3020,7 @@ class _PluginRuntime:
         )
         self._last_config = dict(payload)
         self._publish_payload(payload)
+        shadow_backend_status = payload.get("platform_context", {}).get("shadow_backend_status")
         LOGGER.debug(
             "Published overlay config: opacity=%s global_payload_opacity=%s show_status=%s debug_overlay_corner=%s status_bottom_margin=%s client_log_retention=%d gridlines_enabled=%s "
             "gridline_spacing=%d force_render=%s standalone_mode=%s title_bar_enabled=%s title_bar_height=%d debug_overlay=%s physical_clamp=%s cycle_payload_ids=%s copy_payload_id_on_cycle=%s "
@@ -3012,6 +3050,8 @@ class _PluginRuntime:
             payload["platform_context"],
             payload["physical_clamp_overrides"],
         )
+        if isinstance(shadow_backend_status, Mapping):
+            LOGGER.debug("Published shadow backend status: %s", format_status_report_line(shadow_backend_status))
         if rebroadcast:
             self._schedule_config_rebroadcasts()
 
@@ -3511,6 +3551,9 @@ class _PluginRuntime:
     def _shadow_backend_status_payload(self, context: Mapping[str, Any]) -> Dict[str, Any]:
         session_type = str(context.get("session_type") or "")
         force_xwayland = bool(context.get("force_xwayland"))
+        manual_backend_override = str(context.get("manual_backend_override") or "").strip().lower()
+        if manual_backend_override == "auto":
+            manual_backend_override = ""
         probe = collect_platform_probe(
             ProbeInputs(
                 source=ProbeSource.INITIAL_HINTS,
@@ -3524,14 +3567,18 @@ class _PluginRuntime:
                 env=os.environ,
             )
         )
-        return BackendSelector().select(probe).to_payload()
+        return BackendSelector().select(probe, manual_override=manual_backend_override).to_payload()
 
     def _platform_context_payload(self) -> Dict[str, Any]:
         session = (os.environ.get("XDG_SESSION_TYPE") or "").lower()
+        manual_backend_override = str(getattr(self._preferences, "manual_backend_override", "") or "").strip().lower()
+        if manual_backend_override == "auto":
+            manual_backend_override = ""
         context = {
             "session_type": session or "unknown",
             "compositor": self._detect_wayland_compositor(),
             "force_xwayland": bool(self._preferences.force_xwayland),
+            "manual_backend_override": manual_backend_override,
         }
         if self._flatpak_context.get("is_flatpak"):
             context["flatpak"] = True
@@ -3691,9 +3738,13 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
         )
         launch_command_callback = plugin_runtime.set_launch_command_preference if plugin_runtime else None
         toggle_argument_callback = plugin_runtime.set_toggle_argument_preference if plugin_runtime else None
+        manual_backend_override_callback = (
+            plugin_runtime.set_manual_backend_override_preference if plugin_runtime else None
+        )
         payload_opacity_callback = plugin_runtime.set_payload_opacity_preference if plugin_runtime else None
         reset_group_cache_callback = plugin_runtime.reset_group_cache if plugin_runtime else None
         profile_status_callback = plugin_runtime.get_profile_status if plugin_runtime else None
+        backend_status_callback = plugin_runtime.get_backend_status if plugin_runtime else None
         create_profile_callback = plugin_runtime.create_profile if plugin_runtime else None
         clone_profile_callback = plugin_runtime.clone_profile if plugin_runtime else None
         rename_profile_callback = plugin_runtime.rename_profile if plugin_runtime else None
@@ -3741,9 +3792,11 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
             launch_controller_callback=launch_controller_callback,
             set_launch_command_callback=launch_command_callback,
             set_toggle_argument_callback=toggle_argument_callback,
+            set_manual_backend_override_callback=manual_backend_override_callback,
             set_payload_opacity_callback=payload_opacity_callback,
             reset_group_cache_callback=reset_group_cache_callback,
             profile_status_callback=profile_status_callback,
+            backend_status_callback=backend_status_callback,
             create_profile_callback=create_profile_callback,
             clone_profile_callback=clone_profile_callback,
             rename_profile_callback=rename_profile_callback,

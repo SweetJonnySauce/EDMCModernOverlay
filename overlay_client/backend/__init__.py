@@ -17,6 +17,17 @@ from .contracts import (
     SessionType,
     TargetDiscoveryBackend,
 )
+from .helper_ipc import (
+    HELPER_PROTOCOL_VERSION,
+    HelperBoundaryConfig,
+    HelperBoundaryError,
+    HelperEndpointConfig,
+    HelperMessage,
+    HelperMessageType,
+    HelperTransport,
+    parse_helper_message,
+    validate_helper_boundary,
+)
 from .probe import ProbeInputs, ProbeSource, collect_platform_probe
 from .selector import BackendSelector
 from .status import BackendSelectionStatus, HelperCapabilityState
@@ -30,9 +41,16 @@ __all__ = [
     "BackendSelectionStatus",
     "CapabilityClassification",
     "FallbackReason",
+    "HELPER_PROTOCOL_VERSION",
+    "HelperBoundaryConfig",
+    "HelperBoundaryError",
     "HelperCapabilityState",
+    "HelperEndpointConfig",
     "HelperIpcBackend",
     "HelperKind",
+    "HelperMessage",
+    "HelperMessageType",
+    "HelperTransport",
     "InputPolicyBackend",
     "OperatingSystem",
     "PlatformProbe",
@@ -43,4 +61,6 @@ __all__ = [
     "SessionType",
     "TargetDiscoveryBackend",
     "collect_platform_probe",
+    "parse_helper_message",
+    "validate_helper_boundary",
 ]

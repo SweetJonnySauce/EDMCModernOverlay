@@ -891,6 +891,12 @@ patterns = {
     "title_offset": re.compile(
         r"Title bar offset updated: enabled=(?P<enabled>True|False) height=(?P<height>[0-9]+) offset=(?P<offset>-?[0-9]+) scale_y=(?P<scale_y>[0-9.]+)"
     ),
+    "backend": re.compile(
+        r"Client backend status (?:initialised|updated): (?P<summary>family=.*)"
+    ),
+    "backend_mismatch": re.compile(
+        r"Plugin backend hint differs from client runtime selection: plugin=(?P<plugin>family=.*?) client=(?P<client>family=.*)"
+    ),
 }
 
 latest = {key: None for key in patterns}
@@ -911,6 +917,10 @@ with log_path.open("r", encoding="utf-8", errors="replace") as handle:
             if key == "scaling" and "Overlay scaling updated:" not in line:
                 continue
             if key == "title_offset" and "Title bar offset updated:" not in line:
+                continue
+            if key == "backend" and "Client backend status " not in line:
+                continue
+            if key == "backend_mismatch" and "Plugin backend hint differs from client runtime selection:" not in line:
                 continue
             match = pattern.search(line)
             if match:
@@ -940,8 +950,19 @@ def parse_float(value):
     except (TypeError, ValueError):
         return None
 
+def parse_status_summary(text):
+    summary = {}
+    for token in str(text or "").split():
+        if "=" not in token:
+            continue
+        key, value = token.split("=", 1)
+        summary[key] = value
+    return summary
+
 lines = [f"Source log: {abbreviate(log_path)}"]
 
+backend_info = latest.get("backend")
+backend_mismatch_info = latest.get("backend_mismatch")
 move_info = latest.get("move")
 tracker_info = latest.get("tracker")
 wm_info = latest.get("wm")
@@ -978,6 +999,43 @@ if scaling_info:
     scaling_overflow_y = scaling_info.get("overflow_y")
     scaling_message = parse_float(scaling_info.get("message"))
 
+lines.append("Backend:")
+if backend_info:
+    backend_summary = parse_status_summary(backend_info.get("summary", ""))
+    family = backend_summary.get("family", "unknown")
+    instance = backend_summary.get("instance", "unknown")
+    classification = backend_summary.get("classification", "unknown")
+    lines.append(f"  selected={family}/{instance} [{classification}]")
+    fallback_from = backend_summary.get("fallback_from", "none")
+    fallback_reason = backend_summary.get("fallback_reason", "none")
+    if fallback_from != "none" or fallback_reason != "none":
+        lines.append(f"  fallback_from={fallback_from} reason={fallback_reason}")
+    if backend_summary.get("review_required") == "true":
+        lines.append(f"  review={backend_summary.get('review_reasons', 'none')}")
+    helpers = backend_summary.get("helpers", "none")
+    if helpers != "none":
+        lines.append(f"  helpers={helpers}")
+else:
+    lines.append("  selected=<unavailable>")
+if backend_mismatch_info:
+    plugin_summary = parse_status_summary(backend_mismatch_info.get("plugin", ""))
+    client_summary = parse_status_summary(backend_mismatch_info.get("client", ""))
+    lines.append(
+        "  mismatch_plugin={}/{} [{}]".format(
+            plugin_summary.get("family", "unknown"),
+            plugin_summary.get("instance", "unknown"),
+            plugin_summary.get("classification", "unknown"),
+        )
+    )
+    lines.append(
+        "  mismatch_client={}/{} [{}]".format(
+            client_summary.get("family", "unknown"),
+            client_summary.get("instance", "unknown"),
+            client_summary.get("classification", "unknown"),
+        )
+    )
+
+lines.append("")
 lines.append("Monitor:")
 if move_info:
     monitor_label = (move_info.get("monitor") or "").strip() or "unknown"

@@ -55,6 +55,10 @@ class _HelperIpc:
     def backend_instance(self) -> BackendInstance:
         return BackendInstance.KWIN_WAYLAND
 
+    @property
+    def helper_kind(self) -> HelperKind:
+        return HelperKind.KWIN_SCRIPT
+
 
 def test_backend_family_values_include_locked_support_labels():
     assert BackendFamily.NATIVE_X11.value == "native_x11"
@@ -132,6 +136,8 @@ def test_backend_bundle_and_selection_status_capture_stable_identity():
     assert status.is_true_overlay is False
     assert status.helper_states[0].available is True
     assert status.helper_states[0].version == "1.2.3"
+    assert bundle.helper_ipc is not None
+    assert bundle.helper_ipc.helper_kind is HelperKind.KWIN_SCRIPT
 
 
 def test_backend_selection_status_serializes_to_plain_payload():

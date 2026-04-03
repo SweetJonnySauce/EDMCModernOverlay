@@ -11,9 +11,9 @@ from overlay_client.backend.bundles import _wayland_common
 from overlay_client.backend.consumers import (
     create_bundle_integration,
     create_bundle_tracker,
+    derive_linux_backend_status,
     is_wayland_bundle,
     platform_label_for_bundle,
-    resolve_legacy_linux_bundle,
     resolve_linux_bundle_from_status,
     resolve_tracker_fallback_bundle,
     uses_transient_parent,
@@ -199,67 +199,77 @@ def test_consumer_helper_allows_missing_tracker_for_generic_wayland_bundle():
     assert tracker is None
 
 
-def test_resolve_legacy_linux_bundle_preserves_xwayland_compat_identity_for_wayland_xcb_path():
-    bundle = resolve_legacy_linux_bundle(
+def test_derive_linux_backend_status_preserves_xwayland_compat_identity_for_wayland_xcb_path():
+    status = derive_linux_backend_status(
         session_type="wayland",
         compositor="kwin",
         force_xwayland=False,
         qt_platform_name="xcb",
         env={"XDG_SESSION_TYPE": "wayland"},
     )
+    bundle = resolve_linux_bundle_from_status(status)
 
+    assert status.selected_backend.instance is BackendInstance.XWAYLAND_COMPAT
     assert bundle.descriptor.instance is BackendInstance.XWAYLAND_COMPAT
     assert platform_label_for_bundle(bundle) == "Wayland (XWayland)"
     assert is_wayland_bundle(bundle) is False
     assert uses_transient_parent(bundle) is True
 
 
-def test_resolve_legacy_linux_bundle_preserves_native_x11_identity_for_x11_path():
-    bundle = resolve_legacy_linux_bundle(
+def test_derive_linux_backend_status_preserves_native_x11_identity_for_x11_path():
+    status = derive_linux_backend_status(
         session_type="x11",
         compositor="none",
         force_xwayland=False,
         qt_platform_name="xcb",
         env={"XDG_SESSION_TYPE": "x11"},
     )
+    bundle = resolve_linux_bundle_from_status(status)
 
+    assert status.selected_backend.instance is BackendInstance.NATIVE_X11
     assert bundle.descriptor.instance is BackendInstance.NATIVE_X11
     assert platform_label_for_bundle(bundle) == "X11"
     assert is_wayland_bundle(bundle) is False
     assert uses_transient_parent(bundle) is True
 
 
-def test_resolve_legacy_linux_bundle_preserves_kwin_native_wayland_identity():
-    bundle = resolve_legacy_linux_bundle(
+def test_derive_linux_backend_status_preserves_kwin_native_wayland_identity():
+    status = derive_linux_backend_status(
         session_type="wayland",
         compositor="kwin",
         force_xwayland=False,
         qt_platform_name="wayland",
         env={"XDG_SESSION_TYPE": "wayland"},
     )
+    bundle = resolve_linux_bundle_from_status(status)
 
+    assert status.selected_backend.instance is BackendInstance.KWIN_WAYLAND
     assert bundle.descriptor.instance is BackendInstance.KWIN_WAYLAND
     assert platform_label_for_bundle(bundle) == "Wayland"
     assert is_wayland_bundle(bundle) is True
     assert uses_transient_parent(bundle) is False
 
 
-def test_resolve_legacy_linux_bundle_infers_gnome_and_generic_wayland_paths_from_runtime_context():
-    gnome_bundle = resolve_legacy_linux_bundle(
+def test_derive_linux_backend_status_infers_gnome_and_generic_wayland_paths_from_runtime_context():
+    gnome_status = derive_linux_backend_status(
         session_type="wayland",
         compositor="",
         force_xwayland=False,
         qt_platform_name="wayland",
         env={"XDG_SESSION_TYPE": "wayland", "XDG_CURRENT_DESKTOP": "GNOME"},
     )
-    generic_bundle = resolve_legacy_linux_bundle(
+    generic_status = derive_linux_backend_status(
         session_type="wayland",
         compositor="cosmic",
         force_xwayland=False,
         qt_platform_name="wayland",
         env={"XDG_SESSION_TYPE": "wayland"},
     )
+    gnome_bundle = resolve_linux_bundle_from_status(gnome_status)
+    generic_bundle = resolve_linux_bundle_from_status(generic_status)
 
+    assert gnome_status.selected_backend.instance is BackendInstance.GNOME_SHELL_WAYLAND
+    assert generic_status.selected_backend.instance is BackendInstance.COSMIC
     assert gnome_bundle.descriptor.instance is BackendInstance.GNOME_SHELL_WAYLAND
     assert generic_bundle.descriptor.instance is BackendInstance.WAYLAND_LAYER_SHELL_GENERIC
 

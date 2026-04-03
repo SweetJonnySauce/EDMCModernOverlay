@@ -22,6 +22,7 @@ def _initial_platform_context(initial: "InitialClientSettings") -> PlatformConte
         session_type=session,
         compositor=compositor,
         force_xwayland=bool(initial.force_xwayland or force_env),
+        manual_backend_override=str(getattr(initial, "manual_backend_override", "") or "").strip().lower(),
         flatpak=flatpak_flag,
         flatpak_app=flatpak_app,
     )
@@ -73,10 +74,11 @@ def _client_backend_status(
     return BackendSelector(
         shadow_mode=False,
         stable_notes=("client_selector_result",),
-    ).select(probe)
+    ).select(probe, manual_override=context.manual_backend_override)
 
-
-def _backend_status_signature(status: BackendSelectionStatus | Mapping[str, Any] | None) -> Optional[tuple[str, str, str, str, bool]]:
+def _backend_status_signature(
+    status: BackendSelectionStatus | Mapping[str, Any] | None,
+) -> Optional[tuple[str, str, str, str, bool, str, str]]:
     """Return a compact comparable signature for status objects or payload dicts."""
 
     if status is None:
@@ -89,6 +91,8 @@ def _backend_status_signature(status: BackendSelectionStatus | Mapping[str, Any]
             status.classification.value,
             fallback_reason,
             bool(status.shadow_mode),
+            status.manual_override.value if status.manual_override is not None else "",
+            str(status.override_error or ""),
         )
     selected_backend = status.get("selected_backend") if isinstance(status, Mapping) else None
     if not isinstance(selected_backend, Mapping):
@@ -99,4 +103,6 @@ def _backend_status_signature(status: BackendSelectionStatus | Mapping[str, Any]
         str(status.get("classification") or ""),
         str(status.get("fallback_reason") or ""),
         bool(status.get("shadow_mode")),
+        str(status.get("manual_override") or ""),
+        str(status.get("override_error") or ""),
     )

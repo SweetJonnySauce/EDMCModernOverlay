@@ -271,6 +271,11 @@ echo "LABEL=${{COMPOSITOR_LABEL:-}}"
 echo "MATCH=${{COMPOSITOR_MATCH_JSON:-}}"
 echo "OVERRIDES=${{COMPOSITOR_ENV_OVERRIDES_JSON:-}}"
 echo "NOTES=${{COMPOSITOR_NOTES[*]:-}}"
+echo "HELPER_KIND=${{COMPOSITOR_HELPER_KIND:-}}"
+echo "HELPER_LABEL=${{COMPOSITOR_HELPER_LABEL:-}}"
+echo "HELPER_REQUIRED=${{COMPOSITOR_HELPER_REQUIRED:-0}}"
+echo "HELPER_INSTALL_MODE=${{COMPOSITOR_HELPER_INSTALL_MODE:-}}"
+echo "HELPER_NOTES=${{COMPOSITOR_HELPER_NOTES[*]:-}}"
 echo "PROVENANCE=${{COMPOSITOR_PROVENANCE:-}}"
 """
         output = _run_bash(script, env)
@@ -281,6 +286,11 @@ echo "PROVENANCE=${{COMPOSITOR_PROVENANCE:-}}"
     assert lines.get("MATCH") == '{"session_types":["wayland"],"desktops":["kde","plasma"],"requires_force_xwayland":false}'
     assert lines.get("OVERRIDES") == '{"QT_AUTO_SCREEN_SCALE_FACTOR":"0","QT_ENABLE_HIGHDPI_SCALING":"0","QT_SCALE_FACTOR":"1"}'
     assert "double-scale" in lines.get("NOTES", "")
+    assert lines.get("HELPER_KIND") == "kwin_script"
+    assert "KWin helper script" in lines.get("HELPER_LABEL", "")
+    assert lines.get("HELPER_REQUIRED") == "0"
+    assert lines.get("HELPER_INSTALL_MODE") == "manual_enable"
+    assert "Optional future helper path" in lines.get("HELPER_NOTES", "")
     assert "KDE" in lines.get("PROVENANCE", "")
 
 
@@ -302,3 +312,71 @@ echo "FOUND=${{COMPOSITOR_FOUND:-0}}"
     lines = dict(line.split("=", 1) for line in output.strip().splitlines() if "=" in line)
     assert lines.get("SELECTED") == "0"
     assert lines.get("FOUND") in {"", "0"}
+
+
+def test_helper_guidance_records_auto_approved_state() -> None:
+    env = os.environ.copy()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        installer_path = _write_trimmed_installer(tmpdir)
+        dest_dir = Path(tmpdir) / "plugins" / "EDMCModernOverlay"
+        (dest_dir / "overlay_client").mkdir(parents=True)
+        script = f"""
+export MODERN_OVERLAY_INSTALLER_IMPORT=1
+source "{installer_path}"
+ASSUME_YES=true
+DRY_RUN=false
+COMPOSITOR_SELECTED=1
+COMPOSITOR_FOUND=1
+COMPOSITOR_ID="gnome-shell"
+COMPOSITOR_LABEL="GNOME Shell (Wayland)"
+COMPOSITOR_HELPER_KIND="gnome_shell_extension"
+COMPOSITOR_HELPER_LABEL="GNOME Shell extension"
+COMPOSITOR_HELPER_REQUIRED=1
+COMPOSITOR_HELPER_INSTALL_MODE="manual_enable"
+COMPOSITOR_HELPER_NOTES=("Required helper")
+handle_compositor_helper_guidance "{dest_dir}"
+echo "DONE=1"
+"""
+        output = _run_bash(script, env)
+        approval_path = dest_dir / "overlay_client" / "helper_approval.json"
+        assert approval_path.exists()
+        approval = approval_path.read_text(encoding="utf-8")
+    lines = dict(line.split("=", 1) for line in output.strip().splitlines() if "=" in line)
+    assert lines.get("DONE") == "1"
+    assert '"approved": true' in approval
+    assert '"approval_source": "assume_yes"' in approval
+    assert '"helper_kind": "gnome_shell_extension"' in approval
+
+
+def test_helper_guidance_records_declined_state_without_installing() -> None:
+    env = os.environ.copy()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        installer_path = _write_trimmed_installer(tmpdir)
+        dest_dir = Path(tmpdir) / "plugins" / "EDMCModernOverlay"
+        (dest_dir / "overlay_client").mkdir(parents=True)
+        script = f"""
+export MODERN_OVERLAY_INSTALLER_IMPORT=1
+source "{installer_path}"
+ASSUME_YES=false
+DRY_RUN=false
+COMPOSITOR_SELECTED=1
+COMPOSITOR_FOUND=1
+COMPOSITOR_ID="kwin-wayland"
+COMPOSITOR_LABEL="KDE Plasma (KWin/Wayland)"
+COMPOSITOR_HELPER_KIND="kwin_script"
+COMPOSITOR_HELPER_LABEL="KWin helper script"
+COMPOSITOR_HELPER_REQUIRED=0
+COMPOSITOR_HELPER_INSTALL_MODE="manual_enable"
+COMPOSITOR_HELPER_NOTES=("Optional helper")
+handle_compositor_helper_guidance "{dest_dir}"
+echo "DONE=1"
+"""
+        output = _run_bash(script, env)
+        approval_path = dest_dir / "overlay_client" / "helper_approval.json"
+        assert approval_path.exists()
+        approval = approval_path.read_text(encoding="utf-8")
+    lines = dict(line.split("=", 1) for line in output.strip().splitlines() if "=" in line)
+    assert lines.get("DONE") == "1"
+    assert '"approved": false' in approval
+    assert '"approval_source": "declined"' in approval
+    assert '"helper_kind": "kwin_script"' in approval
