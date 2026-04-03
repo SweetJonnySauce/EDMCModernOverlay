@@ -107,43 +107,50 @@ If something is unclear, capture it under `Open Questions`.
 
 ```mermaid
 flowchart LR
-    subgraph EDMC["EDMC Host Process (Tk main loop)"]
+    subgraph EDMC["EDMC Host Process"]
         Core["EDMC Core"]
-        Plugin["EDMCModernOverlay Plugin (load.py)\nControl plane: launch/config/prefs/CLI"]
+        Plugin["EDMCModernOverlay Plugin\nload.py control plane"]
         Prefs["Plugin Preferences UI"]
-        Ctrl["Overlay Controller (Tk)"]
+        Ctrl["Overlay Controller"]
         EDMCLog["EDMC debug log"]
     end
 
-    subgraph ClientProc["Overlay Client Process (Qt)"]
-        Ingest["Config + platform_context ingest"]
-        Probe["PlatformProbe (runtime evidence)"]
-        Selector["Single BackendSelector\n(client authoritative)"]
-        Status["BackendSelectionStatus + report\n(source=client_runtime)"]
-        Bundles["Backend bundles/consumers\n(native_x11, xwayland_compat, native_wayland_*)"]
+    subgraph ClientProc["Overlay Client Process"]
+        Ingest["Config and platform context ingest"]
+        Probe["PlatformProbe runtime evidence"]
+        Selector["Single BackendSelector\nclient authoritative"]
+        Status["BackendSelectionStatus report\nsource client_runtime"]
+        Bundles["Backend bundles and consumers\nnative_x11 xwayland_compat native_wayland"]
         ClientLog["overlay_client.log"]
     end
 
     subgraph Runtime["Local Runtime Channels"]
-        Socket["Plugin↔Client socket channel\n(port.json + JSON messages)"]
-        Helper["Optional compositor helpers\n(local IPC boundary)"]
+        Socket["Plugin client socket channel\nport.json and JSON messages"]
+        Helper["Optional compositor helpers\nlocal IPC boundary"]
         Diag["Diagnostics collector scripts"]
+        Hint["plugin_hint is advisory"]
+        Api["backend_status CLI currently returns plugin_hint"]
     end
 
     Core --> Plugin
-    Plugin -->|overlay_config + platform_context + shadow_backend_status| Socket
+    Plugin --> Socket
     Socket --> Ingest
-    Ingest --> Probe --> Selector --> Status --> Bundles
-    Helper -->|helper_client_only| Bundles
+    Ingest --> Probe
+    Probe --> Selector
+    Selector --> Status
+    Status --> Bundles
+    Helper --> Bundles
 
-    Plugin -->|backend_status CLI (currently returns plugin_hint)| Prefs
-    Plugin -->|backend_status CLI (currently returns plugin_hint)| Ctrl
+    Plugin --> Api
+    Api --> Prefs
+    Api --> Ctrl
 
-    Status -->|client-runtime status lines| ClientLog
+    Status --> ClientLog
     ClientLog --> Diag
-    Plugin -->|plugin shadow status lines| EDMCLog
+    Plugin --> EDMCLog
 
-    Plugin -. advisory only .->|shadow_backend_status (source=plugin_hint)| Selector
+    Plugin -.-> Hint
+    Hint -.-> Selector
 ```
 
 ## Per-Iteration Test Plan
