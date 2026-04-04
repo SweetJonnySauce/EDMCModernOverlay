@@ -83,6 +83,8 @@ CONTROLLER_TAB_CONTROL_TOGGLE_ARGUMENT = "toggle_argument"
 BACKEND_OVERRIDE_AUTO = "auto"
 DEFAULT_PROFILE_NAME = "Default"
 PROFILE_STATUS_POLL_INTERVAL_MS = 750
+BACKEND_NOTICE_WARNING_COLOR = "#c62828"
+BACKEND_NOTICE_INFO_COLOR = "#1565c0"
 
 LOGGER = logging.getLogger(__name__)
 
@@ -114,6 +116,13 @@ def _controller_tab_control_order() -> tuple[str, str, str]:
         CONTROLLER_TAB_CONTROL_LAUNCH_COMMAND,
         CONTROLLER_TAB_CONTROL_TOGGLE_ARGUMENT,
     )
+
+
+def _backend_notice_color(message: str) -> str:
+    text = str(message or "")
+    if text.startswith("Info:"):
+        return BACKEND_NOTICE_INFO_COLOR
+    return BACKEND_NOTICE_WARNING_COLOR
 
 
 def _config_getter(name: str) -> Optional[Callable[..., Any]]:
@@ -2068,9 +2077,10 @@ class PreferencesPanel:
             textvariable=self._backend_warning_var,
             wraplength=800,
             justify="left",
-            foreground="#c62828",
+            foreground=BACKEND_NOTICE_WARNING_COLOR,
         )
         backend_warning_label.grid(row=3, column=0, sticky="w", pady=ROW_PAD)
+        self._backend_warning_label = backend_warning_label
         status_label = nb.Label(frame, textvariable=self._status_var, wraplength=800, justify="left")
         status_label.grid(row=4, column=0, sticky="w", pady=ROW_PAD)
         frame.columnconfigure(0, weight=1)
@@ -2278,17 +2288,17 @@ class PreferencesPanel:
                     if isinstance(callback_result, bool):
                         restart_required = callback_result
                 except Exception:
-                    LOGGER.debug("Failed to propagate manual backend override change", exc_info=True)
-                    self._status_var.set("Failed to propagate manual backend override change.")
+                    LOGGER.debug("Failed to propagate Overlay backend change", exc_info=True)
+                    self._status_var.set("Failed to apply Overlay backend change.")
                     return
             if restart_required:
                 self._status_var.set(
-                    "Backend override saved. Restart Overlay Client to apply. Current runtime backend remains unchanged until restart."
+                    "Overlay backend saved. Restart Overlay Client to apply. Current runtime backend remains unchanged until restart."
                 )
             elif normalised:
-                self._status_var.set(f"Manual backend override set to {normalised}.")
+                self._status_var.set(f"Overlay backend set to {normalised}.")
             else:
-                self._status_var.set("Manual backend override cleared (Auto).")
+                self._status_var.set("Overlay backend cleared (Auto).")
         finally:
             self._backend_override_apply_in_progress = False
 
@@ -2420,9 +2430,16 @@ class PreferencesPanel:
         summary_var = getattr(self, "_backend_status_var", None)
         if summary_var is not None:
             summary_var.set(format_status_ui_summary(status))
+        notice_text = format_status_ui_warning(status)
         warning_var = getattr(self, "_backend_warning_var", None)
         if warning_var is not None:
-            warning_var.set(format_status_ui_warning(status))
+            warning_var.set(notice_text)
+        warning_label = getattr(self, "_backend_warning_label", None)
+        if warning_label is not None:
+            try:
+                warning_label.configure(foreground=_backend_notice_color(notice_text))
+            except Exception:
+                pass
         self._refresh_backend_override_choices(status)
 
     def _maybe_refresh_backend_status_from_callback(self, *, silent: bool) -> bool:

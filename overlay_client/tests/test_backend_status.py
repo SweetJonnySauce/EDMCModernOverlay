@@ -219,17 +219,21 @@ def test_backend_status_ui_helpers_surface_manual_override_and_invalid_override(
     assert manual_report["warning_required"] is True
     assert format_status_ui_summary(manual_override_status) == (
         "Backend: XWayland compatibility | Mode: True overlay | Source: Live runtime | "
-        "Override: XWayland compatibility"
+        "Overlay backend: XWayland compatibility"
     )
     assert format_status_ui_warning(manual_override_status) == (
-        "Warning: Manual backend override is active: XWayland compatibility.; "
-        "Using XWayland compatibility because you selected it manually."
+        "Info: Overlay backend is set to XWayland compatibility.; "
+        "Using XWayland compatibility because it is selected in Overlay backend.; "
+        "Set Overlay backend to Auto if you want the overlay to choose automatically."
     )
 
     assert invalid_report["override_error"] == "bogus_backend"
     assert invalid_report["warning_required"] is True
     assert format_status_ui_summary(invalid_override_status) == (
         "Backend: KWin Wayland | Mode: True overlay | Source: Live runtime | "
-        "Override: invalid (bogus_backend)"
+        "Overlay backend: invalid (bogus_backend)"
     )
-    assert format_status_ui_warning(invalid_override_status) == "Warning: Saved backend override is invalid: bogus_backend."
+    assert format_status_ui_warning(invalid_override_status) == (
+        "Warning: Saved Overlay backend selection is invalid for this session: bogus_backend.; "
+        "Set Overlay backend to Auto or choose a valid backend for this session."
+    )

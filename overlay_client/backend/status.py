@@ -245,45 +245,57 @@ def format_status_ui_summary(status: BackendSelectionStatus | Mapping[str, objec
     manual_override = str(report.get("manual_override") or "")
     override_error = str(report.get("override_error") or "")
     if manual_override:
-        summary = f"{summary} | Override: {_ui_backend_override_label(manual_override)}"
+        summary = f"{summary} | Overlay backend: {_ui_backend_override_label(manual_override)}"
     elif override_error:
-        summary = f"{summary} | Override: invalid ({override_error})"
+        summary = f"{summary} | Overlay backend: invalid ({override_error})"
     return summary
 
 
 def format_status_ui_warning(status: BackendSelectionStatus | Mapping[str, object]) -> str:
-    """Return a user-facing warning line for degraded, fallback, or helper-missing states."""
+    """Return a user-facing backend notice line for warning or informational states."""
 
     report = build_status_report(status)
-    reasons: list[str] = []
+    warning_reasons: list[str] = []
+    info_reasons: list[str] = []
     classification = str(report.get("classification") or "")
     if classification == CapabilityClassification.DEGRADED_OVERLAY.value:
-        reasons.append("Some overlay guarantees are reduced in this mode.")
+        warning_reasons.append("Some overlay guarantees are reduced in this mode.")
     elif classification == CapabilityClassification.UNSUPPORTED.value:
-        reasons.append("This environment is not currently supported.")
+        warning_reasons.append("This environment is not currently supported.")
     fallback_from = str(report.get("fallback_from") or "")
     fallback_reason = str(report.get("fallback_reason") or "")
     manual_override = str(report.get("manual_override") or "")
+    manual_override_label = _ui_backend_override_label(manual_override)
     if manual_override:
-        reasons.append(f"Manual backend override is active: {_ui_backend_override_label(manual_override)}.")
+        info_reasons.append(f"Overlay backend is set to {manual_override_label}.")
     fallback_message = _ui_fallback_message(
         fallback_reason=fallback_reason,
         fallback_from=fallback_from,
         manual_override=manual_override,
     )
     if fallback_message:
-        reasons.append(fallback_message)
+        if fallback_reason == FallbackReason.MANUAL_OVERRIDE.value and manual_override:
+            info_reasons.append(fallback_message)
+        else:
+            warning_reasons.append(fallback_message)
     override_error = str(report.get("override_error") or "")
     if override_error:
-        reasons.append(f"Saved backend override is invalid: {override_error}.")
+        warning_reasons.append(f"Saved Overlay backend selection is invalid for this session: {override_error}.")
+        warning_reasons.append("Set Overlay backend to Auto or choose a valid backend for this session.")
     helper_unavailable = report.get("helper_unavailable")
     if isinstance(helper_unavailable, list) and helper_unavailable and fallback_reason != FallbackReason.MISSING_HELPER.value:
         helpers = ", ".join(_ui_helper_label(str(helper)) for helper in helper_unavailable if str(helper))
         if helpers:
-            reasons.append(f"Required helper unavailable: {helpers}.")
-    if not reasons:
+            warning_reasons.append(f"Required helper unavailable: {helpers}.")
+    if warning_reasons:
+        if info_reasons:
+            warning_reasons = info_reasons + warning_reasons
+        return "Warning: " + "; ".join(warning_reasons)
+    if manual_override:
+        info_reasons.append("Set Overlay backend to Auto if you want the overlay to choose automatically.")
+    if not info_reasons:
         return ""
-    return "Warning: " + "; ".join(reasons)
+    return "Info: " + "; ".join(info_reasons)
 
 
 def format_status_window_title(
@@ -300,7 +312,7 @@ def format_status_window_title(
     title = f"{base_title} - {support_label} [{classification}, {source}]"
     warning = format_status_ui_warning(status)
     if warning:
-        title = f"{title} - {warning.removeprefix('Warning: ')}"
+        title = f"{title} - {warning.removeprefix('Warning: ').removeprefix('Info: ')}"
     return title
 
 
@@ -380,8 +392,8 @@ def _ui_source_label(value: str) -> str:
 def _ui_fallback_message(*, fallback_reason: str, fallback_from: str, manual_override: str) -> str:
     if fallback_reason == FallbackReason.MANUAL_OVERRIDE.value:
         if manual_override:
-            return f"Using {_ui_backend_override_label(manual_override)} because you selected it manually."
-        return "Using the selected manual backend override."
+            return f"Using {_ui_backend_override_label(manual_override)} because it is selected in Overlay backend."
+        return "Using the selected Overlay backend setting."
     if fallback_reason == FallbackReason.XWAYLAND_COMPAT_ONLY.value:
         return "Using XWayland compatibility mode because a native Wayland path is not active."
     if fallback_reason == FallbackReason.MISSING_HELPER.value:
@@ -403,7 +415,7 @@ def _ui_fallback_message(*, fallback_reason: str, fallback_from: str, manual_ove
     if fallback_reason == FallbackReason.NOT_IMPLEMENTED.value:
         return "The preferred backend is not implemented yet."
     if fallback_reason == FallbackReason.INVALID_OVERRIDE.value:
-        return "The saved backend override is not valid for this environment."
+        return "The saved Overlay backend selection is not valid for this environment."
     return ""
 
 

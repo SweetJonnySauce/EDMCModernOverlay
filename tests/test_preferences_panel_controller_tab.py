@@ -50,6 +50,15 @@ class _FakeCombo:
             self.values = tuple(str(value) for value in values)
 
 
+class _FakeLabel:
+    def __init__(self) -> None:
+        self.foreground = ""
+
+    def configure(self, **kwargs) -> None:
+        if "foreground" in kwargs:
+            self.foreground = str(kwargs["foreground"])
+
+
 def test_preferences_tab_order_contract() -> None:
     assert prefs._preferences_tab_order() == ("Overlay", "Controller", "Profiles", "Experimental")
 
@@ -257,6 +266,7 @@ def test_backend_status_refresh_updates_summary_and_warning() -> None:
     panel._status_var = _StatusVar()
     panel._backend_status_var = _StatusVar()
     panel._backend_warning_var = _StatusVar()
+    panel._backend_warning_label = _FakeLabel()
     panel._preferences = type("_Prefs", (), {"manual_backend_override": ""})()
     panel._var_manual_backend_override = _StatusVar()
     panel._backend_override_combo = _FakeCombo()
@@ -285,6 +295,7 @@ def test_backend_status_refresh_updates_summary_and_warning() -> None:
         "Warning: Some overlay guarantees are reduced in this mode.; "
         "Using XWayland compatibility mode because a native Wayland path is not active."
     )
+    assert panel._backend_warning_label.foreground == prefs.BACKEND_NOTICE_WARNING_COLOR
     assert panel._backend_override_combo.values == ("auto", "xwayland_compat")
 
 
@@ -293,6 +304,7 @@ def test_backend_status_refresh_prefers_client_runtime_source() -> None:
     panel._status_var = _StatusVar()
     panel._backend_status_var = _StatusVar()
     panel._backend_warning_var = _StatusVar()
+    panel._backend_warning_label = _FakeLabel()
     panel._preferences = type("_Prefs", (), {"manual_backend_override": ""})()
     panel._var_manual_backend_override = _StatusVar()
     panel._backend_override_combo = _FakeCombo()
@@ -316,6 +328,41 @@ def test_backend_status_refresh_prefers_client_runtime_source() -> None:
         "Backend: KWin Wayland | Mode: True overlay | Source: Live runtime"
     )
     assert panel._backend_warning_var.value == ""
+    assert panel._backend_warning_label.foreground == prefs.BACKEND_NOTICE_WARNING_COLOR
+
+
+def test_backend_status_refresh_shows_manual_override_as_info() -> None:
+    panel = object.__new__(prefs.PreferencesPanel)
+    panel._status_var = _StatusVar()
+    panel._backend_status_var = _StatusVar()
+    panel._backend_warning_var = _StatusVar()
+    panel._backend_warning_label = _FakeLabel()
+    panel._preferences = type("_Prefs", (), {"manual_backend_override": "native_x11"})()
+    panel._var_manual_backend_override = _StatusVar()
+    panel._backend_override_combo = _FakeCombo()
+    panel._backend_status_snapshot = {}
+    panel._backend_status_callback = lambda: {
+        "status": "ok",
+        "backend_status": {
+            "selected_backend": {"family": "native_x11", "instance": "native_x11"},
+            "classification": "true_overlay",
+            "manual_override": "native_x11",
+            "shadow_mode": False,
+            "helper_states": [],
+            "review_required": False,
+            "review_reasons": [],
+            "probe": {"operating_system": "linux", "session_type": "x11", "compositor": "none"},
+        },
+    }
+
+    changed = panel._maybe_refresh_backend_status_from_callback(silent=True)
+
+    assert changed is True
+    assert panel._backend_warning_var.value == (
+        "Info: Overlay backend is set to Native X11.; "
+        "Set Overlay backend to Auto if you want the overlay to choose automatically."
+    )
+    assert panel._backend_warning_label.foreground == prefs.BACKEND_NOTICE_INFO_COLOR
 
 
 def test_apply_manual_backend_override_persists_and_calls_callback() -> None:
@@ -341,7 +388,7 @@ def test_apply_manual_backend_override_persists_and_calls_callback() -> None:
     assert applied == ["xwayland_compat"]
     assert (
         panel._status_var.value
-        == "Backend override saved. Restart Overlay Client to apply. Current runtime backend remains unchanged until restart."
+        == "Overlay backend saved. Restart Overlay Client to apply. Current runtime backend remains unchanged until restart."
     )
 
 
@@ -368,7 +415,7 @@ def test_apply_manual_backend_override_clears_auto_value() -> None:
     assert applied == [""]
     assert (
         panel._status_var.value
-        == "Backend override saved. Restart Overlay Client to apply. Current runtime backend remains unchanged until restart."
+        == "Overlay backend saved. Restart Overlay Client to apply. Current runtime backend remains unchanged until restart."
     )
 
 
