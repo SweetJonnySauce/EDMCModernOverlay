@@ -1,3 +1,5 @@
+> Historical note: This archive document is kept for context only. It does not supersede the active `fix219_` backend-boundary decisions in `docs/refactoring/fix219_cross_platform_overlay_architecture_research.md` and `docs/refactoring/fix219_backend_architecture_followup_cleanup_plan.md`. For `fix219`, installer compositor profiles remain deployment guidance and helper/install surfaces, not runtime backend-selection ownership.
+
 ## Goal: Make the Linux install compositor aware.
 
 ## Refactorer Persona

@@ -1,3 +1,5 @@
+> Historical note: This archive document is kept for context only. It does not supersede the active `fix219_` backend-boundary decisions in `docs/refactoring/fix219_cross_platform_overlay_architecture_research.md` and `docs/refactoring/fix219_backend_architecture_followup_cleanup_plan.md`. For `fix219`, `load.py` remains an intentional plugin control-plane boundary for launch/orchestration, advisory `plugin_hint`, and Flatpak/env shaping.
+
 ## Goal: Break up the Monolith (load.py extraction)
 
 ## Context: EDMC load.py contract (must not break)

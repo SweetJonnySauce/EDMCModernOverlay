@@ -103,6 +103,14 @@ class BackendDescriptor:
 
 
 @dataclass(frozen=True, slots=True)
+class BackendOverrideOption:
+    """Backend-owned metadata for a single manual override choice."""
+
+    value: str
+    restart_required: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class PlatformProbeResult:
     """Pure snapshot of the local platform and capability environment."""
 
@@ -110,7 +118,6 @@ class PlatformProbeResult:
     session_type: SessionType = SessionType.UNKNOWN
     qt_platform_name: str = ""
     compositor: str = ""
-    force_xwayland: bool = False
     is_flatpak: bool = False
     flatpak_app_id: str = ""
     available_protocols: frozenset[str] = field(default_factory=frozenset)
@@ -128,7 +135,6 @@ class PlatformProbeResult:
             "session_type": self.session_type.value,
             "qt_platform_name": self.qt_platform_name,
             "compositor": self.compositor,
-            "force_xwayland": self.force_xwayland,
             "is_flatpak": self.is_flatpak,
             "flatpak_app_id": self.flatpak_app_id,
             "available_protocols": sorted(self.available_protocols),

@@ -2510,6 +2510,7 @@ class RenderSurfaceMixin:
             title_bar_enabled=self._title_bar_enabled,
             title_bar_height=self._title_bar_height,
             last_title_bar_offset=self._last_title_bar_offset,
+            backend_status=getattr(self, "_client_backend_status", None),
             debug_overlay_corner=self._debug_overlay_corner,
             legacy_preset_point_size_fn=self._legacy_preset_point_size,
             env_override_debug=getattr(self, "_env_override_debug", None),

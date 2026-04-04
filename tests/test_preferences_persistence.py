@@ -127,6 +127,18 @@ def test_preferences_reload_merges_shadow_when_config_empty(plugin_dir: Path, mo
     assert reloaded_config.store[prefs._config_key("last_on_payload_opacity")] == 75
 
 
+def test_preferences_migrate_legacy_force_xwayland_to_manual_backend_override(plugin_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = DummyConfig({prefs._config_key("force_xwayland"): True})
+    monkeypatch.setattr(prefs, "EDMC_CONFIG", config)
+
+    preferences = prefs.Preferences(plugin_dir, dev_mode=True)
+
+    assert preferences.manual_backend_override == "xwayland_compat"
+    shadow = _shadow(plugin_dir / prefs.PREFERENCES_FILE)
+    assert "force_xwayland" not in shadow
+    assert shadow["manual_backend_override"] == "xwayland_compat"
+
+
 def test_preferences_locale_numbers_from_config(plugin_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def number_from_string(value: str) -> float:
         return float(value.replace(",", "."))

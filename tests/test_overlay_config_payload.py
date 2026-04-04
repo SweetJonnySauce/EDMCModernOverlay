@@ -12,7 +12,6 @@ class _StubPrefs:
         self.gridlines_enabled = False
         self.gridline_spacing = 100
         self.force_render = False
-        self.force_xwayland = False
         self.manual_backend_override = ""
         self.title_bar_enabled = False
         self.title_bar_height = 0
@@ -108,7 +107,6 @@ def test_platform_context_payload_includes_shadow_backend_status(monkeypatch):
 
     assert context["session_type"] == "wayland"
     assert context["compositor"] == "kwin"
-    assert context["force_xwayland"] is False
     assert context["manual_backend_override"] == ""
     shadow = context["shadow_backend_status"]
     assert shadow["shadow_mode"] is True
@@ -139,4 +137,5 @@ def test_platform_context_payload_carries_manual_backend_override(monkeypatch):
 
     assert context["manual_backend_override"] == "xwayland_compat"
     assert context["shadow_backend_status"]["manual_override"] == "xwayland_compat"
-    assert context["shadow_backend_status"]["fallback_reason"] == "manual_override"
+    assert "fallback_reason" not in context["shadow_backend_status"]
+    assert context["shadow_backend_status"]["probe"]["qt_platform_name"] == "xcb"

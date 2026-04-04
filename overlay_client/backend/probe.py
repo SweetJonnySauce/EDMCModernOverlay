@@ -26,7 +26,6 @@ class ProbeInputs:
     qt_platform_name: str = ""
     session_type: str = ""
     compositor: str = ""
-    force_xwayland: bool = False
     is_flatpak: bool = False
     flatpak_app_id: str = ""
     available_protocols: frozenset[str] = field(default_factory=frozenset)
@@ -49,7 +48,6 @@ def collect_platform_probe(inputs: ProbeInputs) -> PlatformProbeResult:
         session_type=session_type,
         qt_platform_name=qt_platform_name,
         compositor=compositor,
-        force_xwayland=bool(inputs.force_xwayland),
         is_flatpak=bool(inputs.is_flatpak),
         flatpak_app_id=str(inputs.flatpak_app_id or "").strip(),
         available_protocols=available_protocols,

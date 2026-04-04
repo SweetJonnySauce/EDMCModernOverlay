@@ -1,3 +1,5 @@
+> Historical note: This archive document is kept for context only. It does not supersede the active `fix219_` backend-architecture documents in `docs/refactoring/fix219_backend_architecture_refactor_plan.md`, `docs/refactoring/fix219_backend_architecture_followup_cleanup_plan.md`, and `docs/refactoring/fix219_cross_platform_overlay_architecture_research.md`. It records earlier overlay-client refactor planning rather than current backend-boundary ownership decisions.
+
 > This file tracks the ongoing refactor of `overlay_client.py` (and related modules) into smaller, testable components while preserving behavior and cross-platform support. Use it to rebuild context after interruptions: it summarizes what has been done and what remains. Keep an eye on safety: make sure the chunks of work are small enough that we can easily test them and back them out if needed, document the plan with additional steps if needed (1 row per step), and ensure testing is completed and clearly called out.
 
 # Overlay Client Refactor Plan

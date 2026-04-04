@@ -24,7 +24,8 @@ def harness_runtime(
         adapter,
     ):
         assert adapter is not None
-        runtime._preferences.force_xwayland = False
+        runtime._preferences.manual_backend_override = ""
+        runtime._runtime_manual_backend_override = ""
         yield harness, runtime, adapter
 
 
@@ -47,7 +48,7 @@ def test_runtime_publishes_shadow_backend_status_in_overlay_config(
 
     assert platform_context["session_type"] == "wayland"
     assert platform_context["compositor"] == "kwin"
-    assert platform_context["force_xwayland"] is False
+    assert "force_xwayland" not in platform_context
     assert shadow["shadow_mode"] is True
     assert shadow["selected_backend"] == {
         "family": "native_wayland",

@@ -171,6 +171,11 @@ def _build_payload_handler(
             if targets:
                 window.clear_plugin_groups(targets, resolve_group_name=resolver)
             return
+        if event == "OverlayClientBackendStatusRequest":
+            request_id = str(payload.get("request_id") or "").strip()
+            if request_id:
+                window.send_current_backend_status(request_id)
+            return
         if event == "LegacyOverlay":
             if group_filter is not None and not group_filter.allow_payload(payload):
                 return
@@ -249,11 +254,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     _CLIENT_LOGGER.info("Starting overlay client (pid=%s)", os.getpid())
     _CLIENT_LOGGER.debug("Resolved port file path to %s", port_file)
     _CLIENT_LOGGER.debug(
-        "Loaded initial settings from %s: retention=%d force_render=%s force_xwayland=%s",
+        "Loaded initial settings from %s: retention=%d force_render=%s manual_backend_override=%s",
         settings_path,
         initial_settings.client_log_retention,
         initial_settings.force_render,
-        initial_settings.force_xwayland,
+        initial_settings.manual_backend_override or "auto",
     )
     if dev_settings.trace_enabled:
         payload_filter = ",".join(dev_settings.trace_payload_ids) if dev_settings.trace_payload_ids else "*"

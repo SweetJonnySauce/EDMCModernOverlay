@@ -55,8 +55,8 @@ class _FakePrefs:
         self.gridlines_enabled = False
         self.gridline_spacing = 120
         self.force_render = False
-        self.force_xwayland = False
         self.show_debug_overlay = False
+        self.manual_backend_override = ""
         self.min_font_point = 6.0
         self.max_font_point = 24.0
         self.title_bar_enabled = False
@@ -89,7 +89,6 @@ def _make_runtime(monkeypatch, tmp_path):
     monkeypatch.setattr(load._PluginRuntime, "_configure_payload_logger", lambda self: None)
     monkeypatch.setattr(load._PluginRuntime, "_load_payload_debug_config", lambda self, force=False: None)
     monkeypatch.setattr(load._PluginRuntime, "_load_dev_settings", lambda self, force=False: None)
-    monkeypatch.setattr(load._PluginRuntime, "_enforce_force_xwayland", lambda self, **kwargs: False)
     monkeypatch.setattr(load._PluginRuntime, "_publish_payload", lambda self, payload: None)
     monkeypatch.setattr(load._PluginRuntime, "_maybe_emit_version_update_notice", lambda self: None)
     monkeypatch.setattr(load._PluginRuntime, "_platform_context_payload", lambda self: {})

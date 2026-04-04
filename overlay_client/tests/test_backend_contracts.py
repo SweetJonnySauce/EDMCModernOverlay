@@ -26,7 +26,6 @@ class _Probe:
             session_type=SessionType.WAYLAND,
             qt_platform_name="wayland",
             compositor="kwin",
-            force_xwayland=False,
             available_protocols=frozenset({"layer-shell", "foreign-toplevel"}),
             available_helpers=frozenset({HelperKind.KWIN_SCRIPT}),
         )

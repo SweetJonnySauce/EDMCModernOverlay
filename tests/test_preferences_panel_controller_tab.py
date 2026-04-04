@@ -288,6 +288,36 @@ def test_backend_status_refresh_updates_summary_and_warning() -> None:
     assert panel._backend_override_combo.values == ("auto", "xwayland_compat")
 
 
+def test_backend_status_refresh_prefers_client_runtime_source() -> None:
+    panel = object.__new__(prefs.PreferencesPanel)
+    panel._status_var = _StatusVar()
+    panel._backend_status_var = _StatusVar()
+    panel._backend_warning_var = _StatusVar()
+    panel._preferences = type("_Prefs", (), {"manual_backend_override": ""})()
+    panel._var_manual_backend_override = _StatusVar()
+    panel._backend_override_combo = _FakeCombo()
+    panel._backend_status_snapshot = {}
+    panel._backend_status_callback = lambda: {
+        "status": "ok",
+        "backend_status": {
+            "selected_backend": {"family": "native_wayland", "instance": "kwin_wayland"},
+            "classification": "true_overlay",
+            "shadow_mode": False,
+            "helper_states": [],
+            "review_required": False,
+            "review_reasons": [],
+        },
+    }
+
+    changed = panel._maybe_refresh_backend_status_from_callback(silent=True)
+
+    assert changed is True
+    assert panel._backend_status_var.value == (
+        "Backend: native_wayland / kwin_wayland | Mode: true_overlay | Source: client_runtime"
+    )
+    assert panel._backend_warning_var.value == ""
+
+
 def test_apply_manual_backend_override_persists_and_calls_callback() -> None:
     panel = object.__new__(prefs.PreferencesPanel)
     panel._status_var = _StatusVar()
@@ -309,7 +339,10 @@ def test_apply_manual_backend_override_persists_and_calls_callback() -> None:
 
     assert panel._preferences.manual_backend_override == "xwayland_compat"
     assert applied == ["xwayland_compat"]
-    assert panel._status_var.value == "Manual backend override set to xwayland_compat."
+    assert (
+        panel._status_var.value
+        == "Backend override saved. Restart Overlay Client to apply. Current runtime backend remains unchanged until restart."
+    )
 
 
 def test_apply_manual_backend_override_clears_auto_value() -> None:
@@ -333,7 +366,10 @@ def test_apply_manual_backend_override_clears_auto_value() -> None:
 
     assert panel._preferences.manual_backend_override == ""
     assert applied == [""]
-    assert panel._status_var.value == "Manual backend override cleared (Auto)."
+    assert (
+        panel._status_var.value
+        == "Backend override saved. Restart Overlay Client to apply. Current runtime backend remains unchanged until restart."
+    )
 
 
 def test_profile_state_monitor_starts_with_backend_status_callback_only() -> None:

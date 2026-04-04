@@ -1,5 +1,8 @@
 import logging
 
+import pytest
+
+from overlay_client.backend.consumers import is_wayland_bundle, platform_label_for_bundle, uses_transient_parent
 from overlay_client.backend.bundles.gnome_shell_wayland import build_gnome_shell_wayland_bundle
 from overlay_client.backend.bundles.hyprland import build_hyprland_bundle
 from overlay_client.backend.bundles.kwin_wayland import build_kwin_wayland_bundle
@@ -12,6 +15,30 @@ from overlay_client.platform_integration import PlatformContext
 class _StubWidget:
     def windowHandle(self):
         return None
+
+
+@pytest.mark.parametrize(
+    ("build_bundle", "expected_instance"),
+    [
+        (build_sway_wayfire_wlroots_bundle, BackendInstance.SWAY_WAYFIRE_WLROOTS),
+        (build_hyprland_bundle, BackendInstance.HYPRLAND),
+        (build_kwin_wayland_bundle, BackendInstance.KWIN_WAYLAND),
+        (build_gnome_shell_wayland_bundle, BackendInstance.GNOME_SHELL_WAYLAND),
+        (build_wayland_layer_shell_generic_bundle, BackendInstance.WAYLAND_LAYER_SHELL_GENERIC),
+    ],
+)
+def test_native_wayland_bundles_preserve_current_window_backend_policy_shape(build_bundle, expected_instance):
+    bundle = build_bundle()
+
+    assert bundle.descriptor.family is BackendFamily.NATIVE_WAYLAND
+    assert bundle.descriptor.instance is expected_instance
+    assert bundle.presentation.backend_instance is expected_instance
+    assert bundle.input_policy.backend_instance is expected_instance
+    assert bundle.presentation is bundle.input_policy
+    assert bundle.uses_helper is False
+    assert is_wayland_bundle(bundle) is True
+    assert uses_transient_parent(bundle) is False
+    assert platform_label_for_bundle(bundle) == "Wayland"
 
 
 def test_sway_wayfire_wlroots_bundle_has_explicit_identity_and_shipped_tracker_shape():
@@ -77,13 +104,17 @@ def test_gnome_and_generic_wayland_bundles_preserve_current_no_tracker_behavior(
 
 def test_native_wayland_bundles_share_current_shipped_wayland_integration_shape():
     logger = logging.getLogger("test.backend.bundles.wayland")
-    context = PlatformContext(session_type="wayland", compositor="kwin", force_xwayland=False)
+    context = PlatformContext(session_type="wayland", compositor="kwin")
     widget = _StubWidget()
 
     sway_integration = build_sway_wayfire_wlroots_bundle().presentation.create_integration(widget, logger, context)
+    hyprland_integration = build_hyprland_bundle().presentation.create_integration(widget, logger, context)
     kwin_integration = build_kwin_wayland_bundle().presentation.create_integration(widget, logger, context)
     gnome_integration = build_gnome_shell_wayland_bundle().presentation.create_integration(widget, logger, context)
+    generic_integration = build_wayland_layer_shell_generic_bundle().presentation.create_integration(widget, logger, context)
 
     assert type(sway_integration).__name__ == "_WaylandIntegration"
+    assert type(hyprland_integration).__name__ == "_WaylandIntegration"
     assert type(kwin_integration).__name__ == "_WaylandIntegration"
     assert type(gnome_integration).__name__ == "_WaylandIntegration"
+    assert type(generic_integration).__name__ == "_WaylandIntegration"

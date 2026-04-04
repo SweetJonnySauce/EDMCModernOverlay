@@ -55,7 +55,7 @@ class _StubInteractionController:
 
 class _Window(ControlSurfaceMixin):
     def __init__(self) -> None:
-        self._platform_context = PlatformContext(session_type="x11", compositor="kwin", force_xwayland=False)
+        self._platform_context = PlatformContext(session_type="x11", compositor="kwin")
         self._platform_controller = _StubPlatformController()
         self._interaction_controller = _StubInteractionController()
         self._show_status = False
@@ -97,7 +97,6 @@ def test_update_platform_context_computes_client_owned_status_and_logs_mismatch(
         {
             "session_type": "x11",
             "compositor": "kwin",
-            "force_xwayland": False,
             "shadow_backend_status": {
                 "selected_backend": {"family": "native_x11", "instance": "native_x11"},
                 "classification": "true_overlay",
@@ -126,7 +125,6 @@ def test_update_platform_context_pushes_client_backend_status_into_runtime_consu
         {
             "session_type": "wayland",
             "compositor": "kwin",
-            "force_xwayland": False,
         }
     )
 

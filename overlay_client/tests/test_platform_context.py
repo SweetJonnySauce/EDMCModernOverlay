@@ -4,43 +4,33 @@ from overlay_client.platform_integration import PlatformContext
 
 
 class _Initial:
-    def __init__(self, force_xwayland: bool, manual_backend_override: str = "") -> None:
-        self.force_xwayland = force_xwayland
+    def __init__(self, manual_backend_override: str = "") -> None:
         self.manual_backend_override = manual_backend_override
 
 
 def test_initial_platform_context_prefers_env(monkeypatch):
-    monkeypatch.setenv("EDMC_OVERLAY_FORCE_XWAYLAND", "0")
     monkeypatch.setenv("EDMC_OVERLAY_SESSION_TYPE", "wayland")
     monkeypatch.setenv("EDMC_OVERLAY_COMPOSITOR", "kwin")
     monkeypatch.setenv("EDMC_OVERLAY_IS_FLATPAK", "1")
     monkeypatch.setenv("EDMC_OVERLAY_FLATPAK_ID", "app.id")
 
-    ctx = _initial_platform_context(_Initial(force_xwayland=False))
+    ctx = _initial_platform_context(_Initial())
     assert ctx.session_type == "wayland"
     assert ctx.compositor == "kwin"
     assert ctx.flatpak is True
     assert ctx.flatpak_app == "app.id"
-    assert ctx.force_xwayland is False
     assert ctx.manual_backend_override == ""
 
 
-def test_initial_platform_context_respects_force(monkeypatch):
-    monkeypatch.delenv("EDMC_OVERLAY_FORCE_XWAYLAND", raising=False)
-    ctx = _initial_platform_context(_Initial(force_xwayland=True))
-    assert ctx.force_xwayland is True
-
-
-def test_initial_platform_context_carries_manual_backend_override(monkeypatch):
-    monkeypatch.delenv("EDMC_OVERLAY_FORCE_XWAYLAND", raising=False)
-    ctx = _initial_platform_context(_Initial(force_xwayland=False, manual_backend_override="xwayland_compat"))
+def test_initial_platform_context_carries_manual_backend_override():
+    ctx = _initial_platform_context(_Initial(manual_backend_override="xwayland_compat"))
     assert ctx.manual_backend_override == "xwayland_compat"
 
 
 def test_client_backend_status_prefers_local_runtime_over_plugin_hint(monkeypatch):
     monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
     monkeypatch.setenv("XDG_CURRENT_DESKTOP", "GNOME")
-    context = PlatformContext(session_type="x11", compositor="kwin", force_xwayland=False)
+    context = PlatformContext(session_type="x11", compositor="kwin")
 
     status = _client_backend_status(
         context,
@@ -56,7 +46,7 @@ def test_client_backend_status_prefers_local_runtime_over_plugin_hint(monkeypatc
 
 
 def test_client_backend_status_uses_plugin_hint_as_fallback_when_runtime_unknown():
-    context = PlatformContext(session_type="wayland", compositor="kwin", force_xwayland=False)
+    context = PlatformContext(session_type="wayland", compositor="kwin")
 
     status = _client_backend_status(
         context,
@@ -71,7 +61,7 @@ def test_client_backend_status_uses_plugin_hint_as_fallback_when_runtime_unknown
 
 
 def test_backend_status_signature_handles_status_objects_and_payload_dicts():
-    context = PlatformContext(session_type="wayland", compositor="kwin", force_xwayland=False)
+    context = PlatformContext(session_type="wayland", compositor="kwin")
     status = _client_backend_status(
         context,
         source=ProbeSource.RUNTIME_UPDATE,
@@ -104,7 +94,6 @@ def test_client_backend_status_applies_manual_override_from_context():
     context = PlatformContext(
         session_type="wayland",
         compositor="kwin",
-        force_xwayland=False,
         manual_backend_override="xwayland_compat",
     )
 

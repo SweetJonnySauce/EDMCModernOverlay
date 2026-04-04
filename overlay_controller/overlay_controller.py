@@ -32,7 +32,6 @@ if __name__ == "overlay_controller":
 _CONTROLLER_LOGGER: Optional[logging.Logger] = None
 
 from overlay_client.controller_mode import ControllerModeProfile, ModeProfile  # noqa: F401
-from overlay_client.backend.status import format_status_window_title
 from overlay_client.debug_config import DEBUG_CONFIG_ENABLED
 from overlay_client.logging_utils import build_rotating_file_handler, resolve_log_level, resolve_logs_dir
 from overlay_client.window_tracking import create_elite_window_tracker
@@ -1413,11 +1412,8 @@ class OverlayConfigApp(tk.Tk):
         self._update_backend_status_title(raw_status)
 
     def _update_backend_status_title(self, status: Optional[Mapping[str, Any]]) -> None:
-        title = self._base_window_title
-        if isinstance(status, Mapping) and status:
-            title = format_status_window_title(status, base_title=self._base_window_title)
         try:
-            self.title(title)
+            self.title(self._base_window_title)
         except Exception:
             pass
     def _refresh_idprefix_options(self) -> None:

@@ -68,22 +68,19 @@ If something is unclear, capture it under `Open Questions`.
 - silently downgrading any currently working environment
 - editing immutable vendored harness files (`tests/harness.py`, `tests/edmc/**`) as part of normal refactor work
 
-## Current Audit Findings
-- Remaining runtime platform-policy leakage exists in `overlay_client/platform_integration.py`, where native Wayland compositor-specific presentation/input behavior still lives outside `overlay_client/backend`.
-- Remaining runtime platform-policy leakage exists in `overlay_client/window_tracking.py`, where X11/KWin/Hyprland/wlroots tracker implementations still live outside `overlay_client/backend`.
-- Preferences UI still reconstructs backend override choices from raw `operating_system` / `session_type` / `compositor` data instead of consuming backend-owned metadata.
-- The separate `force_xwayland` setting still exists as a launch-time/persistence knob instead of expressing XWayland use as an explicit backend fallback or override.
-- Preferences backend status currently reflects plugin-side shadow status instead of client-authoritative runtime status.
-- Overlay controller title-bar status is currently used as a backend visibility surface, but that surface should be removed for now.
-- Debug/test-overlay surfaces do not yet expose the chosen backend as part of the lower-left diagnostic/test-logo metrics area.
-- Plugin launch/orchestration logic in `load.py` still contains OS/compositor detection, but that is currently an intentional boundary because the plugin owns process launch, advisory context, and Flatpak/env shaping.
-- Installer compositor logic in `scripts/install_linux.sh` / `scripts/install_matrix.json` remains an intentional deployment boundary rather than a runtime backend-architecture defect.
+## Current Audit Snapshot
+- Phase `1` is complete: Linux presentation/input ownership now routes through backend-owned modules rather than living in shared runtime integration code.
+- Phase `2` is complete: Linux tracker ownership now routes through backend-owned discovery modules rather than living in the public runtime tracker entrypoint.
+- Phase `3.1` through `3.5` are complete: preferences use client-authoritative backend status when available, `force_xwayland` has been retired in favor of explicit `xwayland_compat` override semantics, override-choice metadata is backend-owned, backend status has been removed from the controller title bar, debug/test-overlay diagnostics show backend choice, and residual generic runtime guards have been audited.
+- `load.py` launch/orchestration, advisory `plugin_hint`, and Flatpak/env shaping remain intentional plugin control-plane boundaries rather than backend-ownership defects.
+- Installer compositor profiles in `scripts/install_linux.sh` / `scripts/install_matrix.json` remain intentional deployment guidance boundaries rather than runtime backend-selection defects.
+- The remaining open work in this plan is Phase `4`: real-environment validation, EDMC compliance review, and final evidence-driven signoff.
 
 ## Settings Impact Classification
 - Backend-critical settings/surfaces:
-  - `manual_backend_override`: explicit backend/fallback choice surface; this is the intended long-term user-facing backend control.
-  - `force_xwayland`: currently still backend-critical because it changes launch-time Qt platform selection; tracked for retirement in Stage `3.2`.
+  - `manual_backend_override`: explicit backend/fallback choice surface; this is the intended long-term user-facing backend control, including the explicit `xwayland_compat` override path.
   - `QT_QPA_PLATFORM` and related env override paths: not normal user settings, but still backend-critical because they can override startup transport/backend shape and must be documented or constrained explicitly.
+  - Historical note: the old `force_xwayland` setting has been retired from the normal backend-control path; only legacy persisted values are migrated forward for compatibility.
 - Visibility-only settings:
   - `show_debug_overlay`: relevant because backend choice/status will be surfaced in the debug/test-overlay diagnostics.
   - `debug_overlay_corner`: only affects where the debug/test-overlay diagnostics render.
@@ -94,21 +91,13 @@ If something is unclear, capture it under `Open Questions`.
   - `physical_clamp_enabled` / `physical_clamp_overrides`: shared geometry-normalization escape hatches, not backend ownership or backend choice. Preserve current opt-in behavior during `fix219`; require backend/tracker cleanup to keep feeding the shared normalizer correctly; defer any deeper coordinate-space redesign to a separate post-`fix219` geometry/follow refactor.
   - opacity, font bounds/steps, gridlines, payload cycling, payload logging, connection-status display, controller launch command, and other presentation/debug preferences.
 
-## Current Gaps And Planned Closure
+## Current Remaining Gaps And Planned Closure
 
 | Gap | Current State | Why It Is Still A Gap | Planned Closure |
 | --- | --- | --- | --- |
-| Preferences backend status is not client-authoritative | Plugin `backend_status` CLI still returns plugin shadow status, so prefs currently surface `source=plugin_hint` rather than `source=client_runtime` | User-visible backend truth is still advisory instead of authoritative, and stale/unavailable-client behavior is not explicitly modeled yet | Stage `3.1`: expose client-runtime backend status through the existing plugin/client socket path, keep `plugin_hint` only as labeled fallback, and define unavailable/stale-client behavior |
-| `force_xwayland` still exists as a separate setting instead of an explicit backend fallback | Launch-time Qt platform choice still depends on a dedicated `force_xwayland` preference/env path, even though `xwayland_compat` already exists as a named backend | This duplicates backend intent with a separate transport knob and makes XWayland use look like a mode flag rather than an explicit backend/fallback choice | Stage `3.2`: retire the user-facing `force_xwayland` setting, migrate existing persisted values to explicit `xwayland_compat` override semantics where needed, and derive startup Qt platform from backend/override intent instead of a separate boolean |
-| Overlay Controller title bar still shows backend status | Controller polls backend status and formats it into the window title | This is no longer the desired visibility surface and creates redundant/noisy status presentation | Stage `3.4`: remove backend-title formatting and leave the controller on its base title |
-| Debug/test-overlay diagnostics do not show backend choice | The lower-left debug/test-overlay panel renders monitor, geometry, scaling, and settings data, but not backend identity | There is no client-side visual diagnostic surface showing the chosen backend once the controller title-bar surface is removed | Stage `3.4`: add backend choice to the lower-left debug/test-overlay metrics/test-logo area |
-| Preferences still derive override choices from raw probe fields | `_backend_override_choices_for_status(...)` still branches on `operating_system`, `session_type`, and `compositor` | Backend policy is still reconstructed in UI code instead of consumed from backend-owned metadata | Stage `3.3`: centralize backend-owned override-choice metadata and have prefs consume it directly |
-| Native Wayland presentation/input policy still lives outside backend | `overlay_client/platform_integration.py` still owns compositor-specific Wayland click-through/presentation behavior | Runtime compositor policy is still split across a shared legacy module instead of bundle-owned code | Stages `1.2` and `1.3`: move native Wayland presentation/input ownership into backend-owned modules and reduce `platform_integration.py` to a generic shim |
-| Tracker ownership still lives outside backend | `overlay_client/window_tracking.py` still contains X11/KWin/Hyprland/wlroots tracker implementations | Backend-specific target-discovery behavior is still physically and logically outside the backend ownership boundary | Stages `2.2` and `2.3`: move tracker ownership behind backend-owned discovery modules and reduce `window_tracking.py` to a generic entrypoint |
-| Residual OS-specific guards outside backend have not been fully audited | Generic runtime modules still contain some `sys.platform` / Wayland checks whose role has not been fully reclassified | Without a final audit, backend policy can remain hidden inside generic runtime code even after the major ownership moves are done | Stage `3.5`: classify remaining guards as either legitimate generic windowing logic or leaked backend policy, then remove or redirect the leaked cases |
-| Boundary/archive cleanup is not fully consolidated yet | Some notes still rely on readers finding the follow-up plan rather than seeing boundary-retention and completion limits stated everywhere they matter | Future readers may still overread the completed refactor plan unless retained boundaries and deferrals are explicitly archived or annotated | Stage `3.6`: update/refine the refactor docs so retained boundaries, intentional exceptions, and follow-up ownership limits are explicit wherever completion is summarized |
 | Real-environment validation remains incomplete for deferred/non-closure paths | Additional wlroots, Hyprland, COSMIC, gamescope, and helper-backed Wayland runs may still lack testers even after the minimum `fix219` closure matrix is validated | These paths can remain deferred, but signoff must not imply validated support for them without recorded environment evidence | Stage `4.1`: validate the minimum closure matrix, record any extra runs that are available, and explicitly defer/remove implied support claims for any still-unvalidated paths before signoff |
 | Post-refactor EDMC compliance pass is not yet recorded | The docs do not currently record a final compliance review for plugin API usage, logging, threading, and prefs/config handling after the refactor | Release readiness is incomplete until compliance review evidence is explicit | Stage `4.2`: run and record the EDMC compliance pass, then capture any required follow-up fixes or explicit exceptions |
+| Final release signoff and top-level progress closeout are not yet recorded | The release checklist, final architecture snapshot refresh, and release-note/signoff summary still depend on Phase `4` evidence | The plan should not be read as fully complete until the recorded validation/compliance evidence is reflected in the final signoff docs | Stage `4.3`: close the release signoff checklist, refresh the top-level architecture progress snapshot, and record any remaining named deferrals |
 
 ## Cross-Phase Decision Gates
 - `DG-1`: Resolve the backend-ownership vs physical file-move policy before Stage `1.2` or Stage `2.2` begins.
@@ -236,9 +225,9 @@ If something is unclear, capture it under `Open Questions`.
 
 | Phase | Description | Status |
 | --- | --- | --- |
-| 1 | Move remaining presentation/input ownership into backend-owned runtime modules | Not Started |
-| 2 | Move tracker ownership into backend-owned discovery modules and trim shared runtime tracking code | Not Started |
-| 3 | Remove UI/control-surface backend-policy leakage, fix status surfaces, and document the retained non-backend boundaries | Not Started |
+| 1 | Move remaining presentation/input ownership into backend-owned runtime modules | Completed |
+| 2 | Move tracker ownership into backend-owned discovery modules and trim shared runtime tracking code | Completed |
+| 3 | Remove UI/control-surface backend-policy leakage, fix status surfaces, and document the retained non-backend boundaries | Completed |
 | 4 | Run remaining environment validation, EDMC compliance review, and final release/signoff closure | Not Started |
 
 ## Phase Details
@@ -252,9 +241,9 @@ If something is unclear, capture it under `Open Questions`.
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 1.1 | Add bundle-facing tests that lock current presentation/input behavior across X11/XWayland/native Wayland bundle identities | Not Started |
-| 1.2 | Lift shared X11/XWayland integration creation and native Wayland compositor-specific integration behavior into backend-owned modules or backend-private implementation files | Not Started |
-| 1.3 | Reduce `overlay_client/platform_integration.py` to a generic bundle-consumer shim with no compositor-specific native Wayland policy branches | Not Started |
+| 1.1 | Add bundle-facing tests that lock current presentation/input behavior across X11/XWayland/native Wayland bundle identities | Completed |
+| 1.2 | Lift shared X11/XWayland integration creation and native Wayland compositor-specific integration behavior into backend-owned modules or backend-private implementation files | Completed |
+| 1.3 | Reduce `overlay_client/platform_integration.py` to a generic bundle-consumer shim with no compositor-specific native Wayland policy branches | Completed |
 
 #### Stage 1.1 Detailed Plan
 - Objective:
@@ -263,9 +252,18 @@ If something is unclear, capture it under `Open Questions`.
 - `overlay_client/tests/test_backend_bundles_x11.py`
 - `overlay_client/tests/test_backend_bundles_wayland.py`
 - `overlay_client/tests/test_backend_consumers.py`
+- `overlay_client/backend/bundles/native_x11.py`
+- `overlay_client/backend/bundles/xwayland_compat.py`
+- `overlay_client/backend/bundles/_wayland_common.py`
+- `overlay_client/backend/bundles/gnome_shell_wayland.py`
+- `overlay_client/backend/bundles/kwin_wayland.py`
+- `overlay_client/backend/bundles/hyprland.py`
+- `overlay_client/backend/bundles/sway_wayfire_wlroots.py`
+- `overlay_client/backend/bundles/wayland_layer_shell_generic.py`
+- `overlay_client/backend/consumers.py`
 - Steps:
 - Add or expand tests that prove explicit bundle identity still maps to the current integration behavior for `native_x11`, `xwayland_compat`, `kwin_wayland`, `gnome_shell_wayland`, `sway_wayfire_wlroots`, and `hyprland`.
-- Lock current click-through and presentation-policy outcomes without broadening support claims.
+- Lock the current combined presentation/input backend shape per bundle, the shared XCB-vs-Wayland integration factory routing, and the current `uses_transient_parent()` / platform-label policy outcomes without broadening support claims.
 - Keep this stage test-first; do not move runtime implementation ownership yet.
 - Acceptance criteria:
 - Bundle-facing tests fail if a bundle starts using the wrong presentation/input behavior.
@@ -277,6 +275,8 @@ If something is unclear, capture it under `Open Questions`.
 - Objective:
 - Move runtime presentation/input ownership behind backend-owned modules while preserving current shipped behavior.
 - Primary touch points:
+- `overlay_client/window_integration.py`
+- `overlay_client/backend/bundles/_linux_window_integration.py`
 - `overlay_client/backend/bundles/native_x11.py`
 - `overlay_client/backend/bundles/xwayland_compat.py`
 - `overlay_client/backend/bundles/_wayland_common.py`
@@ -286,30 +286,31 @@ If something is unclear, capture it under `Open Questions`.
 - `overlay_client/backend/bundles/hyprland.py`
 - `overlay_client/backend/bundles/sway_wayfire_wlroots.py`
 - `overlay_client/platform_integration.py`
+- `overlay_client/tests/test_platform_controller_backend_status.py`
 - Steps:
 - Lift the current XCB/X11 integration implementation behind backend-owned factories so `native_x11` and `xwayland_compat` remain explicitly distinct even if implementation internals are shared.
 - Lift the current native Wayland integration behavior, including compositor-specific click-through/presentation handling, behind backend-owned `PresentationBackend` / `InputPolicyBackend` surfaces instead of the shared `_WaylandIntegration` class.
-- Keep any generic Qt-only helpers in a neutral/shared utility if truly backend-agnostic, but move compositor/backend policy ownership out of `platform_integration.py`.
+- Keep any generic Qt-only helpers in a neutral/shared utility if truly backend-agnostic, but move Linux compositor/backend policy ownership and the shipped XCB/Wayland integration classes out of `platform_integration.py`.
 - Acceptance criteria:
 - Backend-owned modules now own runtime presentation/input behavior for Linux bundle identities in explicit contract terms, not only by file placement.
 - Current user-visible behavior remains unchanged.
 - Verification to run:
-- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_bundles_x11.py overlay_client/tests/test_backend_bundles_wayland.py overlay_client/tests/test_backend_consumers.py -q`
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_bundles_x11.py overlay_client/tests/test_backend_bundles_wayland.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_platform_controller_backend_status.py -q`
 
 #### Stage 1.3 Detailed Plan
 - Objective:
-- Leave `overlay_client/platform_integration.py` as a generic consumer facade rather than a second home for compositor policy.
+- Leave `overlay_client/platform_integration.py` as a generic consumer facade rather than a second home for compositor policy or Linux integration implementation ownership.
 - Primary touch points:
 - `overlay_client/platform_integration.py`
-- `overlay_client/backend/consumers.py`
 - `overlay_client/tests/test_platform_controller_backend_status.py`
+- `overlay_client/tests/test_backend_consumers.py`
 - Steps:
-- Remove compositor-branching native Wayland policy from `PlatformController` integration creation.
+- Remove any stale Linux integration imports or helper residue that still makes `platform_integration.py` look like an implementation owner after Stage `1.2`.
 - Keep generic responsibilities only: consume backend status, rebuild integrations when bundle identity changes, expose generic policy queries like `uses_transient_parent()`, and delegate presentation/input ownership to backend-owned contract implementations.
 - Preserve Windows-specific platform integration here unless a later phase chooses to unify that ownership too.
 - Acceptance criteria:
 - No native Wayland compositor branch remains in `platform_integration.py`.
-- `PlatformController` consumes backend-owned presentation/input-policy surfaces only.
+- `PlatformController` consumes backend-owned presentation/input-policy surfaces only, and `platform_integration.py` no longer exposes or imports the shipped Linux XCB/Wayland integration factories.
 - Verification to run:
 - `source .venv/bin/activate && python -m pytest overlay_client/tests/test_platform_controller_backend_status.py overlay_client/tests/test_backend_consumers.py -q`
 
@@ -329,9 +330,9 @@ If something is unclear, capture it under `Open Questions`.
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 2.1 | Add or expand tests that lock current tracker ownership and fallback behavior by bundle/status rather than by raw compositor branches | Not Started |
-| 2.2 | Lift X11/KWin/Hyprland/wlroots tracker implementations behind backend-owned discovery modules or backend-private implementation files | Not Started |
-| 2.3 | Reduce `overlay_client/window_tracking.py` to a generic status-driven tracker entrypoint with no compositor-specific tracker ownership | Not Started |
+| 2.1 | Add or expand tests that lock current tracker ownership and fallback behavior by bundle/status rather than by raw compositor branches | Completed |
+| 2.2 | Lift X11/KWin/Hyprland/wlroots tracker implementations behind backend-owned discovery modules or backend-private implementation files | Completed |
+| 2.3 | Reduce `overlay_client/window_tracking.py` to a generic status-driven tracker entrypoint with no compositor-specific tracker ownership | Completed |
 
 #### Stage 2.1 Detailed Plan
 - Objective:
@@ -341,12 +342,12 @@ If something is unclear, capture it under `Open Questions`.
 - `overlay_client/tests/test_backend_consumers.py`
 - `tests/test_harness_backend_selection_wiring.py`
 - Steps:
-- Expand bundle-routing tests so they prove tracker resolution and fallback work off backend status/bundle identity rather than raw compositor branching.
-- Add or preserve test coverage for the structured diagnostics/debug path needed to troubleshoot multi-monitor, per-monitor DPR, fractional scaling, and normalization issues without inflating the runtime `TargetDiscoveryBackend` contract.
-- Keep harness coverage around config/platform-context plumbing that feeds runtime status into tracker setup.
+- Expand bundle-routing tests so they prove tracker resolution and fallback work off backend status/bundle identity rather than raw compositor branching, including the current X11 fallback rule when an X11 session is paired with a non-`native_x11` selected bundle.
+- Lock the current `create_elite_window_tracker(...)` pass-through contract for `title_hint` and `monitor_provider`, including fallback attempts, so later tracker ownership moves cannot silently drop the monitor-offset/troubleshooting hook.
+- Keep the existing harness coverage around overlay-config shadow backend-status publication as the upstream status-wiring guard that later tracker stages still depend on; do not broaden this stage into new harness plumbing unless the actual tracker entrypoint wiring changes.
 - Acceptance criteria:
 - Tracker fallback expectations are explicit in project-owned tests before tracker ownership moves.
-- Support diagnostics remain sufficient to troubleshoot issue-`#215`-style placement/scaling problems after tracker ownership moves.
+- The current monitor-provider / monitor-offset troubleshooting hook remains explicit in unit tests before tracker ownership moves.
 - Verification to run:
 - `source .venv/bin/activate && python -m pytest overlay_client/tests/test_window_tracking_bundle_routing.py overlay_client/tests/test_backend_consumers.py tests/test_harness_backend_selection_wiring.py -q`
 
@@ -354,6 +355,8 @@ If something is unclear, capture it under `Open Questions`.
 - Objective:
 - Move tracker implementations behind backend-owned discovery ownership while preserving the current shipped tracker set.
 - Primary touch points:
+- `overlay_client/window_tracking_support.py`
+- `overlay_client/backend/bundles/_linux_trackers.py`
 - `overlay_client/backend/bundles/native_x11.py`
 - `overlay_client/backend/bundles/xwayland_compat.py`
 - `overlay_client/backend/bundles/_wayland_common.py`
@@ -361,8 +364,11 @@ If something is unclear, capture it under `Open Questions`.
 - `overlay_client/backend/bundles/hyprland.py`
 - `overlay_client/backend/bundles/sway_wayfire_wlroots.py`
 - `overlay_client/window_tracking.py`
+- `overlay_client/tests/test_backend_bundles_x11.py`
+- `overlay_client/tests/test_backend_bundles_wayland.py`
 - Steps:
-- Lift `wmctrl`, `swaymsg`, `hyprctl`, and KWin DBus tracker ownership into backend-owned `TargetDiscoveryBackend` modules or backend-private implementation files.
+- Lift `wmctrl`, `swaymsg`, `hyprctl`, and KWin DBus tracker ownership into backend-owned `TargetDiscoveryBackend` modules or backend-private implementation files, while leaving the public tracker entrypoint and Windows tracker in `window_tracking.py`.
+- Move only truly shared tracker data/helpers (`WindowState`, monitor-provider types, monitor augmentation helpers) into a neutral support module so backend-owned Linux tracker modules do not need to reach back into the public runtime entrypoint for shared primitives.
 - Preserve current “no tracker available” behavior for intentionally unavailable paths such as helper-required GNOME and generic unknown Wayland.
 - Keep richer troubleshooting data separate from the minimal runtime discovery contract: tracker backends may emit or expose diagnostics for support collection, but they should not turn backend discovery into a second probe/status/classification surface.
 - Keep Windows tracker behavior intact unless a later cleanup stage explicitly broadens the scope.
@@ -370,19 +376,20 @@ If something is unclear, capture it under `Open Questions`.
 - Linux tracker implementation ownership is backend-owned in explicit `TargetDiscoveryBackend` terms.
 - `window_tracking.py` no longer owns compositor-specific tracker classes for Linux backends.
 - Verification to run:
-- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_window_tracking_bundle_routing.py overlay_client/tests/test_backend_consumers.py -q`
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_bundles_x11.py overlay_client/tests/test_backend_bundles_wayland.py overlay_client/tests/test_window_tracking_bundle_routing.py overlay_client/tests/test_backend_consumers.py -q`
 
 #### Stage 2.3 Detailed Plan
 - Objective:
 - Reduce the public tracker entrypoint to a generic status-driven consumer shim.
 - Primary touch points:
 - `overlay_client/window_tracking.py`
-- `overlay_client/backend/consumers.py`
 - `overlay_client/tests/test_window_tracking_bundle_routing.py`
+- `overlay_client/tests/test_backend_consumers.py`
+- `overlay_client/tests/test_follow_surface_mixin.py`
 - Steps:
-- Keep `create_elite_window_tracker(...)` as a generic runtime entrypoint if still useful, but make it consume backend status and backend-owned `TargetDiscoveryBackend` factories only.
-- Remove raw compositor/session branching from Linux tracker ownership paths.
-- Leave only generic platform top-level branching where necessary (for example, Windows vs Linux vs unsupported OS).
+- Keep `create_elite_window_tracker(...)` as the generic runtime entrypoint, but leave Linux tracking selection limited to deriving/consuming backend status and backend-owned `TargetDiscoveryBackend` factories only.
+- Remove any stale Linux tracker implementation residue or unused imports from `window_tracking.py` now that Stage `2.2` has moved the Linux tracker classes behind backend-owned modules.
+- Leave only generic platform top-level branching where necessary (for example, Windows vs Linux vs unsupported OS), and keep the current status-driven Wayland fallback log path intact.
 - Preserve or centralize the structured diagnostics path used to troubleshoot mixed-monitor / fractional-scaling issues so supportability is not lost when raw tracker ownership moves behind backend boundaries.
 - Acceptance criteria:
 - Linux tracking behavior is selected by backend status/bundle only, with target discovery owned by backend-specific contract implementations.
@@ -406,28 +413,27 @@ If something is unclear, capture it under `Open Questions`.
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 3.1 | Expose client-authoritative backend status to plugin preferences via the existing plugin/client socket path, with `plugin_hint` retained as labeled fallback | Not Started |
-| 3.2 | Retire the separate `force_xwayland` setting in favor of explicit manual `xwayland_compat` fallback/override semantics (restart required) | Not Started |
-| 3.3 | Centralize backend-owned override-choice metadata so prefs stop deriving backend choices from raw compositor branches | Not Started |
-| 3.4 | Remove backend status from the Overlay Controller title bar and add backend choice to the lower-left debug/test-overlay metrics area | Not Started |
-| 3.5 | Audit and shrink-wrap residual OS-specific checks in generic runtime modules, removing only the ones that encode backend policy | Not Started |
-| 3.6 | Document the retained intentional boundaries (`load.py`, installer/deployment logic, `plugin_hint`) and archive/supersede any notes that imply broader cleanup is still complete | Not Started |
+| 3.1 | Expose client-authoritative backend status to plugin preferences via the existing plugin/client socket path, with `plugin_hint` retained as labeled fallback | Completed |
+| 3.2 | Retire the separate `force_xwayland` setting in favor of explicit manual `xwayland_compat` fallback/override semantics (restart required) | Completed |
+| 3.3 | Centralize backend-owned override-choice metadata so prefs stop deriving backend choices from raw compositor branches | Completed |
+| 3.4 | Remove backend status from the Overlay Controller title bar and add backend choice to the lower-left debug/test-overlay metrics area | Completed |
+| 3.5 | Audit and shrink-wrap residual OS-specific checks in generic runtime modules, removing only the ones that encode backend policy | Completed |
+| 3.6 | Document the retained intentional boundaries (`load.py`, installer/deployment logic, `plugin_hint`) and archive/supersede any notes that imply broader cleanup is still complete | Completed |
 
 #### Stage 3.1 Detailed Plan
 - Objective:
 - Expose client-authoritative backend status to plugin preferences without introducing a second backend authority.
 - Primary touch points:
-- `overlay_client/data_client.py`
-- `overlay_client/overlay_client.py`
+- `overlay_client/launcher.py`
 - `load.py`
 - `overlay_plugin/preferences.py`
-- `overlay_client/backend/status.py`
 - `overlay_client/tests/test_backend_status.py`
 - `tests/test_preferences_panel_controller_tab.py`
 - `tests/test_harness_backend_status_roundtrip.py`
 - Steps:
-- Add or extend the existing plugin/client socket path so the plugin can request client-authoritative backend status (`source=client_runtime`) rather than only plugin shadow status.
+- Add or extend the existing plugin/client socket path so the plugin can request client-authoritative backend status (`source=client_runtime`) rather than only plugin shadow status, using a plugin->client request event and a client->plugin CLI response over the already-open local connection.
 - Use a request/response status contract over that existing local socket path rather than introducing pushed status updates for this phase.
+- Keep the request path lightweight for the Tk preferences poll by caching recent client-runtime responses in the plugin runtime and only performing synchronous request attempts when the cached runtime status is stale enough to need refresh.
 - Keep the current plugin shadow status (`source=plugin_hint`) as fallback when client-runtime status is unavailable, and label that fallback explicitly as advisory.
 - Define freshness and fallback behavior explicitly so stale or unreachable client-runtime status does not continue to present as current truth; when `client_runtime` and `plugin_hint` disagree, `client_runtime` remains authoritative and any `plugin_hint` mismatch is surfaced only as a secondary advisory note.
 - Keep this stage out of the controller title bar; the goal here is accurate preferences visibility, not more title-bar status.
@@ -444,21 +450,35 @@ If something is unclear, capture it under `Open Questions`.
 - Retire `force_xwayland` as a separate user-facing/persisted setting and keep XWayland usage only as an explicit backend fallback or override.
 - Primary touch points:
 - `load.py`
+- `overlay_client/backend/contracts.py`
+- `overlay_client/backend/probe.py`
+- `overlay_client/backend/consumers.py`
 - `overlay_client/backend/selector.py`
 - `overlay_client/platform_context.py`
+- `overlay_client/platform_integration.py`
 - `overlay_client/client_config.py`
+- `overlay_client/control_surface.py`
+- `overlay_client/developer_helpers.py`
+- `overlay_client/window_tracking.py`
+- `overlay_client/launcher.py`
+- `overlay_client/setup_surface.py`
 - `overlay_plugin/preferences.py`
 - `overlay_plugin/overlay_config_payload.py`
 - `overlay_client/tests/test_backend_selector.py`
 - `overlay_client/tests/test_platform_context.py`
 - `overlay_client/tests/test_client_config.py`
+- `overlay_client/tests/test_platform_controller_backend_status.py`
 - `tests/test_overlay_config_payload.py`
 - `tests/test_preferences_persistence.py`
+- `tests/test_preferences_panel_controller_tab.py`
 - `tests/test_harness_backend_override_roundtrip.py`
+- `tests/test_harness_backend_selection_wiring.py`
+- `tests/test_lifecycle_tracking.py`
 - Steps:
 - Remove the user-facing `force_xwayland` setting from prefs/config/bootstrap payloads and stop emitting `EDMC_OVERLAY_FORCE_XWAYLAND` as part of normal backend control flow.
 - Migrate persisted `force_xwayland=true` state to explicit `manual_backend_override="xwayland_compat"` semantics where needed so existing users keep the same fallback intent.
 - Treat XWayland startup transport as what it really is: an explicit startup transport override to the `xwayland_compat` backend. Under `Auto`, do not silently launch `QT_QPA_PLATFORM=xcb`; only an explicit manual backend override to `xwayland_compat` may drive `QT_QPA_PLATFORM=xcb` on Wayland.
+- Keep the running client truthful while that transport change is pending: when switching into `xwayland_compat` from a live Wayland runtime, save the override immediately but do not push a live overlay-config context update that would make the current runtime claim XWayland before restart.
 - Make the user-facing surface explicit that `xwayland_compat` is restart-required, because Qt platform transport cannot be switched in-process after launch.
 - Backend override selection is made in plugin preferences. When a selected override changes Qt startup transport, the preference change is saved immediately but surfaced in the preferences status area as pending until restart. Preferences must show that the current runtime backend remains unchanged until the overlay client is explicitly restarted, and must not imply that the backend switch has already applied live. The existing `Restart Overlay Client` action should remain the explicit apply path for restart-required backend changes.
 - Preserve `xwayland_compat` as a named explicit fallback backend and do not silently remove the compatibility path.
@@ -466,47 +486,50 @@ If something is unclear, capture it under `Open Questions`.
 - No user-facing or persisted `force_xwayland` setting remains in the normal backend-control path.
 - Explicit `xwayland_compat` fallback/override still works end to end, including launch-time Qt platform selection and restart-required UX.
 - `Auto` no longer behaves like a hidden XWayland-force toggle and never silently launches `QT_QPA_PLATFORM=xcb`.
+- Changing to explicit `xwayland_compat` while a native Wayland client is already running leaves the current runtime/backend status unchanged until restart instead of falsely claiming XWayland immediately.
 - Verification to run:
-- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_selector.py overlay_client/tests/test_platform_context.py overlay_client/tests/test_client_config.py tests/test_overlay_config_payload.py tests/test_preferences_persistence.py tests/test_harness_backend_override_roundtrip.py -q`
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_selector.py overlay_client/tests/test_platform_context.py overlay_client/tests/test_client_config.py overlay_client/tests/test_platform_controller_backend_status.py tests/test_overlay_config_payload.py tests/test_preferences_persistence.py tests/test_preferences_panel_controller_tab.py tests/test_harness_backend_override_roundtrip.py tests/test_harness_backend_selection_wiring.py tests/test_lifecycle_tracking.py -q`
 
 #### Stage 3.3 Detailed Plan
 - Objective:
 - Move override-choice policy out of preferences-specific OS/compositor branching.
 - Primary touch points:
-- `overlay_client/backend/status.py`
 - `overlay_client/backend/contracts.py`
+- `overlay_client/backend/override_options.py`
+- `overlay_client/backend/__init__.py`
+- `load.py`
 - `overlay_plugin/preferences.py`
-- `overlay_client/tests/test_backend_status.py`
+- `overlay_client/tests/test_backend_override_options.py`
 - `tests/test_preferences_panel_controller_tab.py`
+- `tests/test_harness_backend_override_roundtrip.py`
 - Steps:
-- Add backend-owned override-choice metadata so valid override choices come from backend registry metadata rather than preferences-specific OS/compositor mapping logic. `overlay_client/backend/contracts.py` may define the metadata shape, but `status.py` must not become the owner of backend override policy.
-- Update preferences to consume that metadata instead of rebuilding the choice list from `operating_system`, `session_type`, and `compositor`.
+- Add backend-owned override-choice metadata so valid override choices and restart-required rules come from backend registry metadata rather than preferences-specific OS/compositor mapping logic. `overlay_client/backend/contracts.py` may define the metadata shape, but the concrete option data and availability rules should live in a backend-owned metadata module rather than in `status.py` or preferences.
+- Update preferences and the plugin runtime to consume that backend-owned metadata instead of rebuilding the choice list or restart-required rule from raw `operating_system`, `session_type`, and `compositor` branches.
 - Keep UI behavior and override persistence unchanged.
 - Acceptance criteria:
 - Preferences no longer encode compositor mapping tables for backend override choices.
-- Override-choice availability rules live in backend-owned metadata rather than `status.py` or preferences-local policy code.
+- Override-choice availability rules and restart-required metadata live in backend-owned metadata rather than `status.py`, `load.py`, or preferences-local policy code.
 - Verification to run:
-- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_status.py tests/test_preferences_panel_controller_tab.py tests/test_harness_backend_override_roundtrip.py -q`
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_override_options.py tests/test_preferences_panel_controller_tab.py tests/test_harness_backend_override_roundtrip.py -q`
 
 #### Stage 3.4 Detailed Plan
 - Objective:
 - Correct the remaining backend-status visibility surfaces.
 - Primary touch points:
 - `overlay_controller/overlay_controller.py`
-- `overlay_client/backend/status.py`
 - `overlay_client/debug_cycle_overlay.py`
 - `overlay_client/render_surface.py`
-- `overlay_client/tests/test_backend_status.py`
+- `overlay_client/tests/test_debug_overlay_view.py`
 - `overlay_controller/tests/test_backend_status_title.py`
 - Steps:
-- Remove backend-status formatting from the Overlay Controller title bar and leave the controller title at its base title for now.
-- Add backend choice to the lower-left debug/test-overlay metrics area so backend visibility remains available in the client-side visual diagnostics surface.
-- Keep the debug/test-overlay addition scoped to existing diagnostic/test-logo surfaces rather than expanding controller UI.
+- Remove backend-status formatting from the Overlay Controller title bar and leave the controller title at its base title for now; `overlay_controller/overlay_controller.py` should stop consuming backend-title formatting helpers rather than reshaping backend status payloads.
+- Add backend choice to the existing client-side debug diagnostics panel rendered by `DebugOverlayView`, using the current client backend-status snapshot already maintained on the overlay window rather than inventing a second diagnostics source.
+- Keep the debug/test-overlay addition scoped to the existing diagnostics panel content and placement logic rather than expanding controller UI or adding a new metrics widget/surface.
 - Acceptance criteria:
 - Overlay Controller title bar no longer shows backend status.
-- The debug/test-overlay lower-left metrics area includes backend choice information.
+- The debug/test-overlay diagnostics panel includes backend choice information from the current client runtime status.
 - Verification to run:
-- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_status.py overlay_controller/tests/test_backend_status_title.py -q`
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_debug_overlay_view.py overlay_controller/tests/test_backend_status_title.py -q`
 
 #### Stage 3.5 Detailed Plan
 - Objective:
@@ -518,17 +541,18 @@ If something is unclear, capture it under `Open Questions`.
 - `overlay_client/control_surface.py`
 - `overlay_client/tests/test_follow_surface_mixin.py`
 - `overlay_client/tests/test_control_surface_platform_context.py`
+- `overlay_client/tests/test_interaction_controller.py`
 - Steps:
 - Audit remaining `sys.platform` / Wayland checks and classify each one as either generic UI/windowing behavior or leaked backend policy.
 - Treat as acceptable only the mechanical compatibility or API-availability guards that do not select a backend, instantiate backend-specific implementations, or recreate fallback/support/override logic from raw platform/session/compositor inputs.
-- Remove or redirect any checks that still choose backend behavior outside the backend layer.
+- Remove or redirect only the stale checks that no longer serve even that generic compatibility role; in the current code, this primarily means trimming dead residual helpers rather than reworking the retained force-render, transient-parent, standalone-mode, or runtime-status guards that already delegate to backend-owned status/controller APIs.
 - Retain only the generic guards that do not encode backend-family/compositor policy.
 - Acceptance criteria:
 - Residual generic checks are minimal and explicitly justifiable.
 - No remaining runtime module outside backend decides Linux compositor/backend policy locally.
 - Any retained non-backend guard can be explained as a generic compatibility/windowing check rather than backend-policy leakage.
 - Verification to run:
-- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_follow_surface_mixin.py overlay_client/tests/test_control_surface_platform_context.py overlay_client/tests/test_platform_controller_backend_status.py -q`
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_follow_surface_mixin.py overlay_client/tests/test_control_surface_platform_context.py overlay_client/tests/test_interaction_controller.py overlay_client/tests/test_platform_controller_backend_status.py -q`
 
 #### Stage 3.6 Detailed Plan
 - Objective:
@@ -537,11 +561,19 @@ If something is unclear, capture it under `Open Questions`.
 - `docs/refactoring/fix219_backend_architecture_refactor_plan.md`
 - `docs/refactoring/fix219_backend_architecture_followup_cleanup_plan.md`
 - `docs/refactoring/fix219_cross_platform_overlay_architecture_research.md`
-- `load.py`
-- `scripts/install_linux.sh`
-- `scripts/install_matrix.json`
+- `docs/archive/refactoring/load_refactory.md`
+- `docs/archive/refactoring/compositor_aware_install.md`
+- `docs/archive/refactoring/client_refactor.md`
+- `docs/archive/refactoring/refactor-plan.md`
+- `load.py` (reference/comment-only if needed)
+- `scripts/install_linux.sh` (reference/comment-only if needed)
+- `scripts/install_matrix.json` (reference-only)
 - Steps:
 - Update docs to state explicitly that plugin launch/orchestration, `plugin_hint`, Flatpak/env shaping, and installer compositor profiles are retained boundaries.
+- Refresh the top-level narrative in this follow-up plan so the current audit/gap snapshot reflects the post-Phase-`3.5` state rather than repeating already-closed Phase `1`-`3.5` gaps as if they were still active.
+- Update the original refactor plan and architecture research doc anywhere completion is summarized so retained control-plane and deployment boundaries are explicit at the same level as the completed backend-cutover story.
+- Annotate the archived refactor notes that still read like live planning documents so they are clearly historical and do not supersede the active `fix219_` boundary decisions.
+- Keep this stage documentation-first: `load.py` and `scripts/install_linux.sh` may receive boundary comments/annotations if helpful, but this stage should not change launch or installer behavior, and `scripts/install_matrix.json` should only be referenced/documented unless a later plan explicitly broadens scope.
 - Record any remaining cleanup deferrals clearly if a stage finishes with intentional exceptions.
 - Keep the `standalone_mode` boundary explicit: Windows standalone behavior is preserved as-is during `fix219`, while Linux standalone behavior/support remains deferred to a separate post-`fix219` feature/validation plan.
 - Keep the physical-clamp boundary explicit: it remains a shared geometry/follow escape hatch during `fix219`, and any deeper coordinate-space redesign or override-identity cleanup is deferred to a separate post-`fix219` geometry/follow plan.
@@ -549,6 +581,8 @@ If something is unclear, capture it under `Open Questions`.
 - Archive or annotate any refactor notes that incorrectly imply all platform-specific runtime ownership is already inside backend.
 - Acceptance criteria:
 - The follow-up architecture boundary is documented precisely.
+- The follow-up plan no longer presents already-completed Phase `1`-`3.5` cleanup items as current unresolved gaps.
+- Archived refactor notes are visibly historical and point readers back to the active `fix219_` boundary documents.
 - Future cleanup work has an unambiguous distinction between runtime leakage and intentional plugin/install boundaries.
 - Verification to run:
 - `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_status.py overlay_client/tests/test_platform_context.py -q`
@@ -583,13 +617,17 @@ If something is unclear, capture it under `Open Questions`.
 - `docs/refactoring/fix219_backend_architecture_refactor_plan.md`
 - `docs/refactoring/fix219_backend_architecture_followup_cleanup_plan.md`
 - `RELEASE_NOTES.md`
+- `/home/jon/edmc-logs/EDMarketConnector-debug.log`
+- `/home/jon/edmc-logs/EDMCModernOverlay/overlay_client.log`
 - Steps:
+- Collect any already-recorded real-environment evidence from the current EDMC/plugin/client logs first so the stage does not ignore existing runs.
 - Re-run or confirm the minimum closure matrix environments required for `fix219`: Windows baseline, `native_x11`, explicit `xwayland_compat`, and one recorded KWin Wayland run.
 - As part of that closure matrix, explicitly validate that manual backend override authority still works end to end and remains the effective user-facing override over `Auto`, including the restart-required `xwayland_compat` path.
 - If additional wlroots/Hyprland/COSMIC/gamescope or helper-backed Wayland testers are available, record those runs too; otherwise mark those environments deferred and remove any implied signoff claim that they were fully validated in this plan.
 - Record each checked environment as pass, fail, unsupported, or deferred, with the exact limitation or follow-up needed.
 - Record or confirm the final claimed support classification for each checked environment (`true_overlay`, `degraded_overlay`, `unsupported`) and the concrete reason when the result is not `true_overlay`.
 - Apply the classification evidence rule explicitly: no environment receives a final support classification from code inspection alone; `true_overlay` requires demonstrated full claimed behavior with no material unresolved limitation, `degraded_overlay` requires demonstrated partial behavior with an explicit weakened guarantee and concrete reason, `unsupported` requires recorded evidence that the required support bar is not met or not implemented, and any environment lacking sufficient recorded evidence remains deferred.
+- If the minimum closure matrix cannot be satisfied from the available real runs and logs, stop the stage and record the missing evidence explicitly rather than promoting inferred results into signoff claims.
 - Do not silently broaden support claims if validation reveals a weaker support story than planned.
 - Acceptance criteria:
 - The minimum closure matrix has recorded evidence rather than an unspecified validation gap.
@@ -698,22 +736,76 @@ Use this checklist before declaring the backend-architecture cleanup complete.
 - Record exact test commands and outcomes for each completed phase.
 
 ### Phase 1 Execution Summary
-- Not started.
+- Stage `1.1` completed on 2026-04-03.
+- Refined Stage `1.1` in this plan before code changes so the touch points match the current bundle/consumer layout, including the X11/XWayland bundle modules, native Wayland bundle modules, and `overlay_client/backend/consumers.py`.
+- Added test-only coverage to lock the current combined presentation/input backend shape per bundle, shared XCB-vs-Wayland integration routing, and current `uses_transient_parent()` / platform-label policy outcomes across explicit bundle identities.
+- Runtime behavior was unchanged in this stage.
+- Stage `1.2` completed on 2026-04-03.
+- Refined Stage `1.2` in this plan before code changes so the exact extraction scope matched the current code: move the generic shared integration base into `overlay_client/window_integration.py`, move the shipped Linux XCB/Wayland integration implementations into `overlay_client/backend/bundles/_linux_window_integration.py`, and re-point the backend bundle modules at those backend-owned factories.
+- Preserved the current shipped behavior by keeping Windows integration ownership in `platform_integration.py`, keeping the Linux bundle-facing factory names unchanged, and changing only implementation ownership for Linux runtime presentation/input behavior.
+- Stage `1.3` completed on 2026-04-03.
+- Refined Stage `1.3` in this plan before code changes so the remaining work matched the actual code state: `PlatformController` was already delegating through backend consumers, so the stage only needed to remove stale Linux integration imports/residue from `platform_integration.py` and leave it as a generic bundle-consumer facade.
+- Runtime behavior remained unchanged in both Stage `1.2` and Stage `1.3`.
 
 ### Tests Run For Phase 1
-- None yet.
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_bundles_x11.py overlay_client/tests/test_backend_bundles_wayland.py overlay_client/tests/test_backend_consumers.py -q` -> failed before setup because `.venv/bin/activate` did not exist.
+- `python3 -m pytest overlay_client/tests/test_backend_bundles_x11.py overlay_client/tests/test_backend_bundles_wayland.py overlay_client/tests/test_backend_consumers.py -q` -> failed during collection because `PyQt6` was not installed in the system Python.
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_bundles_x11.py overlay_client/tests/test_backend_bundles_wayland.py overlay_client/tests/test_backend_consumers.py -q` -> passed (`34` passed).
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_bundles_x11.py overlay_client/tests/test_backend_bundles_wayland.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_platform_controller_backend_status.py -q` -> passed (`37` passed).
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_platform_controller_backend_status.py overlay_client/tests/test_backend_consumers.py -q` -> passed (`22` passed).
 
 ### Phase 2 Execution Summary
-- Not started.
+- Stage `2.1` completed on 2026-04-03.
+- Refined Stage `2.1` in this plan before code changes so the test scope matched the actual tracker contract edges in the code: status-driven bundle selection, the current X11-vs-Wayland fallback rules, and pass-through of `title_hint` / `monitor_provider` through both primary and fallback tracker creation attempts.
+- Added unit coverage that locks the X11 fallback bundle rule and the current `create_elite_window_tracker(...)` pass-through contract without moving any runtime tracker implementation code yet.
+- Kept the existing harness shadow-backend-status publication test as the upstream status-wiring guard for later tracker stages; runtime behavior was unchanged in this stage.
+- Stage `2.2` completed on 2026-04-03.
+- Refined Stage `2.2` in this plan before code changes so the extraction matched the actual code seams: move the Linux tracker implementations into `overlay_client/backend/bundles/_linux_trackers.py`, move shared tracker primitives into `overlay_client/window_tracking_support.py`, and leave the public entrypoint plus Windows tracker in `overlay_client/window_tracking.py`.
+- Preserved current shipped tracker behavior by moving the Linux tracker implementations intact behind backend-owned discovery modules, keeping factory names and tracker class names unchanged, and re-pointing the bundle modules at the backend-owned factories.
+- Stage `2.3` completed on 2026-04-03.
+- Refined Stage `2.3` in this plan before code changes so the remaining work matched the post-extraction code state: `window_tracking.py` was already status-driven, so the stage only needed to remove stale Linux-tracker residue and leave the file as a generic runtime entrypoint plus the Windows tracker.
+- Runtime behavior remained unchanged in both Stage `2.2` and Stage `2.3`.
 
 ### Tests Run For Phase 2
-- None yet.
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_window_tracking_bundle_routing.py overlay_client/tests/test_backend_consumers.py tests/test_harness_backend_selection_wiring.py -q` -> passed (`28` passed).
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_bundles_x11.py overlay_client/tests/test_backend_bundles_wayland.py overlay_client/tests/test_window_tracking_bundle_routing.py overlay_client/tests/test_backend_consumers.py -q` -> passed (`42` passed).
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_window_tracking_bundle_routing.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_follow_surface_mixin.py -q` -> passed (`31` passed).
 
 ### Phase 3 Execution Summary
-- Not started.
+- Stage `3.1` completed on 2026-04-03.
+- Refined Stage `3.1` in this plan before code changes so the actual transport seam matched the codebase: request/response wiring lives in `load.py` and `overlay_client/launcher.py`, not in `overlay_client/data_client.py`.
+- Added a lightweight plugin->client request event plus client->plugin CLI reply path over the existing local socket connection, backed by a short-lived plugin cache so preferences can use fresh `client_runtime` status without turning every poll into a blocking request.
+- Preserved existing fallback behavior by keeping `plugin_hint` as the advisory fallback when no fresh client-runtime status is available; selector authority did not change.
+- Stage `3.2` completed on 2026-04-03.
+- Refined Stage `3.2` in this plan before code changes so the actual behavior-change surface matched the codebase: retire `force_xwayland` from the normal preferences/bootstrap/runtime path, remove it from the backend probe/selector contracts, split requested-vs-runtime-applied backend override handling inside `load.py`, and update preferences so `xwayland_compat` is surfaced as restart-required without making the running client claim XWayland before restart.
+- Implemented the approved behavior change by migrating legacy persisted `force_xwayland=true` state to explicit `manual_backend_override="xwayland_compat"`, deriving XWayland startup only from explicit manual override plus launch-time `QT_QPA_PLATFORM=xcb`, and removing the old `EDMC_OVERLAY_FORCE_XWAYLAND`/`force_xwayland` normal-control plumbing from runtime payloads, platform context, and selector inputs.
+- Kept the running client truthful by separating requested manual override from runtime-applied manual override inside the plugin runtime: live `platform_context` payloads now keep the current runtime backend stable until restart, while plugin shadow status can still reflect the pending requested fallback/override as advisory information.
+- Stage `3.3` completed on 2026-04-03.
+- Refined Stage `3.3` in this plan before code changes so the metadata-owner cleanup matched the actual code seams: define the override-option metadata shape in `overlay_client/backend/contracts.py`, move the concrete option table and restart-required rules into `overlay_client/backend/override_options.py`, re-export them through `overlay_client/backend/__init__.py`, and repoint both prefs and `load.py` at the backend-owned helpers.
+- Moved backend override-choice availability and restart-required metadata out of preferences-specific raw probe branching and into backend-owned metadata while keeping the UI option list, persistence flow, and restart-required behavior unchanged.
+- Added focused unit coverage for backend-owned override-option availability and restart-required semantics, then re-ran the existing preferences and harness roundtrip coverage to prove the wiring stayed intact.
+- Stage `3.4` completed on 2026-04-03.
+- Refined Stage `3.4` in this plan before code changes so the user-visible status-surface cleanup matched the actual code seams: stop `overlay_controller/overlay_controller.py` from consuming backend-title formatting helpers, and thread the existing client backend-status snapshot into `DebugOverlayView` via `overlay_client/render_surface.py` instead of inventing a new diagnostics surface.
+- Removed backend status from the Overlay Controller window title while keeping backend visibility available in the existing client-side debug diagnostics panel, which now includes the chosen backend, source, and mode from the current client runtime status.
+- Added direct view-level coverage for the debug overlay backend block and updated the controller title tests to lock the restored base-title behavior.
+- Stage `3.5` completed on 2026-04-03.
+- Refined Stage `3.5` in this plan before code changes so the audit matched the actual code state: the remaining live branches in `follow_surface.py`, `interaction_controller.py`, and `control_surface.py` are generic compatibility/windowing guards or calls into backend-owned status/controller APIs, while the only stale residue left in scope was an unused `_is_wayland()` helper in `overlay_client/overlay_client.py`.
+- Removed that dead residual helper and left the retained generic guards intact, recording the stage as an audited shrink-wrap rather than a broader runtime rewrite.
+- Verified the retained force-render, transient-parent, runtime-status, and interaction-controller paths still behave as expected through the existing unit coverage.
+- Stage `3.6` completed on 2026-04-03.
+- Refined Stage `3.6` in this plan before code changes so the actual work matched the remaining documentation debt: refresh the current-state snapshot in this follow-up plan, make retained control-plane/deployment boundaries explicit in the top-level `fix219_` docs, and annotate the archived refactor notes that still read like live planning documents.
+- Updated the active `fix219_` docs to state consistently that `load.py`, advisory `plugin_hint`, Flatpak/env shaping, and installer compositor profiles are intentional retained boundaries, while the remaining open work is limited to Phase `4` validation/compliance/signoff.
+- Added historical markers to the archived `load_refactory.md`, `compositor_aware_install.md`, `client_refactor.md`, and `refactor-plan.md` notes so they no longer read as active backend-boundary authority.
 
 ### Tests Run For Phase 3
-- None yet.
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_status.py tests/test_preferences_panel_controller_tab.py tests/test_harness_backend_status_roundtrip.py -q` -> failed on the first attempt because a new preferences assertion accidentally captured current Stage `3.3` override-choice behavior instead of only Stage `3.1` status-source behavior.
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_status.py tests/test_preferences_panel_controller_tab.py tests/test_harness_backend_status_roundtrip.py -q` -> passed (`23` passed).
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_selector.py overlay_client/tests/test_platform_context.py overlay_client/tests/test_client_config.py overlay_client/tests/test_platform_controller_backend_status.py tests/test_overlay_config_payload.py tests/test_preferences_persistence.py tests/test_preferences_panel_controller_tab.py tests/test_harness_backend_override_roundtrip.py tests/test_harness_backend_selection_wiring.py tests/test_lifecycle_tracking.py -q` -> passed (`56` passed).
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_override_options.py tests/test_preferences_panel_controller_tab.py tests/test_harness_backend_override_roundtrip.py -q` -> passed (`21` passed).
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_debug_overlay_view.py overlay_controller/tests/test_backend_status_title.py -q` -> passed (`3` passed).
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_follow_surface_mixin.py overlay_client/tests/test_control_surface_platform_context.py overlay_client/tests/test_interaction_controller.py overlay_client/tests/test_platform_controller_backend_status.py -q` -> passed (`13` passed).
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_status.py overlay_client/tests/test_platform_context.py -q` -> passed (`13` passed).
+- `source .venv/bin/activate && make check` -> passed (`ruff` clean, `mypy` clean, full suite `815` passed / `21` skipped).
 
 ### Phase 4 Execution Summary
 - Not started.

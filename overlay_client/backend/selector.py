@@ -67,9 +67,7 @@ class BackendSelector:
             return BackendDescriptor(BackendFamily.NATIVE_WINDOWS, BackendInstance.WINDOWS_DESKTOP)
 
         if probe.operating_system is OperatingSystem.LINUX:
-            if probe.session_type is SessionType.WAYLAND and (
-                probe.force_xwayland or probe.qt_platform_name.startswith("xcb")
-            ):
+            if probe.session_type is SessionType.WAYLAND and probe.qt_platform_name.startswith("xcb"):
                 return BackendDescriptor(BackendFamily.XWAYLAND_COMPAT, BackendInstance.XWAYLAND_COMPAT)
             if probe.session_type is SessionType.X11 or probe.qt_platform_name.startswith("xcb"):
                 return BackendDescriptor(BackendFamily.NATIVE_X11, BackendInstance.NATIVE_X11)

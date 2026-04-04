@@ -102,8 +102,14 @@ if __package__:
     from .EDMCOverlay.edmcoverlay import normalise_legacy_payload
     from .group_cache import GroupPlacementCache
     from .overlay_client import env_overrides as env_overrides_helper
-    from .overlay_client.backend import BackendSelector, ProbeInputs, ProbeSource, collect_platform_probe
-    from .overlay_client.backend.status import format_status_report_line
+    from .overlay_client.backend import (
+        BackendSelector,
+        ProbeInputs,
+        ProbeSource,
+        backend_override_requires_restart,
+        collect_platform_probe,
+    )
+    from .overlay_client.backend.status import build_status_report, format_status_report_line
 else:  # pragma: no cover - EDMC loads as top-level module
     from version import __version__ as MODERN_OVERLAY_VERSION, DEV_MODE_ENV_VAR, is_dev_build
     from overlay_plugin.lifecycle import LifecycleTracker
@@ -180,8 +186,14 @@ else:  # pragma: no cover - EDMC loads as top-level module
     from EDMCOverlay.edmcoverlay import normalise_legacy_payload
     from group_cache import GroupPlacementCache
     import overlay_client.env_overrides as env_overrides_helper
-    from overlay_client.backend import BackendSelector, ProbeInputs, ProbeSource, collect_platform_probe
-    from overlay_client.backend.status import format_status_report_line
+    from overlay_client.backend import (
+        BackendSelector,
+        ProbeInputs,
+        ProbeSource,
+        backend_override_requires_restart,
+        collect_platform_probe,
+    )
+    from overlay_client.backend.status import build_status_report, format_status_report_line
 
 PLUGIN_NAME = "EDMCModernOverlay"
 PLUGIN_VERSION = MODERN_OVERLAY_VERSION
@@ -448,6 +460,9 @@ PAYLOAD_LOG_FILE_NAME = "overlay-payloads.log"
 PAYLOAD_LOG_DIR_NAME = PLUGIN_NAME
 PAYLOAD_LOG_MAX_BYTES = 512 * 1024
 CONNECTION_LOG_INTERVAL_SECONDS = 5.0
+CLIENT_RUNTIME_STATUS_TIMEOUT_SECONDS = 1.0
+CLIENT_RUNTIME_STATUS_FRESH_SECONDS = 5.0
+CLIENT_RUNTIME_STATUS_REQUEST_INTERVAL_SECONDS = 2.0
 
 DEFAULT_DEBUG_CONFIG: Dict[str, Any] = {
     "capture_client_stderrout": True,
@@ -480,7 +495,6 @@ DEFAULT_DEV_SETTINGS: Dict[str, Any] = {
 FLATPAK_ENV_FORWARD_KEYS: Tuple[str, ...] = (
     "EDMC_OVERLAY_SESSION_TYPE",
     "EDMC_OVERLAY_COMPOSITOR",
-    "EDMC_OVERLAY_FORCE_XWAYLAND",
     "EDMC_OVERLAY_IS_FLATPAK",
     "EDMC_OVERLAY_FLATPAK_ID",
     "QT_QPA_PLATFORM",
@@ -539,11 +553,18 @@ class _PluginRuntime:
             "docked": False,
         }
         self._preferences = preferences
+        self._runtime_manual_backend_override = _normalise_manual_backend_override(
+            getattr(self._preferences, "manual_backend_override", ""),
+            "",
+        )
         self._last_config: Dict[str, Any] = {}
         self._config_timers: Set[threading.Timer] = set()
         self._config_timer_lock = threading.Lock()
         self._overlay_metrics: Dict[str, Any] = {}
-        self._enforce_force_xwayland(persist=True, update_watchdog=False, emit_config=False)
+        self._client_backend_status_cache: Optional[Dict[str, Any]] = None
+        self._client_backend_status_cached_at: float = 0.0
+        self._client_backend_status_last_request_at: float = 0.0
+        self._pending_client_backend_status_requests: Dict[str, Dict[str, Any]] = {}
         self._payload_logger = logging.getLogger(PAYLOAD_LOGGER_NAME)
         self._payload_logger.setLevel(logging.DEBUG)
         self._payload_logger.propagate = False
@@ -782,7 +803,99 @@ class _PluginRuntime:
     def get_profile_status(self) -> Dict[str, Any]:
         return profile_runtime_helpers.get_profile_status(self, logger=LOGGER)
 
+    @staticmethod
+    def _coerce_client_backend_status_payload(status: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+        selected_backend = status.get("selected_backend")
+        if not isinstance(selected_backend, Mapping):
+            return None
+        payload = dict(status)
+        report = payload.get("report")
+        if not isinstance(report, Mapping):
+            report = build_status_report(payload)
+        payload["report"] = dict(report)
+        return payload
+
+    def _fresh_client_backend_status(self, *, max_age: float) -> Optional[Dict[str, Any]]:
+        cached = self._client_backend_status_cache
+        if cached is None:
+            return None
+        if time.monotonic() - self._client_backend_status_cached_at > max_age:
+            return None
+        return dict(cached)
+
+    def _record_client_backend_status(self, request_id: str, status: Mapping[str, Any]) -> None:
+        payload = self._coerce_client_backend_status_payload(status)
+        if payload is None:
+            return
+        self._client_backend_status_cache = dict(payload)
+        self._client_backend_status_cached_at = time.monotonic()
+        pending = self._pending_client_backend_status_requests.get(request_id)
+        if pending is None:
+            return
+        pending["response"] = dict(payload)
+        event = pending.get("event")
+        if isinstance(event, threading.Event):
+            event.set()
+
+    def _request_client_backend_status(self, *, timeout: float) -> Optional[Dict[str, Any]]:
+        request_id = uuid.uuid4().hex
+        pending: Dict[str, Any] = {"event": threading.Event(), "response": None}
+        self._pending_client_backend_status_requests[request_id] = pending
+        self._client_backend_status_last_request_at = time.monotonic()
+        try:
+            self.broadcaster.publish(
+                {
+                    "event": "OverlayClientBackendStatusRequest",
+                    "request_id": request_id,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
+            )
+        except Exception as exc:
+            LOGGER.debug("Failed to publish backend status request to client: %s", exc)
+            self._pending_client_backend_status_requests.pop(request_id, None)
+            return None
+        event = pending["event"]
+        if isinstance(event, threading.Event):
+            event.wait(timeout)
+        response = pending.get("response")
+        self._pending_client_backend_status_requests.pop(request_id, None)
+        if isinstance(response, Mapping):
+            return dict(response)
+        return None
+
     def get_backend_status(self) -> Dict[str, Any]:
+        fresh_runtime_status = self._fresh_client_backend_status(max_age=CLIENT_RUNTIME_STATUS_REQUEST_INTERVAL_SECONDS)
+        if fresh_runtime_status is not None:
+            report = fresh_runtime_status.get("report")
+            return {
+                "status": "ok",
+                "backend_status": dict(fresh_runtime_status),
+                "report": dict(report) if isinstance(report, Mapping) else build_status_report(fresh_runtime_status),
+            }
+
+        should_request_runtime = (
+            time.monotonic() - self._client_backend_status_last_request_at
+            >= CLIENT_RUNTIME_STATUS_REQUEST_INTERVAL_SECONDS
+        )
+        if should_request_runtime:
+            runtime_status = self._request_client_backend_status(timeout=CLIENT_RUNTIME_STATUS_TIMEOUT_SECONDS)
+            if runtime_status is not None:
+                report = runtime_status.get("report")
+                return {
+                    "status": "ok",
+                    "backend_status": dict(runtime_status),
+                    "report": dict(report) if isinstance(report, Mapping) else build_status_report(runtime_status),
+                }
+
+        cached_runtime_status = self._fresh_client_backend_status(max_age=CLIENT_RUNTIME_STATUS_FRESH_SECONDS)
+        if cached_runtime_status is not None:
+            report = cached_runtime_status.get("report")
+            return {
+                "status": "ok",
+                "backend_status": dict(cached_runtime_status),
+                "report": dict(report) if isinstance(report, Mapping) else build_status_report(cached_runtime_status),
+            }
+
         context = self._platform_context_payload()
         backend_status = context.get("shadow_backend_status")
         if not isinstance(backend_status, Mapping):
@@ -1466,10 +1579,10 @@ class _PluginRuntime:
         )
         platform_context = self._platform_context_payload()
         LOGGER.debug(
-            "Overlay launch context: session=%s compositor=%s force_xwayland=%s qt_platform=%s",
+            "Overlay launch context: session=%s compositor=%s manual_backend_override=%s qt_platform=%s",
             platform_context.get("session_type"),
             platform_context.get("compositor"),
-            platform_context.get("force_xwayland"),
+            platform_context.get("manual_backend_override") or "auto",
             launch_env.get("QT_QPA_PLATFORM"),
         )
         shadow_backend_status = platform_context.get("shadow_backend_status")
@@ -1485,6 +1598,10 @@ class _PluginRuntime:
         )
         self._update_capture_state(self._capture_enabled())
         self.watchdog.start()
+        self._runtime_manual_backend_override = _normalise_manual_backend_override(
+            getattr(self._preferences, "manual_backend_override", ""),
+            "",
+        )
         self._lifecycle.track_handle(self.watchdog)
         return True
 
@@ -1537,56 +1654,11 @@ class _PluginRuntime:
             LOGGER.info("Overlay stdout/stderr capture inactive (override or EDMC logging level disabled piping).")
         self._capture_active = enabled
 
-    def _desired_force_xwayland(self) -> Tuple[bool, str]:
-        env_override = _env_flag("EDMC_OVERLAY_FORCE_XWAYLAND")
-        if env_override is not None:
-            return env_override, "environment override"
-        return bool(self._preferences.force_xwayland), "user preference"
-
-    def _sync_force_xwayland_ui(self) -> None:
-        # UI toggle removed; keep method for legacy callers.
-        return
-
-    def _enforce_force_xwayland(
-        self,
-        *,
-        persist: bool,
-        update_watchdog: bool,
-        emit_config: bool,
-    ) -> bool:
-        source = "user preference"
-        with self._prefs_lock:
-            desired, source = self._desired_force_xwayland()
-            current = bool(self._preferences.force_xwayland)
-            if current == desired:
-                self._sync_force_xwayland_ui()
-                return False
-            self._preferences.force_xwayland = desired
-            # Only persist explicit user choices; env overrides should remain ephemeral.
-            if persist and source == "user preference":
-                try:
-                    self._preferences.save()
-                except Exception as exc:
-                    LOGGER.warning("Failed to save preferences while enforcing XWayland setting: %s", exc)
-        LOGGER.info("force_xwayland set to %s via %s.", desired, source)
-        if update_watchdog and self.watchdog:
-            try:
-                self.watchdog.set_environment(self._build_overlay_environment())
-            except Exception as exc:
-                LOGGER.warning("Failed to apply updated overlay environment: %s", exc)
-            else:
-                _log("Overlay XWayland preference updated; restart overlay to apply.")
-        self._sync_force_xwayland_ui()
-        if emit_config:
-            self._send_overlay_config()
-        return True
-
     def on_preferences_updated(self) -> None:
-        self._enforce_force_xwayland(persist=True, update_watchdog=True, emit_config=False)
         LOGGER.debug(
             "Applying updated preferences: show_connection_status=%s "
             "client_log_retention=%d gridlines_enabled=%s gridline_spacing=%d overlay_opacity=%.2f "
-            "force_render=%s standalone_mode=%s force_xwayland=%s debug_overlay=%s cycle_payload_ids=%s font_min=%.1f font_max=%.1f",
+            "force_render=%s standalone_mode=%s manual_backend_override=%s debug_overlay=%s cycle_payload_ids=%s font_min=%.1f font_max=%.1f",
             self._preferences.show_connection_status,
             self._resolve_client_log_retention(),
             self._preferences.gridlines_enabled,
@@ -1594,7 +1666,7 @@ class _PluginRuntime:
             self._preferences.overlay_opacity,
             self._resolve_force_render(),
             standalone_mode_preference_value(self._preferences),
-            self._preferences.force_xwayland,
+            self._preferences.manual_backend_override or "auto",
             self._preferences.show_debug_overlay,
             self._preferences.cycle_payload_ids,
             self._preferences.min_font_point,
@@ -1948,19 +2020,31 @@ class _PluginRuntime:
         self._command_helper = self._build_command_helper(current_prefix, previous_prefix=current_prefix)
         LOGGER.info("Overlay toggle argument preference updated to %s", normalised)
 
-    def set_manual_backend_override_preference(self, value: str) -> None:
+    def set_manual_backend_override_preference(self, value: str) -> bool:
         normalised = _normalise_manual_backend_override(value, "")
         with self._prefs_lock:
             current = str(getattr(self._preferences, "manual_backend_override", "") or "")
             if normalised == current:
-                return
+                return False
+            runtime_current = str(getattr(self, "_runtime_manual_backend_override", "") or "")
+            restart_required = backend_override_requires_restart(runtime_current, normalised)
             self._preferences.manual_backend_override = normalised
             self._preferences.save()
         LOGGER.info(
             "Manual backend override preference updated to %s",
             normalised or "auto",
         )
+        if self.watchdog:
+            try:
+                self.watchdog.set_environment(self._build_overlay_environment())
+            except Exception as exc:
+                LOGGER.warning("Failed to apply updated overlay environment: %s", exc)
+        if restart_required:
+            _log("Backend override saved. Restart Overlay Client to apply. Current runtime backend remains unchanged until restart.")
+            return True
+        self._runtime_manual_backend_override = normalised
         self._send_overlay_config()
+        return False
 
     def set_payload_opacity_preference(self, value: int) -> None:
         """Set visual payload transparency only (not logical overlay/group on/off)."""
@@ -2856,6 +2940,18 @@ class _PluginRuntime:
                 }
             if command == "profile_status":
                 return {"status": "ok", **self.get_profile_status()}
+            if command == "client_runtime_backend_status":
+                request_id = str(payload.get("request_id") or "").strip()
+                if not request_id:
+                    raise ValueError("client_runtime_backend_status payload requires 'request_id'")
+                backend_status = payload.get("backend_status")
+                if not isinstance(backend_status, Mapping):
+                    raise ValueError("client_runtime_backend_status payload requires 'backend_status'")
+                normalised = self._coerce_client_backend_status_payload(backend_status)
+                if normalised is None:
+                    raise ValueError("client_runtime_backend_status payload contained an invalid backend_status")
+                self._record_client_backend_status(request_id, normalised)
+                return {"status": "ok"}
             if command == "backend_status":
                 return self.get_backend_status()
             if command == "profile_set":
@@ -3453,7 +3549,15 @@ class _PluginRuntime:
         env = dict(os.environ)
         session = (env.get("XDG_SESSION_TYPE") or "").lower()
         compositor = self._detect_wayland_compositor()
-        force_xwayland = bool(self._preferences.force_xwayland)
+        manual_backend_override = _normalise_manual_backend_override(
+            getattr(self._preferences, "manual_backend_override", ""),
+            "",
+        )
+        use_xwayland_transport = (
+            sys.platform.startswith("linux")
+            and session == "wayland"
+            and manual_backend_override == "xwayland_compat"
+        )
         log_level_payload = self._build_log_level_payload()
         env["EDMC_OVERLAY_LOG_LEVEL"] = str(log_level_payload.get("value"))
         log_level_name = log_level_payload.get("name") or logging.getLevelName(logging.INFO)
@@ -3461,18 +3565,17 @@ class _PluginRuntime:
         env[DEV_MODE_ENV_VAR] = "1" if self._preferences.dev_mode else "0"
         env["EDMC_OVERLAY_SESSION_TYPE"] = session or "unknown"
         env["EDMC_OVERLAY_COMPOSITOR"] = compositor
-        env["EDMC_OVERLAY_FORCE_XWAYLAND"] = "1" if force_xwayland else "0"
         env["EDMC_OVERLAY_IS_FLATPAK"] = "1" if self._flatpak_context.get("is_flatpak") else "0"
         app_id = self._flatpak_context.get("app_id")
         if app_id:
             env["EDMC_OVERLAY_FLATPAK_ID"] = str(app_id)
         if sys.platform.startswith("linux"):
-            if session == "wayland" and not force_xwayland:
+            if session == "wayland" and not use_xwayland_transport:
                 env.setdefault("QT_QPA_PLATFORM", "wayland")
                 env.setdefault("QT_WAYLAND_DISABLE_WINDOWDECORATION", "1")
                 env.setdefault("QT_WAYLAND_LAYER_SHELL", "1")
             else:
-                env["QT_QPA_PLATFORM"] = env.get("QT_QPA_PLATFORM", "xcb")
+                env["QT_QPA_PLATFORM"] = "xcb"
                 env.setdefault("QT_WAYLAND_DISABLE_WINDOWDECORATION", "1")
         try:
             overrides_path = self.plugin_dir / "overlay_client" / "env_overrides.json"
@@ -3538,19 +3641,20 @@ class _PluginRuntime:
                 return True
         return False
 
-    def _shadow_qt_platform_name(self, session_type: str, *, force_xwayland: bool) -> str:
+    def _shadow_qt_platform_name(self, session_type: str, *, manual_backend_override: str) -> str:
         configured = str(os.environ.get("QT_QPA_PLATFORM") or "").strip().lower()
+        if manual_backend_override == "xwayland_compat" and session_type == "wayland":
+            return "xcb"
         if configured:
             return configured
         if not sys.platform.startswith("linux"):
             return ""
-        if session_type == "wayland" and not force_xwayland:
+        if session_type == "wayland":
             return "wayland"
         return "xcb"
 
     def _shadow_backend_status_payload(self, context: Mapping[str, Any]) -> Dict[str, Any]:
         session_type = str(context.get("session_type") or "")
-        force_xwayland = bool(context.get("force_xwayland"))
         manual_backend_override = str(context.get("manual_backend_override") or "").strip().lower()
         if manual_backend_override == "auto":
             manual_backend_override = ""
@@ -3558,10 +3662,12 @@ class _PluginRuntime:
             ProbeInputs(
                 source=ProbeSource.INITIAL_HINTS,
                 sys_platform=sys.platform,
-                qt_platform_name=self._shadow_qt_platform_name(session_type, force_xwayland=force_xwayland),
+                qt_platform_name=self._shadow_qt_platform_name(
+                    session_type,
+                    manual_backend_override=manual_backend_override,
+                ),
                 session_type=session_type,
                 compositor=str(context.get("compositor") or ""),
-                force_xwayland=force_xwayland,
                 is_flatpak=bool(context.get("flatpak")),
                 flatpak_app_id=str(context.get("flatpak_app") or ""),
                 env=os.environ,
@@ -3571,20 +3677,30 @@ class _PluginRuntime:
 
     def _platform_context_payload(self) -> Dict[str, Any]:
         session = (os.environ.get("XDG_SESSION_TYPE") or "").lower()
-        manual_backend_override = str(getattr(self._preferences, "manual_backend_override", "") or "").strip().lower()
-        if manual_backend_override == "auto":
-            manual_backend_override = ""
+        runtime_manual_backend_override = _normalise_manual_backend_override(
+            getattr(
+                self,
+                "_runtime_manual_backend_override",
+                getattr(self._preferences, "manual_backend_override", ""),
+            ),
+            "",
+        )
+        requested_manual_backend_override = _normalise_manual_backend_override(
+            getattr(self._preferences, "manual_backend_override", ""),
+            "",
+        )
         context = {
             "session_type": session or "unknown",
             "compositor": self._detect_wayland_compositor(),
-            "force_xwayland": bool(self._preferences.force_xwayland),
-            "manual_backend_override": manual_backend_override,
+            "manual_backend_override": runtime_manual_backend_override,
         }
         if self._flatpak_context.get("is_flatpak"):
             context["flatpak"] = True
             if self._flatpak_context.get("app_id"):
                 context["flatpak_app"] = self._flatpak_context["app_id"]
-        context["shadow_backend_status"] = self._shadow_backend_status_payload(context)
+        shadow_context = dict(context)
+        shadow_context["manual_backend_override"] = requested_manual_backend_override
+        context["shadow_backend_status"] = self._shadow_backend_status_payload(shadow_context)
         return context
 
     def _legacy_overlay_active(self) -> bool:
@@ -3844,7 +3960,7 @@ def prefs_changed(cmdr: str, is_beta: bool) -> None:  # pragma: no cover - save 
             LOGGER.debug(
                 "Preferences saved: show_connection_status=%s "
                 "client_log_retention=%d gridlines_enabled=%s gridline_spacing=%d "
-                "force_render=%s standalone_mode=%s title_bar_enabled=%s title_bar_height=%d force_xwayland=%s "
+                "force_render=%s standalone_mode=%s title_bar_enabled=%s title_bar_height=%d manual_backend_override=%s "
                 "debug_overlay=%s cycle_payload_ids=%s copy_payload_id_on_cycle=%s font_min=%.1f font_max=%.1f",
                 _preferences.show_connection_status,
                 _plugin._resolve_client_log_retention() if _plugin else _preferences.client_log_retention,
@@ -3854,7 +3970,7 @@ def prefs_changed(cmdr: str, is_beta: bool) -> None:  # pragma: no cover - save 
                 standalone_mode_preference_value(_preferences),
                 _preferences.title_bar_enabled,
                 _preferences.title_bar_height,
-                _preferences.force_xwayland,
+                _preferences.manual_backend_override or "auto",
                 _preferences.show_debug_overlay,
                 _preferences.cycle_payload_ids,
                 _preferences.copy_payload_id_on_cycle,

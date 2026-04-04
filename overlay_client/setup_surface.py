@@ -158,10 +158,9 @@ class SetupSurfaceMixin:
             backend_status=self._client_backend_status,
         )
         _CLIENT_LOGGER.debug(
-            "Platform controller initialised: session=%s compositor=%s force_xwayland=%s",
+            "Platform controller initialised: session=%s compositor=%s",
             self._platform_context.session_type or "unknown",
             self._platform_context.compositor or "unknown",
-            self._platform_context.force_xwayland,
         )
         _CLIENT_LOGGER.debug(
             "Client backend status initialised: %s",
@@ -417,7 +416,6 @@ class SetupSurfaceMixin:
             "QT_AUTO_SCREEN_SCALE_FACTOR",
             "QT_ENABLE_HIGHDPI_SCALING",
             "QT_SCALE_FACTOR",
-            "EDMC_OVERLAY_FORCE_XWAYLAND",
         )
         values: Dict[str, Optional[str]] = {}
         for key in keys_of_interest:
@@ -475,10 +473,9 @@ class SetupSurfaceMixin:
         self._apply_legacy_scale()
         self._platform_controller.prepare_window(self.windowHandle())
         _CLIENT_LOGGER.debug(
-            "Platform controller initialised: session=%s compositor=%s force_xwayland=%s",
+            "Platform controller initialised: session=%s compositor=%s",
             self._platform_context.session_type or "unknown",
             self._platform_context.compositor or "unknown",
-            self._platform_context.force_xwayland,
         )
         self._platform_controller.apply_click_through(True)
         self._apply_standalone_window_identity()

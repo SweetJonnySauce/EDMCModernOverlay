@@ -16,7 +16,6 @@ class InitialClientSettings:
     global_payload_opacity: int = 100
     force_render: bool = False
     standalone_mode: bool = False
-    force_xwayland: bool = False
     manual_backend_override: str = ""
     physical_clamp_enabled: bool = False
     physical_clamp_overrides: Dict[str, float] = field(default_factory=dict)
@@ -53,7 +52,6 @@ class DeveloperHelperConfig:
     show_status: Optional[bool] = None
     force_render: Optional[bool] = None
     standalone_mode: Optional[bool] = None
-    force_xwayland: Optional[bool] = None
     manual_backend_override: Optional[str] = None
     show_debug_overlay: Optional[bool] = None
     min_font_point: Optional[float] = None
@@ -140,7 +138,6 @@ class DeveloperHelperConfig:
             show_status=_bool(payload.get("show_status"), None),
             force_render=_bool(payload.get("force_render"), None),
             standalone_mode=_bool(payload.get("standalone_mode"), None),
-            force_xwayland=_bool(payload.get("force_xwayland"), None),
             manual_backend_override=_backend_override(payload.get("manual_backend_override"), None),
             show_debug_overlay=_bool(payload.get("show_debug_overlay"), None),
             min_font_point=_float(payload.get("min_font_point"), None),
@@ -186,7 +183,6 @@ def load_initial_settings(settings_path: Path) -> InitialClientSettings:
     payload_opacity = max(0, min(payload_opacity, 100))
     force_render = bool(data.get("force_render", defaults.force_render))
     standalone_mode = bool(data.get("standalone_mode", defaults.standalone_mode))
-    force_xwayland = bool(data.get("force_xwayland", defaults.force_xwayland))
     raw_manual_backend_override = data.get("manual_backend_override", defaults.manual_backend_override)
     try:
         manual_backend_override = str(raw_manual_backend_override or "").strip().lower()
@@ -194,6 +190,8 @@ def load_initial_settings(settings_path: Path) -> InitialClientSettings:
         manual_backend_override = defaults.manual_backend_override
     if manual_backend_override == "auto":
         manual_backend_override = ""
+    if bool(data.get("force_xwayland", False)) and not manual_backend_override:
+        manual_backend_override = "xwayland_compat"
     physical_clamp_enabled = bool(data.get("physical_clamp_enabled", defaults.physical_clamp_enabled))
     show_debug_overlay = bool(data.get("show_debug_overlay", defaults.show_debug_overlay))
     try:
@@ -268,7 +266,6 @@ def load_initial_settings(settings_path: Path) -> InitialClientSettings:
         global_payload_opacity=payload_opacity,
         force_render=force_render,
         standalone_mode=standalone_mode,
-        force_xwayland=force_xwayland,
         manual_backend_override=manual_backend_override,
         show_debug_overlay=show_debug_overlay,
         min_font_point=min_font,

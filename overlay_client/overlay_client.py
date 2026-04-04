@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 CLIENT_DIR = Path(__file__).resolve().parent
 ROOT_DIR = CLIENT_DIR.parent
 
-from PyQt6.QtGui import QPainter, QGuiApplication
+from PyQt6.QtGui import QPainter
 from PyQt6.QtWidgets import QWidget
 
 from overlay_client.payload_model import PayloadModel  # type: ignore
@@ -683,10 +683,24 @@ class OverlayWindow(SetupSurfaceMixin, InteractionSurfaceMixin, QWidget, RenderS
     def current_backend_status(self):
         return self._client_backend_status
 
-    def _is_wayland(self) -> bool:
-        platform_name = (QGuiApplication.platformName() or "").lower()
-        return "wayland" in platform_name
-
+    def send_current_backend_status(self, request_id: str) -> bool:
+        request = str(request_id or "").strip()
+        if not request:
+            return False
+        client = self._data_client
+        if client is None:
+            return False
+        status = self.current_backend_status()
+        if status is None:
+            return False
+        payload = status.to_payload() if hasattr(status, "to_payload") else dict(status)
+        return client.send_cli_payload(
+            {
+                "cli": "client_runtime_backend_status",
+                "request_id": request,
+                "backend_status": payload,
+            }
+        )
 
 def resolve_port_file(args_port: Optional[str]) -> Path:
     """Compatibility shim; real implementation lives in overlay_client.launcher."""

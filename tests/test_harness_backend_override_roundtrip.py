@@ -25,7 +25,8 @@ def runtime_for_backend_override(
         runtime,
         _adapter,
     ):
-        runtime._preferences.force_xwayland = False
+        runtime._preferences.manual_backend_override = ""
+        runtime._runtime_manual_backend_override = ""
         yield runtime
 
 
@@ -39,7 +40,7 @@ def test_backend_status_cli_roundtrip_reports_manual_override(runtime_for_backen
     backend_status = response["backend_status"]
     report = response["report"]
     assert backend_status["manual_override"] == "xwayland_compat"
-    assert backend_status["fallback_reason"] == "manual_override"
+    assert "fallback_reason" not in backend_status
     assert report["manual_override"] == "xwayland_compat"
     assert report["warning_required"] is True
 
@@ -61,3 +62,25 @@ def test_backend_status_cli_roundtrip_reports_invalid_manual_override(runtime_fo
     assert backend_status["override_error"] == "bogus_backend"
     assert report["override_error"] == "bogus_backend"
     assert report["warning_required"] is True
+
+
+def test_manual_xwayland_override_updates_restart_env_without_live_runtime_reselection(
+    runtime_for_backend_override: object,
+) -> None:
+    runtime = runtime_for_backend_override
+    sent_configs: list[str] = []
+    watchdog_envs: list[dict[str, str]] = []
+
+    runtime._send_overlay_config = lambda: sent_configs.append("sent")
+    runtime.watchdog = type(
+        "_Watchdog",
+        (),
+        {"set_environment": lambda self, env: watchdog_envs.append(dict(env or {}))},
+    )()
+
+    runtime.set_manual_backend_override_preference("xwayland_compat")
+
+    assert runtime._preferences.manual_backend_override == "xwayland_compat"
+    assert sent_configs == []
+    assert watchdog_envs
+    assert watchdog_envs[-1]["QT_QPA_PLATFORM"] == "xcb"

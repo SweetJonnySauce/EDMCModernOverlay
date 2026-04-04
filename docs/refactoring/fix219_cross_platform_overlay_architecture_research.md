@@ -1021,6 +1021,12 @@ Recommended split:
 - selected backend reports capabilities and reasons
 - plugin and controller consume those results for UX and support diagnostics
 
+For `fix219`, the following retained boundaries are intentional and should not be misread as backend-ownership defects:
+
+- `load.py` remains the plugin control plane for EDMC lifecycle, process launch/orchestration, advisory `plugin_hint`, and Flatpak/env shaping.
+- Runtime backend truth still comes from the client; plugin-side launch context and override plumbing remain advisory/control-plane surfaces rather than a second runtime selector.
+- Installer compositor profiles and package/helper guidance in `scripts/install_linux.sh` / `scripts/install_matrix.json` remain deployment guidance, not runtime backend-selection ownership.
+
 ### 3. Treat Qt as an implementation detail where appropriate
 
 Qt can still host rendering and local windowing for backends where it fits, but the architecture should not assume that Qt-level window flags are the stable abstraction for every OS and compositor.

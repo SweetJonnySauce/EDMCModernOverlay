@@ -13,7 +13,6 @@ if TYPE_CHECKING:
 
 
 def _initial_platform_context(initial: "InitialClientSettings") -> PlatformContext:
-    force_env = os.environ.get("EDMC_OVERLAY_FORCE_XWAYLAND") == "1"
     session = os.environ.get("EDMC_OVERLAY_SESSION_TYPE") or os.environ.get("XDG_SESSION_TYPE") or ""
     compositor = os.environ.get("EDMC_OVERLAY_COMPOSITOR") or ""
     flatpak_flag = os.environ.get("EDMC_OVERLAY_IS_FLATPAK") == "1"
@@ -21,7 +20,6 @@ def _initial_platform_context(initial: "InitialClientSettings") -> PlatformConte
     return PlatformContext(
         session_type=session,
         compositor=compositor,
-        force_xwayland=bool(initial.force_xwayland or force_env),
         manual_backend_override=str(getattr(initial, "manual_backend_override", "") or "").strip().lower(),
         flatpak=flatpak_flag,
         flatpak_app=flatpak_app,
@@ -48,7 +46,6 @@ def _client_backend_status(
             qt_platform_name=qt_platform_name,
             session_type="",
             compositor="",
-            force_xwayland=bool(context.force_xwayland),
             is_flatpak=flatpak_flag,
             flatpak_app_id=flatpak_app,
             env=env_map,
@@ -65,7 +62,6 @@ def _client_backend_status(
             qt_platform_name=qt_platform_name,
             session_type=session_hint,
             compositor=compositor_hint,
-            force_xwayland=bool(context.force_xwayland),
             is_flatpak=flatpak_flag,
             flatpak_app_id=flatpak_app,
             env=env_map,

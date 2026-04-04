@@ -15,7 +15,8 @@ from overlay_client.backend.contracts import (
     PresentationBackend,
     TargetDiscoveryBackend,
 )
-from overlay_client.platform_integration import PlatformContext, create_wayland_integration
+from overlay_client.backend.bundles._linux_window_integration import create_wayland_integration
+from overlay_client.platform_integration import PlatformContext
 from overlay_client.window_tracking import MonitorProvider, WindowTracker
 
 WaylandTrackerFactory = Callable[..., Optional[WindowTracker]]

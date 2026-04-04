@@ -16,7 +16,6 @@ def test_collect_platform_probe_normalizes_explicit_hints():
             qt_platform_name="wayland",
             session_type="Wayland",
             compositor="Mutter",
-            force_xwayland=False,
             is_flatpak=True,
             flatpak_app_id="app.id",
             available_protocols=frozenset({"layer-shell"}),

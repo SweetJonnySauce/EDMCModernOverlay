@@ -7,6 +7,7 @@ from typing import Callable, List, Mapping, Optional, Tuple
 from PyQt6.QtCore import Qt, QRect, QPoint
 from PyQt6.QtGui import QColor, QFont, QPainter, QPen
 
+from overlay_client.backend.status import build_status_report
 from overlay_client.group_transform import GroupTransform  # type: ignore
 from overlay_client.viewport_transform import LegacyMapper, ViewportState, legacy_scale_components  # type: ignore
 
@@ -49,6 +50,7 @@ class DebugOverlayView:
         title_bar_enabled: bool,
         title_bar_height: int,
         last_title_bar_offset: int,
+        backend_status: Optional[Mapping[str, object]],
         debug_overlay_corner: str,
         legacy_preset_point_size_fn: Callable[[str, ViewportState, LegacyMapper], float],
         env_override_debug: Optional[Mapping[str, object]] = None,
@@ -165,11 +167,14 @@ class DebugOverlayView:
             "  title_bar_height={}".format(title_bar_height),
             "  applied_offset={}".format(last_title_bar_offset),
         ]
+        backend_lines = self._format_backend_lines(backend_status)
 
         env_override_lines = self._format_env_override_lines(env_override_debug)
 
         info_lines = (
             monitor_lines
+            + [""]
+            + backend_lines
             + [""]
             + overlay_lines
             + [""]
@@ -216,6 +221,24 @@ class DebugOverlayView:
         painter.restore()
 
     @staticmethod
+    def _format_backend_lines(backend_status: Optional[Mapping[str, object]]) -> List[str]:
+        if not backend_status:
+            return ["Backend:", "  choice=unknown", "  source=unknown"]
+
+        report = build_status_report(backend_status)
+        support_label = str(report.get("support_label") or "unknown")
+        source = str(report.get("source") or "unknown")
+        classification = str(report.get("classification") or "unknown")
+        lines = [
+            "Backend:",
+            f"  choice={support_label}",
+            f"  source={source}",
+        ]
+        if classification and classification != "unknown":
+            lines.append(f"  mode={classification}")
+        return lines
+
+    @staticmethod
     def _format_env_override_lines(env_override_debug: Optional[Mapping[str, object]]) -> List[str]:
         if not env_override_debug:
             return []
@@ -240,7 +263,6 @@ class DebugOverlayView:
             "QT_AUTO_SCREEN_SCALE_FACTOR",
             "QT_ENABLE_HIGHDPI_SCALING",
             "QT_SCALE_FACTOR",
-            "EDMC_OVERLAY_FORCE_XWAYLAND",
         )
         lines: List[str] = []
         for key in keys_of_interest:

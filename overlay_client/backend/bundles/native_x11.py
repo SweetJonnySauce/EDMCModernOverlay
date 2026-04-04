@@ -15,8 +15,10 @@ from overlay_client.backend.contracts import (
     PresentationBackend,
     TargetDiscoveryBackend,
 )
-from overlay_client.platform_integration import PlatformContext, create_xcb_integration
-from overlay_client.window_tracking import MonitorProvider, WindowTracker, create_wmctrl_tracker
+from overlay_client.backend.bundles._linux_window_integration import create_xcb_integration
+from overlay_client.backend.bundles._linux_trackers import create_wmctrl_tracker
+from overlay_client.platform_integration import PlatformContext
+from overlay_client.window_tracking import MonitorProvider, WindowTracker
 
 
 @dataclass(frozen=True, slots=True)

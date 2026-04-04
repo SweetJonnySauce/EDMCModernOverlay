@@ -12,7 +12,11 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 
 import overlay_plugin.preferences_profile_helpers as profile_pref_helpers
-from overlay_client.backend import BackendInstance
+from overlay_client.backend import (
+    BackendInstance,
+    backend_override_options_for_status,
+    backend_override_requires_restart,
+)
 from overlay_client.backend.status import format_status_ui_summary, format_status_ui_warning
 
 from overlay_plugin.standalone_support import (
@@ -563,50 +567,6 @@ def _normalise_manual_backend_override(value: Any, default: str = "") -> str:
     return token
 
 
-def _backend_override_choices_for_status(status: Mapping[str, Any], *, current_value: str = "") -> tuple[str, ...]:
-    probe = status.get("probe") if isinstance(status, Mapping) else None
-    selected_backend = status.get("selected_backend") if isinstance(status, Mapping) else None
-    choices: list[str] = [BACKEND_OVERRIDE_AUTO]
-
-    def _add(token: str) -> None:
-        text = _normalise_manual_backend_override(token)
-        if not text:
-            return
-        if text not in choices:
-            choices.append(text)
-
-    if isinstance(selected_backend, Mapping):
-        _add(str(selected_backend.get("instance") or ""))
-    if isinstance(probe, Mapping):
-        operating_system = str(probe.get("operating_system") or "")
-        session_type = str(probe.get("session_type") or "")
-        compositor = str(probe.get("compositor") or "").lower()
-        if operating_system == "windows":
-            _add(BackendInstance.WINDOWS_DESKTOP.value)
-        elif operating_system == "linux":
-            if session_type == "x11":
-                _add(BackendInstance.NATIVE_X11.value)
-            elif session_type == "wayland":
-                _add(BackendInstance.XWAYLAND_COMPAT.value)
-                if compositor in {"kwin"}:
-                    _add(BackendInstance.KWIN_WAYLAND.value)
-                elif compositor in {"gnome-shell"}:
-                    _add(BackendInstance.GNOME_SHELL_WAYLAND.value)
-                elif compositor in {"hyprland"}:
-                    _add(BackendInstance.HYPRLAND.value)
-                elif compositor in {"sway", "wayfire", "wlroots"}:
-                    _add(BackendInstance.SWAY_WAYFIRE_WLROOTS.value)
-                elif compositor in {"cosmic"}:
-                    _add(BackendInstance.COSMIC.value)
-                elif compositor in {"gamescope"}:
-                    _add(BackendInstance.GAMESCOPE.value)
-                else:
-                    _add(BackendInstance.WAYLAND_LAYER_SHELL_GENERIC.value)
-    if current_value and current_value not in choices:
-        choices.append(current_value)
-    return tuple(choices)
-
-
 def _coerce_last_on_payload_opacity(value: Any, default: int) -> int:
     try:
         numeric = int(value)
@@ -632,7 +592,6 @@ class Preferences:
     gridline_spacing: int = 120
     force_render: bool = False
     standalone_mode: bool = False
-    force_xwayland: bool = False
     manual_backend_override: str = ""
     physical_clamp_enabled: bool = False
     physical_clamp_overrides: Dict[str, float] = field(default_factory=dict)
@@ -729,7 +688,7 @@ class Preferences:
                 _config_key(STANDALONE_MODE_PREF_KEY),
                 self.standalone_mode,
             ),
-            "force_xwayland": _config_get_bool(_config_key("force_xwayland"), self.force_xwayland),
+            "force_xwayland": _config_get_bool(_config_key("force_xwayland"), False),
             "manual_backend_override": _config_get_str(
                 _config_key("manual_backend_override"),
                 self.manual_backend_override,
@@ -814,11 +773,13 @@ class Preferences:
             data.get(STANDALONE_MODE_PREF_KEY),
             self.standalone_mode,
         )
-        self.force_xwayland = _coerce_bool(data.get("force_xwayland"), self.force_xwayland)
-        self.manual_backend_override = _normalise_manual_backend_override(
+        manual_backend_override = _normalise_manual_backend_override(
             data.get("manual_backend_override"),
             self.manual_backend_override,
         )
+        if _coerce_bool(data.get("force_xwayland"), False) and not manual_backend_override:
+            manual_backend_override = BackendInstance.XWAYLAND_COMPAT.value
+        self.manual_backend_override = manual_backend_override
         self.physical_clamp_enabled = _coerce_bool(
             data.get("physical_clamp_enabled"),
             self.physical_clamp_enabled,
@@ -911,7 +872,6 @@ class Preferences:
             "gridline_spacing": int(self.gridline_spacing),
             "force_render": bool(self.force_render),
             STANDALONE_MODE_PREF_KEY: bool(self.standalone_mode),
-            "force_xwayland": bool(self.force_xwayland),
             "manual_backend_override": str(self.manual_backend_override or ""),
             "physical_clamp_enabled": bool(self.physical_clamp_enabled),
             "physical_clamp_overrides": dict(self.physical_clamp_overrides or {}),
@@ -952,7 +912,6 @@ class Preferences:
         _config_set_value(_config_key("gridline_spacing"), int(self.gridline_spacing))
         _config_set_value(_config_key("force_render"), bool(self.force_render))
         _config_set_value(_config_key(STANDALONE_MODE_PREF_KEY), bool(self.standalone_mode))
-        _config_set_value(_config_key("force_xwayland"), bool(self.force_xwayland))
         _config_set_value(_config_key("manual_backend_override"), str(self.manual_backend_override or ""))
         _config_set_value(_config_key("physical_clamp_enabled"), bool(self.physical_clamp_enabled))
         try:
@@ -1026,7 +985,7 @@ class PreferencesPanel:
         launch_controller_callback: Optional[Callable[[], None]] = None,
         set_launch_command_callback: Optional[Callable[[str], None]] = None,
         set_toggle_argument_callback: Optional[Callable[[str], None]] = None,
-        set_manual_backend_override_callback: Optional[Callable[[str], None]] = None,
+        set_manual_backend_override_callback: Optional[Callable[[str], Optional[bool]]] = None,
         set_payload_opacity_callback: Optional[Callable[[int], None]] = None,
         reset_group_cache_callback: Optional[Callable[[], bool]] = None,
         profile_status_callback: Optional[Callable[[], Mapping[str, Any]]] = None,
@@ -1216,9 +1175,12 @@ class PreferencesPanel:
         self._payload_spam_apply_btn = None
         self._payload_spam_checkbox = None
         self._backend_override_combo = None
-        self._backend_override_options = _backend_override_choices_for_status(
-            {},
-            current_value=preferences.manual_backend_override,
+        self._backend_override_options = (BACKEND_OVERRIDE_AUTO,) + tuple(
+            option.value
+            for option in backend_override_options_for_status(
+                {},
+                current_value=preferences.manual_backend_override,
+            )
         )
         self._profile_listbox = None
         self._profile_table = None
@@ -2274,7 +2236,9 @@ class PreferencesPanel:
             "",
         )
         current_value = current_pref or str(self._var_manual_backend_override.get() or "")
-        choices = _backend_override_choices_for_status(status, current_value=current_value)
+        choices = (BACKEND_OVERRIDE_AUTO,) + tuple(
+            option.value for option in backend_override_options_for_status(status, current_value=current_value)
+        )
         self._backend_override_options = choices
         combo = getattr(self, "_backend_override_combo", None)
         if combo is not None:
@@ -2301,21 +2265,29 @@ class PreferencesPanel:
         try:
             raw_value = self._var_manual_backend_override.get()
             normalised = _normalise_manual_backend_override(raw_value, "")
+            previous = str(self._preferences.manual_backend_override or "")
+            restart_required = backend_override_requires_restart(previous, normalised)
             selected = normalised or BACKEND_OVERRIDE_AUTO
             if selected != str(self._var_manual_backend_override.get() or ""):
                 self._var_manual_backend_override.set(selected)
-            if normalised == self._preferences.manual_backend_override:
+            if normalised == previous:
                 return
             self._preferences.manual_backend_override = normalised
             self._preferences.save()
             if callable(self._set_manual_backend_override):
                 try:
-                    self._set_manual_backend_override(normalised)
+                    callback_result = self._set_manual_backend_override(normalised)
+                    if isinstance(callback_result, bool):
+                        restart_required = callback_result
                 except Exception:
                     LOGGER.debug("Failed to propagate manual backend override change", exc_info=True)
                     self._status_var.set("Failed to propagate manual backend override change.")
                     return
-            if normalised:
+            if restart_required:
+                self._status_var.set(
+                    "Backend override saved. Restart Overlay Client to apply. Current runtime backend remains unchanged until restart."
+                )
+            elif normalised:
                 self._status_var.set(f"Manual backend override set to {normalised}.")
             else:
                 self._status_var.set("Manual backend override cleared (Auto).")

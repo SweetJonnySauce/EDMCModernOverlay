@@ -1,5 +1,6 @@
 import logging
 
+from overlay_client.backend.consumers import is_wayland_bundle, platform_label_for_bundle, uses_transient_parent
 from overlay_client.backend.bundles.native_x11 import build_native_x11_bundle
 from overlay_client.backend.bundles.xwayland_compat import build_xwayland_compat_bundle
 from overlay_client.backend.contracts import BackendFamily, BackendInstance
@@ -39,7 +40,7 @@ def test_xwayland_bundle_has_explicit_identity_and_shared_window_backend():
 
 def test_x11_and_xwayland_bundles_share_current_shipped_xcb_integration_shape():
     logger = logging.getLogger("test.backend.bundles.x11")
-    context = PlatformContext(session_type="x11", compositor="none", force_xwayland=False)
+    context = PlatformContext(session_type="x11", compositor="none")
     widget = _StubWidget()
 
     native_integration = build_native_x11_bundle().presentation.create_integration(widget, logger, context)
@@ -57,3 +58,15 @@ def test_x11_and_xwayland_bundles_share_current_shipped_wmctrl_tracker_shape():
 
     assert type(native_tracker).__name__ == "_WmctrlTracker"
     assert type(xwayland_tracker).__name__ == "_WmctrlTracker"
+
+
+def test_x11_and_xwayland_bundles_preserve_current_platform_policy_shape():
+    native_bundle = build_native_x11_bundle()
+    xwayland_bundle = build_xwayland_compat_bundle()
+
+    assert platform_label_for_bundle(native_bundle) == "X11"
+    assert platform_label_for_bundle(xwayland_bundle) == "Wayland (XWayland)"
+    assert is_wayland_bundle(native_bundle) is False
+    assert is_wayland_bundle(xwayland_bundle) is False
+    assert uses_transient_parent(native_bundle) is True
+    assert uses_transient_parent(xwayland_bundle) is True

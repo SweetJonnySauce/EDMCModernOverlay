@@ -931,11 +931,6 @@ class ControlSurfaceMixin:
             plugin_backend_hint = None
         session = str(context_payload.get("session_type") or self._platform_context.session_type)
         compositor = str(context_payload.get("compositor") or self._platform_context.compositor)
-        force_value = context_payload.get("force_xwayland")
-        if force_value is None:
-            force_flag = self._platform_context.force_xwayland
-        else:
-            force_flag = bool(force_value)
         override_value = context_payload.get("manual_backend_override")
         if override_value is None:
             manual_backend_override = self._platform_context.manual_backend_override
@@ -956,7 +951,6 @@ class ControlSurfaceMixin:
         new_context = PlatformContext(
             session_type=session,
             compositor=compositor,
-            force_xwayland=force_flag,
             manual_backend_override=manual_backend_override,
             flatpak=flatpak_flag,
             flatpak_app=flatpak_app_label,
@@ -1001,10 +995,9 @@ class ControlSurfaceMixin:
             self._interaction_controller.reapply_current(reason="platform_context_update")
             self._restore_drag_interactivity()
             _CLIENT_LOGGER.debug(
-                "Platform context updated: session=%s compositor=%s force_xwayland=%s flatpak=%s",
+                "Platform context updated: session=%s compositor=%s flatpak=%s",
                 new_context.session_type or "unknown",
                 new_context.compositor or "unknown",
-                new_context.force_xwayland,
                 new_context.flatpak,
             )
         self._status = self._format_status_message(self._status_raw)

@@ -157,3 +157,74 @@ def test_create_elite_window_tracker_uses_status_based_wayland_fallback(monkeypa
         BackendInstance.GNOME_SHELL_WAYLAND,
         BackendInstance.XWAYLAND_COMPAT,
     ]
+
+
+def test_create_elite_window_tracker_uses_status_based_x11_fallback(monkeypatch):
+    sentinel = object()
+    seen_instances = []
+
+    def _factory(bundle, logger, *, title_hint="elite - dangerous", monitor_provider=None):
+        del logger, title_hint, monitor_provider
+        seen_instances.append(bundle.descriptor.instance)
+        if bundle.descriptor.instance is BackendInstance.KWIN_WAYLAND:
+            return None
+        if bundle.descriptor.instance is BackendInstance.NATIVE_X11:
+            return sentinel
+        raise AssertionError(f"unexpected bundle {bundle.descriptor.instance}")
+
+    monkeypatch.setattr("overlay_client.window_tracking.sys.platform", "linux")
+    monkeypatch.setattr(backend_consumers, "create_bundle_tracker", _factory)
+
+    tracker = create_elite_window_tracker(
+        logging.getLogger("test.window_tracking.selected_status_x11_fallback"),
+        backend_status=_status(
+            BackendInstance.KWIN_WAYLAND,
+            family=BackendFamily.NATIVE_WAYLAND,
+            session_type=SessionType.X11,
+            compositor="kwin",
+        ),
+    )
+
+    assert tracker is sentinel
+    assert seen_instances == [
+        BackendInstance.KWIN_WAYLAND,
+        BackendInstance.NATIVE_X11,
+    ]
+
+
+def test_create_elite_window_tracker_preserves_title_hint_and_monitor_provider_across_fallback(monkeypatch):
+    sentinel = object()
+    seen_calls = []
+
+    def _monitor_provider():
+        return [("screen-a", 0, 0, 1920, 1080)]
+
+    def _factory(bundle, logger, *, title_hint="elite - dangerous", monitor_provider=None):
+        del logger
+        seen_calls.append((bundle.descriptor.instance, title_hint, monitor_provider))
+        if bundle.descriptor.instance is BackendInstance.GNOME_SHELL_WAYLAND:
+            return None
+        if bundle.descriptor.instance is BackendInstance.XWAYLAND_COMPAT:
+            return sentinel
+        raise AssertionError(f"unexpected bundle {bundle.descriptor.instance}")
+
+    monkeypatch.setattr("overlay_client.window_tracking.sys.platform", "linux")
+    monkeypatch.setattr(backend_consumers, "create_bundle_tracker", _factory)
+
+    tracker = create_elite_window_tracker(
+        logging.getLogger("test.window_tracking.fallback_monitor_provider"),
+        title_hint="elite",
+        monitor_provider=_monitor_provider,
+        backend_status=_status(
+            BackendInstance.GNOME_SHELL_WAYLAND,
+            family=BackendFamily.NATIVE_WAYLAND,
+            session_type=SessionType.WAYLAND,
+            compositor="gnome-shell",
+        ),
+    )
+
+    assert tracker is sentinel
+    assert seen_calls == [
+        (BackendInstance.GNOME_SHELL_WAYLAND, "elite", _monitor_provider),
+        (BackendInstance.XWAYLAND_COMPAT, "elite", _monitor_provider),
+    ]

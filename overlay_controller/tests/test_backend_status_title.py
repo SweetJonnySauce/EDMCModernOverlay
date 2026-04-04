@@ -13,7 +13,7 @@ class _Bridge:
         return self._response
 
 
-def test_update_backend_status_title_formats_controller_title() -> None:
+def test_update_backend_status_title_keeps_base_controller_title() -> None:
     app = object.__new__(oc.OverlayConfigApp)
     app._base_window_title = "Overlay Controller"
     captured: list[str] = []
@@ -31,7 +31,7 @@ def test_update_backend_status_title_formats_controller_title() -> None:
         },
     )
 
-    assert captured == ["Overlay Controller - native_wayland / kwin_wayland [true_overlay, plugin_hint]"]
+    assert captured == ["Overlay Controller"]
 
 
 def test_refresh_backend_status_cache_updates_snapshot_and_title() -> None:
@@ -61,7 +61,4 @@ def test_refresh_backend_status_cache_updates_snapshot_and_title() -> None:
 
     assert app._plugin_bridge.calls == 1
     assert app._backend_status_snapshot["classification"] == "degraded_overlay"
-    assert captured[-1] == (
-        "Overlay Controller - xwayland_compat / xwayland_compat [degraded_overlay, plugin_hint] - "
-        "Mode: degraded_overlay; Fallback from native_wayland / kwin_wayland (xwayland_compat_only)"
-    )
+    assert captured[-1] == "Overlay Controller"

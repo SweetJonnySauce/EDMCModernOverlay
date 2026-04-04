@@ -11,7 +11,8 @@ If something is unclear, capture it under `Open Questions`.
 
 - The original backend-architecture cutover in this plan is complete.
 - The codebase is now in the post-cutover cleanup/convergence stage tracked in `docs/refactoring/fix219_backend_architecture_followup_cleanup_plan.md`.
-- Current overall position: original refactor Phases `1`-`5` are complete; follow-up cleanup Phase `1` is the next active architectural step.
+- Current overall position: original refactor Phases `1`-`5` are complete; follow-up cleanup Phases `1`-`3` are complete; follow-up Phase `4` is the next active architectural step.
+- Retained `fix219` boundaries are intentional: `load.py` remains the plugin control plane for launch/orchestration, advisory `plugin_hint`, and Flatpak/env shaping, while installer compositor profiles remain deployment guidance rather than runtime backend-selection ownership.
 - The next planned architecture tracks after `fix219` cleanup are dedicated post-`fix219` phases for Windows backend-contract cleanup, Linux standalone runtime/presentation work, and deeper physical-clamp / geometry-follow redesign; all are deferred from `fix219`, but they remain part of the overall architecture direction.
 
 ```mermaid
@@ -28,10 +29,10 @@ flowchart TD
     B4 --> B5["Phase 5\nHelper boundary foundations + cleanup/archive\nCompleted"]
 
     B5 --> C
-    C --> C1["Follow-up Phase 1\nPresentation/Input ownership cleanup\nNext"]
-    C1 --> C2["Follow-up Phase 2\nTracker ownership cleanup"]
-    C2 --> C3["Follow-up Phase 3\nStatus/UI leakage cleanup + retained boundaries"]
-    C3 --> C4["Follow-up Phase 4\nValidation + compliance + signoff"]
+    C --> C1["Follow-up Phase 1\nPresentation/Input ownership cleanup\nCompleted"]
+    C1 --> C2["Follow-up Phase 2\nTracker ownership cleanup\nCompleted"]
+    C2 --> C3["Follow-up Phase 3\nStatus/UI leakage cleanup + retained boundaries\nCompleted"]
+    C3 --> C4["Follow-up Phase 4\nValidation + compliance + signoff\nNext"]
     C4 --> D["Post-fix219 Phase\nWindows backend-contract cleanup\nPlanned"]
     C4 --> E["Post-fix219 Phase\nLinux standalone runtime/presentation\nPlanned"]
     C4 --> F["Post-fix219 Phase\nPhysical clamp / geometry-follow redesign\nPlanned"]

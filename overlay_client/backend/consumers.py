@@ -48,7 +48,6 @@ def derive_linux_backend_status(
     *,
     session_type: str = "",
     compositor: str = "",
-    force_xwayland: bool = False,
     qt_platform_name: str = "",
     manual_override: str = "",
     flatpak: bool = False,
@@ -65,7 +64,6 @@ def derive_linux_backend_status(
             qt_platform_name=qt_platform_name,
             session_type=session_type,
             compositor=compositor,
-            force_xwayland=force_xwayland,
             is_flatpak=flatpak,
             flatpak_app_id=flatpak_app_id,
             env=dict(env or {}),
@@ -79,7 +77,6 @@ def ensure_linux_backend_status(
     *,
     session_type: str = "",
     compositor: str = "",
-    force_xwayland: bool = False,
     qt_platform_name: str = "",
     manual_override: str = "",
     flatpak: bool = False,
@@ -94,7 +91,6 @@ def ensure_linux_backend_status(
     return derive_linux_backend_status(
         session_type=session_type,
         compositor=compositor,
-        force_xwayland=force_xwayland,
         qt_platform_name=qt_platform_name,
         manual_override=manual_override,
         flatpak=flatpak,
@@ -108,7 +104,6 @@ def resolve_legacy_linux_bundle(
     *,
     session_type: str = "",
     compositor: str = "",
-    force_xwayland: bool = False,
     qt_platform_name: str = "",
     env: Optional[Mapping[str, str]] = None,
 ) -> BackendBundle:
@@ -117,7 +112,6 @@ def resolve_legacy_linux_bundle(
     status = derive_linux_backend_status(
         session_type=session_type,
         compositor=compositor,
-        force_xwayland=force_xwayland,
         qt_platform_name=qt_platform_name,
         env=env,
     )

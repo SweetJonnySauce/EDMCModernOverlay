@@ -5,6 +5,7 @@ from .contracts import (
     BackendDescriptor,
     BackendFamily,
     BackendInstance,
+    BackendOverrideOption,
     CapabilityClassification,
     FallbackReason,
     HelperKind,
@@ -29,6 +30,11 @@ from .helper_ipc import (
     validate_helper_boundary,
 )
 from .probe import ProbeInputs, ProbeSource, collect_platform_probe
+from .override_options import (
+    backend_override_option,
+    backend_override_options_for_status,
+    backend_override_requires_restart,
+)
 from .selector import BackendSelector
 from .status import BackendSelectionStatus, HelperCapabilityState
 
@@ -38,6 +44,7 @@ __all__ = [
     "BackendDescriptor",
     "BackendFamily",
     "BackendInstance",
+    "BackendOverrideOption",
     "BackendSelectionStatus",
     "CapabilityClassification",
     "FallbackReason",
@@ -58,6 +65,9 @@ __all__ = [
     "PresentationBackend",
     "ProbeInputs",
     "ProbeSource",
+    "backend_override_option",
+    "backend_override_options_for_status",
+    "backend_override_requires_restart",
     "SessionType",
     "TargetDiscoveryBackend",
     "collect_platform_probe",

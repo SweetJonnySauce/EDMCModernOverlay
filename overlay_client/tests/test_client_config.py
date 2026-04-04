@@ -35,3 +35,12 @@ def test_load_initial_settings_preserves_invalid_manual_backend_override(tmp_pat
     settings = load_initial_settings(settings_path)
 
     assert settings.manual_backend_override == "bogus_backend"
+
+
+def test_load_initial_settings_migrates_legacy_force_xwayland(tmp_path: Path) -> None:
+    settings_path = tmp_path / "overlay_settings.json"
+    _write_settings(settings_path, {"force_xwayland": True})
+
+    settings = load_initial_settings(settings_path)
+
+    assert settings.manual_backend_override == "xwayland_compat"

@@ -1,9 +1,13 @@
 import logging
 
+import pytest
+
 from overlay_client.backend.bundles import (
     gnome_shell_wayland,
     hyprland,
+    kwin_wayland,
     native_x11,
+    sway_wayfire_wlroots,
     wayland_layer_shell_generic,
     xwayland_compat,
 )
@@ -45,7 +49,7 @@ def test_consumer_helper_uses_native_x11_integration_factory(monkeypatch):
     bundle = native_x11.build_native_x11_bundle()
     widget = object()
     logger = logging.getLogger("test.backend.consumers.native_x11")
-    context = PlatformContext(session_type="x11", compositor="none", force_xwayland=False)
+    context = PlatformContext(session_type="x11", compositor="none")
 
     integration = create_bundle_integration(bundle, widget, logger, context)
 
@@ -95,7 +99,7 @@ def test_consumer_helper_uses_xwayland_integration_factory(monkeypatch):
     bundle = xwayland_compat.build_xwayland_compat_bundle()
     widget = object()
     logger = logging.getLogger("test.backend.consumers.xwayland")
-    context = PlatformContext(session_type="wayland", compositor="kwin", force_xwayland=True)
+    context = PlatformContext(session_type="wayland", compositor="kwin")
 
     integration = create_bundle_integration(bundle, widget, logger, context)
 
@@ -145,7 +149,55 @@ def test_consumer_helper_uses_shipped_wayland_integration_factory(monkeypatch):
     bundle = hyprland.build_hyprland_bundle()
     widget = object()
     logger = logging.getLogger("test.backend.consumers.hyprland")
-    context = PlatformContext(session_type="wayland", compositor="hyprland", force_xwayland=False)
+    context = PlatformContext(session_type="wayland", compositor="hyprland")
+
+    integration = create_bundle_integration(bundle, widget, logger, context)
+
+    assert integration is sentinel
+    assert observed["widget"] is widget
+    assert observed["logger"] is logger
+    assert observed["context"] is context
+
+
+@pytest.mark.parametrize(
+    ("build_bundle", "context"),
+    [
+        (
+            sway_wayfire_wlroots.build_sway_wayfire_wlroots_bundle,
+            PlatformContext(session_type="wayland", compositor="sway"),
+        ),
+        (
+            hyprland.build_hyprland_bundle,
+            PlatformContext(session_type="wayland", compositor="hyprland"),
+        ),
+        (
+            kwin_wayland.build_kwin_wayland_bundle,
+            PlatformContext(session_type="wayland", compositor="kwin"),
+        ),
+        (
+            gnome_shell_wayland.build_gnome_shell_wayland_bundle,
+            PlatformContext(session_type="wayland", compositor="gnome-shell"),
+        ),
+    ],
+)
+def test_consumer_helper_routes_native_wayland_bundles_through_shared_wayland_factory(
+    monkeypatch,
+    build_bundle,
+    context,
+):
+    sentinel = object()
+    observed = {}
+
+    def _factory(widget, logger, incoming_context):
+        observed["widget"] = widget
+        observed["logger"] = logger
+        observed["context"] = incoming_context
+        return sentinel
+
+    monkeypatch.setattr(_wayland_common, "create_wayland_integration", _factory)
+    bundle = build_bundle()
+    widget = object()
+    logger = logging.getLogger("test.backend.consumers.native_wayland")
 
     integration = create_bundle_integration(bundle, widget, logger, context)
 
@@ -203,7 +255,6 @@ def test_derive_linux_backend_status_preserves_xwayland_compat_identity_for_wayl
     status = derive_linux_backend_status(
         session_type="wayland",
         compositor="kwin",
-        force_xwayland=False,
         qt_platform_name="xcb",
         env={"XDG_SESSION_TYPE": "wayland"},
     )
@@ -220,7 +271,6 @@ def test_derive_linux_backend_status_preserves_native_x11_identity_for_x11_path(
     status = derive_linux_backend_status(
         session_type="x11",
         compositor="none",
-        force_xwayland=False,
         qt_platform_name="xcb",
         env={"XDG_SESSION_TYPE": "x11"},
     )
@@ -237,7 +287,6 @@ def test_derive_linux_backend_status_preserves_kwin_native_wayland_identity():
     status = derive_linux_backend_status(
         session_type="wayland",
         compositor="kwin",
-        force_xwayland=False,
         qt_platform_name="wayland",
         env={"XDG_SESSION_TYPE": "wayland"},
     )
@@ -254,14 +303,12 @@ def test_derive_linux_backend_status_infers_gnome_and_generic_wayland_paths_from
     gnome_status = derive_linux_backend_status(
         session_type="wayland",
         compositor="",
-        force_xwayland=False,
         qt_platform_name="wayland",
         env={"XDG_SESSION_TYPE": "wayland", "XDG_CURRENT_DESKTOP": "GNOME"},
     )
     generic_status = derive_linux_backend_status(
         session_type="wayland",
         compositor="cosmic",
-        force_xwayland=False,
         qt_platform_name="wayland",
         env={"XDG_SESSION_TYPE": "wayland"},
     )
@@ -333,3 +380,24 @@ def test_resolve_tracker_fallback_bundle_uses_xwayland_for_wayland_selection():
 
     assert fallback_bundle is not None
     assert fallback_bundle.descriptor.instance is BackendInstance.XWAYLAND_COMPAT
+
+
+def test_resolve_tracker_fallback_bundle_uses_native_x11_for_x11_selection():
+    status = BackendSelectionStatus(
+        probe=PlatformProbeResult(
+            operating_system=OperatingSystem.LINUX,
+            session_type=SessionType.X11,
+            qt_platform_name="xcb",
+            compositor="kwin",
+        ),
+        selected_backend=BackendDescriptor(
+            BackendFamily.NATIVE_WAYLAND,
+            BackendInstance.KWIN_WAYLAND,
+        ),
+        classification=CapabilityClassification.TRUE_OVERLAY,
+    )
+
+    fallback_bundle = resolve_tracker_fallback_bundle(status)
+
+    assert fallback_bundle is not None
+    assert fallback_bundle.descriptor.instance is BackendInstance.NATIVE_X11

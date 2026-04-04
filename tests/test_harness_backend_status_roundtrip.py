@@ -25,12 +25,14 @@ def runtime_for_backend_status(
         runtime,
         _adapter,
     ):
-        runtime._preferences.force_xwayland = False
+        runtime._preferences.manual_backend_override = ""
+        runtime._runtime_manual_backend_override = ""
         yield runtime
 
 
 def test_backend_status_cli_roundtrip_returns_plugin_hint_report(runtime_for_backend_status: object) -> None:
     runtime = runtime_for_backend_status
+    runtime._request_client_backend_status = lambda **_kwargs: None
 
     response = runtime._handle_cli_payload({"cli": "backend_status"})
 
@@ -44,5 +46,59 @@ def test_backend_status_cli_roundtrip_returns_plugin_hint_report(runtime_for_bac
         "instance": "kwin_wayland",
     }
     assert report["source"] == "plugin_hint"
+    assert report["support_label"] == "native_wayland / kwin_wayland"
+    assert report["classification"] == "true_overlay"
+
+
+def test_backend_status_cli_roundtrip_prefers_client_runtime_report(runtime_for_backend_status: object) -> None:
+    runtime = runtime_for_backend_status
+    published: list[dict[str, object]] = []
+
+    def _publish(payload: dict[str, object]) -> None:
+        published.append(dict(payload))
+        if str(payload.get("event") or "") != "OverlayClientBackendStatusRequest":
+            return
+        runtime._handle_cli_payload(
+            {
+                "cli": "client_runtime_backend_status",
+                "request_id": payload.get("request_id"),
+                "backend_status": {
+                    "probe": {
+                        "operating_system": "linux",
+                        "session_type": "wayland",
+                        "qt_platform_name": "wayland",
+                        "compositor": "kwin",
+                    },
+                    "selected_backend": {
+                        "family": "native_wayland",
+                        "instance": "kwin_wayland",
+                    },
+                    "classification": "true_overlay",
+                    "shadow_mode": False,
+                    "helper_states": [],
+                    "review_required": False,
+                    "review_reasons": [],
+                    "notes": ["client_selector_result"],
+                    "manual_override": None,
+                    "override_error": "",
+                },
+            }
+        )
+
+    runtime.broadcaster.publish = _publish
+
+    response = runtime._handle_cli_payload({"cli": "backend_status"})
+
+    assert published
+    assert published[-1]["event"] == "OverlayClientBackendStatusRequest"
+    assert response["status"] == "ok"
+    backend_status = response["backend_status"]
+    report = response["report"]
+    assert backend_status["shadow_mode"] is False
+    assert backend_status["selected_backend"] == {
+        "family": "native_wayland",
+        "instance": "kwin_wayland",
+    }
+    assert report["source"] == "client_runtime"
     assert report["support_label"] == "native_wayland / kwin_wayland"
     assert report["classification"] == "true_overlay"

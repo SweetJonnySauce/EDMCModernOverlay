@@ -60,7 +60,7 @@ def test_platform_controller_prefers_backend_status_over_legacy_context(monkeypa
     controller = PlatformController(
         object(),
         logging.getLogger("test.platform_controller.selected_bundle"),
-        PlatformContext(session_type="x11", compositor="", force_xwayland=False),
+        PlatformContext(session_type="x11", compositor=""),
         backend_status=_status(
             BackendInstance.KWIN_WAYLAND,
             family=BackendFamily.NATIVE_WAYLAND,
@@ -90,7 +90,7 @@ def test_platform_controller_derives_backend_status_when_none_is_provided(monkey
     controller = PlatformController(
         object(),
         logging.getLogger("test.platform_controller.derived_bundle"),
-        PlatformContext(session_type="wayland", compositor="kwin", force_xwayland=False),
+        PlatformContext(session_type="wayland", compositor="kwin"),
         backend_status=None,
     )
 
@@ -118,7 +118,7 @@ def test_platform_controller_rebuilds_integration_when_backend_status_changes(mo
     controller = PlatformController(
         object(),
         logging.getLogger("test.platform_controller.update_bundle"),
-        PlatformContext(session_type="x11", compositor="", force_xwayland=False),
+        PlatformContext(session_type="x11", compositor=""),
         backend_status=_status(
             BackendInstance.NATIVE_X11,
             family=BackendFamily.NATIVE_X11,
@@ -127,7 +127,7 @@ def test_platform_controller_rebuilds_integration_when_backend_status_changes(mo
         ),
     )
     controller.prepare_window("window-handle")
-    controller.update_context(PlatformContext(session_type="wayland", compositor="kwin", force_xwayland=False))
+    controller.update_context(PlatformContext(session_type="wayland", compositor="kwin"))
     controller.update_backend_status(
         _status(
             BackendInstance.KWIN_WAYLAND,
