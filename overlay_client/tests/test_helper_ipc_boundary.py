@@ -32,6 +32,8 @@ def _unix_boundary(runtime_dir: Path) -> HelperBoundaryConfig:
 def test_validate_helper_boundary_accepts_unix_socket_inside_runtime_dir(tmp_path: Path) -> None:
     boundary = validate_helper_boundary(_unix_boundary(tmp_path), runtime_dir=str(tmp_path))
 
+    assert boundary.backend_instance is BackendInstance.KWIN_WAYLAND
+    assert boundary.helper_kind is HelperKind.KWIN_SCRIPT
     assert boundary.endpoint.transport is HelperTransport.UNIX_SOCKET
     assert boundary.endpoint.address == str(tmp_path / "edmc-modern-overlay-helper.sock")
     assert boundary.allowed_events == frozenset({"window_geometry_changed", "active_window_changed"})
@@ -70,6 +72,8 @@ def test_validate_helper_boundary_accepts_session_dbus_endpoint() -> None:
         )
     )
 
+    assert boundary.backend_instance is BackendInstance.GNOME_SHELL_WAYLAND
+    assert boundary.helper_kind is HelperKind.GNOME_SHELL_EXTENSION
     assert boundary.endpoint.transport is HelperTransport.SESSION_DBUS
     assert boundary.endpoint.service_name == "org.edmc.ModernOverlay"
 

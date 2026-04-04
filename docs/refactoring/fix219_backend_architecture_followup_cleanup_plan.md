@@ -71,10 +71,11 @@ If something is unclear, capture it under `Open Questions`.
 ## Current Audit Snapshot
 - Phase `1` is complete: Linux presentation/input ownership now routes through backend-owned modules rather than living in shared runtime integration code.
 - Phase `2` is complete: Linux tracker ownership now routes through backend-owned discovery modules rather than living in the public runtime tracker entrypoint.
-- Phase `3.1` through `3.5` are complete: preferences use client-authoritative backend status when available, `force_xwayland` has been retired in favor of explicit `xwayland_compat` override semantics, override-choice metadata is backend-owned, backend status has been removed from the controller title bar, debug/test-overlay diagnostics show backend choice, and residual generic runtime guards have been audited.
+- Phase `3` is complete: preferences use client-authoritative backend status when available, `force_xwayland` has been retired in favor of explicit `xwayland_compat` override semantics, override-choice metadata is backend-owned, backend status has been removed from the controller title bar, debug/test-overlay diagnostics show backend choice, residual generic runtime guards have been audited, and the retained intentional boundaries are documented explicitly.
+- Phase `4` is complete: the public backend surface now declares required discovery/presentation behavior directly, capability truth for generic runtime consumers now lives in `BackendCapabilities`, the still-intentional combined Linux presentation/input adapter shape is documented explicitly, and the helper boundary remains narrow and transport-specific.
 - `load.py` launch/orchestration, advisory `plugin_hint`, and Flatpak/env shaping remain intentional plugin control-plane boundaries rather than backend-ownership defects.
 - Installer compositor profiles in `scripts/install_linux.sh` / `scripts/install_matrix.json` remain intentional deployment guidance boundaries rather than runtime backend-selection defects.
-- The remaining open work in this plan is Phase `4`: real-environment validation, EDMC compliance review, and final evidence-driven signoff.
+- The remaining open work in this plan is Phase `5`: real-environment validation, EDMC compliance review, and final signoff.
 
 ## Settings Impact Classification
 - Backend-critical settings/surfaces:
@@ -95,9 +96,9 @@ If something is unclear, capture it under `Open Questions`.
 
 | Gap | Current State | Why It Is Still A Gap | Planned Closure |
 | --- | --- | --- | --- |
-| Real-environment validation remains incomplete for deferred/non-closure paths | Additional wlroots, Hyprland, COSMIC, gamescope, and helper-backed Wayland runs may still lack testers even after the minimum `fix219` closure matrix is validated | These paths can remain deferred, but signoff must not imply validated support for them without recorded environment evidence | Stage `4.1`: validate the minimum closure matrix, record any extra runs that are available, and explicitly defer/remove implied support claims for any still-unvalidated paths before signoff |
-| Post-refactor EDMC compliance pass is not yet recorded | The docs do not currently record a final compliance review for plugin API usage, logging, threading, and prefs/config handling after the refactor | Release readiness is incomplete until compliance review evidence is explicit | Stage `4.2`: run and record the EDMC compliance pass, then capture any required follow-up fixes or explicit exceptions |
-| Final release signoff and top-level progress closeout are not yet recorded | The release checklist, final architecture snapshot refresh, and release-note/signoff summary still depend on Phase `4` evidence | The plan should not be read as fully complete until the recorded validation/compliance evidence is reflected in the final signoff docs | Stage `4.3`: close the release signoff checklist, refresh the top-level architecture progress snapshot, and record any remaining named deferrals |
+| Real-environment validation remains incomplete for deferred/non-closure paths | Additional wlroots, Hyprland, COSMIC, gamescope, and helper-backed Wayland runs may still lack testers even after the minimum `fix219` closure matrix is validated | These paths can remain deferred, but signoff must not imply validated support for them without recorded environment evidence | Stage `5.1`: validate the minimum closure matrix, record any extra runs that are available, and explicitly defer/remove implied support claims for any still-unvalidated paths before signoff |
+| Post-refactor EDMC compliance pass is not yet recorded | The docs do not currently record a final compliance review for plugin API usage, logging, threading, and prefs/config handling after the refactor | Release readiness is incomplete until compliance review evidence is explicit | Stage `5.2`: run and record the EDMC compliance pass, then capture any required follow-up fixes or explicit exceptions |
+| Final release signoff and top-level progress closeout are not yet recorded | The release checklist, final architecture snapshot refresh, and release-note/signoff summary still depend on Phase `5` evidence | The plan should not be read as fully complete until the recorded validation/compliance evidence is reflected in the final signoff docs | Stage `5.3`: close the release signoff checklist, refresh the top-level architecture progress snapshot, and record any remaining named deferrals |
 
 ## Cross-Phase Decision Gates
 - `DG-1`: Resolve the backend-ownership vs physical file-move policy before Stage `1.2` or Stage `2.2` begins.
@@ -116,6 +117,9 @@ If something is unclear, capture it under `Open Questions`.
 - Code:
 - `overlay_client/backend/bundles/*.py` (target ownership location for runtime presentation/input/discovery behavior)
 - `overlay_client/backend/consumers.py` (bundle resolution and bundle-facing consumer helpers)
+- `overlay_client/backend/contracts.py` (public backend protocol and metadata surface)
+- `overlay_client/backend/status.py` (status/report metadata that still reflects identity-oriented assumptions)
+- `overlay_client/backend/helper_ipc.py` (existing helper boundary that may need a richer public contract shape)
 - `overlay_client/platform_integration.py` (current shared integration logic still holding native Wayland compositor branches)
 - `overlay_client/window_tracking.py` (current shared tracker implementations and Linux fallback entrypoint)
 - `overlay_client/follow_surface.py` (generic follow/runtime logic that still contains some Linux-specific checks)
@@ -134,6 +138,8 @@ If something is unclear, capture it under `Open Questions`.
 - `overlay_client/tests/test_backend_bundles_x11.py`
 - `overlay_client/tests/test_backend_bundles_wayland.py`
 - `overlay_client/tests/test_backend_consumers.py`
+- `overlay_client/tests/test_backend_contracts.py`
+- `overlay_client/tests/test_helper_ipc_boundary.py`
 - `overlay_client/tests/test_window_tracking_bundle_routing.py`
 - `overlay_client/tests/test_follow_surface_mixin.py`
 - `overlay_client/tests/test_platform_controller_backend_status.py`
@@ -170,7 +176,7 @@ If something is unclear, capture it under `Open Questions`.
 - Backend choice should be visible in debug/test-overlay diagnostics, specifically in the lower-left debug/test-logo metrics area.
 - `standalone_mode` remains a runtime/presentation feature rather than a backend-selection control for the purposes of `fix219`; keep the current Windows behavior unchanged in this plan and defer Linux standalone behavior/support to a separate post-`fix219` track.
 - `physical_clamp_enabled` / `physical_clamp_overrides` remain shared, opt-in geometry-normalization escape hatches for `fix219`; preserve the current behavior while backend/tracker ownership moves, and do not absorb clamp policy into backend selection or per-backend policy.
-- Capability classification and support-tier policy from the architecture research remain authoritative for this plan; Phase `4` must record final claimed environment classifications (`true_overlay`, `degraded_overlay`, `unsupported`) and concrete reasons rather than only pass/fail validation notes.
+- Capability classification and support-tier policy from the architecture research remain authoritative for this plan; Phase `5` must record final claimed environment classifications (`true_overlay`, `degraded_overlay`, `unsupported`) and concrete reasons rather than only pass/fail validation notes.
 - Final environment classification must be based on recorded environment evidence plus selector/status coverage; `true_overlay` requires demonstrated full claimed behavior with no material unresolved limitation, `degraded_overlay` requires demonstrated partial behavior with an explicit weakened guarantee and concrete reason, `unsupported` requires recorded evidence that the required support bar is not met or not implemented, and unvalidated environments must remain deferred rather than being silently classified.
 - The minimum real-environment closure matrix for `fix219` is Windows baseline, `native_x11`, explicit `xwayland_compat`, and one recorded KWin Wayland run. wlroots/Hyprland/COSMIC/gamescope and helper-backed Wayland paths may remain deferred if testers are unavailable, but they must not remain implied support claims at signoff without recorded validation.
 - Windows is not broadened as an implementation target in this follow-up, but no stage may introduce Linux-specific shortcuts that would block the eventual cross-platform contract model described in the architecture research.
@@ -190,8 +196,22 @@ If something is unclear, capture it under `Open Questions`.
 - `HelperIpcBackend`
   - Helper-backed paths must stay explicit, user-approved, and architecture-visible. Deferred helper work must remain documented as such rather than collapsing back into hidden compositor branches.
   - For `fix219`, preserving the helper boundary is sufficient; new helper-side implementation work is deferred unless required to keep an already-claimed path functioning.
+- Contract tightening
+  - Phase `4` of this plan strengthens the backend contracts so they define required behavior, not only identity.
+  - That phase removes `getattr(...)`-style capability discovery from bundle consumers by promoting required methods onto the public protocols used by:
+    - `TargetDiscoveryBackend`
+    - `PresentationBackend`
+  - `InputPolicyBackend` intentionally remains minimal during `fix219` because no generic runtime consumer currently requires a separate input-policy method.
+  - `HelperIpcBackend` intentionally remains narrow during `fix219`; transport/message validation continues to live in `overlay_client/backend/helper_ipc.py` unless later runtime work requires more on the generic contract surface.
+  - The same phase also moves semantic bundle behavior out of enum/family inference and into explicit backend-declared capabilities, specifically:
+    - tracker availability
+    - transient-parent requirements
+    - native-Wayland vs X11-style windowing expectation
+    - tracker fallback transport expectations
+  - The current `fix219` landing shape keeps the Linux bundle-owned combined `presentation` / `input_policy` adapter explicit and test-locked; a later plan may still split that public shape if reuse/lifecycle boundaries justify it.
+  - Validation and signoff happen only after that tightening work lands so the release-readiness evidence reflects the stronger contract surface rather than the looser transitional one.
 - Capability classification and visibility
-  - Phase `3` and Phase `4` must preserve the architecture policy that backend/status surfaces report chosen backend, source of truth, and any degraded/fallback reason in a way support can inspect.
+  - Phase `3`, Phase `4`, and Phase `5` must preserve the architecture policy that backend/status surfaces report chosen backend, source of truth, and any degraded/fallback reason in a way support can inspect.
   - Multi-monitor / DPR troubleshooting must remain supported after the cleanup through logs, debug-overlay fields, or collected diagnostics; richer debug metadata must not be forced into the core runtime `TargetDiscoveryBackend` contract just to preserve supportability.
 - Non-backend boundaries
   - `standalone_mode`, `physical_clamp_*`, plugin launch/orchestration, Flatpak/env shaping, and installer/deployment logic remain outside backend-selection cleanup unless a later plan explicitly broadens scope.
@@ -228,7 +248,8 @@ If something is unclear, capture it under `Open Questions`.
 | 1 | Move remaining presentation/input ownership into backend-owned runtime modules | Completed |
 | 2 | Move tracker ownership into backend-owned discovery modules and trim shared runtime tracking code | Completed |
 | 3 | Remove UI/control-surface backend-policy leakage, fix status surfaces, and document the retained non-backend boundaries | Completed |
-| 4 | Run remaining environment validation, EDMC compliance review, and final release/signoff closure | Not Started |
+| 4 | Tighten backend contracts so the public backend surface is behavior-oriented rather than primarily identity-oriented | Completed |
+| 5 | Run remaining environment validation, EDMC compliance review, and final release/signoff closure | Not Started |
 
 ## Phase Details
 
@@ -598,19 +619,136 @@ If something is unclear, capture it under `Open Questions`.
 - Preferences consume backend-owned metadata instead of reconstructing backend policy.
 - Remaining non-backend boundaries are explicit, documented, and intentionally retained.
 
-### Phase 4: Validation, Compliance, And Signoff
-- Close the remaining release-readiness gaps after the ownership/status cleanup lands.
+### Phase 4: Backend Contract Tightening
+- Tighten the public backend contract surface before release-readiness signoff.
+- The goal is to make the backend layer behavior-oriented rather than primarily identity-oriented, so generic consumers stop depending on undeclared methods and enum/family inference.
+- Risks: overreaching into a second architecture project, or changing runtime behavior while trying to improve the contract shape.
+- Mitigations: keep this phase contract-first and behavior-preserving, use targeted unit tests around the public protocol surface, and avoid re-opening already-completed ownership work unless the looser contract shape genuinely forces it.
+
+#### Phase 4 Preflight Notes
+- `4.1` scope guard:
+  - promote only the methods that generic consumers already require today
+  - do not use `4.1` to redesign the public contract shape under the label of "tightening"
+- `4.2` capability-shape guard:
+  - define only the smallest explicit capability metadata set needed to replace current enum/family inference
+  - expected first candidates are:
+    - tracker availability
+    - transient-parent requirement
+    - click-through/windowing expectation
+    - compatibility/fallback transport expectation
+- `HelperIpcBackend` guard:
+  - enrich the public helper contract only if generic runtime consumers truly need more than helper identity
+  - otherwise keep the helper boundary narrow in `fix219` and defer richer helper-runtime semantics to a later plan
+- Implementation rule:
+  - if a Phase `4` change would merge, split, or redefine the intended public backend contracts rather than merely tightening them, stop and record it as a new architecture decision instead of folding it into this plan silently
+
+| Stage | Description | Status |
+| --- | --- | --- |
+| 4.1 | Strengthen the public backend protocols so required runtime behavior is declared rather than discovered through `getattr(...)` | Completed |
+| 4.2 | Move semantic bundle capabilities out of enum/family inference and into explicit backend-declared metadata/capabilities | Completed |
+| 4.3 | Lock the tightened contract shape with focused protocol-level tests and refresh the active docs to reflect the stronger public contract | Completed |
+
+#### Stage 4.1 Detailed Plan
+- Objective:
+- Make the public backend protocols accurately describe the behavior that runtime consumers require.
+- Primary touch points:
+- `overlay_client/backend/contracts.py`
+- `overlay_client/backend/consumers.py`
+- `overlay_client/backend/bundles/native_x11.py`
+- `overlay_client/backend/bundles/xwayland_compat.py`
+- `overlay_client/backend/bundles/_wayland_common.py`
+- `overlay_client/tests/test_backend_contracts.py`
+- `overlay_client/tests/test_backend_consumers.py`
+- Steps:
+- Promote required runtime methods onto the public protocols instead of relying on `getattr(...)` checks in bundle consumers, specifically for:
+  - `TargetDiscoveryBackend`
+  - `PresentationBackend`
+  - `InputPolicyBackend` only where a generic consumer already requires a concrete method today
+- Keep `HelperIpcBackend` narrow in this stage unless the actual generic runtime consumer seam proves it needs more than identity metadata.
+- Keep the first tightening pass behavior-preserving: bundle implementations may stay combined where that is the current shipped shape, but the public protocol surface must stop pretending the already-required discovery/presentation methods are optional.
+- Update the consumer helpers so they depend on the declared contract rather than probing for undeclared methods at runtime.
+- Acceptance criteria:
+- Bundle consumers no longer use `getattr(...)` to discover required backend behavior.
+- Runtime Linux bundle implementations conform to the declared public protocols used by current generic consumers.
+- No intentional runtime behavior change is introduced in this stage.
+- Verification to run:
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_contracts.py overlay_client/tests/test_backend_consumers.py -q`
+
+#### Stage 4.2 Detailed Plan
+- Objective:
+- Move semantic bundle behavior out of enum/family inference and into explicit backend-declared capabilities.
+- Primary touch points:
+- `overlay_client/backend/contracts.py`
+- `overlay_client/backend/consumers.py`
+- `overlay_client/backend/bundles/native_x11.py`
+- `overlay_client/backend/bundles/xwayland_compat.py`
+- `overlay_client/backend/bundles/_wayland_common.py`
+- `overlay_client/tests/test_backend_contracts.py`
+- `overlay_client/tests/test_backend_consumers.py`
+- `overlay_client/tests/test_backend_bundles_x11.py`
+- `overlay_client/tests/test_backend_bundles_wayland.py`
+- `overlay_client/tests/test_platform_controller_backend_status.py`
+- Steps:
+- Replace helper logic in bundle consumers that infers backend behavior from family/instance labels with explicit bundle-declared capability metadata, specifically for:
+  - tracker availability
+  - transient-parent requirements
+  - native-Wayland vs X11-style windowing expectation
+  - tracker fallback transport expectation by session type
+- Keep this stage minimal and behavior-preserving: do not add unused capability metadata merely because it might be useful later, and do not move support-family/status-report formatting out of the existing status model.
+- Keep human-readable labels intact by sourcing the current platform-label helper from backend-declared metadata rather than from family/instance branching.
+- Acceptance criteria:
+- Generic consumers query explicit backend capabilities rather than inferring behavior from enums or helper-specific family checks.
+- Bundle-facing tests fail if a bundle exposes the wrong capability behavior.
+- Verification to run:
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_contracts.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_backend_bundles_x11.py overlay_client/tests/test_backend_bundles_wayland.py overlay_client/tests/test_platform_controller_backend_status.py -q`
+
+#### Stage 4.3 Detailed Plan
+- Objective:
+- Lock the tightened contract shape and document it clearly before moving into release-readiness evidence work.
+- Primary touch points:
+- `overlay_client/backend/contracts.py`
+- `overlay_client/tests/test_backend_contracts.py`
+- `overlay_client/tests/test_helper_ipc_boundary.py`
+- `docs/refactoring/fix219_backend_architecture_refactor_plan.md`
+- `docs/refactoring/fix219_backend_architecture_followup_cleanup_plan.md`
+- Steps:
+- Add focused contract-level tests that prove the tightened public shape directly rather than only testing bundle identity and selector output, specifically for:
+  - explicit `BackendCapabilities` behavior
+  - the still-intentional combined `presentation` / `input_policy` adapter shape during `fix219`
+  - the intentionally narrow split between generic `HelperIpcBackend` identity metadata and transport/message validation in `helper_ipc.py`
+- Document the current landing shape explicitly:
+  - capability truth now lives in `BackendCapabilities`
+  - Linux bundles intentionally keep a combined presentation/input runtime adapter during `fix219`
+  - helper transport validation remains owned by `helper_ipc.py`, while `HelperIpcBackend` stays narrow unless later runtime work requires more
+- Refresh the active `fix219_` docs so the strengthened contract surface is reflected before the final validation/signoff phase begins, including rolling the plan snapshots forward from Phase `4` as next work to Phase `5` as next work when this stage completes.
+- Acceptance criteria:
+- The tightened contract is covered by focused protocol-level tests.
+- The active docs describe the strengthened contract shape accurately.
+- Phase `4` no longer appears as an open remaining gap once this stage is complete.
+- Verification to run:
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_contracts.py overlay_client/tests/test_helper_ipc_boundary.py -q`
+
+#### Phase 4 Execution Order
+- Implement in strict order: `4.1` -> `4.2` -> `4.3`.
+
+#### Phase 4 Exit Criteria
+- Public backend protocols describe the required runtime behavior directly.
+- Generic consumers no longer depend on undeclared backend methods or enum/family inference for capability truth.
+- The active `fix219_` docs reflect the tightened contract shape before signoff work begins.
+
+### Phase 5: Validation, Compliance, And Signoff
+- Close the remaining release-readiness gaps after the ownership/status cleanup and contract-tightening work land.
 - Keep this phase evidence-driven: record exact environments checked, exact compliance findings, and any explicit limitations retained at signoff time.
 - Risks: declaring completion based only on tests and refactor shape while remaining compositor/helper paths or EDMC compliance edges are still unverified.
 - Mitigations: require recorded environment results, recorded compliance findings, and an explicit closeout of the release signoff checklist before calling the cleanup complete.
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 4.1 | Run the remaining compositor/helper validation matrix and record exact environment results and retained limitations | Not Started |
-| 4.2 | Run and record the EDMC compliance review after the refactor cleanup is complete | Not Started |
-| 4.3 | Close the release signoff checklist and record any final deferrals or explicit limitations | Not Started |
+| 5.1 | Run the remaining compositor/helper validation matrix and record exact environment results and retained limitations | Not Started |
+| 5.2 | Run and record the EDMC compliance review after the refactor cleanup is complete | Not Started |
+| 5.3 | Close the release signoff checklist and record any final deferrals or explicit limitations | Not Started |
 
-#### Stage 4.1 Detailed Plan
+#### Stage 5.1 Detailed Plan
 - Objective:
 - Replace the current “known validation gap” state with recorded environment evidence for the remaining claimed paths.
 - Primary touch points:
@@ -637,7 +775,7 @@ If something is unclear, capture it under `Open Questions`.
 - Verification to run:
 - Record exact commands, environments, and outcomes in the `Execution Log`; include any supporting automated tests run alongside the manual checks.
 
-#### Stage 4.2 Detailed Plan
+#### Stage 5.2 Detailed Plan
 - Objective:
 - Record a post-refactor EDMC compliance review instead of relying on assumptions from earlier implementation stages.
 - Primary touch points:
@@ -657,7 +795,7 @@ If something is unclear, capture it under `Open Questions`.
 - `python scripts/check_edmc_python.py`
 - Record any additional targeted test/lint commands run as part of the compliance review.
 
-#### Stage 4.3 Detailed Plan
+#### Stage 5.3 Detailed Plan
 - Objective:
 - Make final completion conditional on the recorded evidence rather than on implementation confidence alone.
 - Primary touch points:
@@ -676,10 +814,10 @@ If something is unclear, capture it under `Open Questions`.
 - Verification to run:
 - No single fixed command; this stage is complete only when the checklist and execution log contain the required evidence and any retained deferrals.
 
-#### Phase 4 Execution Order
-- Implement in strict order: `4.1` -> `4.2` -> `4.3`.
+#### Phase 5 Execution Order
+- Implement in strict order: `5.1` -> `5.2` -> `5.3`.
 
-#### Phase 4 Exit Criteria
+#### Phase 5 Exit Criteria
 - Remaining claimed compositor/helper paths have recorded validation outcomes.
 - A post-refactor EDMC compliance review is recorded.
 - The release signoff checklist is closed or has explicit named deferrals with rationale.
@@ -794,7 +932,7 @@ Use this checklist before declaring the backend-architecture cleanup complete.
 - Verified the retained force-render, transient-parent, runtime-status, and interaction-controller paths still behave as expected through the existing unit coverage.
 - Stage `3.6` completed on 2026-04-03.
 - Refined Stage `3.6` in this plan before code changes so the actual work matched the remaining documentation debt: refresh the current-state snapshot in this follow-up plan, make retained control-plane/deployment boundaries explicit in the top-level `fix219_` docs, and annotate the archived refactor notes that still read like live planning documents.
-- Updated the active `fix219_` docs to state consistently that `load.py`, advisory `plugin_hint`, Flatpak/env shaping, and installer compositor profiles are intentional retained boundaries, while the remaining open work is limited to Phase `4` validation/compliance/signoff.
+- Updated the active `fix219_` docs to state consistently that `load.py`, advisory `plugin_hint`, Flatpak/env shaping, and installer compositor profiles are intentional retained boundaries, while the remaining open work now starts with Phase `4` backend-contract tightening followed by Phase `5` validation/compliance/signoff.
 - Added historical markers to the archived `load_refactory.md`, `compositor_aware_install.md`, `client_refactor.md`, and `refactor-plan.md` notes so they no longer read as active backend-boundary authority.
 
 ### Tests Run For Phase 3
@@ -808,7 +946,36 @@ Use this checklist before declaring the backend-architecture cleanup complete.
 - `source .venv/bin/activate && make check` -> passed (`ruff` clean, `mypy` clean, full suite `815` passed / `21` skipped).
 
 ### Phase 4 Execution Summary
-- Not started.
+- Stage `4.1` completed on 2026-04-03.
+- Refined Stage `4.1` in this plan before code changes so the scope matched the actual consumer seam in the code: tighten the public discovery and presentation protocols, leave `InputPolicyBackend` unchanged because no generic consumer currently requires an input-policy method, and keep `HelperIpcBackend` narrow because no generic runtime consumer currently needs more than helper identity metadata.
+- Declared the already-required `create_tracker(...)` and `create_integration(...)` methods on the public protocols in `overlay_client/backend/contracts.py`, then removed the `getattr(...)`-based runtime probing from `overlay_client/backend/consumers.py`.
+- Kept bundle behavior unchanged by leaving the current combined Linux bundle implementations intact and tightening only the public contract surface they already satisfy.
+- Expanded protocol coverage in `overlay_client/tests/test_backend_contracts.py` so both protocol fixtures and shipped Linux bundles are checked against the tightened runtime-checkable contract.
+- Stage `4.2` completed on 2026-04-03.
+- Refined Stage `4.2` in this plan before code changes so the scope matched the actual remaining inference seam: add explicit bundle capability metadata for platform label, native-Wayland vs X11-style windowing, transient-parent requirement, tracker availability, and tracker fallback by session type; do not broaden the stage into unused click-through metadata or status-surface redesign.
+- Added explicit backend-declared capability metadata to `BackendBundle` in `overlay_client/backend/contracts.py`, threaded it through the Linux bundle builders in `native_x11.py`, `xwayland_compat.py`, and `_wayland_common.py`, and switched the generic consumer helpers in `overlay_client/backend/consumers.py` to read those declared capabilities instead of inferring behavior from backend family/instance labels.
+- Preserved current behavior by keeping the human-readable platform labels unchanged, keeping the existing tracker-fallback outcomes unchanged, and leaving runtime bundle implementations intact while only changing where capability truth lives.
+- Expanded bundle/consumer/contract coverage so tests now assert the explicit capability metadata on shipped bundles and prove the generic helper functions can follow capability metadata instead of descriptor-family inference.
+- Stage `4.3` completed on 2026-04-03.
+- Refined Stage `4.3` in this plan before code changes so the closure matched the actual remaining work: add focused contract tests for `BackendCapabilities`, explicitly lock the still-intentional combined Linux `presentation` / `input_policy` adapter shape during `fix219`, keep the helper-boundary split clear between narrow `HelperIpcBackend` identity and `helper_ipc.py` transport validation, and roll the active `fix219_` docs forward so Phase `5` is the next open work rather than Phase `4`.
+- Expanded `overlay_client/tests/test_backend_contracts.py` with focused contract-shape coverage for explicit capability fallback mapping, full Linux bundle protocol conformance across the shipped bundle matrix, and the intentional combined presentation/input adapter shape.
+- Expanded `overlay_client/tests/test_helper_ipc_boundary.py` so helper-boundary validation continues to lock the transport-specific surface separately from the generic helper identity contract.
+- Refreshed the active `fix219_` docs so they now describe the landed contract shape explicitly:
+  - `BackendCapabilities` is the generic runtime capability truth source
+  - Linux bundles intentionally keep a combined presentation/input adapter during `fix219`
+  - helper transport validation remains in `overlay_client/backend/helper_ipc.py`, while `HelperIpcBackend` stays narrow
+  - Phase `5` is now the next active work
+- Phase `4` is now complete: the public backend surface is behavior-oriented, generic consumers no longer rely on undeclared methods or family/instance inference for capability truth, and the active `fix219_` docs describe the tightened contract shape accurately.
 
 ### Tests Run For Phase 4
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_contracts.py overlay_client/tests/test_backend_consumers.py -q` -> passed (`26` passed).
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_contracts.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_backend_bundles_x11.py overlay_client/tests/test_backend_bundles_wayland.py overlay_client/tests/test_platform_controller_backend_status.py -q` -> passed (`46` passed).
+- `source .venv/bin/activate && python -m ruff check overlay_client/backend/contracts.py overlay_client/backend/consumers.py overlay_client/backend/bundles/native_x11.py overlay_client/backend/bundles/xwayland_compat.py overlay_client/backend/bundles/_wayland_common.py overlay_client/backend/__init__.py overlay_client/tests/test_backend_contracts.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_backend_bundles_x11.py overlay_client/tests/test_backend_bundles_wayland.py overlay_client/tests/test_platform_controller_backend_status.py` -> passed.
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_contracts.py overlay_client/tests/test_helper_ipc_boundary.py -q` -> passed (`16` passed).
+- `source .venv/bin/activate && python -m ruff check overlay_client/tests/test_backend_contracts.py overlay_client/tests/test_helper_ipc_boundary.py` -> passed.
+
+### Phase 5 Execution Summary
+- Not started.
+
+### Tests Run For Phase 5
 - None yet.

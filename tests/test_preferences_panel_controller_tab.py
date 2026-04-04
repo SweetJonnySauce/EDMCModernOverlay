@@ -59,7 +59,6 @@ def test_controller_tab_control_order_contract() -> None:
         "launch_controller",
         "launch_command",
         "toggle_argument",
-        "backend_override",
     )
 
 
@@ -280,10 +279,11 @@ def test_backend_status_refresh_updates_summary_and_warning() -> None:
 
     assert changed is True
     assert panel._backend_status_var.value == (
-        "Backend: xwayland_compat / xwayland_compat | Mode: degraded_overlay | Source: plugin_hint"
+        "Backend: XWayland compatibility | Mode: Degraded overlay | Source: Plugin hint"
     )
     assert panel._backend_warning_var.value == (
-        "Warning: Mode: degraded_overlay; Fallback from native_wayland / kwin_wayland (xwayland_compat_only)"
+        "Warning: Some overlay guarantees are reduced in this mode.; "
+        "Using XWayland compatibility mode because a native Wayland path is not active."
     )
     assert panel._backend_override_combo.values == ("auto", "xwayland_compat")
 
@@ -313,7 +313,7 @@ def test_backend_status_refresh_prefers_client_runtime_source() -> None:
 
     assert changed is True
     assert panel._backend_status_var.value == (
-        "Backend: native_wayland / kwin_wayland | Mode: true_overlay | Source: client_runtime"
+        "Backend: KWin Wayland | Mode: True overlay | Source: Live runtime"
     )
     assert panel._backend_warning_var.value == ""
 

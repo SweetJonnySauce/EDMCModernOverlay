@@ -65,16 +65,14 @@ def test_backend_status_reports_fallback_and_review_guard_in_payload():
         "review_reasons=no_silent_downgrade:xwayland_compat helpers=none"
     )
     assert format_status_ui_summary(payload) == (
-        "Backend: xwayland_compat / xwayland_compat | Mode: true_overlay | Source: client_runtime"
+        "Backend: XWayland compatibility | Mode: True overlay | Source: Live runtime"
     )
     assert format_status_ui_warning(payload) == (
-        "Warning: Fallback from native_wayland / kwin_wayland (xwayland_compat_only); "
-        "Review required: no_silent_downgrade:xwayland_compat"
+        "Warning: Using XWayland compatibility mode because a native Wayland path is not active."
     )
     assert format_status_window_title(payload) == (
         "Overlay Controller - xwayland_compat / xwayland_compat [true_overlay, client_runtime] - "
-        "Fallback from native_wayland / kwin_wayland (xwayland_compat_only); "
-        "Review required: no_silent_downgrade:xwayland_compat"
+        "Using XWayland compatibility mode because a native Wayland path is not active."
     )
 
 
@@ -147,10 +145,10 @@ def test_backend_status_ui_helpers_label_plugin_hint_and_inactive_helpers():
     assert report["helper_unavailable"] == ["gnome_shell_extension"]
     assert report["warning_required"] is True
     assert format_status_ui_summary(status) == (
-        "Backend: native_wayland / gnome_shell_wayland | Mode: degraded_overlay | Source: plugin_hint"
+        "Backend: GNOME Wayland | Mode: Degraded overlay | Source: Plugin hint"
     )
     assert format_status_ui_warning(status) == (
-        "Warning: Mode: degraded_overlay; Helper unavailable: gnome_shell_extension"
+        "Warning: Some overlay guarantees are reduced in this mode.; Required helper unavailable: GNOME Shell extension."
     )
 
 
@@ -191,7 +189,7 @@ def test_backend_status_report_helpers_accept_backend_status_response_wrapper():
 
     assert build_status_report(response)["source"] == "plugin_hint"
     assert format_status_ui_summary(response) == (
-        "Backend: native_wayland / kwin_wayland | Mode: true_overlay | Source: plugin_hint"
+        "Backend: KWin Wayland | Mode: True overlay | Source: Plugin hint"
     )
 
 
@@ -220,18 +218,18 @@ def test_backend_status_ui_helpers_surface_manual_override_and_invalid_override(
     assert manual_report["manual_override"] == "xwayland_compat"
     assert manual_report["warning_required"] is True
     assert format_status_ui_summary(manual_override_status) == (
-        "Backend: xwayland_compat / xwayland_compat | Mode: true_overlay | Source: client_runtime | "
-        "Override: xwayland_compat"
+        "Backend: XWayland compatibility | Mode: True overlay | Source: Live runtime | "
+        "Override: XWayland compatibility"
     )
     assert format_status_ui_warning(manual_override_status) == (
-        "Warning: Fallback from native_wayland / kwin_wayland (manual_override); "
-        "Manual override active: xwayland_compat"
+        "Warning: Manual backend override is active: XWayland compatibility.; "
+        "Using XWayland compatibility because you selected it manually."
     )
 
     assert invalid_report["override_error"] == "bogus_backend"
     assert invalid_report["warning_required"] is True
     assert format_status_ui_summary(invalid_override_status) == (
-        "Backend: native_wayland / kwin_wayland | Mode: true_overlay | Source: client_runtime | "
+        "Backend: KWin Wayland | Mode: True overlay | Source: Live runtime | "
         "Override: invalid (bogus_backend)"
     )
-    assert format_status_ui_warning(invalid_override_status) == "Warning: Invalid override: bogus_backend"
+    assert format_status_ui_warning(invalid_override_status) == "Warning: Saved backend override is invalid: bogus_backend."

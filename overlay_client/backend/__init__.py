@@ -2,6 +2,7 @@
 
 from .contracts import (
     BackendBundle,
+    BackendCapabilities,
     BackendDescriptor,
     BackendFamily,
     BackendInstance,
@@ -40,6 +41,7 @@ from .status import BackendSelectionStatus, HelperCapabilityState
 
 __all__ = [
     "BackendBundle",
+    "BackendCapabilities",
     "BackendSelector",
     "BackendDescriptor",
     "BackendFamily",

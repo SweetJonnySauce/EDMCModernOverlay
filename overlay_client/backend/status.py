@@ -238,14 +238,14 @@ def format_status_ui_summary(status: BackendSelectionStatus | Mapping[str, objec
     """Return a concise user-facing status summary."""
 
     report = build_status_report(status)
-    support_label = str(report.get("support_label") or "unknown")
-    classification = str(report.get("classification") or "unknown")
-    source = str(report.get("source") or "unknown")
+    support_label = _ui_backend_label(report)
+    classification = _ui_classification_label(str(report.get("classification") or "unknown"))
+    source = _ui_source_label(str(report.get("source") or "unknown"))
     summary = f"Backend: {support_label} | Mode: {classification} | Source: {source}"
     manual_override = str(report.get("manual_override") or "")
     override_error = str(report.get("override_error") or "")
     if manual_override:
-        summary = f"{summary} | Override: {manual_override}"
+        summary = f"{summary} | Override: {_ui_backend_override_label(manual_override)}"
     elif override_error:
         summary = f"{summary} | Override: invalid ({override_error})"
     return summary
@@ -257,32 +257,30 @@ def format_status_ui_warning(status: BackendSelectionStatus | Mapping[str, objec
     report = build_status_report(status)
     reasons: list[str] = []
     classification = str(report.get("classification") or "")
-    if classification in {CapabilityClassification.DEGRADED_OVERLAY.value, CapabilityClassification.UNSUPPORTED.value}:
-        reasons.append(f"Mode: {classification}")
+    if classification == CapabilityClassification.DEGRADED_OVERLAY.value:
+        reasons.append("Some overlay guarantees are reduced in this mode.")
+    elif classification == CapabilityClassification.UNSUPPORTED.value:
+        reasons.append("This environment is not currently supported.")
     fallback_from = str(report.get("fallback_from") or "")
     fallback_reason = str(report.get("fallback_reason") or "")
-    if fallback_from and fallback_reason:
-        reasons.append(f"Fallback from {fallback_from} ({fallback_reason})")
-    elif fallback_reason:
-        reasons.append(f"Fallback reason: {fallback_reason}")
     manual_override = str(report.get("manual_override") or "")
     if manual_override:
-        reasons.append(f"Manual override active: {manual_override}")
+        reasons.append(f"Manual backend override is active: {_ui_backend_override_label(manual_override)}.")
+    fallback_message = _ui_fallback_message(
+        fallback_reason=fallback_reason,
+        fallback_from=fallback_from,
+        manual_override=manual_override,
+    )
+    if fallback_message:
+        reasons.append(fallback_message)
     override_error = str(report.get("override_error") or "")
     if override_error:
-        reasons.append(f"Invalid override: {override_error}")
+        reasons.append(f"Saved backend override is invalid: {override_error}.")
     helper_unavailable = report.get("helper_unavailable")
-    fallback_reason = str(report.get("fallback_reason") or "")
     if isinstance(helper_unavailable, list) and helper_unavailable and fallback_reason != FallbackReason.MISSING_HELPER.value:
-        helpers = ", ".join(str(helper) for helper in helper_unavailable if str(helper))
+        helpers = ", ".join(_ui_helper_label(str(helper)) for helper in helper_unavailable if str(helper))
         if helpers:
-            reasons.append(f"Helper unavailable: {helpers}")
-    if bool(report.get("review_required")):
-        review_values = report.get("review_reasons")
-        if isinstance(review_values, list) and review_values:
-            reasons.append("Review required: " + ", ".join(str(value) for value in review_values if str(value)))
-        else:
-            reasons.append("Review required")
+            reasons.append(f"Required helper unavailable: {helpers}.")
     if not reasons:
         return ""
     return "Warning: " + "; ".join(reasons)
@@ -319,6 +317,104 @@ def _support_label(family: str, instance: str) -> str:
     if not family and not instance:
         return ""
     return f"{family} / {instance}"
+
+
+def _ui_backend_label(report: Mapping[str, object]) -> str:
+    family = str(report.get("family") or "")
+    instance = str(report.get("instance") or "")
+    labels = {
+        ("native_windows", "windows_desktop"): "Windows desktop",
+        ("native_x11", "native_x11"): "Native X11",
+        ("xwayland_compat", "xwayland_compat"): "XWayland compatibility",
+        ("native_wayland", "wayland_layer_shell_generic"): "Generic Wayland",
+        ("native_wayland", "kwin_wayland"): "KWin Wayland",
+        ("compositor_helper", "kwin_wayland"): "KWin helper",
+        ("native_wayland", "gnome_shell_wayland"): "GNOME Wayland",
+        ("compositor_helper", "gnome_shell_wayland"): "GNOME Shell helper",
+        ("native_wayland", "sway_wayfire_wlroots"): "wlroots Wayland",
+        ("native_wayland", "hyprland"): "Hyprland",
+        ("native_wayland", "cosmic"): "COSMIC Wayland",
+        ("native_wayland", "gamescope"): "Gamescope Wayland",
+        ("portal_fallback", "portal_fallback"): "Portal fallback",
+    }
+    return labels.get((family, instance), str(report.get("support_label") or "unknown"))
+
+
+def _ui_backend_override_label(value: str) -> str:
+    token = str(value or "").strip()
+    if not token:
+        return "Auto"
+    labels = {
+        "native_x11": "Native X11",
+        "xwayland_compat": "XWayland compatibility",
+        "windows_desktop": "Windows desktop",
+        "wayland_layer_shell_generic": "Generic Wayland",
+        "kwin_wayland": "KWin Wayland",
+        "gnome_shell_wayland": "GNOME Wayland",
+        "sway_wayfire_wlroots": "wlroots Wayland",
+        "hyprland": "Hyprland",
+        "cosmic": "COSMIC Wayland",
+        "gamescope": "Gamescope Wayland",
+        "portal_fallback": "Portal fallback",
+    }
+    return labels.get(token, token)
+
+
+def _ui_classification_label(value: str) -> str:
+    labels = {
+        CapabilityClassification.TRUE_OVERLAY.value: "True overlay",
+        CapabilityClassification.DEGRADED_OVERLAY.value: "Degraded overlay",
+        CapabilityClassification.UNSUPPORTED.value: "Unsupported",
+    }
+    return labels.get(value, value or "unknown")
+
+
+def _ui_source_label(value: str) -> str:
+    labels = {
+        "client_runtime": "Live runtime",
+        "plugin_hint": "Plugin hint",
+    }
+    return labels.get(value, value or "unknown")
+
+
+def _ui_fallback_message(*, fallback_reason: str, fallback_from: str, manual_override: str) -> str:
+    if fallback_reason == FallbackReason.MANUAL_OVERRIDE.value:
+        if manual_override:
+            return f"Using {_ui_backend_override_label(manual_override)} because you selected it manually."
+        return "Using the selected manual backend override."
+    if fallback_reason == FallbackReason.XWAYLAND_COMPAT_ONLY.value:
+        return "Using XWayland compatibility mode because a native Wayland path is not active."
+    if fallback_reason == FallbackReason.MISSING_HELPER.value:
+        if fallback_from:
+            return f"A required helper for {fallback_from} is not available."
+        return "A required compositor helper is not available."
+    if fallback_reason == FallbackReason.MISSING_PROTOCOL.value:
+        return "Required compositor protocols are not available."
+    if fallback_reason == FallbackReason.COMPOSITOR_RESTRICTION.value:
+        return "The compositor is restricting the preferred overlay path."
+    if fallback_reason == FallbackReason.TRACKING_UNAVAILABLE.value:
+        return "Window tracking is unavailable for the preferred backend."
+    if fallback_reason == FallbackReason.CLICK_THROUGH_UNAVAILABLE.value:
+        return "Click-through is unavailable for the preferred backend."
+    if fallback_reason == FallbackReason.STACKING_NOT_GUARANTEED.value:
+        return "Stacking behavior is not guaranteed for the preferred backend."
+    if fallback_reason == FallbackReason.SANDBOX_RESTRICTION.value:
+        return "Sandbox restrictions are limiting overlay capabilities."
+    if fallback_reason == FallbackReason.NOT_IMPLEMENTED.value:
+        return "The preferred backend is not implemented yet."
+    if fallback_reason == FallbackReason.INVALID_OVERRIDE.value:
+        return "The saved backend override is not valid for this environment."
+    return ""
+
+
+def _ui_helper_label(value: str) -> str:
+    labels = {
+        "gnome_shell_extension": "GNOME Shell extension",
+        "kwin_script": "KWin script",
+        "kwin_effect": "KWin effect",
+        "external_helper": "external helper",
+    }
+    return labels.get(value, value or "unknown helper")
 
 
 def _token_value(value: object) -> str:

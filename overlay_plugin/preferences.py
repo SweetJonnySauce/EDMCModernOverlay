@@ -80,7 +80,6 @@ PREFERENCES_TAB_EXPERIMENTAL = "Experimental"
 CONTROLLER_TAB_CONTROL_LAUNCH_BUTTON = "launch_controller"
 CONTROLLER_TAB_CONTROL_LAUNCH_COMMAND = "launch_command"
 CONTROLLER_TAB_CONTROL_TOGGLE_ARGUMENT = "toggle_argument"
-CONTROLLER_TAB_CONTROL_BACKEND_OVERRIDE = "backend_override"
 BACKEND_OVERRIDE_AUTO = "auto"
 DEFAULT_PROFILE_NAME = "Default"
 PROFILE_STATUS_POLL_INTERVAL_MS = 750
@@ -109,12 +108,11 @@ def _preferences_tab_order() -> tuple[str, str, str, str]:
     )
 
 
-def _controller_tab_control_order() -> tuple[str, str, str, str]:
+def _controller_tab_control_order() -> tuple[str, str, str]:
     return (
         CONTROLLER_TAB_CONTROL_LAUNCH_BUTTON,
         CONTROLLER_TAB_CONTROL_LAUNCH_COMMAND,
         CONTROLLER_TAB_CONTROL_TOGGLE_ARGUMENT,
-        CONTROLLER_TAB_CONTROL_BACKEND_OVERRIDE,
     )
 
 
@@ -1318,21 +1316,6 @@ class PreferencesPanel:
         toggle_row.grid(row=controller_row, column=0, sticky="w", pady=ROW_PAD)
         controller_row += 1
 
-        backend_override_row = ttk.Frame(controller_section, style=self._frame_style)
-        nb.Label(backend_override_row, text="Manual backend override:").pack(side="left")
-        backend_override_combo = ttk.Combobox(
-            backend_override_row,
-            width=28,
-            state="readonly",
-            textvariable=self._var_manual_backend_override,
-            values=self._backend_override_options,
-        )
-        backend_override_combo.pack(side="left", padx=(8, 0))
-        backend_override_combo.bind("<<ComboboxSelected>>", self._on_manual_backend_override_selected)
-        self._backend_override_combo = backend_override_combo
-        backend_override_row.grid(row=controller_row, column=0, sticky="w", pady=ROW_PAD)
-        controller_row += 1
-
         profile_row = 0
 
         profile_table_frame = ttk.Frame(profiles_section, style=self._frame_style)
@@ -1481,6 +1464,21 @@ class PreferencesPanel:
         )
         force_checkbox.pack(side="left")
         force_row.grid(row=user_row, column=0, sticky="w", pady=ROW_PAD)
+        user_row += 1
+
+        backend_override_row = ttk.Frame(user_section, style=self._frame_style)
+        nb.Label(backend_override_row, text="Overlay backend:").pack(side="left")
+        backend_override_combo = ttk.Combobox(
+            backend_override_row,
+            width=28,
+            state="readonly",
+            textvariable=self._var_manual_backend_override,
+            values=self._backend_override_options,
+        )
+        backend_override_combo.pack(side="left", padx=(8, 0))
+        backend_override_combo.bind("<<ComboboxSelected>>", self._on_manual_backend_override_selected)
+        self._backend_override_combo = backend_override_combo
+        backend_override_row.grid(row=user_row, column=0, sticky="w", pady=ROW_PAD)
         user_row += 1
 
         font_row = ttk.Frame(user_section, style=self._frame_style)

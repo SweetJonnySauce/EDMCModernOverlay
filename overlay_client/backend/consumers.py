@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Mapping, Optional
 
-from overlay_client.backend.contracts import BackendBundle, BackendFamily, BackendInstance, SessionType
+from overlay_client.backend.contracts import BackendBundle, BackendInstance
 from overlay_client.backend.probe import ProbeInputs, ProbeSource, collect_platform_probe
 from overlay_client.backend.selector import BackendSelector
 from overlay_client.backend.status import BackendSelectionStatus
@@ -18,12 +18,7 @@ if TYPE_CHECKING:
 def create_bundle_integration(bundle: BackendBundle, widget, logger: logging.Logger, context: "PlatformContext"):
     """Create a platform integration object from a bundle presentation backend."""
 
-    factory = getattr(bundle.presentation, "create_integration", None)
-    if not callable(factory):
-        raise TypeError(
-            f"Presentation backend {type(bundle.presentation).__name__} does not expose create_integration()"
-        )
-    return factory(widget, logger, context)
+    return bundle.presentation.create_integration(widget, logger, context)
 
 
 def create_bundle_tracker(
@@ -35,10 +30,7 @@ def create_bundle_tracker(
 ) -> Optional["WindowTracker"]:
     """Create a window tracker from a bundle discovery backend."""
 
-    factory = getattr(bundle.discovery, "create_tracker", None)
-    if not callable(factory):
-        raise TypeError(f"Discovery backend {type(bundle.discovery).__name__} does not expose create_tracker()")
-    return factory(logger, title_hint=title_hint, monitor_provider=monitor_provider)
+    return bundle.discovery.create_tracker(logger, title_hint=title_hint, monitor_provider=monitor_provider)
 
 
 _COMPAT_SELECTOR = BackendSelector(shadow_mode=False)
@@ -121,7 +113,12 @@ def resolve_legacy_linux_bundle(
 def resolve_linux_bundle_from_status(status: BackendSelectionStatus) -> BackendBundle:
     """Resolve the explicit Linux bundle chosen by the client-owned selector result."""
 
-    instance = status.selected_backend.instance
+    return _build_linux_bundle_for_instance(status.selected_backend.instance)
+
+
+def _build_linux_bundle_for_instance(instance: BackendInstance) -> BackendBundle:
+    """Build the concrete Linux bundle for an explicit backend instance."""
+
     if instance is BackendInstance.NATIVE_X11:
         from overlay_client.backend.bundles.native_x11 import build_native_x11_bundle
 
@@ -160,36 +157,26 @@ def resolve_linux_bundle_from_status(status: BackendSelectionStatus) -> BackendB
 def resolve_tracker_fallback_bundle(status: BackendSelectionStatus) -> Optional[BackendBundle]:
     """Return the current shipped tracker fallback bundle for a selected Linux status."""
 
-    session_type = status.probe.session_type
-    selected_instance = status.selected_backend.instance
-    if session_type is SessionType.WAYLAND and selected_instance is not BackendInstance.XWAYLAND_COMPAT:
-        from overlay_client.backend.bundles.xwayland_compat import build_xwayland_compat_bundle
-
-        return build_xwayland_compat_bundle()
-    if session_type is SessionType.X11 and selected_instance is not BackendInstance.NATIVE_X11:
-        from overlay_client.backend.bundles.native_x11 import build_native_x11_bundle
-
-        return build_native_x11_bundle()
-    return None
+    bundle = resolve_linux_bundle_from_status(status)
+    fallback_instance = bundle.capabilities.tracker_fallback_for(status.probe.session_type)
+    if fallback_instance is None or fallback_instance is bundle.descriptor.instance:
+        return None
+    return _build_linux_bundle_for_instance(fallback_instance)
 
 
 def is_wayland_bundle(bundle: BackendBundle) -> bool:
     """Return whether the bundle uses native Wayland window-management behavior."""
 
-    return bundle.descriptor.family is BackendFamily.NATIVE_WAYLAND
+    return bundle.capabilities.uses_native_wayland_windowing
 
 
 def uses_transient_parent(bundle: BackendBundle) -> bool:
     """Return whether the bundle requires the legacy X11 transient-parent workaround."""
 
-    return bundle.descriptor.family in {BackendFamily.NATIVE_X11, BackendFamily.XWAYLAND_COMPAT}
+    return bundle.capabilities.requires_transient_parent
 
 
 def platform_label_for_bundle(bundle: BackendBundle) -> str:
     """Return the current human-readable platform label for a bundle-backed runtime path."""
 
-    if bundle.descriptor.family is BackendFamily.XWAYLAND_COMPAT:
-        return "Wayland (XWayland)"
-    if bundle.descriptor.family is BackendFamily.NATIVE_X11:
-        return "X11"
-    return "Wayland"
+    return bundle.capabilities.platform_label

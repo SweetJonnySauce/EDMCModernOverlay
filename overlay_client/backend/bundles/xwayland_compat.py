@@ -8,6 +8,7 @@ from typing import Optional
 
 from overlay_client.backend.contracts import (
     BackendBundle,
+    BackendCapabilities,
     BackendDescriptor,
     BackendFamily,
     BackendInstance,
@@ -59,6 +60,11 @@ def build_xwayland_compat_bundle() -> BackendBundle:
         descriptor=BackendDescriptor(
             family=BackendFamily.XWAYLAND_COMPAT,
             instance=BackendInstance.XWAYLAND_COMPAT,
+        ),
+        capabilities=BackendCapabilities(
+            platform_label="Wayland (XWayland)",
+            uses_native_wayland_windowing=False,
+            requires_transient_parent=True,
         ),
         discovery=XWaylandCompatDiscoveryBackend(),
         presentation=window_backend,

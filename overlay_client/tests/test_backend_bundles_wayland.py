@@ -8,7 +8,7 @@ from overlay_client.backend.bundles.hyprland import build_hyprland_bundle
 from overlay_client.backend.bundles.kwin_wayland import build_kwin_wayland_bundle
 from overlay_client.backend.bundles.sway_wayfire_wlroots import build_sway_wayfire_wlroots_bundle
 from overlay_client.backend.bundles.wayland_layer_shell_generic import build_wayland_layer_shell_generic_bundle
-from overlay_client.backend.contracts import BackendFamily, BackendInstance
+from overlay_client.backend.contracts import BackendFamily, BackendInstance, SessionType
 from overlay_client.platform_integration import PlatformContext
 
 
@@ -36,6 +36,9 @@ def test_native_wayland_bundles_preserve_current_window_backend_policy_shape(bui
     assert bundle.input_policy.backend_instance is expected_instance
     assert bundle.presentation is bundle.input_policy
     assert bundle.uses_helper is False
+    assert bundle.capabilities.platform_label == "Wayland"
+    assert bundle.capabilities.uses_native_wayland_windowing is True
+    assert bundle.capabilities.requires_transient_parent is False
     assert is_wayland_bundle(bundle) is True
     assert uses_transient_parent(bundle) is False
     assert platform_label_for_bundle(bundle) == "Wayland"
@@ -53,6 +56,9 @@ def test_sway_wayfire_wlroots_bundle_has_explicit_identity_and_shipped_tracker_s
     assert bundle.input_policy.backend_instance is BackendInstance.SWAY_WAYFIRE_WLROOTS
     assert bundle.presentation is bundle.input_policy
     assert bundle.uses_helper is False
+    assert bundle.capabilities.tracker_available is True
+    assert bundle.capabilities.tracker_fallback_for(SessionType.WAYLAND) is BackendInstance.XWAYLAND_COMPAT
+    assert bundle.capabilities.tracker_fallback_for(SessionType.X11) is BackendInstance.NATIVE_X11
     assert type(bundle.discovery.create_tracker(logger)).__name__ == "_SwayTracker"
 
 
@@ -68,6 +74,7 @@ def test_hyprland_bundle_has_explicit_identity_and_shipped_tracker_shape():
     assert bundle.input_policy.backend_instance is BackendInstance.HYPRLAND
     assert bundle.presentation is bundle.input_policy
     assert bundle.uses_helper is False
+    assert bundle.capabilities.tracker_available is True
     assert type(bundle.discovery.create_tracker(logger)).__name__ == "_HyprlandTracker"
 
 
@@ -83,6 +90,7 @@ def test_kwin_bundle_has_explicit_identity_and_shipped_tracker_shape():
     assert bundle.input_policy.backend_instance is BackendInstance.KWIN_WAYLAND
     assert bundle.presentation is bundle.input_policy
     assert bundle.uses_helper is False
+    assert bundle.capabilities.tracker_available is True
     assert type(bundle.discovery.create_tracker(logger)).__name__ == "_KWinTracker"
 
 
@@ -94,11 +102,13 @@ def test_gnome_and_generic_wayland_bundles_preserve_current_no_tracker_behavior(
     assert gnome_bundle.descriptor.family is BackendFamily.NATIVE_WAYLAND
     assert gnome_bundle.descriptor.instance is BackendInstance.GNOME_SHELL_WAYLAND
     assert gnome_bundle.descriptor.support_label == "native_wayland / gnome_shell_wayland"
+    assert gnome_bundle.capabilities.tracker_available is False
     assert gnome_bundle.discovery.create_tracker(logger) is None
 
     assert generic_bundle.descriptor.family is BackendFamily.NATIVE_WAYLAND
     assert generic_bundle.descriptor.instance is BackendInstance.WAYLAND_LAYER_SHELL_GENERIC
     assert generic_bundle.descriptor.support_label == "native_wayland / wayland_layer_shell_generic"
+    assert generic_bundle.capabilities.tracker_available is False
     assert generic_bundle.discovery.create_tracker(logger) is None
 
 

@@ -8,11 +8,13 @@ from typing import Callable, Optional
 
 from overlay_client.backend.contracts import (
     BackendBundle,
+    BackendCapabilities,
     BackendDescriptor,
     BackendFamily,
     BackendInstance,
     InputPolicyBackend,
     PresentationBackend,
+    SessionType,
     TargetDiscoveryBackend,
 )
 from overlay_client.backend.bundles._linux_window_integration import create_wayland_integration
@@ -80,6 +82,16 @@ def build_native_wayland_bundle(
         descriptor=BackendDescriptor(
             family=BackendFamily.NATIVE_WAYLAND,
             instance=instance,
+        ),
+        capabilities=BackendCapabilities(
+            platform_label="Wayland",
+            uses_native_wayland_windowing=True,
+            requires_transient_parent=False,
+            tracker_available=tracker_factory is not create_unavailable_tracker,
+            tracker_fallback_by_session=(
+                (SessionType.WAYLAND, BackendInstance.XWAYLAND_COMPAT),
+                (SessionType.X11, BackendInstance.NATIVE_X11),
+            ),
         ),
         discovery=NativeWaylandDiscoveryBackend(instance=instance, tracker_factory=tracker_factory),
         presentation=window_backend,

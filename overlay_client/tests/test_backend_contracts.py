@@ -1,5 +1,6 @@
 from overlay_client.backend import (
     BackendBundle,
+    BackendCapabilities,
     BackendDescriptor,
     BackendFamily,
     BackendInstance,
@@ -36,11 +37,18 @@ class _Discovery:
     def backend_instance(self) -> BackendInstance:
         return BackendInstance.KWIN_WAYLAND
 
+    def create_tracker(self, logger, *, title_hint="elite - dangerous", monitor_provider=None):
+        del logger, title_hint, monitor_provider
+        return None
+
 
 class _Presentation:
     @property
     def backend_instance(self) -> BackendInstance:
         return BackendInstance.KWIN_WAYLAND
+
+    def create_integration(self, widget, logger, context):
+        return (widget, logger, context)
 
 
 class _InputPolicy:
@@ -101,6 +109,13 @@ def test_backend_bundle_and_selection_status_capture_stable_identity():
     )
     bundle = BackendBundle(
         descriptor=descriptor,
+        capabilities=BackendCapabilities(
+            platform_label="Wayland",
+            uses_native_wayland_windowing=True,
+            requires_transient_parent=False,
+            tracker_available=True,
+            tracker_fallback_by_session=((SessionType.WAYLAND, BackendInstance.XWAYLAND_COMPAT),),
+        ),
         discovery=_Discovery(),
         presentation=_Presentation(),
         input_policy=_InputPolicy(),
@@ -137,6 +152,9 @@ def test_backend_bundle_and_selection_status_capture_stable_identity():
     assert status.helper_states[0].version == "1.2.3"
     assert bundle.helper_ipc is not None
     assert bundle.helper_ipc.helper_kind is HelperKind.KWIN_SCRIPT
+    assert bundle.capabilities.platform_label == "Wayland"
+    assert bundle.capabilities.uses_native_wayland_windowing is True
+    assert bundle.capabilities.tracker_fallback_for(SessionType.WAYLAND) is BackendInstance.XWAYLAND_COMPAT
 
 
 def test_backend_selection_status_serializes_to_plain_payload():
@@ -161,3 +179,64 @@ def test_backend_selection_status_serializes_to_plain_payload():
     }
     assert payload["probe"]["qt_platform_name"] == "wayland"
     assert payload["notes"] == ["shadow_selector_result", "fedora_kde_wayland"]
+
+
+def test_backend_capabilities_expose_explicit_fallback_mapping_by_session():
+    capabilities = BackendCapabilities(
+        platform_label="Wayland",
+        uses_native_wayland_windowing=True,
+        requires_transient_parent=False,
+        tracker_available=False,
+        tracker_fallback_by_session=(
+            (SessionType.WAYLAND, BackendInstance.XWAYLAND_COMPAT),
+            (SessionType.X11, BackendInstance.NATIVE_X11),
+        ),
+    )
+
+    assert capabilities.tracker_fallback_for(SessionType.WAYLAND) is BackendInstance.XWAYLAND_COMPAT
+    assert capabilities.tracker_fallback_for(SessionType.X11) is BackendInstance.NATIVE_X11
+    assert capabilities.tracker_fallback_for(SessionType.UNKNOWN) is None
+
+
+def test_actual_linux_bundle_components_conform_to_tightened_protocols():
+    from overlay_client.backend.bundles.hyprland import build_hyprland_bundle
+    from overlay_client.backend.bundles.gnome_shell_wayland import build_gnome_shell_wayland_bundle
+    from overlay_client.backend.bundles.kwin_wayland import build_kwin_wayland_bundle
+    from overlay_client.backend.bundles.native_x11 import build_native_x11_bundle
+    from overlay_client.backend.bundles.sway_wayfire_wlroots import build_sway_wayfire_wlroots_bundle
+    from overlay_client.backend.bundles.wayland_layer_shell_generic import build_wayland_layer_shell_generic_bundle
+    from overlay_client.backend.bundles.xwayland_compat import build_xwayland_compat_bundle
+
+    for bundle in (
+        build_native_x11_bundle(),
+        build_xwayland_compat_bundle(),
+        build_hyprland_bundle(),
+        build_kwin_wayland_bundle(),
+        build_gnome_shell_wayland_bundle(),
+        build_sway_wayfire_wlroots_bundle(),
+        build_wayland_layer_shell_generic_bundle(),
+    ):
+        assert isinstance(bundle.discovery, TargetDiscoveryBackend)
+        assert isinstance(bundle.presentation, PresentationBackend)
+        assert isinstance(bundle.input_policy, InputPolicyBackend)
+
+
+def test_fix219_intentionally_keeps_combined_presentation_input_adapter_shape_for_linux_bundles():
+    from overlay_client.backend.bundles.gnome_shell_wayland import build_gnome_shell_wayland_bundle
+    from overlay_client.backend.bundles.hyprland import build_hyprland_bundle
+    from overlay_client.backend.bundles.kwin_wayland import build_kwin_wayland_bundle
+    from overlay_client.backend.bundles.native_x11 import build_native_x11_bundle
+    from overlay_client.backend.bundles.sway_wayfire_wlroots import build_sway_wayfire_wlroots_bundle
+    from overlay_client.backend.bundles.wayland_layer_shell_generic import build_wayland_layer_shell_generic_bundle
+    from overlay_client.backend.bundles.xwayland_compat import build_xwayland_compat_bundle
+
+    for bundle in (
+        build_native_x11_bundle(),
+        build_xwayland_compat_bundle(),
+        build_hyprland_bundle(),
+        build_kwin_wayland_bundle(),
+        build_gnome_shell_wayland_bundle(),
+        build_sway_wayfire_wlroots_bundle(),
+        build_wayland_layer_shell_generic_bundle(),
+    ):
+        assert bundle.presentation is bundle.input_policy

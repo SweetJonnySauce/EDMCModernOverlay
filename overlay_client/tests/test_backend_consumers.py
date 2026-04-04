@@ -23,6 +23,8 @@ from overlay_client.backend.consumers import (
     uses_transient_parent,
 )
 from overlay_client.backend.contracts import (
+    BackendBundle,
+    BackendCapabilities,
     BackendDescriptor,
     BackendFamily,
     BackendInstance,
@@ -33,6 +35,31 @@ from overlay_client.backend.contracts import (
 )
 from overlay_client.backend.status import BackendSelectionStatus
 from overlay_client.platform_integration import PlatformContext
+
+
+class _CapabilityOnlyDiscovery:
+    @property
+    def backend_instance(self) -> BackendInstance:
+        return BackendInstance.NATIVE_X11
+
+    def create_tracker(self, logger, *, title_hint="elite - dangerous", monitor_provider=None):
+        del logger, title_hint, monitor_provider
+        return None
+
+
+class _CapabilityOnlyPresentation:
+    @property
+    def backend_instance(self) -> BackendInstance:
+        return BackendInstance.NATIVE_X11
+
+    def create_integration(self, widget, logger, context):
+        return (widget, logger, context)
+
+
+class _CapabilityOnlyInputPolicy:
+    @property
+    def backend_instance(self) -> BackendInstance:
+        return BackendInstance.NATIVE_X11
 
 
 def test_consumer_helper_uses_native_x11_integration_factory(monkeypatch):
@@ -83,6 +110,29 @@ def test_consumer_helper_uses_native_x11_tracker_factory(monkeypatch):
     assert observed["logger"] is logger
     assert observed["title_hint"] == "elite"
     assert observed["monitor_provider"] is monitor_provider
+
+
+def test_capability_helpers_use_backend_declared_metadata_over_descriptor_inference():
+    bundle = BackendBundle(
+        descriptor=BackendDescriptor(
+            family=BackendFamily.NATIVE_X11,
+            instance=BackendInstance.NATIVE_X11,
+        ),
+        capabilities=BackendCapabilities(
+            platform_label="Wayland",
+            uses_native_wayland_windowing=True,
+            requires_transient_parent=False,
+            tracker_available=False,
+            tracker_fallback_by_session=((SessionType.WAYLAND, BackendInstance.XWAYLAND_COMPAT),),
+        ),
+        discovery=_CapabilityOnlyDiscovery(),
+        presentation=_CapabilityOnlyPresentation(),
+        input_policy=_CapabilityOnlyInputPolicy(),
+    )
+
+    assert platform_label_for_bundle(bundle) == "Wayland"
+    assert is_wayland_bundle(bundle) is True
+    assert uses_transient_parent(bundle) is False
 
 
 def test_consumer_helper_uses_xwayland_integration_factory(monkeypatch):
@@ -395,6 +445,60 @@ def test_resolve_tracker_fallback_bundle_uses_native_x11_for_x11_selection():
             BackendInstance.KWIN_WAYLAND,
         ),
         classification=CapabilityClassification.TRUE_OVERLAY,
+    )
+
+    fallback_bundle = resolve_tracker_fallback_bundle(status)
+
+    assert fallback_bundle is not None
+    assert fallback_bundle.descriptor.instance is BackendInstance.NATIVE_X11
+
+
+def test_resolve_tracker_fallback_bundle_uses_bundle_declared_fallback_mapping(monkeypatch):
+    status = BackendSelectionStatus(
+        probe=PlatformProbeResult(
+            operating_system=OperatingSystem.LINUX,
+            session_type=SessionType.WAYLAND,
+            qt_platform_name="wayland",
+            compositor="custom",
+        ),
+        selected_backend=BackendDescriptor(
+            BackendFamily.NATIVE_WAYLAND,
+            BackendInstance.KWIN_WAYLAND,
+        ),
+        classification=CapabilityClassification.TRUE_OVERLAY,
+    )
+
+    capability_bundle = BackendBundle(
+        descriptor=BackendDescriptor(
+            family=BackendFamily.NATIVE_WAYLAND,
+            instance=BackendInstance.KWIN_WAYLAND,
+        ),
+        capabilities=BackendCapabilities(
+            platform_label="Wayland",
+            uses_native_wayland_windowing=True,
+            requires_transient_parent=False,
+            tracker_available=False,
+            tracker_fallback_by_session=((SessionType.WAYLAND, BackendInstance.NATIVE_X11),),
+        ),
+        discovery=_CapabilityOnlyDiscovery(),
+        presentation=_CapabilityOnlyPresentation(),
+        input_policy=_CapabilityOnlyInputPolicy(),
+    )
+
+    monkeypatch.setattr("overlay_client.backend.consumers.resolve_linux_bundle_from_status", lambda _: capability_bundle)
+    monkeypatch.setattr(
+        "overlay_client.backend.consumers._build_linux_bundle_for_instance",
+        lambda instance: BackendBundle(
+            descriptor=BackendDescriptor(BackendFamily.NATIVE_X11, instance),
+            capabilities=BackendCapabilities(
+                platform_label="X11",
+                uses_native_wayland_windowing=False,
+                requires_transient_parent=True,
+            ),
+            discovery=_CapabilityOnlyDiscovery(),
+            presentation=_CapabilityOnlyPresentation(),
+            input_policy=_CapabilityOnlyInputPolicy(),
+        ),
     )
 
     fallback_bundle = resolve_tracker_fallback_bundle(status)

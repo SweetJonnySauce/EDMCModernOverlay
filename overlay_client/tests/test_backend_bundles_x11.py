@@ -23,6 +23,10 @@ def test_native_x11_bundle_has_explicit_identity_and_shared_window_backend():
     assert bundle.input_policy.backend_instance is BackendInstance.NATIVE_X11
     assert bundle.presentation is bundle.input_policy
     assert bundle.uses_helper is False
+    assert bundle.capabilities.platform_label == "X11"
+    assert bundle.capabilities.uses_native_wayland_windowing is False
+    assert bundle.capabilities.requires_transient_parent is True
+    assert bundle.capabilities.tracker_available is True
 
 
 def test_xwayland_bundle_has_explicit_identity_and_shared_window_backend():
@@ -36,6 +40,10 @@ def test_xwayland_bundle_has_explicit_identity_and_shared_window_backend():
     assert bundle.input_policy.backend_instance is BackendInstance.XWAYLAND_COMPAT
     assert bundle.presentation is bundle.input_policy
     assert bundle.uses_helper is False
+    assert bundle.capabilities.platform_label == "Wayland (XWayland)"
+    assert bundle.capabilities.uses_native_wayland_windowing is False
+    assert bundle.capabilities.requires_transient_parent is True
+    assert bundle.capabilities.tracker_available is True
 
 
 def test_x11_and_xwayland_bundles_share_current_shipped_xcb_integration_shape():

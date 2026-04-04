@@ -11,8 +11,12 @@ If something is unclear, capture it under `Open Questions`.
 
 - The original backend-architecture cutover in this plan is complete.
 - The codebase is now in the post-cutover cleanup/convergence stage tracked in `docs/refactoring/fix219_backend_architecture_followup_cleanup_plan.md`.
-- Current overall position: original refactor Phases `1`-`5` are complete; follow-up cleanup Phases `1`-`3` are complete; follow-up Phase `4` is the next active architectural step.
+- Current overall position: original refactor Phases `1`-`5` are complete; follow-up cleanup Phases `1`-`4` are complete; follow-up Phase `5` is the next active architectural step.
 - Retained `fix219` boundaries are intentional: `load.py` remains the plugin control plane for launch/orchestration, advisory `plugin_hint`, and Flatpak/env shaping, while installer compositor profiles remain deployment guidance rather than runtime backend-selection ownership.
+- Current `fix219` contract landing shape is explicit:
+  - generic runtime capability truth now lives in `BackendCapabilities`
+  - Linux bundles intentionally keep a combined `presentation` / `input_policy` adapter during `fix219`
+  - helper transport validation remains in `overlay_client/backend/helper_ipc.py`, while `HelperIpcBackend` stays a narrow identity surface
 - The next planned architecture tracks after `fix219` cleanup are dedicated post-`fix219` phases for Windows backend-contract cleanup, Linux standalone runtime/presentation work, and deeper physical-clamp / geometry-follow redesign; all are deferred from `fix219`, but they remain part of the overall architecture direction.
 
 ```mermaid
@@ -32,10 +36,11 @@ flowchart TD
     C --> C1["Follow-up Phase 1\nPresentation/Input ownership cleanup\nCompleted"]
     C1 --> C2["Follow-up Phase 2\nTracker ownership cleanup\nCompleted"]
     C2 --> C3["Follow-up Phase 3\nStatus/UI leakage cleanup + retained boundaries\nCompleted"]
-    C3 --> C4["Follow-up Phase 4\nValidation + compliance + signoff\nNext"]
-    C4 --> D["Post-fix219 Phase\nWindows backend-contract cleanup\nPlanned"]
-    C4 --> E["Post-fix219 Phase\nLinux standalone runtime/presentation\nPlanned"]
-    C4 --> F["Post-fix219 Phase\nPhysical clamp / geometry-follow redesign\nPlanned"]
+    C3 --> C4["Follow-up Phase 4\nBackend contract tightening\nCompleted"]
+    C4 --> C5["Follow-up Phase 5\nValidation + compliance + signoff\nNext"]
+    C5 --> D["Post-fix219 Phase\nWindows backend-contract cleanup\nPlanned"]
+    C5 --> E["Post-fix219 Phase\nLinux standalone runtime/presentation\nPlanned"]
+    C5 --> F["Post-fix219 Phase\nPhysical clamp / geometry-follow redesign\nPlanned"]
 ```
 
 ## Refactorer Persona
@@ -69,7 +74,7 @@ flowchart TD
 | Backend contracts and status schema | Existing behavior remains unchanged while new types/contracts are introduced | Unit | Pure types and policy logic should be proven without EDMC lifecycle noise | `overlay_client/tests/test_backend_contracts.py` | `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_contracts.py -q` |
 | Platform probe and selector matrix | Current environment selection/fallback behavior is mirrored before cutover | Unit | Selector correctness must be locked across synthetic environment combinations | `overlay_client/tests/test_platform_probe.py`, `overlay_client/tests/test_backend_selector.py` | `source .venv/bin/activate && python -m pytest overlay_client/tests/test_platform_probe.py overlay_client/tests/test_backend_selector.py -q` |
 | Client authority and selector wiring | Plugin hints remain advisory and client final selection is published correctly | Harness | Touches `load.py`, startup wiring, runtime state handoff | `tests/test_harness_backend_selection_wiring.py` | `source .venv/bin/activate && python -m pytest tests/test_harness_backend_selection_wiring.py -q` |
-| Backend consumer cutover | Tracking/presentation/input consumers stop re-selecting locally and consume the chosen bundle only | Mixed (Unit + Harness) | Pure consumer adapters need unit coverage; `load.py`/runtime wiring needs harness coverage | `overlay_client/tests/test_backend_consumers.py`, `tests/test_harness_backend_consumer_contract.py` | `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_consumers.py tests/test_harness_backend_consumer_contract.py -q` |
+| Backend consumer cutover | Tracking/presentation/input consumers stop re-selecting locally and consume the chosen bundle only | Mixed (Unit + Harness) | Pure consumer adapters need unit coverage; `load.py`/runtime wiring needs harness coverage | `overlay_client/tests/test_backend_consumers.py`, `tests/test_harness_backend_selection_wiring.py` | `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_consumers.py tests/test_harness_backend_selection_wiring.py -q` |
 | Capability visibility and manual override | Status, warnings, override state, and diagnostics remain truthful and visible | Mixed (Unit + Harness) | Status formatting is pure; prefs/controller/runtime round-trip is integration-sensitive | `overlay_client/tests/test_backend_status.py`, `tests/test_harness_backend_override_roundtrip.py` | `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_status.py tests/test_harness_backend_override_roundtrip.py -q` |
 | Helper boundary and approval flows | Helper comms stay local-only and helper install/enable remains explicit and user-approved | Mixed (Unit + Harness) | Local protocol validation is pure; approval/reporting paths may cross plugin/runtime surfaces | `overlay_client/tests/test_helper_ipc_boundary.py`, `tests/test_install_linux.py` | `source .venv/bin/activate && python -m pytest overlay_client/tests/test_helper_ipc_boundary.py tests/test_install_linux.py -q` |
 
@@ -161,7 +166,7 @@ flowchart LR
         Helper["Optional compositor helpers\nlocal IPC boundary"]
         Diag["Diagnostics collector scripts"]
         Hint["plugin_hint is advisory"]
-        Api["backend_status CLI currently returns plugin_hint"]
+        Api["backend_status API\nclient_runtime preferred\nplugin_hint fallback"]
     end
 
     Core --> Plugin

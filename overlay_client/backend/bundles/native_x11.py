@@ -8,6 +8,7 @@ from typing import Optional
 
 from overlay_client.backend.contracts import (
     BackendBundle,
+    BackendCapabilities,
     BackendDescriptor,
     BackendFamily,
     BackendInstance,
@@ -59,6 +60,11 @@ def build_native_x11_bundle() -> BackendBundle:
         descriptor=BackendDescriptor(
             family=BackendFamily.NATIVE_X11,
             instance=BackendInstance.NATIVE_X11,
+        ),
+        capabilities=BackendCapabilities(
+            platform_label="X11",
+            uses_native_wayland_windowing=False,
+            requires_transient_parent=True,
         ),
         discovery=NativeX11DiscoveryBackend(),
         presentation=window_backend,

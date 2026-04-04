@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from overlay_client.platform_integration import PlatformContext
+    from overlay_client.window_tracking import MonitorProvider, WindowTracker
 
 
 class OperatingSystem(str, Enum):
@@ -111,6 +116,25 @@ class BackendOverrideOption:
 
 
 @dataclass(frozen=True, slots=True)
+class BackendCapabilities:
+    """Explicit bundle-declared capability metadata for generic runtime consumers."""
+
+    platform_label: str
+    uses_native_wayland_windowing: bool
+    requires_transient_parent: bool
+    tracker_available: bool = True
+    tracker_fallback_by_session: tuple[tuple[SessionType, BackendInstance], ...] = ()
+
+    def tracker_fallback_for(self, session_type: SessionType) -> BackendInstance | None:
+        """Return the declared tracker fallback instance for the given session, if any."""
+
+        for fallback_session, fallback_instance in self.tracker_fallback_by_session:
+            if fallback_session is session_type:
+                return fallback_instance
+        return None
+
+
+@dataclass(frozen=True, slots=True)
 class PlatformProbeResult:
     """Pure snapshot of the local platform and capability environment."""
 
@@ -158,6 +182,15 @@ class TargetDiscoveryBackend(Protocol):
     def backend_instance(self) -> BackendInstance:
         """Return the backend instance identifier for this component."""
 
+    def create_tracker(
+        self,
+        logger: logging.Logger,
+        *,
+        title_hint: str = "elite - dangerous",
+        monitor_provider: MonitorProvider | None = None,
+    ) -> WindowTracker | None:
+        """Create the backend-owned tracker used for target discovery."""
+
 
 @runtime_checkable
 class PresentationBackend(Protocol):
@@ -166,6 +199,9 @@ class PresentationBackend(Protocol):
     @property
     def backend_instance(self) -> BackendInstance:
         """Return the backend instance identifier for this component."""
+
+    def create_integration(self, widget: object, logger: logging.Logger, context: PlatformContext) -> object:
+        """Create the backend-owned window integration for runtime presentation."""
 
 
 @runtime_checkable
@@ -195,6 +231,7 @@ class BackendBundle:
     """Concrete bundle of backend components selected for a runtime environment."""
 
     descriptor: BackendDescriptor
+    capabilities: BackendCapabilities
     discovery: TargetDiscoveryBackend
     presentation: PresentationBackend
     input_policy: InputPolicyBackend
