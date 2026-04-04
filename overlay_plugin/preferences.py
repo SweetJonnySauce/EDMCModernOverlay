@@ -2298,7 +2298,9 @@ class PreferencesPanel:
             elif normalised:
                 self._status_var.set(f"Overlay backend set to {normalised}.")
             else:
-                self._status_var.set("Overlay backend cleared (Auto).")
+                self._status_var.set(
+                    "Overlay backend cleared (Auto). Restart Overlay Client if the live runtime status still shows the previous selection."
+                )
         finally:
             self._backend_override_apply_in_progress = False
 

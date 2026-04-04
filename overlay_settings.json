@@ -9,7 +9,7 @@
   "gridline_spacing": 120,
   "force_render": false,
   "standalone_mode": false,
-  "manual_backend_override": "xwayland_compat",
+  "manual_backend_override": "native_x11",
   "physical_clamp_enabled": false,
   "physical_clamp_overrides": {},
   "show_debug_overlay": false,

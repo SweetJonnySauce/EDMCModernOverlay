@@ -419,6 +419,33 @@ def test_apply_manual_backend_override_clears_auto_value() -> None:
     )
 
 
+def test_apply_manual_backend_override_clear_auto_message_explains_stale_runtime_refresh() -> None:
+    panel = object.__new__(prefs.PreferencesPanel)
+    panel._status_var = _StatusVar()
+    panel._preferences = type(
+        "_Prefs",
+        (),
+        {
+            "manual_backend_override": "native_x11",
+            "save": lambda self: None,
+        },
+    )()
+    panel._var_manual_backend_override = _StatusVar()
+    panel._var_manual_backend_override.set("auto")
+    panel._backend_override_apply_in_progress = False
+    applied: list[str] = []
+    panel._set_manual_backend_override = lambda value: applied.append(value)
+
+    panel._apply_manual_backend_override()
+
+    assert panel._preferences.manual_backend_override == ""
+    assert applied == [""]
+    assert (
+        panel._status_var.value
+        == "Overlay backend cleared (Auto). Restart Overlay Client if the live runtime status still shows the previous selection."
+    )
+
+
 def test_profile_state_monitor_starts_with_backend_status_callback_only() -> None:
     panel = object.__new__(prefs.PreferencesPanel)
     panel._frame = _FakeFrame()
