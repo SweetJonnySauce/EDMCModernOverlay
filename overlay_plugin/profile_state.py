@@ -301,18 +301,15 @@ def _normalise_ship_entry(raw: Mapping[str, Any], existing: Optional[Mapping[str
 
     # Ship-name fields must come from actual name fields only.
     # Localised ship-type fields belong to ship_type, not ship_name.
-    ship_name = _first_non_empty(
-        raw,
-        (
-            "UserShipName",
-            "ShipName",
-            "ShipName_Localised",
-            "ShipNameLocalised",
-            "Name_Localised",
-            "NameLocalised",
-            "ship_name",
-            "Name",
-        ),
+    ship_name_fields = (
+        "UserShipName",
+        "ShipName",
+        "ShipName_Localised",
+        "ShipNameLocalised",
+        "Name_Localised",
+        "NameLocalised",
+        "ship_name",
+        "Name",
     )
     saw_ship_name_field, ship_name = _first_present_non_empty(raw, ship_name_fields)
     if ship_name is not None:
