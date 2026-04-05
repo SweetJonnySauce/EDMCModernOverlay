@@ -301,23 +301,22 @@ def _normalise_ship_entry(raw: Mapping[str, Any], existing: Optional[Mapping[str
 
     # Ship-name fields must come from actual name fields only.
     # Localised ship-type fields belong to ship_type, not ship_name.
-    ship_name = _first_non_empty(
-        raw,
-        (
-            "UserShipName",
-            "ShipName",
-            "ShipName_Localised",
-            "ShipNameLocalised",
-            "Name_Localised",
-            "NameLocalised",
-            "ship_name",
-            "Name",
-        ),
+    ship_name_fields = (
+        "UserShipName",
+        "ShipName",
+        "ShipName_Localised",
+        "ShipNameLocalised",
+        "Name_Localised",
+        "NameLocalised",
+        "ship_name",
+        "Name",
     )
+    saw_ship_name_field, ship_name = _first_present_non_empty(raw, ship_name_fields)
     if ship_name is not None:
-        token = str(ship_name).strip()
-        if token and not token.startswith("$"):
-            merged["ship_name"] = token
+        merged["ship_name"] = ship_name
+    elif saw_ship_name_field:
+        # Explicit blank names in tracked journal data should clear stale cached names.
+        merged.pop("ship_name", None)
 
     ship_ident = raw.get("UserShipId")
     if ship_ident is None:
@@ -356,6 +355,21 @@ def _first_non_empty(raw: Mapping[str, Any], keys: tuple[str, ...]) -> Optional[
         if token:
             return token
     return None
+
+
+def _first_present_non_empty(raw: Mapping[str, Any], keys: tuple[str, ...]) -> tuple[bool, Optional[str]]:
+    saw_key = False
+    for key in keys:
+        if key not in raw:
+            continue
+        saw_key = True
+        value = raw.get(key)
+        if value is None:
+            continue
+        token = str(value).strip()
+        if token and not token.startswith("$"):
+            return True, token
+    return saw_key, None
 
 
 def _ship_sort_key(entry: Mapping[str, Any]) -> int:
