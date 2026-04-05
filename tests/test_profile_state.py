@@ -141,7 +141,28 @@ def test_profile_store_storedships_uses_localised_name_fields(tmp_path: Path) ->
     assert ship_91["ship_ident"] == "SW-29L"
 
 
-def test_profile_store_storedships_falls_back_to_ship_type_localised_for_ship_name(tmp_path: Path) -> None:
+def test_profile_store_storedships_prefers_name_over_localised_ship_type_for_ship_name(tmp_path: Path) -> None:
+    user_path = tmp_path / "overlay_groupings.user.json"
+    user_path.write_text("{}\n", encoding="utf-8")
+    store = OverlayProfileStore(user_path=user_path)
+
+    changed = store.update_fleet_from_journal(
+        entry={
+            "event": "StoredShips",
+            "ShipsHere": [
+                {"ShipID": 18, "ShipType": "cutter", "ShipType_Localised": "Imperial Cutter", "Name": "Lana rhoades"}
+            ],
+            "ShipsRemote": [],
+        }
+    )
+    status = store.status()
+
+    assert changed is True
+    ship_18 = next(item for item in status["ships"] if item["ship_id"] == 18)
+    assert ship_18["ship_name"] == "Lana rhoades"
+
+
+def test_profile_store_storedships_does_not_treat_ship_type_localised_as_ship_name(tmp_path: Path) -> None:
     user_path = tmp_path / "overlay_groupings.user.json"
     user_path.write_text("{}\n", encoding="utf-8")
     store = OverlayProfileStore(user_path=user_path)
@@ -159,7 +180,8 @@ def test_profile_store_storedships_falls_back_to_ship_type_localised_for_ship_na
 
     assert changed is True
     ship_91 = next(item for item in status["ships"] if item["ship_id"] == 91)
-    assert ship_91["ship_name"] == "Type-11 Prospector"
+    assert ship_91["ship_name"] == ""
+    assert ship_91["ship_type"] == "Type-11 Prospector"
     assert ship_91["ship_ident"] == "SW-29L"
 
 
@@ -236,7 +258,7 @@ def test_profile_store_shipyardswap_uses_ship_name_map_for_ship_type(monkeypatch
     assert ship_91["ship_ident"] == "SW-29L"
 
 
-def test_profile_store_shipyardswap_falls_back_to_ship_type_localised_for_ship_name(tmp_path: Path) -> None:
+def test_profile_store_shipyardswap_does_not_treat_ship_type_localised_as_ship_name(tmp_path: Path) -> None:
     user_path = tmp_path / "overlay_groupings.user.json"
     user_path.write_text("{}\n", encoding="utf-8")
     store = OverlayProfileStore(user_path=user_path)
@@ -254,7 +276,8 @@ def test_profile_store_shipyardswap_falls_back_to_ship_type_localised_for_ship_n
 
     assert changed is True
     ship_91 = next(item for item in status["ships"] if item["ship_id"] == 91)
-    assert ship_91["ship_name"] == "Type-11 Prospector"
+    assert ship_91["ship_name"] == ""
+    assert ship_91["ship_type"] == "Type-11 Prospector"
     assert ship_91["ship_ident"] == "SW-29L"
 
 
@@ -287,6 +310,27 @@ def test_profile_store_shipyardswap_state_merge_uses_ship_name_map_for_ship_type
     assert ship_93["ship_type"] == "Kestrel Mk II"
     assert ship_93["ship_name"] == "Lily Phillips"
     assert ship_93["ship_ident"] == "PVE-05"
+
+
+def test_profile_store_ignores_shiptargeted_entry_for_fleet_cache(tmp_path: Path) -> None:
+    user_path = tmp_path / "overlay_groupings.user.json"
+    user_path.write_text("{}\n", encoding="utf-8")
+    store = OverlayProfileStore(user_path=user_path)
+
+    changed = store.update_fleet_from_journal(
+        entry={
+            "event": "ShipTargeted",
+            "ShipID": 57,
+            "Ship": "Type9_Military",
+            "Ship_Localised": "Type-10 Defender",
+            "ShipName": "Should Not Be Used",
+            "ShipIdent": "BAD-01",
+        }
+    )
+    status = store.status()
+
+    assert changed is False
+    assert status["ships"] == []
 
 
 def test_profile_store_storedships_merges_active_ship_from_state_when_omitted(tmp_path: Path) -> None:
