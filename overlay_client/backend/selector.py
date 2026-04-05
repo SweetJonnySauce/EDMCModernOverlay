@@ -25,15 +25,13 @@ class BackendSelector:
     """Select a shadow backend result without driving runtime consumers yet."""
 
     shadow_mode: bool = True
-    conservative_existing_classification: bool = True
     stable_notes: tuple[str, ...] = field(default_factory=lambda: ("shadow_selector_result",))
 
     def select(self, probe: PlatformProbeResult, *, manual_override: str = "") -> BackendSelectionStatus:
         auto_descriptor = self._select_descriptor(probe)
         override_instance, override_error = self._resolve_manual_override(manual_override, probe, auto_descriptor)
         descriptor = self._descriptor_for_override(override_instance, probe, auto_descriptor)
-        strict_classification = self._strict_classification(descriptor, probe)
-        classification = self._classify(descriptor, probe, strict_classification)
+        classification = self._strict_classification(descriptor, probe)
         if override_instance is not None and descriptor != auto_descriptor:
             fallback_from, fallback_reason = auto_descriptor, FallbackReason.MANUAL_OVERRIDE
         elif override_instance is not None:
@@ -44,7 +42,7 @@ class BackendSelector:
             descriptor,
             probe,
             classification=classification,
-            strict_classification=strict_classification,
+            strict_classification=classification,
         )
         notes = self._selection_notes(descriptor, probe, override_instance=override_instance, override_error=override_error)
         return BackendSelectionStatus(
@@ -170,20 +168,6 @@ class BackendSelector:
             return CapabilityClassification.DEGRADED_OVERLAY
         return CapabilityClassification.TRUE_OVERLAY
 
-    def _classify(
-        self,
-        descriptor: BackendDescriptor,
-        probe: PlatformProbeResult,
-        strict_classification: CapabilityClassification,
-    ) -> CapabilityClassification:
-        if (
-            self.conservative_existing_classification
-            and descriptor.instance is BackendInstance.XWAYLAND_COMPAT
-            and probe.session_type is SessionType.WAYLAND
-        ):
-            return CapabilityClassification.TRUE_OVERLAY
-        return strict_classification
-
     def _fallback_context(
         self,
         descriptor: BackendDescriptor,
@@ -202,17 +186,15 @@ class BackendSelector:
 
     def _review_guard(
         self,
-        descriptor: BackendDescriptor,
-        probe: PlatformProbeResult,
+        _descriptor: BackendDescriptor,
+        _probe: PlatformProbeResult,
         *,
         classification: CapabilityClassification,
         strict_classification: CapabilityClassification,
     ) -> tuple[bool, tuple[str, ...]]:
         if classification is strict_classification:
             return False, ()
-        if descriptor.instance is BackendInstance.XWAYLAND_COMPAT and probe.session_type is SessionType.WAYLAND:
-            return True, ("no_silent_downgrade:xwayland_compat",)
-        return True, ("no_silent_downgrade:review_required",)
+        return True, ("classification_requires_review",)
 
     def _selection_notes(
         self,

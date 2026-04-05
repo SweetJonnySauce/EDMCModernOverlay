@@ -1,4 +1,4 @@
-from overlay_client.backend import BackendInstance, ProbeSource
+from overlay_client.backend import BackendInstance, CapabilityClassification, ProbeSource
 from overlay_client.platform_context import _backend_status_signature, _client_backend_status, _initial_platform_context
 from overlay_client.platform_integration import PlatformContext
 
@@ -106,5 +106,6 @@ def test_client_backend_status_applies_manual_override_from_context():
     )
 
     assert status.selected_backend.instance is BackendInstance.XWAYLAND_COMPAT
+    assert status.classification is CapabilityClassification.DEGRADED_OVERLAY
     assert status.manual_override is BackendInstance.XWAYLAND_COMPAT
     assert status.fallback_reason is not None

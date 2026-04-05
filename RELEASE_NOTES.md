@@ -8,6 +8,7 @@
 
 ### Maintenance
 - Set up @dwomble's test harness to do headless EDMC testing (copied from BGS-Tally). Fix [#207](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/207)
+- Backend status truthfulness: Wayland `xwayland_compat` is now reported as `degraded_overlay` instead of `true_overlay`; runtime behavior and explicit manual override semantics are unchanged.
 
 ### Bug Fixes
 - Fix [#183](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/183) - Enabled checkbox on Overlay Controller is confusing.

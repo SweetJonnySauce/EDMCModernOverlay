@@ -39,8 +39,10 @@ def test_backend_status_cli_roundtrip_reports_manual_override(runtime_for_backen
     assert response["status"] == "ok"
     backend_status = response["backend_status"]
     report = response["report"]
+    assert backend_status["classification"] == "degraded_overlay"
     assert backend_status["manual_override"] == "xwayland_compat"
     assert "fallback_reason" not in backend_status
+    assert report["classification"] == "degraded_overlay"
     assert report["manual_override"] == "xwayland_compat"
     assert report["warning_required"] is True
 

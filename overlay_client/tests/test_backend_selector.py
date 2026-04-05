@@ -41,11 +41,11 @@ def test_selector_uses_xwayland_compat_for_wayland_xcb_path():
 
     assert status.selected_backend.family is BackendFamily.XWAYLAND_COMPAT
     assert status.selected_backend.instance is BackendInstance.XWAYLAND_COMPAT
-    assert status.classification is CapabilityClassification.TRUE_OVERLAY
+    assert status.classification is CapabilityClassification.DEGRADED_OVERLAY
     assert status.fallback_from == BackendDescriptor(BackendFamily.NATIVE_WAYLAND, BackendInstance.KWIN_WAYLAND)
     assert status.fallback_reason is FallbackReason.XWAYLAND_COMPAT_ONLY
-    assert status.review_required is True
-    assert status.review_reasons == ("no_silent_downgrade:xwayland_compat",)
+    assert status.review_required is False
+    assert status.review_reasons == ()
     assert "wayland_session_uses_xwayland_compat" in status.notes
 
 
@@ -194,10 +194,12 @@ def test_selector_applies_manual_xwayland_override_on_wayland():
     )
 
     assert status.selected_backend.instance is BackendInstance.XWAYLAND_COMPAT
+    assert status.classification is CapabilityClassification.DEGRADED_OVERLAY
     assert status.manual_override is BackendInstance.XWAYLAND_COMPAT
     assert status.override_error == ""
     assert status.fallback_from == BackendDescriptor(BackendFamily.NATIVE_WAYLAND, BackendInstance.KWIN_WAYLAND)
     assert status.fallback_reason is FallbackReason.MANUAL_OVERRIDE
+    assert status.review_required is False
     assert "manual_override_active:xwayland_compat" in status.notes
 
 
@@ -239,8 +241,8 @@ def test_selector_reports_invalid_manual_override_without_changing_auto_selectio
     assert "invalid_manual_override:bogus_backend" in status.notes
 
 
-def test_selector_can_expose_stricter_xwayland_classification_when_conservative_mode_is_disabled():
-    selector = BackendSelector(conservative_existing_classification=False)
+def test_selector_reports_strict_xwayland_classification_without_review_guard():
+    selector = BackendSelector()
     status = selector.select(
         PlatformProbeResult(
             operating_system=OperatingSystem.LINUX,

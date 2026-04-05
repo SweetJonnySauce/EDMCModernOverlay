@@ -73,6 +73,7 @@ If something is unclear, capture it under `Open Questions`.
 - Phase `2` is complete: Linux tracker ownership now routes through backend-owned discovery modules rather than living in the public runtime tracker entrypoint.
 - Phase `3` is complete: preferences use client-authoritative backend status when available, `force_xwayland` has been retired in favor of explicit `xwayland_compat` override semantics, override-choice metadata is backend-owned, backend status has been removed from the controller title bar, debug/test-overlay diagnostics show backend choice, residual generic runtime guards have been audited, and the retained intentional boundaries are documented explicitly.
 - Phase `4` is complete: the public backend surface now declares required discovery/presentation behavior directly, capability truth for generic runtime consumers now lives in `BackendCapabilities`, the still-intentional combined Linux presentation/input adapter shape is documented explicitly, and the helper boundary remains narrow and transport-specific.
+- Phase `4A` is complete: shipped status surfaces now report Wayland `xwayland_compat` as `degraded_overlay`, the transitional review-guarded `true_overlay` classification has been removed, and explicit manual-override/runtime behavior remains unchanged.
 - `load.py` launch/orchestration, advisory `plugin_hint`, and Flatpak/env shaping remain intentional plugin control-plane boundaries rather than backend-ownership defects.
 - Installer compositor profiles in `scripts/install_linux.sh` / `scripts/install_matrix.json` remain intentional deployment guidance boundaries rather than runtime backend-selection defects.
 - The remaining open work in this plan is Phase `5`: real-environment validation, EDMC compliance review, and final signoff.
@@ -249,6 +250,7 @@ If something is unclear, capture it under `Open Questions`.
 | 2 | Move tracker ownership into backend-owned discovery modules and trim shared runtime tracking code | Completed |
 | 3 | Remove UI/control-surface backend-policy leakage, fix status surfaces, and document the retained non-backend boundaries | Completed |
 | 4 | Tighten backend contracts so the public backend surface is behavior-oriented rather than primarily identity-oriented | Completed |
+| 4A | Flip Wayland `xwayland_compat` reporting from transitional `true_overlay` to explicit `degraded_overlay` without changing runtime backend behavior | Completed |
 | 5 | Run remaining environment validation, EDMC compliance review, and final release/signoff closure | Not Started |
 
 ## Phase Details
@@ -736,6 +738,95 @@ If something is unclear, capture it under `Open Questions`.
 - Generic consumers no longer depend on undeclared backend methods or enum/family inference for capability truth.
 - The active `fix219_` docs reflect the tightened contract shape before signoff work begins.
 
+### Phase 4A: XWayland Compatibility Honesty Cutover
+- Land a narrow truthfulness update before release-readiness signoff so the shipped status model stops overstating the Wayland `xwayland_compat` compatibility path.
+- Scope guard: this phase changes selector/status truthfulness only. It must not remove `xwayland_compat`, redesign startup transport, or change the actual runtime backend behavior of the compatibility path.
+- Risks: surprising users/support with a new degraded label, or accidentally broadening the work into a transport/backend redesign rather than a status-policy correction.
+- Mitigations: keep fallback metadata and manual-override behavior intact, keep the schema stable, cover the cutover with focused unit/harness tests, and update the active docs before Phase `5` validation treats the new output as release-ready evidence.
+
+#### Phase 4A Preflight Notes
+- `4A.1` policy guard:
+  - keep backend selection and runtime behavior unchanged; only the reported support classification changes
+  - preserve `fallback_from` and `fallback_reason=xwayland_compat_only` so support can still see why the compatibility backend was chosen
+- `4A.2` surface guard:
+  - keep `review_required` in the payload/report schema for compatibility, but stop using it for the Wayland `xwayland_compat` case once the classification is honest
+  - update UI/debug wording only as needed to reflect the honest `degraded_overlay` result
+- `4A.3` validation guard:
+  - re-prove explicit manual override and restart-required behavior end to end
+  - if a real Wayland validation environment is not available, record that the behavior change is test-backed and defer manual confirmation explicitly rather than inventing signoff evidence
+
+| Stage | Description | Status |
+| --- | --- | --- |
+| 4A.1 | Flip the shipped selector/status policy so Wayland `xwayland_compat` reports `degraded_overlay` instead of transitional `true_overlay` | Completed |
+| 4A.2 | Update selector/status/preferences/debug coverage so all user-visible surfaces reflect the honest degraded classification consistently | Completed |
+| 4A.3 | Re-validate explicit `xwayland_compat` override behavior, then refresh active docs/release notes so Phase `5` signoff uses the honest shipped classification | Completed |
+
+#### Stage 4A.1 Detailed Plan
+- Objective:
+- Make the shipped selector/status result for Wayland `xwayland_compat` truthful without changing which backend launches or how it runs.
+- Primary touch points:
+- `overlay_client/backend/selector.py`
+- `overlay_client/backend/status.py`
+- `overlay_client/tests/test_backend_selector.py`
+- `overlay_client/tests/test_backend_status.py`
+- Steps:
+- Remove the conservative selector rewrite that currently upgrades strict `degraded_overlay` to shipped `true_overlay` for Wayland `xwayland_compat`.
+- Keep `fallback_from` and `fallback_reason=xwayland_compat_only` intact so the compatibility downgrade remains explicit in diagnostics.
+- Stop using `review_required=no_silent_downgrade:xwayland_compat` for this path once the reported classification matches the strict classification.
+- Keep the payload/report schema stable: `review_required` and `review_reasons` may remain present but should be false/empty for this case.
+- Acceptance criteria:
+- Wayland sessions running Qt `xcb` still select `xwayland_compat`.
+- The selected backend remains unchanged, but the reported classification becomes `degraded_overlay`.
+- No startup transport, manual override, or bundle/runtime behavior changes are introduced in this stage.
+- Verification to run:
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_selector.py overlay_client/tests/test_backend_status.py -q`
+
+#### Stage 4A.2 Detailed Plan
+- Objective:
+- Keep every user-visible/backend-visible status surface aligned once the honest degraded classification ships.
+- Primary touch points:
+- `overlay_client/tests/test_backend_selector.py`
+- `overlay_client/tests/test_backend_status.py`
+- `tests/test_preferences_panel_controller_tab.py`
+- `tests/test_harness_backend_status_roundtrip.py`
+- `tests/test_harness_backend_override_roundtrip.py`
+- `overlay_client/tests/test_debug_overlay_view.py`
+- Steps:
+- Update selector and status expectations that currently lock the transitional `true_overlay + review_required` combination for Wayland `xwayland_compat`.
+- Update preferences/debug/status-surface coverage so summaries and warnings describe `xwayland_compat` as a degraded compatibility path instead of a true-overlay path.
+- Reconfirm that explicit manual override to `xwayland_compat` remains restart-required and continues to report as a manual compatibility selection rather than as an invalid or implicit fallback.
+- Acceptance criteria:
+- Unit and harness coverage agree on the new `degraded_overlay` result for Wayland `xwayland_compat`.
+- Preferences/debug/status surfaces remain internally consistent and continue to expose fallback/manual-override metadata correctly.
+- Verification to run:
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_selector.py overlay_client/tests/test_backend_status.py tests/test_preferences_panel_controller_tab.py tests/test_harness_backend_status_roundtrip.py tests/test_harness_backend_override_roundtrip.py overlay_client/tests/test_debug_overlay_view.py -q`
+
+#### Stage 4A.3 Detailed Plan
+- Objective:
+- Make the honesty cutover part of the active `fix219` narrative before Phase `5` validation/signoff consumes the new output as evidence.
+- Primary touch points:
+- `docs/refactoring/fix219_backend_architecture_followup_cleanup_plan.md`
+- `docs/refactoring/fix219_backend_architecture_refactor_plan.md`
+- `RELEASE_NOTES.md`
+- `/home/jon/edmc-logs/EDMCModernOverlay/overlay_client.log`
+- Steps:
+- If a real Wayland environment is available, confirm that explicit `xwayland_compat` override still launches the overlay with `QT_QPA_PLATFORM=xcb` and that runtime status now reports `degraded_overlay`.
+- If a real Wayland environment is not available, record that limitation explicitly and carry the manual confirmation into Phase `5.1` rather than implying it was already re-validated.
+- Refresh the active docs/release notes so they describe the shipped `xwayland_compat` status as an explicit degraded compatibility path rather than a conservative temporary `true_overlay` classification.
+- Acceptance criteria:
+- The active docs no longer describe the transitional `true_overlay` reporting as current behavior.
+- Any manual-validation gap remains explicit rather than implied complete.
+- Verification to run:
+- Record exact commands, environments, and outcomes in the `Execution Log`; include any targeted automated tests run alongside the manual checks.
+
+#### Phase 4A Execution Order
+- Implement in strict order: `4A.1` -> `4A.2` -> `4A.3`.
+
+#### Phase 4A Exit Criteria
+- Wayland `xwayland_compat` reports as `degraded_overlay` in shipped status surfaces.
+- `xwayland_compat` remains available as an explicit manual compatibility override with unchanged runtime behavior.
+- The active `fix219_` docs reflect the honest compatibility classification before Phase `5` validation/signoff begins.
+
 ### Phase 5: Validation, Compliance, And Signoff
 - Close the remaining release-readiness gaps after the ownership/status cleanup and contract-tightening work land.
 - Keep this phase evidence-driven: record exact environments checked, exact compliance findings, and any explicit limitations retained at signoff time.
@@ -973,6 +1064,23 @@ Use this checklist before declaring the backend-architecture cleanup complete.
 - `source .venv/bin/activate && python -m ruff check overlay_client/backend/contracts.py overlay_client/backend/consumers.py overlay_client/backend/bundles/native_x11.py overlay_client/backend/bundles/xwayland_compat.py overlay_client/backend/bundles/_wayland_common.py overlay_client/backend/__init__.py overlay_client/tests/test_backend_contracts.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_backend_bundles_x11.py overlay_client/tests/test_backend_bundles_wayland.py overlay_client/tests/test_platform_controller_backend_status.py` -> passed.
 - `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_contracts.py overlay_client/tests/test_helper_ipc_boundary.py -q` -> passed (`16` passed).
 - `source .venv/bin/activate && python -m ruff check overlay_client/tests/test_backend_contracts.py overlay_client/tests/test_helper_ipc_boundary.py` -> passed.
+
+### Phase 4A Execution Summary
+- Stage `4A.1` completed on 2026-04-04.
+- Removed the transitional selector rewrite in `overlay_client/backend/selector.py` so Wayland `xwayland_compat` now reports its strict classification directly as `degraded_overlay` instead of shipping a softened `true_overlay` result with a review guard.
+- Preserved runtime behavior and backend choice: Wayland + Qt `xcb` still selects `xwayland_compat`, fallback metadata remains explicit, and the payload/report schema still includes `review_required` fields even though this path no longer uses them.
+- Stage `4A.2` completed on 2026-04-04.
+- Updated unit and harness coverage to lock the honest degraded classification across selector, status formatting, preferences-facing status snapshots, plugin shadow status payloads, and explicit manual-override round-trips.
+- Preserved the existing explicit manual `xwayland_compat` override semantics, including restart-required transport behavior, while making the user-visible status surfaces reflect the weaker compatibility guarantee truthfully.
+- Stage `4A.3` completed on 2026-04-04.
+- Refreshed the active `fix219_` docs and release notes so they no longer describe the conservative transitional `true_overlay` classification as current behavior for Wayland `xwayland_compat`.
+- No real Wayland manual rerun was performed as part of this implementation step; explicit runtime confirmation of the unchanged `QT_QPA_PLATFORM=xcb` override path remains part of Phase `5.1` validation evidence rather than being implied complete here.
+- Phase `4A` is now complete: shipped status/reporting is honest about the XWayland compatibility path, while backend selection and runtime behavior remain unchanged.
+
+### Tests Run For Phase 4A
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_backend_selector.py overlay_client/tests/test_backend_status.py tests/test_preferences_panel_controller_tab.py tests/test_harness_backend_status_roundtrip.py tests/test_harness_backend_override_roundtrip.py overlay_client/tests/test_debug_overlay_view.py -q` -> passed (`42` passed).
+- `source .venv/bin/activate && python -m pytest overlay_client/tests/test_platform_context.py tests/test_overlay_config_payload.py -q` -> passed (`10` passed).
+- `source .venv/bin/activate && python -m ruff check overlay_client/backend/selector.py overlay_client/tests/test_backend_selector.py overlay_client/tests/test_backend_status.py overlay_client/tests/test_platform_context.py tests/test_overlay_config_payload.py tests/test_harness_backend_override_roundtrip.py` -> passed.
 
 ### Phase 5 Execution Summary
 - Not started.

@@ -137,5 +137,7 @@ def test_platform_context_payload_carries_manual_backend_override(monkeypatch):
 
     assert context["manual_backend_override"] == "xwayland_compat"
     assert context["shadow_backend_status"]["manual_override"] == "xwayland_compat"
+    assert context["shadow_backend_status"]["classification"] == "degraded_overlay"
     assert "fallback_reason" not in context["shadow_backend_status"]
+    assert context["shadow_backend_status"]["report"]["classification"] == "degraded_overlay"
     assert context["shadow_backend_status"]["probe"]["qt_platform_name"] == "xcb"

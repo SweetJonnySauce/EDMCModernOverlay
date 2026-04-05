@@ -29,15 +29,13 @@ def _probe() -> PlatformProbeResult:
     )
 
 
-def test_backend_status_reports_fallback_and_review_guard_in_payload():
+def test_backend_status_reports_xwayland_fallback_as_degraded_overlay():
     status = BackendSelectionStatus(
         probe=_probe(),
         selected_backend=BackendDescriptor(BackendFamily.XWAYLAND_COMPAT, BackendInstance.XWAYLAND_COMPAT),
-        classification=CapabilityClassification.TRUE_OVERLAY,
+        classification=CapabilityClassification.DEGRADED_OVERLAY,
         fallback_from=BackendDescriptor(BackendFamily.NATIVE_WAYLAND, BackendInstance.KWIN_WAYLAND),
         fallback_reason=FallbackReason.XWAYLAND_COMPAT_ONLY,
-        review_required=True,
-        review_reasons=("no_silent_downgrade:xwayland_compat",),
         notes=("client_selector_result",),
         shadow_mode=False,
     )
@@ -45,33 +43,35 @@ def test_backend_status_reports_fallback_and_review_guard_in_payload():
     payload = status.to_payload()
 
     assert status.uses_fallback is True
-    assert status.has_review_guard is True
+    assert status.has_review_guard is False
     assert payload["fallback_from"] == {
         "family": "native_wayland",
         "instance": "kwin_wayland",
     }
     assert payload["fallback_reason"] == "xwayland_compat_only"
-    assert payload["review_required"] is True
-    assert payload["review_reasons"] == ["no_silent_downgrade:xwayland_compat"]
+    assert payload["review_required"] is False
+    assert payload["review_reasons"] == []
     assert payload["report"]["family"] == "xwayland_compat"
     assert payload["report"]["instance"] == "xwayland_compat"
     assert payload["report"]["source"] == "client_runtime"
     assert payload["report"]["fallback_from"] == "native_wayland / kwin_wayland"
     assert payload["report"]["warning_required"] is True
     assert payload["report"]["summary"] == (
-        "family=xwayland_compat instance=xwayland_compat classification=true_overlay "
+        "family=xwayland_compat instance=xwayland_compat classification=degraded_overlay "
         "fallback_from=native_wayland/kwin_wayland fallback_reason=xwayland_compat_only "
-        "manual_override=none override_error=none review_required=true "
-        "review_reasons=no_silent_downgrade:xwayland_compat helpers=none"
+        "manual_override=none override_error=none review_required=false "
+        "review_reasons=none helpers=none"
     )
     assert format_status_ui_summary(payload) == (
-        "Backend: XWayland compatibility | Mode: True overlay | Source: Live runtime"
+        "Backend: XWayland compatibility | Mode: Degraded overlay | Source: Live runtime"
     )
     assert format_status_ui_warning(payload) == (
-        "Warning: Using XWayland compatibility mode because a native Wayland path is not active."
+        "Warning: Some overlay guarantees are reduced in this mode.; "
+        "Using XWayland compatibility mode because a native Wayland path is not active."
     )
     assert format_status_window_title(payload) == (
-        "Overlay Controller - xwayland_compat / xwayland_compat [true_overlay, client_runtime] - "
+        "Overlay Controller - xwayland_compat / xwayland_compat [degraded_overlay, client_runtime] - "
+        "Some overlay guarantees are reduced in this mode.; "
         "Using XWayland compatibility mode because a native Wayland path is not active."
     )
 
@@ -197,7 +197,7 @@ def test_backend_status_ui_helpers_surface_manual_override_and_invalid_override(
     manual_override_status = BackendSelectionStatus(
         probe=_probe(),
         selected_backend=BackendDescriptor(BackendFamily.XWAYLAND_COMPAT, BackendInstance.XWAYLAND_COMPAT),
-        classification=CapabilityClassification.TRUE_OVERLAY,
+        classification=CapabilityClassification.DEGRADED_OVERLAY,
         fallback_from=BackendDescriptor(BackendFamily.NATIVE_WAYLAND, BackendInstance.KWIN_WAYLAND),
         fallback_reason=FallbackReason.MANUAL_OVERRIDE,
         manual_override=BackendInstance.XWAYLAND_COMPAT,
@@ -218,13 +218,13 @@ def test_backend_status_ui_helpers_surface_manual_override_and_invalid_override(
     assert manual_report["manual_override"] == "xwayland_compat"
     assert manual_report["warning_required"] is True
     assert format_status_ui_summary(manual_override_status) == (
-        "Backend: XWayland compatibility | Mode: True overlay | Source: Live runtime | "
+        "Backend: XWayland compatibility | Mode: Degraded overlay | Source: Live runtime | "
         "Overlay backend: XWayland compatibility"
     )
     assert format_status_ui_warning(manual_override_status) == (
-        "Info: Overlay backend is set to XWayland compatibility.; "
+        "Warning: Overlay backend is set to XWayland compatibility.; "
         "Using XWayland compatibility because it is selected in Overlay backend.; "
-        "Set Overlay backend to Auto if you want the overlay to choose automatically."
+        "Some overlay guarantees are reduced in this mode."
     )
 
     assert invalid_report["override_error"] == "bogus_backend"

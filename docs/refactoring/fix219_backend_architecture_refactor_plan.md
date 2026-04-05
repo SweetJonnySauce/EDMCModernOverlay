@@ -11,12 +11,13 @@ If something is unclear, capture it under `Open Questions`.
 
 - The original backend-architecture cutover in this plan is complete.
 - The codebase is now in the post-cutover cleanup/convergence stage tracked in `docs/refactoring/fix219_backend_architecture_followup_cleanup_plan.md`.
-- Current overall position: original refactor Phases `1`-`5` are complete; follow-up cleanup Phases `1`-`4` are complete; follow-up Phase `5` is the next active architectural step.
+- Current overall position: original refactor Phases `1`-`5` are complete; follow-up cleanup Phases `1`-`4A` are complete; follow-up Phase `5` is the next active architectural step.
 - Retained `fix219` boundaries are intentional: `load.py` remains the plugin control plane for launch/orchestration, advisory `plugin_hint`, and Flatpak/env shaping, while installer compositor profiles remain deployment guidance rather than runtime backend-selection ownership.
 - Current `fix219` contract landing shape is explicit:
   - generic runtime capability truth now lives in `BackendCapabilities`
   - Linux bundles intentionally keep a combined `presentation` / `input_policy` adapter during `fix219`
   - helper transport validation remains in `overlay_client/backend/helper_ipc.py`, while `HelperIpcBackend` stays a narrow identity surface
+  - Wayland `xwayland_compat` now reports as an explicit `degraded_overlay` compatibility path rather than a review-guarded `true_overlay`
 - The next planned architecture tracks after `fix219` cleanup are dedicated post-`fix219` phases for Windows backend-contract cleanup, Linux standalone runtime/presentation work, and deeper physical-clamp / geometry-follow redesign; all are deferred from `fix219`, but they remain part of the overall architecture direction.
 
 ```mermaid
@@ -37,7 +38,8 @@ flowchart TD
     C1 --> C2["Follow-up Phase 2\nTracker ownership cleanup\nCompleted"]
     C2 --> C3["Follow-up Phase 3\nStatus/UI leakage cleanup + retained boundaries\nCompleted"]
     C3 --> C4["Follow-up Phase 4\nBackend contract tightening\nCompleted"]
-    C4 --> C5["Follow-up Phase 5\nValidation + compliance + signoff\nNext"]
+    C4 --> C4A["Follow-up Phase 4A\nXWayland honesty cutover\nCompleted"]
+    C4A --> C5["Follow-up Phase 5\nValidation + compliance + signoff\nNext"]
     C5 --> D["Post-fix219 Phase\nWindows backend-contract cleanup\nPlanned"]
     C5 --> E["Post-fix219 Phase\nLinux standalone runtime/presentation\nPlanned"]
     C5 --> F["Post-fix219 Phase\nPhysical clamp / geometry-follow redesign\nPlanned"]
@@ -808,7 +810,7 @@ flowchart LR
 - Preserved native-first, fallback-available policy in explicit selector output by:
   - reporting `xwayland_compat` as a named fallback from the compositor-specific native Wayland backend
   - reporting GNOME helper-missing fallback metadata without downgrading current shipped behavior
-  - retaining conservative classification for downgrade-sensitive `xwayland_compat` paths while marking the preserved classification as review-required
+  - initially retaining conservative classification for downgrade-sensitive `xwayland_compat` paths while marking the preserved classification as review-required; this transitional reporting was later removed by follow-up Phase `4A`, which now reports the compatibility path honestly as `degraded_overlay`
 - Extended `overlay_client/backend/status.py` so selection status payloads can surface review-guard metadata alongside fallback metadata.
 - Added Stage `3.3` unit coverage in:
   - `overlay_client/tests/test_backend_selector.py`
