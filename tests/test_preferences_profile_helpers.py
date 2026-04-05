@@ -271,7 +271,7 @@ def test_sync_profile_table_marks_active_column_for_current_profile_row() -> Non
     assert panel._profile_table.rows["row2"]["values"][0] == helpers.ACTIVE_COLUMN_CHECKMARK
 
 
-def test_build_ship_table_rows_filters_unknown_names_and_formats_name() -> None:
+def test_build_ship_table_rows_falls_back_to_ship_type_when_name_missing() -> None:
     rows = helpers._build_ship_table_rows(
         [
             {"ship_id": 91, "ship_name": "Type-11 Prospector", "ship_ident": "SW-29L", "ship_type": "Type-11"},
@@ -283,6 +283,7 @@ def test_build_ship_table_rows_filters_unknown_names_and_formats_name() -> None:
     assert rows == [
         {"name": "Type-11 Prospector (SW-29L)", "ship_id": 91, "ship_ident": "SW-29L", "type": "Type-11"},
         {"name": "Kate Koss", "ship_id": 67, "ship_ident": "", "type": "Type-8"},
+        {"name": "Python (TR-005)", "ship_id": 68, "ship_ident": "TR-005", "type": "Python"},
     ]
 
 

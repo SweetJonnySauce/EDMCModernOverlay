@@ -766,11 +766,12 @@ def _build_ship_table_rows(ships_raw: Any) -> list[Dict[str, Any]]:
         except (TypeError, ValueError):
             continue
         ship_name = str(item.get("ship_name") or "").strip()
-        if not ship_name:
+        ship_type = str(item.get("ship_type") or "").strip()
+        display_name = ship_name or ship_type
+        if not display_name:
             continue
         ship_ident = str(item.get("ship_ident") or "").strip()
-        rendered_name = f"{ship_name} ({ship_ident})" if ship_ident else ship_name
-        ship_type = str(item.get("ship_type") or "").strip()
+        rendered_name = f"{display_name} ({ship_ident})" if ship_ident else display_name
         rows.append(
             {
                 "name": rendered_name,

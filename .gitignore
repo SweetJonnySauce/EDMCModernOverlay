@@ -25,3 +25,4 @@ logs/**
 !payload_store/
 !payload_store/*.log
 overlay_client/fonts/EUROCAPS.TTF
+*.tmp
