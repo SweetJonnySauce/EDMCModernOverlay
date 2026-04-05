@@ -791,12 +791,10 @@ def _build_ship_table_rows(ships_raw: Any) -> list[Dict[str, Any]]:
             continue
         ship_name = str(item.get("ship_name") or "").strip()
         ship_type = str(item.get("ship_type") or "").strip()
-        display_name = ship_name or ship_type
-        if not display_name:
+        if not ship_name and not ship_type:
             continue
         display_name = ship_name or "Unnamed"
         ship_ident = str(item.get("ship_ident") or "").strip()
-        rendered_name = f"{display_name} ({ship_ident})" if ship_ident else display_name
         rows.append(
             {
                 "name": display_name,
