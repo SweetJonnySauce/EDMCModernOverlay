@@ -271,7 +271,7 @@ def test_sync_profile_table_marks_active_column_for_current_profile_row() -> Non
     assert panel._profile_table.rows["row2"]["values"][0] == helpers.ACTIVE_COLUMN_CHECKMARK
 
 
-def test_build_ship_table_rows_falls_back_to_ship_type_when_name_missing() -> None:
+def test_build_ship_table_rows_uses_unnamed_when_name_missing() -> None:
     rows = helpers._build_ship_table_rows(
         [
             {"ship_id": 91, "ship_name": "Type-11 Prospector", "ship_ident": "SW-29L", "ship_type": "Type-11"},
@@ -281,9 +281,9 @@ def test_build_ship_table_rows_falls_back_to_ship_type_when_name_missing() -> No
     )
 
     assert rows == [
-        {"name": "Type-11 Prospector (SW-29L)", "ship_id": 91, "ship_ident": "SW-29L", "type": "Type-11"},
+        {"name": "Type-11 Prospector", "ship_id": 91, "ship_ident": "SW-29L", "type": "Type-11"},
         {"name": "Kate Koss", "ship_id": 67, "ship_ident": "", "type": "Type-8"},
-        {"name": "Python (TR-005)", "ship_id": 68, "ship_ident": "TR-005", "type": "Python"},
+        {"name": "Unnamed", "ship_id": 68, "ship_ident": "TR-005", "type": "Python"},
     ]
 
 
@@ -356,7 +356,32 @@ def test_sync_profile_ship_list_renders_apply_in_tree_column() -> None:
 
     insert = panel._profile_ship_table.insert_calls[0]
     assert insert["text"] == "[x]"
-    assert insert["values"] == ("Type-11 Prospector (SW-29L)", "SW-29L", "Type-11")
+    assert insert["values"] == ("Type-11 Prospector", "SW-29L", "Type-11")
+
+
+def test_sync_profile_ship_list_labels_unnamed_ships_in_name_column() -> None:
+    panel = _Panel(selected="Default", order=["Default"])
+    panel._profile_ship_table = _InsertShipTable()
+    panel._profile_ship_checked_ids = set()
+    panel._profile_menu_icons = {}
+
+    helpers.sync_profile_ship_list(
+        panel,
+        {
+            "ships": [
+                {
+                    "ship_id": 68,
+                    "ship_name": "",
+                    "ship_ident": "TR-005",
+                    "ship_type": "Python",
+                }
+            ]
+        },
+    )
+
+    insert = panel._profile_ship_table.insert_calls[0]
+    assert insert["text"] == "[ ]"
+    assert insert["values"] == ("Unnamed", "TR-005", "Python")
 
 
 def test_sync_profile_ship_list_shows_no_ships_hint_in_status_message() -> None:

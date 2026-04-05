@@ -1361,7 +1361,7 @@ class PreferencesPanel:
         profile_ship_table.column("name", width=220, minwidth=120, stretch=True, anchor="w")
         profile_ship_table.heading("id", text="ID", command=lambda: self._on_profile_ship_sort("id"))
         profile_ship_table.column("id", width=64, minwidth=54, stretch=False, anchor="center")
-        profile_ship_table.heading("type", text="Type", command=lambda: self._on_profile_ship_sort("type"))
+        profile_ship_table.heading("type", text="Model", command=lambda: self._on_profile_ship_sort("type"))
         profile_ship_table.column("type", width=160, minwidth=100, stretch=True, anchor="w")
         profile_ship_table.grid(row=1, column=0, sticky="nsew")
         profile_ship_scroll = ttk.Scrollbar(ships_row, orient="vertical", command=profile_ship_table.yview)
