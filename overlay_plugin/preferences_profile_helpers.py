@@ -18,7 +18,9 @@ RULE_CONTEXT_KEYS = (
     "InMulticrew",
 )
 ACTIVE_COLUMN_CHECKMARK = "✅"
-NO_SHIPS_HINT = "Swap ships in game and then close and reopen settings to have it show up on the ship list."
+NO_SHIPS_HINT = "Visit a shipyard and swap ships in game then close and reopen settings to populate the ship list."
+_LEGACY_NO_SHIPS_HINT = "Swap ships in game and then close and reopen settings to have it show up on the ship list."
+_NO_SHIPS_HINT_MESSAGES = {NO_SHIPS_HINT, _LEGACY_NO_SHIPS_HINT}
 
 
 def load_profile_menu_icons(panel: Any) -> None:
@@ -123,6 +125,35 @@ def _set_profile_ship_table_enabled(panel: Any, *, enabled: bool) -> None:
             ship_table.configure(state="normal" if enabled else "disabled")
         except Exception:
             pass
+
+
+def _set_profile_ship_hint(panel: Any, message: str) -> None:
+    hint_var = getattr(panel, "_profile_ship_hint_var", None)
+    if hint_var is not None:
+        try:
+            hint_var.set(message)
+        except Exception:
+            pass
+    try:
+        if str(panel._status_var.get() or "").strip() in _NO_SHIPS_HINT_MESSAGES:
+            panel._status_var.set("")
+    except Exception:
+        pass
+
+
+def _clear_profile_ship_hint(panel: Any) -> None:
+    hint_var = getattr(panel, "_profile_ship_hint_var", None)
+    if hint_var is not None:
+        try:
+            if str(hint_var.get() or "").strip() in _NO_SHIPS_HINT_MESSAGES:
+                hint_var.set("")
+        except Exception:
+            pass
+    try:
+        if str(panel._status_var.get() or "").strip() in _NO_SHIPS_HINT_MESSAGES:
+            panel._status_var.set("")
+    except Exception:
+        pass
 
 
 def _sync_ship_table_enabled_for_selected_profile(panel: Any) -> None:
@@ -729,16 +760,9 @@ def sync_profile_ship_list(panel: Any, status: Mapping[str, Any]) -> None:
     panel._profile_ship_checked_ids = checked_ids.intersection(row_ship_ids)
     if not rows:
         ship_table.insert("", "end", text="", values=("no ships yet", "", ""))
-        try:
-            panel._status_var.set(NO_SHIPS_HINT)
-        except Exception:
-            pass
+        _set_profile_ship_hint(panel, NO_SHIPS_HINT)
         return
-    try:
-        if str(panel._status_var.get() or "").strip() == NO_SHIPS_HINT:
-            panel._status_var.set("")
-    except Exception:
-        pass
+    _clear_profile_ship_hint(panel)
     for row in rows:
         ship_id = int(row["ship_id"])
         text, image = _ship_apply_visual(panel, ship_id in panel._profile_ship_checked_ids)
