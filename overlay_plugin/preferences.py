@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import copy
 import json
 import logging
 import math
@@ -84,6 +85,38 @@ CONTROLLER_TAB_CONTROL_TOGGLE_ARGUMENT = "toggle_argument"
 BACKEND_OVERRIDE_AUTO = "auto"
 DEFAULT_PROFILE_NAME = "Default"
 PROFILE_STATUS_POLL_INTERVAL_MS = 750
+CONFIG_BACKED_PREFERENCE_NAMES = (
+    DEV_MODE_PREF_KEY,
+    "overlay_opacity",
+    "global_payload_opacity",
+    "show_connection_status",
+    "debug_overlay_corner",
+    "client_log_retention",
+    "gridlines_enabled",
+    "gridline_spacing",
+    "force_render",
+    STANDALONE_MODE_PREF_KEY,
+    "force_xwayland",
+    "physical_clamp_enabled",
+    "physical_clamp_overrides",
+    "show_debug_overlay",
+    "min_font_point",
+    "max_font_point",
+    "legacy_font_step",
+    "title_bar_enabled",
+    "title_bar_height",
+    "cycle_payload_ids",
+    "copy_payload_id_on_cycle",
+    "scale_mode",
+    "nudge_overflow_payloads",
+    "payload_nudge_gutter",
+    "status_message_gutter",
+    "log_payloads",
+    "payload_log_delay_seconds",
+    "controller_launch_command",
+    "controller_toggle_argument",
+    "last_on_payload_opacity",
+)
 BACKEND_NOTICE_WARNING_COLOR = "#c62828"
 BACKEND_NOTICE_INFO_COLOR = "#1565c0"
 DEFAULT_DEBUG_OVERLAY_CORNER = "SE"
