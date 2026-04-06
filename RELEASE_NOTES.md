@@ -11,6 +11,7 @@
 
 ### Bug Fixes
 - Fix [#183](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/183) - Enabled checkbox on Overlay Controller is confusing.
+- Fix [#202](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/202) - Addressed issue where settings were not persisting across upgrades.
 
 ## 0.8.0
 

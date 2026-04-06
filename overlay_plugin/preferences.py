@@ -1,6 +1,7 @@
 """Preferences management and Tk UI for the Modern Overlay plugin."""
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import math
@@ -76,6 +77,38 @@ CONTROLLER_TAB_CONTROL_LAUNCH_COMMAND = "launch_command"
 CONTROLLER_TAB_CONTROL_TOGGLE_ARGUMENT = "toggle_argument"
 DEFAULT_PROFILE_NAME = "Default"
 PROFILE_STATUS_POLL_INTERVAL_MS = 750
+CONFIG_BACKED_PREFERENCE_NAMES = (
+    DEV_MODE_PREF_KEY,
+    "overlay_opacity",
+    "global_payload_opacity",
+    "show_connection_status",
+    "debug_overlay_corner",
+    "client_log_retention",
+    "gridlines_enabled",
+    "gridline_spacing",
+    "force_render",
+    STANDALONE_MODE_PREF_KEY,
+    "force_xwayland",
+    "physical_clamp_enabled",
+    "physical_clamp_overrides",
+    "show_debug_overlay",
+    "min_font_point",
+    "max_font_point",
+    "legacy_font_step",
+    "title_bar_enabled",
+    "title_bar_height",
+    "cycle_payload_ids",
+    "copy_payload_id_on_cycle",
+    "scale_mode",
+    "nudge_overflow_payloads",
+    "payload_nudge_gutter",
+    "status_message_gutter",
+    "log_payloads",
+    "payload_log_delay_seconds",
+    "controller_launch_command",
+    "controller_toggle_argument",
+    "last_on_payload_opacity",
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -150,6 +183,13 @@ def _config_get_raw(key: str, default: Any) -> Any:
     else:
         value = getattr(EDMC_CONFIG, key, default) if EDMC_CONFIG is not None else default
     return default if value is None else value
+
+
+def _config_has_value(key: str) -> bool:
+    if not _config_available():
+        return False
+    sentinel = object()
+    return _config_get_raw(key, sentinel) is not sentinel
 
 
 def _config_get_value(name: str, key: str, default: Any) -> Any:
@@ -601,9 +641,9 @@ class Preferences:
         if self._config_enabled:
             self._maybe_import_legacy_json()
             self._load_from_config()
-            # Merge in the shadow JSON in case EDMC config missed a recent update.
-            # This keeps restarts consistent even if config persistence failed mid-session.
-            self._load_from_json(silent=True)
+            # Backfill only config keys that are missing; the shadow file must not
+            # override valid EDMC config values during upgrades.
+            self._backfill_missing_config_from_json(silent=True)
             try:
                 self._persist_to_config()
             except Exception:
@@ -618,24 +658,45 @@ class Preferences:
 
     # Persistence ---------------------------------------------------------
 
-    def _load_from_json(self, *, silent: bool = False) -> None:
+    def _read_shadow_data(self, *, silent: bool = False) -> Optional[Mapping[str, Any]]:
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
         except FileNotFoundError:
-            return
+            return None
         except json.JSONDecodeError:
             if not silent:
                 LOGGER.debug("overlay_settings.json is not valid JSON; ignoring contents.")
+            return None
+        if not isinstance(data, Mapping):
+            return None
+        return data
+
+    def _load_from_json(self, *, silent: bool = False) -> None:
+        data = self._read_shadow_data(silent=silent)
+        if data is None:
             return
         self._apply_raw_data(data)
+
+    def _backfill_missing_config_from_json(self, *, silent: bool = False) -> None:
+        data = self._read_shadow_data(silent=silent)
+        if data is None:
+            return
+        missing_names = [
+            name for name in CONFIG_BACKED_PREFERENCE_NAMES if not _config_has_value(_config_key(name))
+        ]
+        if not missing_names:
+            return
+        shadow = copy.deepcopy(self)
+        shadow._apply_raw_data(data)
+        for name in missing_names:
+            setattr(self, name, copy.deepcopy(getattr(shadow, name)))
 
     def _maybe_import_legacy_json(self) -> None:
         current_version = _config_get_int(CONFIG_VERSION_KEY, 0)
         if current_version >= CONFIG_STATE_VERSION:
             return
-        try:
-            data = json.loads(self._path.read_text(encoding="utf-8"))
-        except (FileNotFoundError, json.JSONDecodeError):
+        data = self._read_shadow_data(silent=True)
+        if data is None:
             _config_set_value(CONFIG_VERSION_KEY, CONFIG_STATE_VERSION)
             return
         self._apply_raw_data(data)

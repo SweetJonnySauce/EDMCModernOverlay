@@ -121,6 +121,69 @@ def test_preferences_reload_merges_shadow_when_config_empty(plugin_dir: Path, mo
     assert reloaded_config.store[prefs._config_key("last_on_payload_opacity")] == 75
 
 
+def test_preferences_reload_prefers_config_over_shadow_when_both_exist(
+    plugin_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shadow_path = plugin_dir / prefs.PREFERENCES_FILE
+    shadow_path.write_text(
+        json.dumps(
+            {
+                "standalone_mode": False,
+                "controller_toggle_argument": "shadow",
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    config = DummyConfig(
+        {
+            prefs.CONFIG_VERSION_KEY: prefs.CONFIG_STATE_VERSION,
+            prefs._config_key(STANDALONE_MODE_PREF_KEY): True,
+            prefs._config_key("controller_toggle_argument"): "config",
+        }
+    )
+    monkeypatch.setattr(prefs, "EDMC_CONFIG", config)
+
+    reloaded = prefs.Preferences(plugin_dir, dev_mode=True)
+
+    assert reloaded.standalone_mode is True
+    assert reloaded.controller_toggle_argument == "config"
+    shadow = _shadow(shadow_path)
+    assert shadow["standalone_mode"] is True
+    assert shadow["controller_toggle_argument"] == "config"
+
+
+def test_preferences_reload_backfills_missing_config_values_from_shadow_when_version_current(
+    plugin_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shadow_path = plugin_dir / prefs.PREFERENCES_FILE
+    shadow_path.write_text(
+        json.dumps(
+            {
+                "standalone_mode": True,
+                "controller_toggle_argument": "shadowtoggle",
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    config = DummyConfig(
+        {
+            prefs.CONFIG_VERSION_KEY: prefs.CONFIG_STATE_VERSION,
+        }
+    )
+    monkeypatch.setattr(prefs, "EDMC_CONFIG", config)
+
+    reloaded = prefs.Preferences(plugin_dir, dev_mode=True)
+
+    assert reloaded.standalone_mode is True
+    assert reloaded.controller_toggle_argument == "shadowtoggle"
+    assert config.store[prefs._config_key(STANDALONE_MODE_PREF_KEY)] is True
+    assert config.store[prefs._config_key("controller_toggle_argument")] == "shadowtoggle"
+
+
 def test_preferences_locale_numbers_from_config(plugin_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def number_from_string(value: str) -> float:
         return float(value.replace(",", "."))
