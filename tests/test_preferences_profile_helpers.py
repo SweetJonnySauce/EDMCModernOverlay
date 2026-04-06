@@ -30,6 +30,7 @@ class _Panel:
         self._selected = selected
         self._profile_table_order = list(order)
         self._status_var = _StatusVar()
+        self._profile_ship_hint_var = _StatusVar()
         self.reorder_calls: list[tuple[str, int]] = []
         self.refresh_count = 0
 
@@ -384,7 +385,7 @@ def test_sync_profile_ship_list_labels_unnamed_ships_in_name_column() -> None:
     assert insert["values"] == ("Unnamed", "TR-005", "Python")
 
 
-def test_sync_profile_ship_list_shows_no_ships_hint_in_status_message() -> None:
+def test_sync_profile_ship_list_shows_no_ships_hint_in_profiles_hint_only() -> None:
     panel = _Panel(selected="Default", order=["Default"])
     panel._profile_ship_table = _InsertShipTable()
     panel._profile_ship_checked_ids = set()
@@ -394,7 +395,8 @@ def test_sync_profile_ship_list_shows_no_ships_hint_in_status_message() -> None:
 
     insert = panel._profile_ship_table.insert_calls[0]
     assert insert["values"] == ("no ships yet", "", "")
-    assert panel._status_var.value == helpers.NO_SHIPS_HINT
+    assert panel._profile_ship_hint_var.value == helpers.NO_SHIPS_HINT
+    assert panel._status_var.value == ""
 
 
 def test_sync_profile_ship_list_clears_no_ships_hint_when_ships_exist() -> None:
@@ -402,6 +404,7 @@ def test_sync_profile_ship_list_clears_no_ships_hint_when_ships_exist() -> None:
     panel._profile_ship_table = _InsertShipTable()
     panel._profile_ship_checked_ids = set()
     panel._profile_menu_icons = {}
+    panel._profile_ship_hint_var.set(helpers.NO_SHIPS_HINT)
     panel._status_var.set(helpers.NO_SHIPS_HINT)
 
     helpers.sync_profile_ship_list(
@@ -418,6 +421,32 @@ def test_sync_profile_ship_list_clears_no_ships_hint_when_ships_exist() -> None:
         },
     )
 
+    assert panel._profile_ship_hint_var.value == ""
+    assert panel._status_var.value == ""
+
+
+def test_sync_profile_ship_list_clears_legacy_shared_no_ships_hint() -> None:
+    panel = _Panel(selected="Default", order=["Default"])
+    panel._profile_ship_table = _InsertShipTable()
+    panel._profile_ship_checked_ids = set()
+    panel._profile_menu_icons = {}
+    panel._status_var.set("Swap ships in game and then close and reopen settings to have it show up on the ship list.")
+
+    helpers.sync_profile_ship_list(
+        panel,
+        {
+            "ships": [
+                {
+                    "ship_id": 91,
+                    "ship_name": "Type-11 Prospector",
+                    "ship_ident": "SW-29L",
+                    "ship_type": "Type-11",
+                }
+            ]
+        },
+    )
+
+    assert panel._profile_ship_hint_var.value == ""
     assert panel._status_var.value == ""
 
 
