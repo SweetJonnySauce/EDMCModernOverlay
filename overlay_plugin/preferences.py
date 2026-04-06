@@ -1335,6 +1335,7 @@ class PreferencesPanel:
         self._backend_status_var = tk.StringVar(value="Backend: unknown | Mode: unknown | Source: unknown")
         self._backend_warning_var = tk.StringVar(value="")
         self._profile_ship_hint_var = tk.StringVar(value="")
+        self._profile_ship_hint_var = tk.StringVar(value="")
         self._profile_menu_icons: Dict[str, Any] = {}
         self._profile_poll_after_id: Optional[str] = None
         self._profile_poll_interval_ms = PROFILE_STATUS_POLL_INTERVAL_MS
@@ -1542,6 +1543,13 @@ class PreferencesPanel:
         profile_ship_table.bind("<Button-1>", self._on_profile_ship_table_click)
         profile_ship_table.bind("<Double-1>", self._on_profile_ship_table_double_click)
         self._profile_ship_table = profile_ship_table
+        profile_ship_hint = nb.Label(
+            ships_row,
+            textvariable=self._profile_ship_hint_var,
+            wraplength=800,
+            justify="left",
+        )
+        profile_ship_hint.grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
         profile_ship_hint = nb.Label(
             ships_row,
             textvariable=self._profile_ship_hint_var,
