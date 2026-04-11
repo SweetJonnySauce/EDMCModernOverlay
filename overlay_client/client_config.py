@@ -25,6 +25,10 @@ class InitialClientSettings:
     legacy_font_step: float = 4.0
     status_bottom_margin: int = 40
     debug_overlay_corner: str = "SE"
+    max_font_point: float = 12.0
+    legacy_font_step: float = 4.0
+    status_bottom_margin: int = 40
+    debug_overlay_corner: str = "SE"
     status_corner: str = "SW"
     title_bar_enabled: bool = False
     title_bar_height: int = 30

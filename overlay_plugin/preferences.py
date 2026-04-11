@@ -677,7 +677,9 @@ class Preferences:
     global_payload_opacity: int = 100
     show_connection_status: bool = False
     debug_overlay_corner: str = DEFAULT_DEBUG_OVERLAY_CORNER
+    debug_overlay_corner: str = DEFAULT_DEBUG_OVERLAY_CORNER
     client_log_retention: int = DEFAULT_CLIENT_LOG_RETENTION
+    gridlines_enabled: bool = DEFAULT_GRIDLINES_ENABLED
     gridlines_enabled: bool = DEFAULT_GRIDLINES_ENABLED
     gridline_spacing: int = 120
     force_render: bool = False
@@ -689,12 +691,19 @@ class Preferences:
     min_font_point: float = 6.0
     max_font_point: float = DEFAULT_MAX_FONT_POINT
     legacy_font_step: int = DEFAULT_LEGACY_FONT_STEP
+    max_font_point: float = DEFAULT_MAX_FONT_POINT
+    legacy_font_step: int = DEFAULT_LEGACY_FONT_STEP
     title_bar_enabled: bool = False
+    title_bar_height: int = DEFAULT_TITLE_BAR_HEIGHT
     title_bar_height: int = DEFAULT_TITLE_BAR_HEIGHT
     cycle_payload_ids: bool = False
     copy_payload_id_on_cycle: bool = False
     scale_mode: str = DEFAULT_SCALE_MODE
+    scale_mode: str = DEFAULT_SCALE_MODE
     nudge_overflow_payloads: bool = False
+    payload_nudge_gutter: int = DEFAULT_PAYLOAD_NUDGE_GUTTER
+    status_message_gutter: int = DEFAULT_STATUS_MESSAGE_GUTTER
+    log_payloads: bool = DEFAULT_LOG_PAYLOADS
     payload_nudge_gutter: int = DEFAULT_PAYLOAD_NUDGE_GUTTER
     status_message_gutter: int = DEFAULT_STATUS_MESSAGE_GUTTER
     log_payloads: bool = DEFAULT_LOG_PAYLOADS
@@ -978,6 +987,7 @@ class Preferences:
             "global_payload_opacity": int(self.global_payload_opacity),
             "show_connection_status": bool(self.show_connection_status),
             "debug_overlay_corner": str(self.debug_overlay_corner or DEFAULT_DEBUG_OVERLAY_CORNER),
+            "debug_overlay_corner": str(self.debug_overlay_corner or DEFAULT_DEBUG_OVERLAY_CORNER),
             "client_log_retention": int(self.client_log_retention),
             "gridlines_enabled": bool(self.gridlines_enabled),
             "gridline_spacing": int(self.gridline_spacing),
@@ -995,6 +1005,7 @@ class Preferences:
             "title_bar_height": int(self.title_bar_height),
             "cycle_payload_ids": bool(self.cycle_payload_ids),
             "copy_payload_id_on_cycle": bool(self.copy_payload_id_on_cycle),
+            "scale_mode": str(self.scale_mode or DEFAULT_SCALE_MODE),
             "scale_mode": str(self.scale_mode or DEFAULT_SCALE_MODE),
             "nudge_overflow_payloads": bool(self.nudge_overflow_payloads),
             "payload_nudge_gutter": int(self.payload_nudge_gutter),
