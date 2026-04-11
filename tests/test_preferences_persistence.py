@@ -131,6 +131,7 @@ def test_preferences_reload_prefers_config_over_shadow_when_both_exist(
             {
                 "standalone_mode": False,
                 "controller_toggle_argument": "shadow",
+                "scale_mode": "fit",
             },
             indent=2,
         ),
@@ -141,6 +142,7 @@ def test_preferences_reload_prefers_config_over_shadow_when_both_exist(
             prefs.CONFIG_VERSION_KEY: prefs.CONFIG_STATE_VERSION,
             prefs._config_key(STANDALONE_MODE_PREF_KEY): True,
             prefs._config_key("controller_toggle_argument"): "config",
+            prefs._config_key("scale_mode"): "fill",
         }
     )
     monkeypatch.setattr(prefs, "EDMC_CONFIG", config)
@@ -149,9 +151,11 @@ def test_preferences_reload_prefers_config_over_shadow_when_both_exist(
 
     assert reloaded.standalone_mode is True
     assert reloaded.controller_toggle_argument == "config"
+    assert reloaded.scale_mode == "fill"
     shadow = _shadow(shadow_path)
     assert shadow["standalone_mode"] is True
     assert shadow["controller_toggle_argument"] == "config"
+    assert shadow["scale_mode"] == "fill"
 
 
 def test_preferences_reload_backfills_missing_config_values_from_shadow_when_version_current(
@@ -164,6 +168,7 @@ def test_preferences_reload_backfills_missing_config_values_from_shadow_when_ver
             {
                 "standalone_mode": True,
                 "controller_toggle_argument": "shadowtoggle",
+                "scale_mode": "fill",
             },
             indent=2,
         ),
@@ -180,8 +185,26 @@ def test_preferences_reload_backfills_missing_config_values_from_shadow_when_ver
 
     assert reloaded.standalone_mode is True
     assert reloaded.controller_toggle_argument == "shadowtoggle"
+    assert reloaded.scale_mode == "fill"
     assert config.store[prefs._config_key(STANDALONE_MODE_PREF_KEY)] is True
     assert config.store[prefs._config_key("controller_toggle_argument")] == "shadowtoggle"
+    assert config.store[prefs._config_key("scale_mode")] == "fill"
+
+
+def test_preferences_fresh_install_defaults_match_legacy_overlay_layout(
+    plugin_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = DummyConfig()
+    monkeypatch.setattr(prefs, "EDMC_CONFIG", config)
+
+    preferences = prefs.Preferences(plugin_dir, dev_mode=True)
+
+    assert preferences.scale_mode == "fill"
+    assert preferences.force_xwayland is True
+    assert preferences.title_bar_height == 30
+    assert preferences.status_message_gutter == 20
+    assert preferences.payload_nudge_gutter == 20
 
 
 def test_preferences_locale_numbers_from_config(plugin_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
