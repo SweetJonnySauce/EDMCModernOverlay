@@ -32,10 +32,14 @@ class InitialClientSettings:
     status_corner: str = "SW"
     title_bar_enabled: bool = False
     title_bar_height: int = 30
+    title_bar_height: int = 30
     cycle_payload_ids: bool = False
     copy_payload_id_on_cycle: bool = False
     scale_mode: str = "fill"
+    scale_mode: str = "fill"
     nudge_overflow_payloads: bool = False
+    payload_nudge_gutter: int = 20
+    payload_log_delay_seconds: float = 0.5
     payload_nudge_gutter: int = 20
     payload_log_delay_seconds: float = 0.5
     edmc_log_level: Optional[int] = None
