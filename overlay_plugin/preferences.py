@@ -77,6 +77,16 @@ CONTROLLER_TAB_CONTROL_LAUNCH_COMMAND = "launch_command"
 CONTROLLER_TAB_CONTROL_TOGGLE_ARGUMENT = "toggle_argument"
 DEFAULT_PROFILE_NAME = "Default"
 PROFILE_STATUS_POLL_INTERVAL_MS = 750
+DEFAULT_DEBUG_OVERLAY_CORNER = "SE"
+DEFAULT_GRIDLINES_ENABLED = True
+DEFAULT_FORCE_XWAYLAND = True
+DEFAULT_MAX_FONT_POINT = 12.0
+DEFAULT_LEGACY_FONT_STEP = 4
+DEFAULT_TITLE_BAR_HEIGHT = 30
+DEFAULT_SCALE_MODE = "fill"
+DEFAULT_PAYLOAD_NUDGE_GUTTER = 20
+DEFAULT_STATUS_MESSAGE_GUTTER = 20
+DEFAULT_LOG_PAYLOADS = True
 CONFIG_BACKED_PREFERENCE_NAMES = (
     DEV_MODE_PREF_KEY,
     "overlay_opacity",
@@ -607,28 +617,28 @@ class Preferences:
     overlay_opacity: float = 0.0
     global_payload_opacity: int = 100
     show_connection_status: bool = False
-    debug_overlay_corner: str = "NW"
+    debug_overlay_corner: str = DEFAULT_DEBUG_OVERLAY_CORNER
     client_log_retention: int = DEFAULT_CLIENT_LOG_RETENTION
-    gridlines_enabled: bool = False
+    gridlines_enabled: bool = DEFAULT_GRIDLINES_ENABLED
     gridline_spacing: int = 120
     force_render: bool = False
     standalone_mode: bool = False
-    force_xwayland: bool = False
+    force_xwayland: bool = DEFAULT_FORCE_XWAYLAND
     physical_clamp_enabled: bool = False
     physical_clamp_overrides: Dict[str, float] = field(default_factory=dict)
     show_debug_overlay: bool = False
     min_font_point: float = 6.0
-    max_font_point: float = 24.0
-    legacy_font_step: int = 2
+    max_font_point: float = DEFAULT_MAX_FONT_POINT
+    legacy_font_step: int = DEFAULT_LEGACY_FONT_STEP
     title_bar_enabled: bool = False
-    title_bar_height: int = 0
+    title_bar_height: int = DEFAULT_TITLE_BAR_HEIGHT
     cycle_payload_ids: bool = False
     copy_payload_id_on_cycle: bool = False
-    scale_mode: str = "fit"
+    scale_mode: str = DEFAULT_SCALE_MODE
     nudge_overflow_payloads: bool = False
-    payload_nudge_gutter: int = 30
-    status_message_gutter: int = STATUS_GUTTER_DEFAULT
-    log_payloads: bool = False
+    payload_nudge_gutter: int = DEFAULT_PAYLOAD_NUDGE_GUTTER
+    status_message_gutter: int = DEFAULT_STATUS_MESSAGE_GUTTER
+    log_payloads: bool = DEFAULT_LOG_PAYLOADS
     payload_log_delay_seconds: float = 0.5
     controller_launch_command: str = "!ovr"
     controller_toggle_argument: str = TOGGLE_ARGUMENT_DEFAULT
@@ -898,7 +908,7 @@ class Preferences:
             "overlay_opacity": float(self.overlay_opacity),
             "global_payload_opacity": int(self.global_payload_opacity),
             "show_connection_status": bool(self.show_connection_status),
-            "debug_overlay_corner": str(self.debug_overlay_corner or "NW"),
+            "debug_overlay_corner": str(self.debug_overlay_corner or DEFAULT_DEBUG_OVERLAY_CORNER),
             "client_log_retention": int(self.client_log_retention),
             "gridlines_enabled": bool(self.gridlines_enabled),
             "gridline_spacing": int(self.gridline_spacing),
@@ -916,7 +926,7 @@ class Preferences:
             "title_bar_height": int(self.title_bar_height),
             "cycle_payload_ids": bool(self.cycle_payload_ids),
             "copy_payload_id_on_cycle": bool(self.copy_payload_id_on_cycle),
-            "scale_mode": str(self.scale_mode or "fit"),
+            "scale_mode": str(self.scale_mode or DEFAULT_SCALE_MODE),
             "nudge_overflow_payloads": bool(self.nudge_overflow_payloads),
             "payload_nudge_gutter": int(self.payload_nudge_gutter),
             "status_message_gutter": int(self.status_message_gutter),
@@ -938,7 +948,7 @@ class Preferences:
         _config_set_value(_config_key("overlay_opacity"), float(self.overlay_opacity))
         _config_set_value(_config_key("global_payload_opacity"), int(self.global_payload_opacity))
         _config_set_value(_config_key("show_connection_status"), bool(self.show_connection_status))
-        _config_set_value(_config_key("debug_overlay_corner"), str(self.debug_overlay_corner or "NW"))
+        _config_set_value(_config_key("debug_overlay_corner"), str(self.debug_overlay_corner or DEFAULT_DEBUG_OVERLAY_CORNER))
         _config_set_value(_config_key("client_log_retention"), int(self.client_log_retention))
         _config_set_value(_config_key("gridlines_enabled"), bool(self.gridlines_enabled))
         _config_set_value(_config_key("gridline_spacing"), int(self.gridline_spacing))
@@ -959,7 +969,7 @@ class Preferences:
         _config_set_value(_config_key("title_bar_height"), int(self.title_bar_height))
         _config_set_value(_config_key("cycle_payload_ids"), bool(self.cycle_payload_ids))
         _config_set_value(_config_key("copy_payload_id_on_cycle"), bool(self.copy_payload_id_on_cycle))
-        _config_set_value(_config_key("scale_mode"), str(self.scale_mode or "fit"))
+        _config_set_value(_config_key("scale_mode"), str(self.scale_mode or DEFAULT_SCALE_MODE))
         _config_set_value(_config_key("nudge_overflow_payloads"), bool(self.nudge_overflow_payloads))
         _config_set_value(_config_key("payload_nudge_gutter"), int(self.payload_nudge_gutter))
         _config_set_value(_config_key("status_message_gutter"), int(self.status_message_gutter))
