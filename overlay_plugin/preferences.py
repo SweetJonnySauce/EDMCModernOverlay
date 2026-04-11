@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import copy
-import copy
 import json
 import logging
 import math
@@ -85,38 +84,6 @@ CONTROLLER_TAB_CONTROL_TOGGLE_ARGUMENT = "toggle_argument"
 BACKEND_OVERRIDE_AUTO = "auto"
 DEFAULT_PROFILE_NAME = "Default"
 PROFILE_STATUS_POLL_INTERVAL_MS = 750
-CONFIG_BACKED_PREFERENCE_NAMES = (
-    DEV_MODE_PREF_KEY,
-    "overlay_opacity",
-    "global_payload_opacity",
-    "show_connection_status",
-    "debug_overlay_corner",
-    "client_log_retention",
-    "gridlines_enabled",
-    "gridline_spacing",
-    "force_render",
-    STANDALONE_MODE_PREF_KEY,
-    "force_xwayland",
-    "physical_clamp_enabled",
-    "physical_clamp_overrides",
-    "show_debug_overlay",
-    "min_font_point",
-    "max_font_point",
-    "legacy_font_step",
-    "title_bar_enabled",
-    "title_bar_height",
-    "cycle_payload_ids",
-    "copy_payload_id_on_cycle",
-    "scale_mode",
-    "nudge_overflow_payloads",
-    "payload_nudge_gutter",
-    "status_message_gutter",
-    "log_payloads",
-    "payload_log_delay_seconds",
-    "controller_launch_command",
-    "controller_toggle_argument",
-    "last_on_payload_opacity",
-)
 BACKEND_NOTICE_WARNING_COLOR = "#c62828"
 BACKEND_NOTICE_INFO_COLOR = "#1565c0"
 DEFAULT_DEBUG_OVERLAY_CORNER = "SE"
@@ -129,80 +96,6 @@ DEFAULT_SCALE_MODE = "fill"
 DEFAULT_PAYLOAD_NUDGE_GUTTER = 20
 DEFAULT_STATUS_MESSAGE_GUTTER = 20
 DEFAULT_LOG_PAYLOADS = True
-CONFIG_BACKED_PREFERENCE_NAMES = (
-    DEV_MODE_PREF_KEY,
-    "overlay_opacity",
-    "global_payload_opacity",
-    "show_connection_status",
-    "debug_overlay_corner",
-    "client_log_retention",
-    "gridlines_enabled",
-    "gridline_spacing",
-    "force_render",
-    STANDALONE_MODE_PREF_KEY,
-    "force_xwayland",
-    "physical_clamp_enabled",
-    "physical_clamp_overrides",
-    "show_debug_overlay",
-    "min_font_point",
-    "max_font_point",
-    "legacy_font_step",
-    "title_bar_enabled",
-    "title_bar_height",
-    "cycle_payload_ids",
-    "copy_payload_id_on_cycle",
-    "scale_mode",
-    "nudge_overflow_payloads",
-    "payload_nudge_gutter",
-    "status_message_gutter",
-    "log_payloads",
-    "payload_log_delay_seconds",
-    "controller_launch_command",
-    "controller_toggle_argument",
-    "last_on_payload_opacity",
-)
-DEFAULT_DEBUG_OVERLAY_CORNER = "SE"
-DEFAULT_GRIDLINES_ENABLED = True
-DEFAULT_FORCE_XWAYLAND = True
-DEFAULT_MAX_FONT_POINT = 12.0
-DEFAULT_LEGACY_FONT_STEP = 4
-DEFAULT_TITLE_BAR_HEIGHT = 30
-DEFAULT_SCALE_MODE = "fill"
-DEFAULT_PAYLOAD_NUDGE_GUTTER = 20
-DEFAULT_STATUS_MESSAGE_GUTTER = 20
-DEFAULT_LOG_PAYLOADS = True
-CONFIG_BACKED_PREFERENCE_NAMES = (
-    DEV_MODE_PREF_KEY,
-    "overlay_opacity",
-    "global_payload_opacity",
-    "show_connection_status",
-    "debug_overlay_corner",
-    "client_log_retention",
-    "gridlines_enabled",
-    "gridline_spacing",
-    "force_render",
-    STANDALONE_MODE_PREF_KEY,
-    "force_xwayland",
-    "physical_clamp_enabled",
-    "physical_clamp_overrides",
-    "show_debug_overlay",
-    "min_font_point",
-    "max_font_point",
-    "legacy_font_step",
-    "title_bar_enabled",
-    "title_bar_height",
-    "cycle_payload_ids",
-    "copy_payload_id_on_cycle",
-    "scale_mode",
-    "nudge_overflow_payloads",
-    "payload_nudge_gutter",
-    "status_message_gutter",
-    "log_payloads",
-    "payload_log_delay_seconds",
-    "controller_launch_command",
-    "controller_toggle_argument",
-    "last_on_payload_opacity",
-)
 CONFIG_BACKED_PREFERENCE_NAMES = (
     DEV_MODE_PREF_KEY,
     "overlay_opacity",
@@ -1402,9 +1295,6 @@ class PreferencesPanel:
         self._profile_ship_hint_var = tk.StringVar(value="")
         self._backend_status_var = tk.StringVar(value="Backend: unknown | Mode: unknown | Source: unknown")
         self._backend_warning_var = tk.StringVar(value="")
-        self._profile_ship_hint_var = tk.StringVar(value="")
-        self._profile_ship_hint_var = tk.StringVar(value="")
-        self._profile_ship_hint_var = tk.StringVar(value="")
         self._profile_menu_icons: Dict[str, Any] = {}
         self._profile_poll_after_id: Optional[str] = None
         self._profile_poll_interval_ms = PROFILE_STATUS_POLL_INTERVAL_MS
