@@ -1,0 +1,262 @@
+name: Dev Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_label:
+        description: Optional suffix for artifact filenames; sanitized and prefixed with dev-
+        required: false
+        type: string
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  bundle:
+    name: Build dev archives
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Resolve dev version label
+        shell: bash
+        run: |
+          set -euo pipefail
+          raw="${{ inputs.version_label }}"
+          if [[ -z "$raw" ]]; then
+            raw="${GITHUB_REF_NAME:-run-${GITHUB_RUN_NUMBER}}"
+          fi
+          safe="$(printf '%s' "$raw" | sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^-+//; s/-+$//')"
+          if [[ -z "$safe" ]]; then
+            safe="run-${GITHUB_RUN_NUMBER}"
+          fi
+          echo "VERSION=dev-${safe}" >> "$GITHUB_ENV"
+          echo "Using VERSION=dev-${safe}"
+
+      - name: Prepare staging layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXCLUDE_MANIFEST="scripts/release_excludes.json"
+          if [[ ! -f "$EXCLUDE_MANIFEST" ]]; then
+            echo "Exclude manifest not found at $EXCLUDE_MANIFEST" >&2
+            exit 1
+          fi
+          readarray -t EXCLUDES < <(python3 -c "import json, pathlib; m=json.loads(pathlib.Path('scripts/release_excludes.json').read_text()); out=[]; [out.append(f'--exclude={d}/') for d in m.get('directories', [])]; [out.append(f'--exclude=/{d}/') for d in m.get('root_directories', [])]; [out.append(f'--exclude={f}') for f in m.get('files', [])]; [out.append(f'--exclude={p}') for p in m.get('patterns', [])]; print('\\n'.join(out))")
+          printf 'Release excludes:\n%s\n' "${EXCLUDES[@]}"
+
+          mkdir -p dist/windows_powershell dist/windows_powershell/EDMCModernOverlay
+          mkdir -p dist/linux dist/linux/EDMCModernOverlay
+
+          rsync -a "${EXCLUDES[@]}" ./ dist/windows_powershell/EDMCModernOverlay/
+          rsync -a "${EXCLUDES[@]}" ./ dist/linux/EDMCModernOverlay/
+
+          cp scripts/install_windows.ps1 dist/windows_powershell/
+          cp scripts/install_linux.sh scripts/install_matrix.json dist/linux/
+
+      - name: Generate checksum manifest from staged payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/generate_checksums.py --root dist/linux --target-dir dist/linux/EDMCModernOverlay --output dist/linux/checksums.txt --excludes scripts/release_excludes.json
+          cp dist/linux/checksums.txt dist/windows_powershell/
+
+      - name: Create archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x dist/linux/install_linux.sh
+          VER="${VERSION:-}"
+          if [[ -z "$VER" ]]; then
+            VER="dev-run-${GITHUB_RUN_NUMBER}"
+          fi
+          (cd dist/windows_powershell && zip -r "../EDMCModernOverlay-windows_powershell-${VER}.zip" EDMCModernOverlay install_windows.ps1 checksums.txt)
+          (cd dist/linux && tar -czf "../EDMCModernOverlay-linux-${VER}.tar.gz" EDMCModernOverlay install_linux.sh install_matrix.json checksums.txt)
+          ls -al dist
+
+      - name: Upload dev bundle artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: dev-release-bundles
+          path: |
+            dist/EDMCModernOverlay-windows_powershell-*.zip
+            dist/EDMCModernOverlay-linux-*.tar.gz
+          if-no-files-found: error
+
+  win_inno_build:
+    name: Build dev Windows Inno installer
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Resolve dev version label
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $raw = "${{ inputs.version_label }}"
+          if ([string]::IsNullOrWhiteSpace($raw)) {
+            $raw = $env:GITHUB_REF_NAME
+          }
+          if ([string]::IsNullOrWhiteSpace($raw)) {
+            $raw = "run-$($env:GITHUB_RUN_NUMBER)"
+          }
+          $safe = [regex]::Replace($raw, '[^A-Za-z0-9._-]+', '-').Trim('-')
+          if ([string]::IsNullOrWhiteSpace($safe)) {
+            $safe = "run-$($env:GITHUB_RUN_NUMBER)"
+          }
+          "VERSION=dev-$safe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Using VERSION=dev-$safe"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Resolve Windows Python installer metadata
+        shell: pwsh
+        run: |
+          python scripts/resolve_windows_python.py --pyproject pyproject.toml
+
+      - name: Stage payload (apply release excludes)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import shutil
+          from fnmatch import fnmatch
+          from pathlib import Path
+
+          root = Path.cwd()
+          manifest = json.loads((root / "scripts" / "release_excludes.json").read_text())
+          exclude_dirs = set(manifest.get("directories", []))
+          exclude_root_dirs = set(manifest.get("root_directories", []))
+          exclude_files = set(manifest.get("files", []))
+          exclude_patterns = manifest.get("patterns", [])
+          exclude_substrings = set(manifest.get("substrings", []))
+
+          exclude_substrings.update({"overlay_client/.venv", "overlay_client\\.venv"})
+
+          payload_root = root / "dist" / "inno_payload" / "EDMCModernOverlay"
+          if payload_root.exists():
+              shutil.rmtree(payload_root)
+          payload_root.mkdir(parents=True, exist_ok=True)
+
+          def should_exclude(path: Path) -> bool:
+              rel = path.relative_to(root).as_posix()
+              name = path.name
+              if path.is_dir() and name in exclude_dirs:
+                  return True
+              if path.is_dir() and name in exclude_root_dirs and rel.split("/")[0] == name:
+                  return True
+              if path.is_file() and name in exclude_files:
+                  return True
+              if any(fnmatch(name, pat) for pat in exclude_patterns):
+                  return True
+              if any(sub in rel for sub in exclude_substrings):
+                  return True
+              if rel.startswith("dist/inno_payload"):
+                  return True
+              return False
+
+          def copy_tree(src: Path, dst: Path):
+              if should_exclude(src):
+                  return
+              if src.is_dir():
+                  dst.mkdir(parents=True, exist_ok=True)
+                  for child in src.iterdir():
+                      copy_tree(child, dst / child.name)
+              else:
+                  dst.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(src, dst)
+
+          for child in root.iterdir():
+              if child.name in {".git", "dist"}:
+                  continue
+              copy_tree(child, payload_root / child.name)
+
+          tools = root / "dist" / "inno_payload" / "tools"
+          tools.mkdir(parents=True, exist_ok=True)
+          shutil.copy2(root / "scripts" / "generate_checksums.py", tools / "generate_checksums.py")
+          shutil.copy2(root / "scripts" / "release_excludes.json", tools / "release_excludes.json")
+          PY
+
+      - name: Generate checksum manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python scripts/generate_checksums.py --root dist/inno_payload --target-dir dist/inno_payload/EDMCModernOverlay --output dist/inno_payload/EDMCModernOverlay/checksums.txt --excludes scripts/release_excludes.json
+
+      - name: Generate payload checksum manifest (non-plugin assets)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python scripts/generate_checksums.py --root dist/inno_payload --target-dir dist/inno_payload --output dist/inno_payload/checksums_payload.txt --excludes scripts/release_excludes.json --skip EDMCModernOverlay
+
+      - name: Smoke-verify checksum manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python scripts/generate_checksums.py --verify --root dist/inno_payload --manifest dist/inno_payload/EDMCModernOverlay/checksums.txt
+
+      - name: Smoke-verify payload manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python scripts/generate_checksums.py --verify --root dist/inno_payload --manifest dist/inno_payload/checksums_payload.txt --excludes scripts/release_excludes.json --skip EDMCModernOverlay
+
+      - name: Bundle Eurocaps font
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $sourceFont = "extras\\EUROCAPS.ttf"
+          if (-not (Test-Path -LiteralPath $sourceFont)) {
+            throw "Expected Eurocaps font at '$sourceFont' but it was not found. Please place EUROCAPS.ttf in the extras folder."
+          }
+          $fontDir = "dist\\inno_payload\\extras"
+          New-Item -ItemType Directory -Path $fontDir -Force | Out-Null
+          $destFont = Join-Path $fontDir "EUROCAPS.ttf"
+          Copy-Item -LiteralPath $sourceFont -Destination $destFont -Force
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          choco install innosetup --no-progress -y
+
+      - name: Build installer with Inno Setup
+        if: ${{ hashFiles('scripts/installer.iss') != '' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:Path += ";C:\\Program Files (x86)\\Inno Setup 6"
+          $workspace = (Get-Location).ProviderPath
+          $outputDir = Join-Path $workspace "dist\\inno_output"
+          $payloadRoot = Join-Path $workspace "dist\\inno_payload"
+          New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+          $finalExeBase = "EDMCModernOverlay-windows-$($env:VERSION)"
+          iscc scripts\\installer.iss /DAppVersion="$($env:VERSION)" /DOutputDir="$outputDir" /DOutputBaseFilename="$finalExeBase" /DPayloadRoot="$payloadRoot" /DInstallVenvMode="build"
+
+      - name: Upload dev installer artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: dev-win-inno-build
+          path: |
+            dist/inno_output/*.exe
+            dist/inno_payload/**
+            scripts/installer.iss
+          if-no-files-found: warn
+
+      - name: Upload dev installer EXE
+        uses: actions/upload-artifact@v6
+        with:
+          name: dev-win-inno-build-exe
+          path: dist/inno_output/*.exe
+          if-no-files-found: error
