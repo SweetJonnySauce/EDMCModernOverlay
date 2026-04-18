@@ -455,9 +455,15 @@ class FollowSurfaceMixin:
             raise_fn=lambda: self.raise_(),
             apply_drag_state_fn=self._apply_drag_state,
             format_scale_debug_fn=self.format_scale_debug,
+            before_show_fn=lambda: self._log_windows_native_state("visibility:before_show"),
+            after_show_fn=lambda: self._log_windows_native_state("visibility:after_show"),
+            before_hide_fn=lambda: self._log_windows_native_state("visibility:before_hide"),
+            after_hide_fn=lambda: self._log_windows_native_state("visibility:after_hide"),
         )
         # keep compatibility for any consumers expecting cached state
         self._last_visibility_state = new_state
+        if hasattr(self, "_log_windows_native_state"):
+            self._log_windows_native_state(f"follow_visibility:requested={show}:actual={new_state}")
 
     def _move_to_screen(self, rect: QRect) -> None:
         window = self.windowHandle()

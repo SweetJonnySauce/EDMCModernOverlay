@@ -140,7 +140,15 @@ class SetupSurfaceMixin:
         self._follow_enabled: bool = True
         self._last_logged_scale: Optional[Tuple[float, float, float]] = None
         self._platform_context = _initial_platform_context(initial)
-        self._platform_controller = PlatformController(self, _CLIENT_LOGGER, self._platform_context)
+        self._log_windows_native_state_enabled = bool(
+            sys.platform.startswith("win") and getattr(debug_config, "log_windows_native_state", False)
+        )
+        self._platform_controller = PlatformController(
+            self,
+            _CLIENT_LOGGER,
+            self._platform_context,
+            disable_ws_ex_transparent=bool(getattr(debug_config, "disable_ws_ex_transparent", False)),
+        )
         _CLIENT_LOGGER.debug(
             "Platform controller initialised: session=%s compositor=%s force_xwayland=%s",
             self._platform_context.session_type or "unknown",
@@ -164,6 +172,7 @@ class SetupSurfaceMixin:
             set_children_attr_fn=lambda transparent: self._set_children_click_through(transparent),
             transparent_input_supported=self._transparent_input_supported,
             set_window_transparent_input_fn=lambda transparent: self.windowHandle().setFlag(Qt.WindowType.WindowTransparentForInput, transparent) if self.windowHandle() else None,
+            log_window_state_fn=self._log_windows_native_state,
         )
         self._status_presenter = StatusPresenter(
             send_payload_fn=self.handle_legacy_payload,
@@ -302,6 +311,11 @@ class SetupSurfaceMixin:
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Window
         )
+        if sys.platform.startswith("win") and getattr(self._debug_config, "enable_no_drop_shadow", False):
+            no_shadow_flag = getattr(Qt.WindowType, "NoDropShadowWindowHint", None)
+            if no_shadow_flag is not None:
+                window_flags |= no_shadow_flag
+                _CLIENT_LOGGER.debug("Applying NoDropShadowWindowHint due to dev toggle")
         if sys.platform.startswith("linux"):
             window_flags |= Qt.WindowType.X11BypassWindowManagerHint
         self.setWindowFlags(window_flags)
@@ -414,10 +428,26 @@ class SetupSurfaceMixin:
         apply_enabled = enabled
         if flag == Qt.WindowType.Tool and self._standalone_mode and sys.platform.startswith("win"):
             apply_enabled = False
+        if flag == Qt.WindowType.Tool and sys.platform.startswith("win") and getattr(self._debug_config, "disable_qt_tool", False):
+            if apply_enabled:
+                _CLIENT_LOGGER.debug("Suppressing Qt.Tool due to dev toggle")
+            apply_enabled = False
         try:
             self.setWindowFlag(flag, apply_enabled)
         except Exception as exc:
             _CLIENT_LOGGER.debug("Failed to set window flag %s=%s: %s", flag, apply_enabled, exc)
+
+    def _log_windows_native_state(self, reason: str) -> None:
+        if not getattr(self, "_log_windows_native_state_enabled", False):
+            return
+        self._platform_controller.log_native_window_state(
+            reason,
+            extra={
+                "force_render": bool(getattr(self, "_force_render", False)),
+                "standalone_mode": bool(getattr(self, "_standalone_mode", False)),
+                "drag_enabled": bool(getattr(self, "_drag_enabled", False)),
+            },
+        )
 
     # Set up experimental feature to run the overlay as a stand-alone window for capture tools.
     def _apply_standalone_window_identity(self) -> None:
@@ -454,6 +484,7 @@ class SetupSurfaceMixin:
     def _handle_show_event(self) -> None:
         self._apply_legacy_scale()
         self._platform_controller.prepare_window(self.windowHandle())
+        self._log_windows_native_state("show_event:prepared")
         _CLIENT_LOGGER.debug(
             "Platform controller initialised: session=%s compositor=%s force_xwayland=%s",
             self._platform_context.session_type or "unknown",
@@ -461,6 +492,7 @@ class SetupSurfaceMixin:
             self._platform_context.force_xwayland,
         )
         self._platform_controller.apply_click_through(True)
+        self._log_windows_native_state("show_event:click_through_applied")
         self._apply_standalone_window_identity()
         screen = self.windowHandle().screen() if self.windowHandle() else None
         if screen is None:

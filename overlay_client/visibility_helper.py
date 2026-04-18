@@ -20,15 +20,27 @@ class VisibilityHelper:
         raise_fn: Callable[[], None],
         apply_drag_state_fn: Callable[[], None],
         format_scale_debug_fn: Callable[[], str],
+        before_show_fn: Callable[[], None] | None = None,
+        after_show_fn: Callable[[], None] | None = None,
+        before_hide_fn: Callable[[], None] | None = None,
+        after_hide_fn: Callable[[], None] | None = None,
     ) -> bool:
         if show:
             if not is_visible_fn():
+                if before_show_fn is not None:
+                    before_show_fn()
                 show_fn()
+                if after_show_fn is not None:
+                    after_show_fn()
                 raise_fn()
                 apply_drag_state_fn()
         else:
             if is_visible_fn():
+                if before_hide_fn is not None:
+                    before_hide_fn()
                 hide_fn()
+                if after_hide_fn is not None:
+                    after_hide_fn()
         if self._last_state != show:
             self._log(
                 "Overlay visibility set to %s; %s",

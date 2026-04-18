@@ -46,6 +46,10 @@ class DebugConfig:
     payload_vertex_markers: bool = False
     repaint_debounce_enabled: Optional[bool] = None
     log_repaint_debounce: bool = False
+    log_windows_native_state: bool = False
+    disable_qt_tool: bool = False
+    enable_no_drop_shadow: bool = False
+    disable_ws_ex_transparent: bool = False
 
 
 def _coerce_log_retention(value: Any) -> Optional[int]:
@@ -91,6 +95,10 @@ def load_dev_settings(path: Path) -> DebugConfig:
         "payload_vertex_markers": False,
         "repaint_debounce_enabled": True,
         "log_repaint_debounce": False,
+        "log_windows_native_state": False,
+        "disable_qt_tool": False,
+        "enable_no_drop_shadow": False,
+        "disable_ws_ex_transparent": False,
     }
     raw_data: dict[str, Any] = {}
     needs_write = False
@@ -153,6 +161,10 @@ def load_dev_settings(path: Path) -> DebugConfig:
             repaint_debounce_enabled = not bool(disable_raw)
 
     log_repaint_debounce = bool(data.get("log_repaint_debounce", False))
+    log_windows_native_state = bool(data.get("log_windows_native_state", False))
+    disable_qt_tool = bool(data.get("disable_qt_tool", False))
+    enable_no_drop_shadow = bool(data.get("enable_no_drop_shadow", False))
+    disable_ws_ex_transparent = bool(data.get("disable_ws_ex_transparent", False))
 
     normalized = DebugConfig(
         trace_enabled=trace_enabled,
@@ -162,6 +174,10 @@ def load_dev_settings(path: Path) -> DebugConfig:
         payload_vertex_markers=payload_vertex_markers,
         repaint_debounce_enabled=repaint_debounce_enabled,
         log_repaint_debounce=log_repaint_debounce,
+        log_windows_native_state=log_windows_native_state,
+        disable_qt_tool=disable_qt_tool,
+        enable_no_drop_shadow=enable_no_drop_shadow,
+        disable_ws_ex_transparent=disable_ws_ex_transparent,
     )
 
     if needs_write:

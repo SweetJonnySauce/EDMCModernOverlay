@@ -31,6 +31,10 @@ def test_dev_settings_enabled_reads_file(monkeypatch, tmp_path):
         "tracing": {"enabled": True, "payload_ids": ["core"]},
         "overlay_outline": True,
         "group_bounds_outline": True,
+        "log_windows_native_state": True,
+        "disable_qt_tool": True,
+        "enable_no_drop_shadow": True,
+        "disable_ws_ex_transparent": True,
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
     monkeypatch.setattr(module, "DEBUG_CONFIG_ENABLED", True, raising=False)
@@ -38,3 +42,8 @@ def test_dev_settings_enabled_reads_file(monkeypatch, tmp_path):
     assert cfg.trace_enabled is True
     assert cfg.trace_payload_ids == ("core",)
     assert cfg.overlay_outline is True
+    assert cfg.group_bounds_outline is True
+    assert cfg.log_windows_native_state is True
+    assert cfg.disable_qt_tool is True
+    assert cfg.enable_no_drop_shadow is True
+    assert cfg.disable_ws_ex_transparent is True

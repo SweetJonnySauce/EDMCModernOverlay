@@ -26,6 +26,7 @@ class InteractionController:
         set_children_attr_fn: Callable[[bool], None],
         transparent_input_supported: bool,
         set_window_transparent_input_fn: Callable[[bool], None],
+        log_window_state_fn: Optional[Callable[[str], None]] = None,
     ) -> None:
         self._is_wayland = is_wayland_fn
         self._log = log_fn
@@ -41,6 +42,7 @@ class InteractionController:
         self._set_children_attr = set_children_attr_fn
         self._transparent_input_supported = transparent_input_supported
         self._set_window_transparent_input = set_window_transparent_input_fn
+        self._log_window_state = log_window_state_fn
         self._current_click_through: Optional[bool] = None
 
     def set_click_through(self, transparent: bool, *, force: bool = False, reason: str = "") -> None:
@@ -81,6 +83,8 @@ class InteractionController:
         self.reapply_current(reason="force_render_enter")
 
     def _apply_click_through_state(self, transparent: bool, reason: str) -> None:
+        if self._log_window_state is not None:
+            self._log_window_state(f"click_through:before:{reason}:{transparent}")
         self._set_widget_attribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, transparent)
         self._set_children_attr(transparent)
         self._set_window_flag(Qt.WindowType.WindowStaysOnTopHint, True)
@@ -100,3 +104,5 @@ class InteractionController:
             if self._transparent_input_supported:
                 self._set_window_transparent_input(transparent)
         self._raise()
+        if self._log_window_state is not None:
+            self._log_window_state(f"click_through:after:{reason}:{transparent}")

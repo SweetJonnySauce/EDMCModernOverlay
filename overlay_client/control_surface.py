@@ -41,6 +41,8 @@ class ControlSurfaceMixin:
         flag = bool(force)
         if flag == self._force_render:
             return
+        if hasattr(self, "_log_windows_native_state"):
+            self._log_windows_native_state(f"force_render:before:{flag}")
         self._force_render = flag
         if flag:
             self._interaction_controller.handle_force_render_enter()
@@ -60,6 +62,8 @@ class ControlSurfaceMixin:
                 and not self._last_follow_state.is_foreground
             ):
                 self._update_follow_visibility(False)
+        if hasattr(self, "_log_windows_native_state"):
+            self._log_windows_native_state(f"force_render:after:{flag}")
 
     def set_standalone_mode(self, enabled: Optional[bool]) -> None:
         flag = bool(enabled)
