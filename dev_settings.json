@@ -1,5 +1,6 @@
 {
   "disable_qt_tool": false,
+  "disable_qt_window_transparent_input": false,
   "disable_ws_ex_transparent": false,
   "enable_no_drop_shadow": false,
   "group_bounds_outline": true,

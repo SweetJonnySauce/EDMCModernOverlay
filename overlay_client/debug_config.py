@@ -48,6 +48,7 @@ class DebugConfig:
     log_repaint_debounce: bool = False
     log_windows_native_state: bool = False
     disable_qt_tool: bool = False
+    disable_qt_window_transparent_input: bool = False
     enable_no_drop_shadow: bool = False
     disable_ws_ex_transparent: bool = False
 
@@ -97,6 +98,7 @@ def load_dev_settings(path: Path) -> DebugConfig:
         "log_repaint_debounce": False,
         "log_windows_native_state": False,
         "disable_qt_tool": False,
+        "disable_qt_window_transparent_input": False,
         "enable_no_drop_shadow": False,
         "disable_ws_ex_transparent": False,
     }
@@ -163,6 +165,7 @@ def load_dev_settings(path: Path) -> DebugConfig:
     log_repaint_debounce = bool(data.get("log_repaint_debounce", False))
     log_windows_native_state = bool(data.get("log_windows_native_state", False))
     disable_qt_tool = bool(data.get("disable_qt_tool", False))
+    disable_qt_window_transparent_input = bool(data.get("disable_qt_window_transparent_input", False))
     enable_no_drop_shadow = bool(data.get("enable_no_drop_shadow", False))
     disable_ws_ex_transparent = bool(data.get("disable_ws_ex_transparent", False))
 
@@ -176,6 +179,7 @@ def load_dev_settings(path: Path) -> DebugConfig:
         log_repaint_debounce=log_repaint_debounce,
         log_windows_native_state=log_windows_native_state,
         disable_qt_tool=disable_qt_tool,
+        disable_qt_window_transparent_input=disable_qt_window_transparent_input,
         enable_no_drop_shadow=enable_no_drop_shadow,
         disable_ws_ex_transparent=disable_ws_ex_transparent,
     )

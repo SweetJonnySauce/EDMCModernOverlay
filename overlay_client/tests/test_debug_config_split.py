@@ -33,6 +33,7 @@ def test_dev_settings_enabled_reads_file(monkeypatch, tmp_path):
         "group_bounds_outline": True,
         "log_windows_native_state": True,
         "disable_qt_tool": True,
+        "disable_qt_window_transparent_input": True,
         "enable_no_drop_shadow": True,
         "disable_ws_ex_transparent": True,
     }
@@ -45,5 +46,6 @@ def test_dev_settings_enabled_reads_file(monkeypatch, tmp_path):
     assert cfg.group_bounds_outline is True
     assert cfg.log_windows_native_state is True
     assert cfg.disable_qt_tool is True
+    assert cfg.disable_qt_window_transparent_input is True
     assert cfg.enable_no_drop_shadow is True
     assert cfg.disable_ws_ex_transparent is True

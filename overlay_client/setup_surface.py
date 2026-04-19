@@ -105,7 +105,12 @@ class SetupSurfaceMixin:
         self._move_mode: bool = False
         self._cursor_saved: bool = False
         self._saved_cursor = self.cursor()
-        self._transparent_input_supported = hasattr(Qt.WindowType, "WindowTransparentForInput")
+        disable_qt_window_transparent_input = bool(
+            getattr(debug_config, "disable_qt_window_transparent_input", False)
+        )
+        self._transparent_input_supported = (
+            hasattr(Qt.WindowType, "WindowTransparentForInput") and not disable_qt_window_transparent_input
+        )
         self._show_status: bool = False
         self._base_height: int = int(BASE_HEIGHT)
         self._base_width: int = int(BASE_WIDTH)
@@ -147,6 +152,7 @@ class SetupSurfaceMixin:
             self,
             _CLIENT_LOGGER,
             self._platform_context,
+            disable_qt_window_transparent_input=disable_qt_window_transparent_input,
             disable_ws_ex_transparent=bool(getattr(debug_config, "disable_ws_ex_transparent", False)),
         )
         _CLIENT_LOGGER.debug(

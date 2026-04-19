@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from overlay_client.platform_integration import _exstyle_flag_names, _style_flag_names
+import logging
+import types
+
+from PyQt6.QtCore import Qt
+
+from overlay_client.platform_integration import PlatformContext, _IntegrationBase, _exstyle_flag_names, _style_flag_names
 
 
 def test_style_flag_names_decode_common_window_bits() -> None:
@@ -21,3 +26,30 @@ def test_exstyle_flag_names_decode_common_extended_bits() -> None:
     assert "WS_EX_LAYERED" in names
     assert "WS_EX_TRANSPARENT" in names
     assert "WS_EX_TOOLWINDOW" in names
+
+
+def test_base_integration_skips_qt_transparent_input_when_debug_toggle_enabled() -> None:
+    window = types.SimpleNamespace(flags_set=[])
+    window.setFlag = lambda flag, enabled: window.flags_set.append((flag, enabled))
+    widget = types.SimpleNamespace(windowHandle=lambda: window)
+    integration = _IntegrationBase(
+        widget,
+        logging.getLogger("test"),
+        PlatformContext(),
+        disable_qt_window_transparent_input=True,
+    )
+
+    integration.apply_click_through(True)
+
+    assert window.flags_set == []
+
+
+def test_base_integration_sets_qt_transparent_input_when_enabled() -> None:
+    window = types.SimpleNamespace(flags_set=[])
+    window.setFlag = lambda flag, enabled: window.flags_set.append((flag, enabled))
+    widget = types.SimpleNamespace(windowHandle=lambda: window)
+    integration = _IntegrationBase(widget, logging.getLogger("test"), PlatformContext())
+
+    integration.apply_click_through(True)
+
+    assert window.flags_set == [(Qt.WindowType.WindowTransparentForInput, True)]

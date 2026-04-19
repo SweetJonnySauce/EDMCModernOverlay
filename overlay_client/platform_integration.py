@@ -35,12 +35,14 @@ class _IntegrationBase:
         logger: logging.Logger,
         context: PlatformContext,
         *,
+        disable_qt_window_transparent_input: bool = False,
         disable_ws_ex_transparent: bool = False,
     ) -> None:
         self._widget = widget
         self._logger = logger
         self._context = context
         self._window: Optional[QWindow] = None
+        self._disable_qt_window_transparent_input = disable_qt_window_transparent_input
         self._disable_ws_ex_transparent = disable_ws_ex_transparent
 
     def update_context(self, context: PlatformContext) -> None:
@@ -51,6 +53,9 @@ class _IntegrationBase:
 
     def apply_click_through(self, transparent: bool) -> None:
         window = self._window or self._widget.windowHandle()
+        if self._disable_qt_window_transparent_input:
+            self._logger.debug("Skipping Qt WindowTransparentForInput application due to dev toggle")
+            return
         if window and hasattr(Qt.WindowType, "WindowTransparentForInput"):
             window.setFlag(Qt.WindowType.WindowTransparentForInput, transparent)
 
@@ -81,12 +86,14 @@ class _WindowsIntegration(_IntegrationBase):
         logger: logging.Logger,
         context: PlatformContext,
         *,
+        disable_qt_window_transparent_input: bool = False,
         disable_ws_ex_transparent: bool = False,
     ) -> None:
         super().__init__(
             widget,
             logger,
             context,
+            disable_qt_window_transparent_input=disable_qt_window_transparent_input,
             disable_ws_ex_transparent=disable_ws_ex_transparent,
         )
         self._last_hwnd: Optional[int] = None
@@ -222,12 +229,14 @@ class _WaylandIntegration(_IntegrationBase):
         logger: logging.Logger,
         context: PlatformContext,
         *,
+        disable_qt_window_transparent_input: bool = False,
         disable_ws_ex_transparent: bool = False,
     ) -> None:
         super().__init__(
             widget,
             logger,
             context,
+            disable_qt_window_transparent_input=disable_qt_window_transparent_input,
             disable_ws_ex_transparent=disable_ws_ex_transparent,
         )
         self._layer_shell = None
@@ -384,11 +393,13 @@ class PlatformController:
         logger: logging.Logger,
         context: PlatformContext,
         *,
+        disable_qt_window_transparent_input: bool = False,
         disable_ws_ex_transparent: bool = False,
     ) -> None:
         self._widget = widget
         self._logger = logger
         self._context = context
+        self._disable_qt_window_transparent_input = disable_qt_window_transparent_input
         self._disable_ws_ex_transparent = disable_ws_ex_transparent
         self._platform_name = (QGuiApplication.platformName() or "").lower()
         self._integration = self._select_integration()
@@ -400,6 +411,7 @@ class PlatformController:
                 self._widget,
                 self._logger,
                 self._context,
+                disable_qt_window_transparent_input=self._disable_qt_window_transparent_input,
                 disable_ws_ex_transparent=self._disable_ws_ex_transparent,
             )
         if self._context.force_xwayland or self._platform_name.startswith("xcb"):
@@ -408,6 +420,7 @@ class PlatformController:
                 self._widget,
                 self._logger,
                 self._context,
+                disable_qt_window_transparent_input=self._disable_qt_window_transparent_input,
                 disable_ws_ex_transparent=self._disable_ws_ex_transparent,
             )
         if (os.environ.get("XDG_SESSION_TYPE") or "").lower() == "x11":
@@ -416,6 +429,7 @@ class PlatformController:
                 self._widget,
                 self._logger,
                 self._context,
+                disable_qt_window_transparent_input=self._disable_qt_window_transparent_input,
                 disable_ws_ex_transparent=self._disable_ws_ex_transparent,
             )
         self._logger.debug("Selecting Wayland integration for overlay client")
@@ -423,6 +437,7 @@ class PlatformController:
             self._widget,
             self._logger,
             self._context,
+            disable_qt_window_transparent_input=self._disable_qt_window_transparent_input,
             disable_ws_ex_transparent=self._disable_ws_ex_transparent,
         )
 
