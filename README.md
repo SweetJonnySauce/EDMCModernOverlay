@@ -11,7 +11,7 @@
 
 EDMC Modern Overlay (packaged as `EDMCModernOverlay`) replaces [EDMCOverlay](https://github.com/inorton/EDMCOverlay) and [edmcoverlay2](https://github.com/pan-mroku/edmcoverlay2). It is a cross-platform (Windows and Linux) plugin for Elite Dangerous Market Connector ([EDMC](https://github.com/EDCD/EDMarketConnector)). It streams data from other EDMC plugins to be displayed in your game window. EDMCModernOverlay supports fullscreen, borderless, and windowed mode on any display size. It also now has a standalone mode as an experimental feature in 0.7.7 for use in SteamVR. The [plugin releases](https://github.com/SweetJonnySauce/EDMC-ModernOverlay/releases/latest) include Windows (powershell and .exe) and Linux installers.
 
-CMDRs can customize the placement of plugin payloads on their game window using the [Overlay Controller](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Overlay-Controller). You can change X/Y placement, anchor point, text justification, and add/change background colors for each plugin display.
+CMDRs can customize the placement of plugin payloads on their game window using the [Overlay Controller](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Overlay-Controller). You set profiles depending on game play and can change X/Y placement, anchor point, text justification, and add/change background colors for each plugin display.
 
 <img width="1957" height="1260" alt="image" src="https://github.com/user-attachments/assets/f17a2a83-1e5c-4556-af65-1053dba38cff" />
 
