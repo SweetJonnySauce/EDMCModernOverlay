@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import re
 import tkinter as tk
 from tkinter import colorchooser
 from typing import Callable, Optional
 
 _HEX_DIGITS = set("0123456789ABCDEFabcdef")
-_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _COLOR_DIALOG_PATCHED = False
 
 
@@ -26,6 +24,14 @@ class BackgroundWidget(tk.Frame):
         self._enabled = True
         self._picker_open = False
         self._pre_key_state: tuple[tk.Widget, int, int | None, bool] | None = None
+        self._opacity_var = tk.IntVar(value=100)
+        self._opacity_label_var = tk.StringVar(value="100%")
+        self._opacity_adjust_mode = False
+        self._opacity_pending_commit = False
+        self._opacity_sync_guard = False
+        self._remembered_opacity_percent = 100
+        self._last_valid_color: Optional[str] = None
+        self._last_valid_border_color: Optional[str] = None
 
         color_row = tk.Frame(self, bd=0, highlightthickness=0, bg=self.cget("background"))
         color_row.pack(fill="x", padx=4, pady=(4, 2))
@@ -34,12 +40,12 @@ class BackgroundWidget(tk.Frame):
         entry = tk.Entry(color_row, textvariable=self._color_var, width=14)
         entry.pack(side="left", padx=(6, 4))
         entry.bind("<Button-1>", lambda _e: self._handle_entry_click("color"), add="+")
-        entry.bind("<space>", self._handle_space_exit, add="+")
         entry.bind("<FocusIn>", lambda _e: self._handle_focus_event("color"), add="+")
         entry.bind("<FocusOut>", lambda _e: self._emit_change())
         entry.bind("<KeyRelease>", lambda _e: self._validate_color("color", lazy=True))
         entry.bind("<KeyPress-Left>", lambda e: self._record_pre_key_state(e, -1), add="+")
         entry.bind("<KeyPress-Right>", lambda e: self._record_pre_key_state(e, 1), add="+")
+        self._bind_tab_navigation(entry)
         self._entry = entry
         picker_btn = tk.Button(color_row, text="Pick…", command=lambda: self._handle_picker_click("color"), width=6)
         picker_btn.pack(side="left")
@@ -47,6 +53,7 @@ class BackgroundWidget(tk.Frame):
         picker_btn.bind("<Return>", lambda e: self._handle_picker_keypress("color", e), add="+")
         picker_btn.bind("<KP_Enter>", lambda e: self._handle_picker_keypress("color", e), add="+")
         picker_btn.bind("<space>", lambda e: self._handle_picker_keypress("color", e), add="+")
+        self._bind_tab_navigation(picker_btn)
         self._picker_btn = picker_btn
 
         border_color_row = tk.Frame(self, bd=0, highlightthickness=0, bg=self.cget("background"))
@@ -58,12 +65,12 @@ class BackgroundWidget(tk.Frame):
         border_entry = tk.Entry(border_color_row, textvariable=self._border_color_var, width=14)
         border_entry.pack(side="left", padx=(6, 4))
         border_entry.bind("<Button-1>", lambda _e: self._handle_entry_click("border_color"), add="+")
-        border_entry.bind("<space>", self._handle_space_exit, add="+")
         border_entry.bind("<FocusIn>", lambda _e: self._handle_focus_event("border_color"), add="+")
         border_entry.bind("<FocusOut>", lambda _e: self._emit_change())
         border_entry.bind("<KeyRelease>", lambda _e: self._validate_color("border_color", lazy=True))
         border_entry.bind("<KeyPress-Left>", lambda e: self._record_pre_key_state(e, -1), add="+")
         border_entry.bind("<KeyPress-Right>", lambda e: self._record_pre_key_state(e, 1), add="+")
+        self._bind_tab_navigation(border_entry)
         self._border_entry = border_entry
         border_picker_btn = tk.Button(
             border_color_row,
@@ -76,6 +83,7 @@ class BackgroundWidget(tk.Frame):
         border_picker_btn.bind("<Return>", lambda e: self._handle_picker_keypress("border_color", e), add="+")
         border_picker_btn.bind("<KP_Enter>", lambda e: self._handle_picker_keypress("border_color", e), add="+")
         border_picker_btn.bind("<space>", lambda e: self._handle_picker_keypress("border_color", e), add="+")
+        self._bind_tab_navigation(border_picker_btn)
         self._border_picker_btn = border_picker_btn
 
         border_row = tk.Frame(self, bd=0, highlightthickness=0, bg=self.cget("background"))
@@ -100,13 +108,42 @@ class BackgroundWidget(tk.Frame):
         spin.bind("<KeyRelease>", lambda _e: self._emit_change(commit_border=False))
         spin.bind("<KeyPress-Left>", lambda e: self._record_pre_key_state(e, -1), add="+")
         spin.bind("<KeyPress-Right>", lambda e: self._record_pre_key_state(e, 1), add="+")
+        self._bind_tab_navigation(spin)
         self._spin = spin
+        opacity_controls = tk.Frame(border_row, bd=0, highlightthickness=0, bg=self.cget("background"))
+        opacity_controls.pack(side="right", padx=(4, 0))
+        opacity_text_label = tk.Label(opacity_controls, text="Opacity", anchor="w", bg=self.cget("background"))
+        opacity_text_label.pack(side="left", padx=(0, 2))
+        opacity_scale = tk.Scale(
+            opacity_controls,
+            from_=0,
+            to=100,
+            orient="horizontal",
+            resolution=1,
+            showvalue=False,
+            variable=self._opacity_var,
+            command=self._handle_opacity_drag,
+            length=120,
+        )
+        opacity_scale.pack(side="left", padx=(8, 4))
+        opacity_scale.bind("<ButtonPress-1>", self._handle_opacity_press, add="+")
+        opacity_scale.bind("<ButtonRelease-1>", self._handle_opacity_release, add="+")
+        opacity_scale.bind("<FocusIn>", lambda _e: self._handle_focus_event("opacity"), add="+")
+        self._bind_tab_navigation(opacity_scale)
+        self._opacity_scale = opacity_scale
+        opacity_label = tk.Label(
+            opacity_controls,
+            textvariable=self._opacity_label_var,
+            anchor="w",
+            bg=self.cget("background"),
+        )
+        opacity_label.pack(side="left")
+        self._opacity_value_label = opacity_label
         self._bind_focus_target(self, None)
         self._bind_focus_target(color_row, "color")
         self._bind_focus_target(color_label, "color")
         self._bind_focus_target(border_color_row, "border_color")
         self._bind_focus_target(border_color_label, "border_color")
-        self._bind_focus_target(border_row, "border")
         self._bind_focus_target(border_label, "border")
 
     def set_focus_request_callback(self, callback: Callable[[], None] | None) -> None:
@@ -124,6 +161,7 @@ class BackgroundWidget(tk.Frame):
             self._spin.configure(state=state)
             self._picker_btn.configure(state=state)
             self._border_picker_btn.configure(state=state)
+            self._opacity_scale.configure(state=state)
         except Exception:
             pass
 
@@ -141,6 +179,9 @@ class BackgroundWidget(tk.Frame):
         self._border_var.set(str(border_int))
         self._entry.configure(background="white")
         self._border_entry.configure(background="white")
+        self._last_valid_color = self._normalise_color_text(display) if display else None
+        self._last_valid_border_color = self._normalise_color_text(border_display) if border_display else None
+        self._sync_slider_from_loaded_values(self._last_valid_color, self._last_valid_border_color)
 
     def on_focus_enter(self) -> None:
         if not self._enabled:
@@ -154,6 +195,8 @@ class BackgroundWidget(tk.Frame):
             pass
 
     def get_binding_targets(self) -> list[tk.Widget]:  # type: ignore[name-defined]
+        # Intentionally exclude the opacity slider so Return/Up/Down route through
+        # handle_key() active-field logic (commit-on-exit) instead of focus_next/prev bindings.
         return [self._entry, self._border_entry, self._spin]
 
     def focus_next_field(self, _event: object | None = None) -> str:
@@ -164,6 +207,8 @@ class BackgroundWidget(tk.Frame):
             next_field = "border_color"
         elif self._active_field in ("border_color", "border_pick"):
             next_field = "border"
+        elif self._active_field == "border":
+            next_field = "opacity"
         else:
             next_field = "color"
         self._focus_field(next_field)
@@ -175,10 +220,12 @@ class BackgroundWidget(tk.Frame):
         self._emit_change()
         if self._active_field in ("border",):
             prev_field = "border_color"
+        elif self._active_field == "opacity":
+            prev_field = "border"
         elif self._active_field in ("border_color", "border_pick"):
             prev_field = "color"
         else:
-            prev_field = "border"
+            prev_field = "opacity"
         self._focus_field(prev_field)
         return "break"
 
@@ -186,6 +233,27 @@ class BackgroundWidget(tk.Frame):
         if not self._enabled:
             return False
         key = keysym.lower()
+        if self._active_field == "opacity":
+            if key in {"left", "right"}:
+                delta = 1 if key == "right" else -1
+                if self._opacity_adjust_mode:
+                    self._adjust_slider_value(delta)
+                    return True
+                self._move_horizontal(delta)
+                return True
+            if key in {"space", "return", "kp_enter"}:
+                self._commit_opacity_changes()
+                self._focus_field("opacity", slider_adjust_mode=False)
+                return True
+            if key == "up":
+                self._commit_opacity_changes()
+                self._move_horizontal(-1)
+                return True
+            if key == "down":
+                self._commit_opacity_changes()
+                self._move_horizontal(1)
+                return True
+            return False
         if key in {"left", "right"}:
             if not self._should_move_horizontal(_event, 1 if key == "right" else -1):
                 return False
@@ -209,12 +277,12 @@ class BackgroundWidget(tk.Frame):
         self._focus_field(self._active_field)
 
     def _set_active_field(self, field: str) -> None:
-        if field not in ("color", "pick", "border_color", "border_pick", "border"):
+        if field not in ("color", "pick", "border_color", "border_pick", "border", "opacity"):
             return
         self._active_field = field
         self._pre_key_state = None
 
-    def _focus_field(self, field: str) -> None:
+    def _focus_field(self, field: str, *, slider_adjust_mode: bool | None = None) -> None:
         self._set_active_field(field)
         if field == "color":
             target = self._entry
@@ -224,12 +292,17 @@ class BackgroundWidget(tk.Frame):
             target = self._border_entry
         elif field == "border_pick":
             target = self._border_picker_btn
+        elif field == "opacity":
+            target = self._opacity_scale
+            if slider_adjust_mode is None:
+                slider_adjust_mode = True
+            self._opacity_adjust_mode = bool(slider_adjust_mode)
         else:
             target = self._spin
         try:
             target.focus_set()
             try:
-                if field in ("pick", "border_pick"):
+                if field in ("pick", "border_pick", "opacity"):
                     return
                 if hasattr(target, "select_range"):
                     target.select_range(0, tk.END)
@@ -246,6 +319,9 @@ class BackgroundWidget(tk.Frame):
             return
         self._set_active_field(field)
         if field in ("pick", "border_pick"):
+            return
+        if field == "opacity":
+            self._opacity_adjust_mode = True
             return
         if field == "color":
             target = self._entry
@@ -331,6 +407,61 @@ class BackgroundWidget(tk.Frame):
         self._focus_field("border")
         return "break"
 
+    def _handle_opacity_press(self, _event: tk.Event[tk.Misc]) -> None:  # type: ignore[name-defined]
+        if not self._enabled:
+            return
+        if self._request_focus:
+            try:
+                self._request_focus()
+            except Exception:
+                pass
+        self._focus_field("opacity", slider_adjust_mode=True)
+
+    def _handle_opacity_release(self, _event: tk.Event[tk.Misc]) -> None:  # type: ignore[name-defined]
+        if not self._enabled:
+            return
+        self._commit_opacity_changes()
+
+    def _bind_tab_navigation(self, widget: tk.Widget) -> None:  # type: ignore[name-defined]
+        widget.bind("<Tab>", self._handle_tab, add="+")
+        widget.bind("<Shift-Tab>", self._handle_shift_tab, add="+")
+        widget.bind("<ISO_Left_Tab>", self._handle_shift_tab, add="+")
+
+    def _handle_tab(self, _event: tk.Event[tk.Misc]) -> str:  # type: ignore[name-defined]
+        if not self._enabled:
+            return "break"
+        return self.focus_next_field()
+
+    def _handle_shift_tab(self, _event: tk.Event[tk.Misc]) -> str:  # type: ignore[name-defined]
+        if not self._enabled:
+            return "break"
+        return self.focus_previous_field()
+
+    def _handle_opacity_drag(self, value: str) -> None:
+        if self._opacity_sync_guard:
+            return
+        try:
+            percent = int(round(float(value)))
+        except Exception:
+            percent = self._remembered_opacity_percent
+        self._set_opacity_percent(percent, mark_pending=True)
+
+    def _set_opacity_percent(self, percent: int, *, mark_pending: bool = False) -> None:
+        bounded = max(0, min(100, int(percent)))
+        self._opacity_sync_guard = True
+        try:
+            self._opacity_var.set(bounded)
+        finally:
+            self._opacity_sync_guard = False
+        self._opacity_label_var.set(f"{bounded}%")
+        self._remembered_opacity_percent = bounded
+        if mark_pending:
+            self._opacity_pending_commit = True
+
+    def _adjust_slider_value(self, delta: int) -> None:
+        current = int(self._opacity_var.get())
+        self._set_opacity_percent(current + delta, mark_pending=True)
+
     def _handle_picker_click(self, target: str) -> None:
         if not self._enabled:
             return
@@ -382,10 +513,9 @@ class BackgroundWidget(tk.Frame):
                 target_var.set(original_value)
                 return
             hex_value = hex_value.upper()
-            if had_alpha and alpha_value is not None:
-                alpha_int = max(0, min(255, int(alpha_value)))
-                result = f"#{alpha_int:02X}{hex_value}"
-            else:
+            _ = rgb, alpha_value, had_alpha
+            result = self._apply_slider_alpha_to_token(f"#{hex_value}")
+            if result is None:
                 result = f"#{hex_value}"
             target_var.set(result)
             self._emit_change()
@@ -412,38 +542,256 @@ class BackgroundWidget(tk.Frame):
         return token
 
     def _emit_change(self, *, commit_border: bool = True) -> None:
+        color_raw = self._color_var.get().strip()
         color_value = self._validate_color("color")
-        if color_value is None and self._color_var.get().strip():
-            return
+        color_invalid = bool(color_raw) and color_value is None
+        border_raw = self._border_color_var.get().strip()
         border_color_value = self._validate_color("border_color")
-        if border_color_value is None and self._border_color_var.get().strip():
+        border_invalid = bool(border_raw) and border_color_value is None
+        self._sync_slider_from_manual_alpha(
+            color_value if not color_invalid else None,
+            border_color_value if not border_invalid else None,
+        )
+        if color_invalid or border_invalid:
             return
         raw_border = self._border_var.get().strip()
+        border_value = self._resolve_border_value(raw_border, commit_border=commit_border)
+        if border_value is None:
+            return
+        color_slider_token = self._slider_target_token(color_value)
+        border_slider_token = self._slider_target_token(border_color_value)
+        color_output = self._apply_slider_alpha_to_token(color_slider_token) if color_slider_token is not None else None
+        if self._should_slider_control_border(color_slider_token, border_slider_token):
+            border_output = (
+                self._apply_slider_alpha_to_token(border_slider_token) if border_slider_token is not None else None
+            )
+        else:
+            border_output = self._canonical_argb_token(border_slider_token)
+        if color_output is not None:
+            self._color_var.set(color_output)
+            self._last_valid_color = color_output
+        else:
+            self._last_valid_color = None
+        if border_output is not None:
+            self._border_color_var.set(border_output)
+            self._last_valid_border_color = border_output
+        else:
+            self._last_valid_border_color = None
+        if self._change_callback is not None:
+            self._change_callback(color_output, border_output, border_value)
+
+    def _commit_opacity_changes(self) -> None:
+        if not self._opacity_pending_commit:
+            return
+        color_raw = self._color_var.get().strip()
+        color_value = self._validate_color("color")
+        color_invalid = bool(color_raw) and color_value is None
+        border_raw = self._border_color_var.get().strip()
+        border_value_token = self._validate_color("border_color")
+        border_invalid = bool(border_raw) and border_value_token is None
+        self._opacity_pending_commit = False
+        color_slider_token = self._slider_target_token(None if color_invalid else color_value)
+        border_slider_token = self._slider_target_token(None if border_invalid else border_value_token)
+        target_present = color_slider_token is not None or border_slider_token is not None
+        if not target_present:
+            return
+        raw_border = self._border_var.get().strip()
+        border_width = self._resolve_border_value(raw_border, commit_border=True)
+        if border_width is None:
+            return
+        control_border = self._should_slider_control_border(color_slider_token, border_slider_token)
+
+        color_output: Optional[str]
+        if color_invalid:
+            color_output = self._last_valid_color
+        elif color_slider_token is not None:
+            color_output = self._apply_slider_alpha_to_token(color_slider_token)
+            if color_output is not None:
+                self._color_var.set(color_output)
+                self._last_valid_color = color_output
+            else:
+                color_output = self._last_valid_color
+        else:
+            color_output = None
+            self._last_valid_color = None
+
+        border_output: Optional[str]
+        if border_invalid:
+            border_output = self._last_valid_border_color
+        elif border_slider_token is not None:
+            if control_border:
+                border_output = self._apply_slider_alpha_to_token(border_slider_token)
+                if border_output is not None:
+                    self._border_color_var.set(border_output)
+                    self._last_valid_border_color = border_output
+                else:
+                    border_output = self._last_valid_border_color
+            else:
+                border_output = self._canonical_argb_token(border_slider_token)
+                if border_output is not None:
+                    self._border_color_var.set(border_output)
+                    self._last_valid_border_color = border_output
+                else:
+                    border_output = self._last_valid_border_color
+        else:
+            border_output = None
+            self._last_valid_border_color = None
+
+        if self._change_callback is not None:
+            self._change_callback(color_output, border_output, border_width)
+
+    @staticmethod
+    def _slider_target_token(token: Optional[str]) -> Optional[str]:
+        if token is None:
+            return None
+        if token.strip().casefold() == "none":
+            return None
+        return token
+
+    def _should_slider_control_border(self, color_token: Optional[str], border_token: Optional[str]) -> bool:
+        if border_token is None:
+            return False
+        if color_token is None:
+            return True
+        color_alpha = self._effective_alpha_for_link(color_token)
+        border_alpha = self._effective_alpha_for_link(border_token)
+        if color_alpha is None or border_alpha is None:
+            return False
+        return color_alpha == border_alpha
+
+    @staticmethod
+    def _effective_alpha_for_link(token: str) -> Optional[int]:
+        text = (token or "").strip()
+        if not text:
+            return None
+        if text.startswith("#"):
+            body = text[1:]
+            if len(body) == 8 and all(ch in _HEX_DIGITS for ch in body):
+                return int(body[0:2], 16)
+            if len(body) == 6 and all(ch in _HEX_DIGITS for ch in body):
+                return 255
+            return None
+        return 255
+
+    def _canonical_argb_token(self, token: Optional[str]) -> Optional[str]:
+        if token is None:
+            return None
+        alpha = self._effective_alpha_for_link(token)
+        if alpha is None:
+            return None
+        return self._apply_alpha_to_token(token, alpha)
+
+    def _resolve_border_value(self, raw_border: str, *, commit_border: bool) -> Optional[int]:
         if not raw_border:
             if not commit_border:
-                return
+                return None
             border_value = self._min_border
             self._border_var.set(str(border_value))
+            return border_value
+        try:
+            border_value = int(raw_border)
+        except Exception:
+            if not commit_border:
+                return None
+            border_value = self._min_border
+            self._border_var.set(str(border_value))
+            return border_value
+        if not commit_border:
+            if border_value < self._min_border or border_value > self._max_border:
+                return None
+            return border_value
+        border_value = max(self._min_border, min(self._max_border, border_value))
+        self._border_var.set(str(border_value))
+        return border_value
+
+    def _sync_slider_from_loaded_values(
+        self,
+        color_value: Optional[str],
+        border_color_value: Optional[str],
+    ) -> None:
+        if color_value:
+            percent = self._token_alpha_percent(color_value, use_default=True)
+        elif border_color_value:
+            percent = self._token_alpha_percent(border_color_value, use_default=True)
         else:
-            try:
-                border_value = int(raw_border)
-            except Exception:
-                if not commit_border:
-                    return
-                border_value = self._min_border
-                self._border_var.set(str(border_value))
+            percent = self._remembered_opacity_percent
+        self._set_opacity_percent(percent, mark_pending=False)
+        self._opacity_pending_commit = False
+
+    def _sync_slider_from_manual_alpha(
+        self,
+        color_value: Optional[str],
+        border_color_value: Optional[str],
+    ) -> None:
+        percent: Optional[int] = None
+        if color_value and self._token_has_explicit_alpha(color_value):
+            percent = self._token_alpha_percent(color_value, use_default=False)
+        elif color_value is None and border_color_value and self._token_has_explicit_alpha(border_color_value):
+            percent = self._token_alpha_percent(border_color_value, use_default=False)
+        if percent is None:
+            return
+        self._set_opacity_percent(percent, mark_pending=False)
+        self._opacity_pending_commit = False
+
+    def _token_has_explicit_alpha(self, token: str) -> bool:
+        text = (token or "").strip()
+        if not text.startswith("#"):
+            return False
+        return len(text) == 9
+
+    def _token_alpha_percent(self, token: str, *, use_default: bool) -> int:
+        rgba, alpha, had_alpha = self._parse_color_value(token)
+        if rgba is None:
+            return self._remembered_opacity_percent
+        if had_alpha and alpha is not None:
+            return self._alpha_to_percent(alpha)
+        if use_default:
+            return 100
+        return self._remembered_opacity_percent
+
+    @staticmethod
+    def _alpha_to_percent(alpha: int) -> int:
+        bounded = max(0, min(255, int(alpha)))
+        return int(round((bounded / 255.0) * 100.0))
+
+    @staticmethod
+    def _percent_to_alpha(percent: int) -> int:
+        bounded = max(0, min(100, int(percent)))
+        return int(round((bounded / 100.0) * 255.0))
+
+    def _apply_slider_alpha_to_token(self, token: str) -> Optional[str]:
+        alpha = self._percent_to_alpha(self._remembered_opacity_percent)
+        return self._apply_alpha_to_token(token, alpha)
+
+    def _apply_alpha_to_token(self, token: str, alpha: int) -> Optional[str]:
+        normalized = self._normalise_color_text(token)
+        if normalized is None:
+            return None
+        alpha_int = max(0, min(255, int(alpha)))
+        if normalized.startswith("#"):
+            body = normalized[1:]
+            if len(body) == 8:
+                rgb = body[2:]
+            elif len(body) == 6:
+                rgb = body
             else:
-                if not commit_border:
-                    if border_value < self._min_border or border_value > self._max_border:
-                        return
-                else:
-                    border_value = max(self._min_border, min(self._max_border, border_value))
-                    self._border_var.set(str(border_value))
-        if self._change_callback is not None:
-            self._change_callback(color_value, border_color_value, border_value)
+                return None
+            return f"#{alpha_int:02X}{rgb.upper()}"
+        rgb = self._resolve_named_color_rgb(normalized)
+        if rgb is None:
+            return None
+        red, green, blue = rgb
+        return f"#{alpha_int:02X}{red:02X}{green:02X}{blue:02X}"
+
+    def _resolve_named_color_rgb(self, name: str) -> Optional[tuple[int, int, int]]:
+        try:
+            red16, green16, blue16 = self.winfo_rgb(name)
+        except Exception:
+            return None
+        return red16 // 256, green16 // 256, blue16 // 256
 
     def _move_horizontal(self, delta: int) -> None:
-        order = ("color", "pick", "border_color", "border_pick", "border")
+        order = ("color", "pick", "border_color", "border_pick", "border", "opacity")
         try:
             idx = order.index(self._active_field)
         except ValueError:
@@ -562,15 +910,16 @@ if {![info exists ::edmcoverlay_color_dialog_patched]} {
             return
         _COLOR_DIALOG_PATCHED = True
 
-    @staticmethod
-    def _normalise_color_text(raw: str) -> Optional[str]:
+    def _normalise_color_text(self, raw: str) -> Optional[str]:
         token = (raw or "").strip()
         if not token:
             return None
         hex_part = token[1:] if token.startswith("#") else token
         if len(hex_part) in (6, 8) and all(ch in _HEX_DIGITS for ch in hex_part):
             return "#" + hex_part.upper()
-        if _NAME_PATTERN.match(token):
+        if token.casefold() == "none":
+            return token
+        if self._resolve_named_color_rgb(token) is not None:
             return token
         return None
 

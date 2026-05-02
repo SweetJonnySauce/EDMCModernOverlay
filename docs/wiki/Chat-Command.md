@@ -8,12 +8,17 @@ You can launch the [Overlay Controller](https://github.com/SweetJonnySauce/EDMCM
 - **Off:** `off [plugin_group_name]` turns groups off (all groups if no target is provided).
 - **Toggle:** `toggle [plugin_group_name]` flips group state on or off (all groups if no target is provided).
 - **Status:** `status` lists plugin groups with `Enabled|Not Enabled|Unknown|Ignored`, `Seen|Not Seen`, and `On|Off` states.
+- **Profile Set:** `profile <name>` switches the active overlay profile.
+- **Profile Cycle:** `profile next` and `profile prev` cycle to the next/previous profile.
+- **Profile List/Status:** `profile status` (also `profile list`, `profile ls`) prints profiles with the active one in brackets.
+- **Profile Cycle Shortcuts:** `next` and `prev` are aliases for profile cycling.
+- **Profiles Shortcut:** `profiles` prints profiles with the active one in brackets.
 - **Opacity:** number `0-100` or percent form (for example `50%`, `75%`) sets visual opacity. 0 is fully transparent, 100 is fully visible.
 - **Test Overlay:** `test` sends a test overlay to the middle of the game window.
 - **Plugins:** `plugins` logs installed plugin scan details.
 
 ### Chat Command Equivalents
-For `on`', `off`, and `toggle`, the following forms are equivalent:
+For `on`, `off`, and `toggle`, the following forms are equivalent:
 
 - `!ovr on BGS-Tally Objectives`
 - `!ovr BGS-Tally Objectives on`
@@ -27,6 +32,12 @@ For `on`', `off`, and `toggle`, the following forms are equivalent:
 - `!ovr toggle` toggles all plugin groups on or off.
 - `!ovr t` toggles all plugin groups using the default toggle token.
 - `!ovr status` shows a table overlay with columns `Plugin Group | Plugin | Seen | State` using values from `<plugin_group_name>: Enabled|Not Enabled|Unknown|Ignored, Seen|Not Seen, On|Off`. Seen means the plugin group has been seen in your current session.
+- `!ovr profile Mining` sets the active profile to `Mining`.
+- `!ovr profile next` switches to the next profile.
+- `!ovr profile prev` switches to the previous profile.
+- `!ovr next` and `!ovr prev` are shorthand profile cycle commands.
+- `!ovr profiles` prints profile names and marks the active one as `[ProfileName]`.
+- `!ovr profile status` prints the same profile list/status output.
 - `!ovr 50%` sets visual overlay opacity to 50%.
 - `!ovr test` sends a test overlay payload.
 

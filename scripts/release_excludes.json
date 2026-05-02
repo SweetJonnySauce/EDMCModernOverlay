@@ -22,6 +22,7 @@
     "EDMCModernOverlay.code-workspace",
     "Makefile",
     "overlay_groupings.user.json",
+    "overlay_settings.json",
     "pyvenv.cfg"
   ],
   "patterns": [

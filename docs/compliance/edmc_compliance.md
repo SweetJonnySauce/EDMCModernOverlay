@@ -72,4 +72,4 @@ Use this evidence checklist for each release when deciding the `Stay aligned wit
 - If a release intentionally waives EDMC Releases/Discussions logging or parity-environment artifacts, record that waiver in `Exceptions` with release scope and rationale.
 
 ## Exceptions
-- None
+- 0.9.0 waiver: EDMC Releases/Discussions review findings log is not required for 0.9.0 release sign-off.

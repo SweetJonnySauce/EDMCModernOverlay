@@ -1,0 +1,76 @@
+{
+  "chat_launch": [
+    {
+      "event": "SendText",
+      "Message": "!ovr"
+    }
+  ],
+  "chat_help": [
+    {
+      "event": "SendText",
+      "Message": "!ovr help"
+    }
+  ],
+  "chat_toggle": [
+    {
+      "event": "SendText",
+      "Message": "!ovr t"
+    }
+  ],
+  "chat_group_actions": [
+    {
+      "event": "SendText",
+      "Message": "!ovr on \"BGS-Tally Objectives\""
+    },
+    {
+      "event": "SendText",
+      "Message": "!ovr off \"BGS-Tally Objectives\""
+    },
+    {
+      "event": "SendText",
+      "Message": "!ovr status"
+    },
+    {
+      "event": "SendText",
+      "Message": "!ovr toggle \"BGS-Tally Objectives\""
+    }
+  ],
+  "chat_profiles": [
+    {
+      "event": "SendText",
+      "Message": "!ovr profile next"
+    },
+    {
+      "event": "SendText",
+      "Message": "!ovr profile prev"
+    },
+    {
+      "event": "SendText",
+      "Message": "!ovr profiles"
+    }
+  ],
+  "profile_ship_seed": [
+    {
+      "event": "LoadGame",
+      "ShipID": 880042,
+      "Ship": "krait_mkii",
+      "ShipName": "Harness Runner",
+      "UserShipId": "HR-42"
+    }
+  ],
+  "profile_shipyard_swap_seed": [
+    {
+      "event": "ShipyardSwap",
+      "ShipType": "smallcombat01_nx",
+      "ShipType_Localised": "Kestrel Mk II",
+      "ShipID": 93,
+      "UserShipName": "Harness Kestrel",
+      "UserShipId": "HK-93",
+      "ShipName": "Harness Kestrel",
+      "ShipIdent": "HK-93",
+      "StoreOldShip": "PantherMkII",
+      "StoreShipID": 90,
+      "MarketID": 3709408768
+    }
+  ]
+}

@@ -205,3 +205,104 @@ def test_state_manager_bulk_set_updates_only_known_groups_and_keeps_stale_entrie
     assert enabled_map["Alpha"] is False
     assert enabled_map["Beta"] is False
     assert enabled_map["Removed Group"] is True
+
+
+def test_state_manager_profile_scoped_visibility_switches_with_active_profile(tmp_path):
+    shipped = tmp_path / "overlay_groupings.json"
+    user = tmp_path / "overlay_groupings.user.json"
+    _write_json(
+        shipped,
+        {
+            "PluginA": {
+                "idPrefixGroups": {
+                    "Alpha": {"idPrefixes": ["a-"]},
+                }
+            }
+        },
+    )
+    _write_json(
+        user,
+        {
+            "_overlay_profile_state": {
+                "profiles": ["PvE", "Default"],
+                "current_profile": "Default",
+            },
+            "_plugin_group_state": {
+                "enabled": {"Alpha": True},
+                "enabled_by_profile": {
+                    "Default": {"Alpha": True},
+                    "PvE": {"Alpha": False},
+                },
+            },
+        },
+    )
+
+    manager = PluginGroupStateManager(shipped_path=shipped, user_path=user)
+    assert manager.state_snapshot() == {"Alpha": True}
+
+    manager.set_current_profile("PvE")
+    assert manager.state_snapshot() == {"Alpha": False}
+
+    manager.set_current_profile("Default")
+    assert manager.state_snapshot() == {"Alpha": True}
+
+
+def test_state_manager_clone_and_rename_profile_preserves_visibility_map(tmp_path):
+    shipped = tmp_path / "overlay_groupings.json"
+    user = tmp_path / "overlay_groupings.user.json"
+    _write_json(
+        shipped,
+        {
+            "PluginA": {
+                "idPrefixGroups": {
+                    "Alpha": {"idPrefixes": ["a-"]},
+                }
+            }
+        },
+    )
+    _write_json(user, {})
+
+    manager = PluginGroupStateManager(shipped_path=shipped, user_path=user)
+    manager.set_groups_enabled(False, ["Alpha"])
+    manager.create_profile("PvE")
+    manager.set_current_profile("PvE")
+    manager.set_groups_enabled(True, ["Alpha"])
+
+    manager.clone_profile("PvE", "PvP")
+    manager.set_current_profile("PvP")
+    assert manager.state_snapshot() == {"Alpha": True}
+
+    manager.rename_profile("PvP", "Combat")
+    manager.set_current_profile("Combat")
+    assert manager.state_snapshot() == {"Alpha": True}
+
+    manager.set_current_profile("Default")
+    assert manager.state_snapshot() == {"Alpha": False}
+
+
+def test_state_manager_reset_groups_to_default_restores_active_profile_visibility(tmp_path):
+    shipped = tmp_path / "overlay_groupings.json"
+    user = tmp_path / "overlay_groupings.user.json"
+    _write_json(
+        shipped,
+        {
+            "PluginA": {
+                "idPrefixGroups": {
+                    "Alpha": {"idPrefixes": ["a-"]},
+                }
+            }
+        },
+    )
+    _write_json(user, {})
+
+    manager = PluginGroupStateManager(shipped_path=shipped, user_path=user)
+    manager.set_groups_enabled(False, ["Alpha"])
+    manager.create_profile("PvE")
+    manager.set_current_profile("PvE")
+    manager.set_groups_enabled(True, ["Alpha"])
+    assert manager.state_snapshot() == {"Alpha": True}
+
+    updated, unknown = manager.reset_groups_to_default(["Alpha"])
+    assert updated == ["Alpha"]
+    assert unknown == []
+    assert manager.state_snapshot() == {"Alpha": False}

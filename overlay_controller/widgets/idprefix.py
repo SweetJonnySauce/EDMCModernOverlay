@@ -7,27 +7,52 @@ from typing import Callable
 from overlay_controller.widgets.common import alt_modifier_active
 
 IDPREFIX_DROPDOWN_WIDTH = 32
+PROFILE_DROPDOWN_WIDTH = 18
 
 
-class IdPrefixGroupWidget(tk.Frame):
-    """Composite control with a dropdown selector (placeholder for future inputs)."""
+class _LabeledSelectorWidget(tk.Frame):
+    """Single-selector widget with label, dropdown, and step arrows."""
 
-    def __init__(self, parent: tk.Widget, options: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        parent: tk.Widget,
+        *,
+        label_text: str,
+        options: list[str] | None = None,
+        dropdown_width: int,
+    ) -> None:
         super().__init__(parent, bd=0, highlightthickness=0, bg=parent.cget("background"))
         self._choices = options or []
         self._selection = tk.StringVar()
         self._dropdown_posted = False
         self._request_focus: Callable[[], None] | None = None
         self._on_selection_changed: Callable[[str | None], None] | None = None
+
+        self.columnconfigure(0, weight=0)
+        self.columnconfigure(1, weight=1)
+        self.columnconfigure(2, weight=0)
+        self.rowconfigure(0, weight=0)
+        self.rowconfigure(1, weight=1)
+
+        self.label = tk.Label(self, text=label_text, anchor="w", bg=self.cget("background"))
+        self.label.grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 2))
+
         self.dropdown = ttk.Combobox(
             self,
             values=self._choices,
             state="readonly",
             textvariable=self._selection,
-            width=IDPREFIX_DROPDOWN_WIDTH,
+            width=dropdown_width,
         )
         if self._choices:
             self.dropdown.current(0)
+        self.dropdown.grid(row=1, column=1, padx=0, pady=0, sticky="we")
+
+        self._block_classes = ("TComboboxListbox", "Listbox", "TComboboxPopdown")
+        self._bind_dropdown_common()
+        self._build_triangles()
+
+    def _bind_dropdown_common(self) -> None:
         alt_sequences = (
             "<Alt-Up>",
             "<Alt-Down>",
@@ -38,37 +63,26 @@ class IdPrefixGroupWidget(tk.Frame):
             "<Alt-KeyPress-Left>",
             "<Alt-KeyPress-Right>",
         )
-        block_classes = ("TComboboxListbox", "Listbox", "TComboboxPopdown")
-        self._block_classes = block_classes
         for seq in alt_sequences:
             self.dropdown.bind(seq, lambda _e: "break")
-            for class_name in block_classes:
+            for class_name in self._block_classes:
                 try:
                     self.dropdown.bind_class(class_name, seq, lambda _e: "break")
                 except Exception:
                     continue
-        # Ensure arrow keys stay local to this widget/popdown so we can handle navigation ourselves.
+
         for seq in ("<Left>", "<Right>", "<Up>", "<Down>"):
             self.dropdown.bind(seq, self._handle_arrow_key, add="+")
-            for class_name in block_classes:
+            for class_name in self._block_classes:
                 try:
                     self.dropdown.bind_class(class_name, seq, self._handle_arrow_key, add="+")
                 except Exception:
                     continue
-        self._build_triangles()
+
         self.dropdown.bind("<Button-1>", self._handle_dropdown_click, add="+")
         self.dropdown.bind("<<ComboboxSelected>>", self._handle_selection_change, add="+")
 
-        self.columnconfigure(0, weight=0)
-        self.columnconfigure(1, weight=1)
-        self.columnconfigure(2, weight=0)
-        self.rowconfigure(0, weight=1)
-
-        self.dropdown.grid(row=0, column=1, padx=0, pady=0)
-
     def update_options(self, options: list[str], selected_index: int | None = None) -> None:
-        """Replace dropdown options and apply selection if provided."""
-
         self._choices = options or []
         try:
             self.dropdown.configure(values=self._choices)
@@ -87,25 +101,18 @@ class IdPrefixGroupWidget(tk.Frame):
                 pass
 
     def on_focus_enter(self) -> None:
-        """Called when the host enters focus mode for this widget."""
-
         try:
             self.dropdown.focus_set()
         except Exception:
             pass
 
     def on_focus_exit(self) -> None:
-        """Called when the host exits focus mode for this widget."""
-
         try:
-            # Return focus to the toplevel so no inner control keeps focus.
             self.winfo_toplevel().focus_set()
         except Exception:
             pass
 
     def _is_dropdown_open(self) -> bool:
-        """Return True when the combobox popdown is visible."""
-
         try:
             popdown = self.dropdown.tk.call("ttk::combobox::PopdownWindow", self.dropdown)
             return bool(int(self.dropdown.tk.call("winfo", "viewable", popdown)))
@@ -113,8 +120,6 @@ class IdPrefixGroupWidget(tk.Frame):
             return False
 
     def _sync_dropdown_selection(self, index: int) -> None:
-        """Best-effort highlight sync for the ttk popdown listbox."""
-
         try:
             popdown = self.dropdown.tk.call("ttk::combobox::PopdownWindow", self.dropdown)
             listbox = f"{popdown}.f.l"
@@ -129,8 +134,6 @@ class IdPrefixGroupWidget(tk.Frame):
             return
 
     def _advance_selection(self, step: int = 1) -> bool:
-        """Move selection by the given step; returns True if it changed."""
-
         count = len(self._choices)
         if not count:
             return False
@@ -151,60 +154,45 @@ class IdPrefixGroupWidget(tk.Frame):
             return False
 
     def _build_triangles(self) -> None:
-        """Add clickable triangles on either side of the combobox."""
-
-        def _make_button(column: int, direction: str) -> None:
+        def _make_button(*, column: int, direction: str, on_click: Callable[[], None]) -> None:
             btn = tk.Canvas(
                 self,
-                width=28,
-                height=28,
+                width=24,
+                height=24,
                 bd=0,
                 highlightthickness=0,
                 bg=self.cget("background"),
             )
-            size = 28
+            size = 24
             inset = 6
             if direction == "left":
                 points = (inset, size / 2, size - inset, inset, size - inset, size - inset)
             else:
                 points = (size - inset, size / 2, inset, inset, inset, size - inset)
             btn.create_polygon(*points, fill="black", outline="black")
-            btn.grid(row=0, column=column, padx=4, pady=0)
+            btn.grid(row=1, column=column, padx=2, pady=0)
 
-            def _on_click(_event: object) -> str | None:
+            def _handler(_event: object) -> str:
                 if self._request_focus:
                     try:
                         self._request_focus()
                     except Exception:
                         pass
-                try:
-                    self.dropdown.focus_set()
-                except Exception:
-                    pass
-                self._advance_selection(-1 if direction == "left" else 1)
+                on_click()
                 return "break"
 
-            btn.bind("<Button-1>", _on_click)
-            if not hasattr(self, "_triangle_buttons"):
-                self._triangle_buttons: list[tk.Canvas] = []
-            self._triangle_buttons.append(btn)
+            btn.bind("<Button-1>", _handler)
 
-        _make_button(0, "left")
-        _make_button(2, "right")
+        _make_button(column=0, direction="left", on_click=lambda: self._advance_selection(-1))
+        _make_button(column=2, direction="right", on_click=lambda: self._advance_selection(1))
 
     def set_focus_request_callback(self, callback: Callable[[], None] | None) -> None:
-        """Register a callback that requests host focus when a control is clicked."""
-
         self._request_focus = callback
 
     def set_selection_change_callback(self, callback: Callable[[str | None], None] | None) -> None:
-        """Register a callback invoked when the selection changes."""
-
         self._on_selection_changed = callback
 
     def _handle_dropdown_click(self, _event: object) -> None:
-        """Ensure the widget enters focus/selection before native dropdown handling."""
-
         if self._request_focus:
             try:
                 self._request_focus()
@@ -223,8 +211,6 @@ class IdPrefixGroupWidget(tk.Frame):
                 pass
 
     def set_exit_focus_sequences(self, sequences: list[str]) -> None:
-        """Bind exit focus keys from the controller keybindings."""
-
         for sequence in sequences:
             try:
                 self.dropdown.bind(sequence, self._handle_exit_focus, add="+")
@@ -256,8 +242,6 @@ class IdPrefixGroupWidget(tk.Frame):
         return "break"
 
     def _post_dropdown(self) -> None:
-        """Open the combobox dropdown without synthesizing key events."""
-
         try:
             self.dropdown.tk.call("ttk::combobox::Post", self.dropdown)
             self._dropdown_posted = True
@@ -279,8 +263,6 @@ class IdPrefixGroupWidget(tk.Frame):
             pass
 
     def _navigate(self, step: int) -> bool:
-        """Advance selection and sync an open dropdown listbox if present."""
-
         changed = self._advance_selection(step)
         if changed:
             try:
@@ -292,8 +274,6 @@ class IdPrefixGroupWidget(tk.Frame):
         return changed
 
     def handle_key(self, keysym: str, event: tk.Event[tk.Misc] | None = None) -> str | None:  # type: ignore[name-defined]
-        """Process keys while this widget has focus mode active."""
-
         if alt_modifier_active(self, event):
             return "break"
 
@@ -301,25 +281,24 @@ class IdPrefixGroupWidget(tk.Frame):
         if key == "left":
             self._advance_selection(-1)
             return "break"
-        elif key == "right":
+        if key == "right":
             self._advance_selection(1)
             return "break"
-        elif key == "down":
+        if key == "down":
             if not self._is_dropdown_open():
                 if self._dropdown_posted:
                     self._dropdown_posted = False
                     self._navigate(1)
                     return "break"
-                else:
-                    self._post_dropdown()
-                    return "break"
+                self._post_dropdown()
+                return "break"
             self._dropdown_posted = False
             self._navigate(1)
             return "break"
-        elif key == "up":
+        if key == "up":
             self._navigate(-1)
             return "break"
-        elif key == "return":
+        if key == "return":
             try:
                 if self._is_dropdown_open():
                     focus_target = self.dropdown.tk.call("focus")
@@ -335,9 +314,31 @@ class IdPrefixGroupWidget(tk.Frame):
         return None
 
     def _handle_arrow_key(self, event: tk.Event[tk.Misc]) -> str | None:  # type: ignore[name-defined]
-        """Capture arrow keys while focused to avoid bubbling to parent bindings."""
-
         return self.handle_key(event.keysym, event)
 
 
-__all__ = ["IdPrefixGroupWidget"]
+class ProfileSelectorWidget(_LabeledSelectorWidget):
+    def __init__(self, parent: tk.Widget, options: list[str] | None = None) -> None:
+        super().__init__(
+            parent,
+            label_text="Profile",
+            options=options,
+            dropdown_width=PROFILE_DROPDOWN_WIDTH,
+        )
+
+
+class OverlaySelectorWidget(_LabeledSelectorWidget):
+    def __init__(self, parent: tk.Widget, options: list[str] | None = None) -> None:
+        super().__init__(
+            parent,
+            label_text="Overlay",
+            options=options,
+            dropdown_width=IDPREFIX_DROPDOWN_WIDTH,
+        )
+
+
+# Backward-compatible alias used by some tests/import sites.
+IdPrefixGroupWidget = OverlaySelectorWidget
+
+
+__all__ = ["IdPrefixGroupWidget", "OverlaySelectorWidget", "ProfileSelectorWidget"]

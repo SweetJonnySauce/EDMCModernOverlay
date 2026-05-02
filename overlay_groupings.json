@@ -124,6 +124,17 @@
         "backgroundColor": "red",
         "backgroundBorderColor": "red",
         "backgroundBorderWidth": 3
+      },
+      "BGS-Tally Fleetcarrier": {
+        "idPrefixes": [
+          "bgstally-msg-fleetcarrier-"
+        ],
+        "idPrefixGroupAnchor": "ne",
+        "payloadJustification": "right",
+        "offsetX": -5.0,
+        "backgroundColor": "None",
+        "backgroundBorderColor": "None",
+        "backgroundBorderWidth": 3
       }
     }
   },
@@ -222,8 +233,8 @@
           "edmclogeventminer-status-overlay-"
         ],
         "idPrefixGroupAnchor": "sw",
-        "offsetX": 420,
-        "offsetY": 955,
+        "offsetX": 5.0,
+        "offsetY": 850.0,
         "backgroundColor": "#AA000000",
         "backgroundBorderWidth": 5
       }
@@ -314,6 +325,48 @@
         "payloadJustification": "left",
         "markerLabelPosition": "below",
         "controllerPreviewBoxMode": "last",
+        "backgroundColor": "black",
+        "backgroundBorderColor": "blue",
+        "backgroundBorderWidth": 10
+      },
+      "EDMCModernOverlay Profile Status": {
+        "idPrefixes": [
+          "edmcmodernoverlay-profile-status-"
+        ],
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
+        "backgroundColor": "black",
+        "backgroundBorderColor": "black",
+        "backgroundBorderWidth": 3
+      },
+      "EDMCModernOverlay Profile List": {
+        "idPrefixes": [
+          "edmcmodernoverlay-profile-list-"
+        ],
+        "idPrefixGroupAnchor": "center",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last",
+        "offsetX": 640.0,
+        "offsetY": 480.0,
+        "backgroundColor": "black",
+        "backgroundBorderColor": "blue",
+        "backgroundBorderWidth": 10
+      },
+      "EDMCModernOverlay Command Status": {
+        "idPrefixes": [
+          "edmcmodernoverlay-command-status-"
+        ],
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last",
+        "offsetX": 40.0,
+        "offsetY": 44.0,
         "backgroundColor": "black",
         "backgroundBorderColor": "blue",
         "backgroundBorderWidth": 10

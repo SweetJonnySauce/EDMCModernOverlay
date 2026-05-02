@@ -464,7 +464,7 @@ class PayloadInspectorApp:
         self._tips = [
             "Enable \"Log incoming payloads\" in the Modern Overlay preferences to mirror payloads",
             "Right click on a payload to suppress it",
-            "Use tests/send_overlay_from_log.py with the --log-file parameter to replay a captured payload for testing.",
+            "Use utils/send_overlay_from_log.py with the --log-file parameter to replay a captured payload for testing.",
             "Right click on a payload to draw the ID Prefix Group in the preview.",
         ]
         self._tip_index = -1

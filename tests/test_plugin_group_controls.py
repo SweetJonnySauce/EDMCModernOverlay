@@ -198,3 +198,42 @@ def test_plugin_group_control_service_unknown_only_targeted_off_emits_no_clear(t
     assert result["unknown"] == ["Missing Group"]
     assert result["cleared"] == []
     assert clears == []
+
+
+def test_plugin_group_control_service_reset_to_default_restores_group_visibility(tmp_path: Path) -> None:
+    shipped = tmp_path / "overlay_groupings.json"
+    user = tmp_path / "overlay_groupings.user.json"
+    _write_json(
+        shipped,
+        {
+            "PluginA": {
+                "idPrefixGroups": {
+                    "Alpha": {"idPrefixes": ["a-"]},
+                }
+            }
+        },
+    )
+    _write_json(user, {})
+    manager = PluginGroupStateManager(shipped_path=shipped, user_path=user)
+    manager.set_groups_enabled(False, ["Alpha"])
+    manager.create_profile("PvE")
+    manager.set_current_profile("PvE")
+    manager.set_groups_enabled(True, ["Alpha"])
+    assert manager.state_snapshot() == {"Alpha": True}
+
+    clears: list[tuple[list[str], str]] = []
+    publishes: list[str] = []
+    service = PluginGroupControlService(
+        state_manager=manager,
+        publish_config=lambda: publishes.append("published"),
+        publish_group_clear=lambda groups, source: clears.append((list(groups), source)),
+    )
+    result = service.reset_to_default(group_names=["Alpha"], source="reset_test")
+
+    assert result["updated"] == ["Alpha"]
+    assert result["unknown"] == []
+    assert result["cleared"] == ["Alpha"]
+    assert result["action"] == "reset_to_default"
+    assert publishes == ["published"]
+    assert clears == [(["Alpha"], "reset_test")]
+    assert service.state_snapshot() == {"Alpha": False}

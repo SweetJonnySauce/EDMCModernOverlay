@@ -59,6 +59,7 @@ SETTINGS_PATH = ROOT_DIR / "overlay_settings.json"
 TRACE_LOG_PATH = Path(__file__).resolve().with_name("plugin_group_manager_context.log")
 PORT_PATH = ROOT_DIR / "port.json"
 PAYLOAD_STORE_DIR = ROOT_DIR / "payload_store"
+PAYLOAD_CACHE_PATH = ROOT_DIR / "utils" / "new-payloads.json"
 PAYLOAD_LOG_DIR_NAME = "EDMCModernOverlay"
 PAYLOAD_LOG_BASENAMES = ("overlay-payloads.log", "overlay_payloads.log")
 ANCHOR_CHOICES = ("nw", "ne", "sw", "se", "center", "top", "bottom", "left", "right")
@@ -2190,7 +2191,7 @@ class PluginGroupManagerApp:
     def __init__(self, log_dir_override: Optional[Path] = None) -> None:
         self._matcher = OverrideMatcher(GROUPINGS_PATH)
         self._locator = LogLocator(ROOT_DIR, override_dir=log_dir_override)
-        cache_path = ROOT_DIR / "payload_store" / "new-payloads.json"
+        cache_path = PAYLOAD_CACHE_PATH
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             cache_path.unlink()

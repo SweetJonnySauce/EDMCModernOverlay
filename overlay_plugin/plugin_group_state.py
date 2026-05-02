@@ -12,11 +12,52 @@ _LOGGER = logging.getLogger("EDMC.ModernOverlay.PluginGroupState")
 
 _STATE_ROOT_KEY = "_plugin_group_state"
 _STATE_ENABLED_KEY = "enabled"
+_STATE_ENABLED_BY_PROFILE_KEY = "enabled_by_profile"
 _STATE_METADATA_KEY = "metadata"
+_PROFILE_STATE_KEY = "_overlay_profile_state"
+_DEFAULT_PROFILE_NAME = "Default"
 
 
 def _utc_iso_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _normalise_profile_name(value: Any) -> Optional[str]:
+    token = str(value or "").strip()
+    if not token:
+        return None
+    if token.casefold() == _DEFAULT_PROFILE_NAME.casefold():
+        return _DEFAULT_PROFILE_NAME
+    return token
+
+
+def _normalise_profiles(raw_profiles: Any, fallback_current: str) -> list[str]:
+    profiles: list[str] = []
+    seen: set[str] = set()
+
+    def _append(raw: Any) -> None:
+        token = _normalise_profile_name(raw)
+        if token is None:
+            return
+        key = token.casefold()
+        if key in seen:
+            return
+        seen.add(key)
+        profiles.append(token)
+
+    if isinstance(raw_profiles, list):
+        for item in raw_profiles:
+            _append(item)
+    _append(fallback_current)
+    _append(_DEFAULT_PROFILE_NAME)
+
+    ordered: list[str] = [
+        name
+        for name in profiles
+        if name.casefold() != _DEFAULT_PROFILE_NAME.casefold()
+    ]
+    ordered.append(_DEFAULT_PROFILE_NAME)
+    return ordered
 
 
 class PluginGroupStateManager:
@@ -34,6 +75,8 @@ class PluginGroupStateManager:
         self._user_path = user_path
         self._resolver = resolver or PluginGroupResolver(shipped_path=shipped_path, user_path=user_path, logger=self._logger)
         self._enabled_overrides: Dict[str, bool] = {}
+        self._enabled_by_profile: Dict[str, Dict[str, bool]] = {}
+        self._current_profile: str = _DEFAULT_PROFILE_NAME
         self._metadata: Dict[str, Dict[str, Any]] = {}
         self._counter_drop = 0
         self._counter_metadata = 0
@@ -105,18 +148,20 @@ class PluginGroupStateManager:
         updated: list[str] = []
         targets = self._resolve_targets(group_names)
 
+        updates: Dict[str, bool] = {}
         for target in targets:
             canonical = self._canonical_group_name(target)
             if canonical is None:
                 unknown.append(str(target))
                 continue
-            previous = self._enabled_overrides.get(canonical)
-            if previous is not None and bool(previous) == bool(enabled):
+            previous = self._resolved_group_enabled(self._enabled_overrides, canonical)
+            if previous == bool(enabled):
                 continue
-            self._enabled_overrides[canonical] = bool(enabled)
+            updates[canonical] = bool(enabled)
             updated.append(canonical)
 
         if updated:
+            self._apply_enabled_updates(updates)
             self._persist_state()
         return updated, unknown
 
@@ -126,19 +171,47 @@ class PluginGroupStateManager:
         updated: list[str] = []
         targets = self._resolve_targets(group_names)
 
+        updates: Dict[str, bool] = {}
         for target in targets:
             canonical = self._canonical_group_name(target)
             if canonical is None:
                 unknown.append(str(target))
                 continue
-            next_state = not self.is_group_enabled(canonical)
-            previous_override = self._enabled_overrides.get(canonical)
-            if previous_override is not None and bool(previous_override) == next_state:
-                continue
-            self._enabled_overrides[canonical] = next_state
+            next_state = not self._resolved_group_enabled(self._enabled_overrides, canonical)
+            updates[canonical] = next_state
             updated.append(canonical)
 
         if updated:
+            self._apply_enabled_updates(updates)
+            self._persist_state()
+        return updated, unknown
+
+    def reset_groups_to_default(self, group_names: Optional[Sequence[str]] = None) -> Tuple[list[str], list[str]]:
+        """Reset active-profile group visibility back to the Default profile values."""
+        self.reload_if_changed()
+        unknown: list[str] = []
+        updated: list[str] = []
+        targets = self._resolve_targets(group_names)
+
+        active_profile = self._resolve_profile_name(self._current_profile) or _DEFAULT_PROFILE_NAME
+        active_map = dict(self._enabled_by_profile.get(active_profile, {}))
+        default_map = dict(self._enabled_by_profile.get(_DEFAULT_PROFILE_NAME, {}))
+
+        updates: Dict[str, bool] = {}
+        for target in targets:
+            canonical = self._canonical_group_name(target)
+            if canonical is None:
+                unknown.append(str(target))
+                continue
+            current_enabled = self._resolved_group_enabled(active_map, canonical)
+            default_enabled = self._resolved_group_enabled(default_map, canonical)
+            if current_enabled == default_enabled:
+                continue
+            updates[canonical] = bool(default_enabled)
+            updated.append(canonical)
+
+        if updated:
+            self._apply_enabled_updates(updates)
             self._persist_state()
         return updated, unknown
 
@@ -153,18 +226,154 @@ class PluginGroupStateManager:
     def metadata_snapshot(self) -> Dict[str, Dict[str, Any]]:
         return {key: dict(value) for key, value in self._metadata.items()}
 
+    def sync_profiles(self, *, profiles: Sequence[str], current_profile: str) -> None:
+        normalised_profiles = _normalise_profiles(list(profiles), str(current_profile or _DEFAULT_PROFILE_NAME))
+        current = _normalise_profile_name(current_profile) or _DEFAULT_PROFILE_NAME
+
+        existing_by_cf = {name.casefold(): name for name in self._enabled_by_profile.keys()}
+        updated_by_profile: Dict[str, Dict[str, bool]] = {}
+        default_snapshot = dict(self._enabled_by_profile.get(_DEFAULT_PROFILE_NAME, {}))
+        for profile_name in normalised_profiles:
+            resolved_existing = existing_by_cf.get(profile_name.casefold())
+            if resolved_existing is not None:
+                updated_by_profile[profile_name] = dict(self._enabled_by_profile.get(resolved_existing, {}))
+                continue
+            updated_by_profile[profile_name] = dict(default_snapshot)
+
+        self._enabled_by_profile = updated_by_profile
+        self._current_profile = self._resolve_profile_name(current) or _DEFAULT_PROFILE_NAME
+        self._enabled_overrides = dict(self._enabled_by_profile.get(self._current_profile, {}))
+        self._persist_state()
+
+    def create_profile(self, profile_name: str) -> None:
+        token = _normalise_profile_name(profile_name)
+        if token is None:
+            return
+        resolved = self._resolve_profile_name(token)
+        if resolved is not None:
+            return
+        default_snapshot = dict(self._enabled_by_profile.get(_DEFAULT_PROFILE_NAME, {}))
+        self._enabled_by_profile[token] = default_snapshot
+        self._persist_state()
+
+    def clone_profile(self, source_profile: str, new_profile: str) -> None:
+        source_token = _normalise_profile_name(source_profile)
+        target_token = _normalise_profile_name(new_profile)
+        if source_token is None or target_token is None:
+            return
+        source_resolved = self._resolve_profile_name(source_token)
+        if source_resolved is None:
+            source_resolved = _DEFAULT_PROFILE_NAME
+        source_snapshot = dict(self._enabled_by_profile.get(source_resolved, {}))
+        target_resolved = self._resolve_profile_name(target_token)
+        if target_resolved is not None:
+            self._enabled_by_profile[target_resolved] = source_snapshot
+        else:
+            self._enabled_by_profile[target_token] = source_snapshot
+        self._persist_state()
+
+    def rename_profile(self, old_name: str, new_name: str) -> None:
+        old_token = _normalise_profile_name(old_name)
+        new_token = _normalise_profile_name(new_name)
+        if old_token is None or new_token is None:
+            return
+        old_resolved = self._resolve_profile_name(old_token)
+        if old_resolved is None:
+            return
+        old_map = dict(self._enabled_by_profile.get(old_resolved, {}))
+        existing_new = self._resolve_profile_name(new_token)
+        if existing_new is not None and existing_new.casefold() != old_resolved.casefold():
+            return
+
+        updated: Dict[str, Dict[str, bool]] = {}
+        inserted = False
+        for profile_name, profile_map in self._enabled_by_profile.items():
+            if str(profile_name).casefold() == old_resolved.casefold():
+                if not inserted:
+                    updated[new_token] = old_map
+                    inserted = True
+                continue
+            updated[str(profile_name)] = dict(profile_map)
+        if not inserted:
+            updated[new_token] = old_map
+
+        self._enabled_by_profile = updated
+        if str(self._current_profile).casefold() == old_resolved.casefold():
+            self._current_profile = new_token
+            self._enabled_overrides = dict(old_map)
+        self._persist_state()
+
+    def delete_profile(self, profile_name: str) -> None:
+        token = _normalise_profile_name(profile_name)
+        if token is None or token.casefold() == _DEFAULT_PROFILE_NAME.casefold():
+            return
+        resolved = self._resolve_profile_name(token)
+        if resolved is None:
+            return
+        self._enabled_by_profile.pop(resolved, None)
+        if str(self._current_profile).casefold() == resolved.casefold():
+            self._current_profile = _DEFAULT_PROFILE_NAME
+            self._enabled_overrides = dict(self._enabled_by_profile.get(_DEFAULT_PROFILE_NAME, {}))
+        self._persist_state()
+
+    def set_current_profile(self, profile_name: str) -> None:
+        token = _normalise_profile_name(profile_name)
+        if token is None:
+            return
+        resolved = self._resolve_profile_name(token)
+        if resolved is None:
+            default_snapshot = dict(self._enabled_by_profile.get(_DEFAULT_PROFILE_NAME, {}))
+            self._enabled_by_profile[token] = default_snapshot
+            resolved = token
+        self._current_profile = resolved
+        self._enabled_overrides = dict(self._enabled_by_profile.get(resolved, {}))
+        self._persist_state()
+
     def _load_user_state(self) -> None:
         payload = self._read_user_file()
         state_root = payload.get(_STATE_ROOT_KEY)
-        if not isinstance(state_root, Mapping):
-            return
+        state_root = state_root if isinstance(state_root, Mapping) else {}
         enabled = state_root.get(_STATE_ENABLED_KEY)
+        legacy_enabled: Dict[str, bool] = {}
         if isinstance(enabled, Mapping):
             for group_name, value in enabled.items():
-                if not isinstance(group_name, str):
+                if isinstance(group_name, str) and isinstance(value, bool):
+                    legacy_enabled[group_name] = value
+
+        profile_state = payload.get(_PROFILE_STATE_KEY)
+        profile_state = profile_state if isinstance(profile_state, Mapping) else {}
+        current_profile = _normalise_profile_name(profile_state.get("current_profile")) or _DEFAULT_PROFILE_NAME
+        profiles = _normalise_profiles(profile_state.get("profiles"), current_profile)
+
+        enabled_by_profile: Dict[str, Dict[str, bool]] = {}
+        raw_enabled_by_profile = state_root.get(_STATE_ENABLED_BY_PROFILE_KEY)
+        if isinstance(raw_enabled_by_profile, Mapping):
+            for raw_profile, raw_group_map in raw_enabled_by_profile.items():
+                profile_name = _normalise_profile_name(raw_profile)
+                if profile_name is None or not isinstance(raw_group_map, Mapping):
                     continue
-                if isinstance(value, bool):
-                    self._enabled_overrides[group_name] = value
+                entry: Dict[str, bool] = {}
+                for group_name, value in raw_group_map.items():
+                    if isinstance(group_name, str) and isinstance(value, bool):
+                        entry[group_name] = value
+                enabled_by_profile[profile_name] = entry
+
+        if not enabled_by_profile:
+            enabled_by_profile[current_profile] = dict(legacy_enabled)
+
+        default_snapshot = dict(
+            enabled_by_profile.get(_DEFAULT_PROFILE_NAME)
+            or enabled_by_profile.get(current_profile)
+            or legacy_enabled
+        )
+        enabled_by_profile.setdefault(_DEFAULT_PROFILE_NAME, dict(default_snapshot))
+        for profile_name in profiles:
+            enabled_by_profile.setdefault(profile_name, dict(default_snapshot))
+
+        self._enabled_by_profile = enabled_by_profile
+        self._current_profile = self._resolve_profile_name(current_profile) or _DEFAULT_PROFILE_NAME
+        self._enabled_overrides = dict(self._enabled_by_profile.get(self._current_profile, {}))
+
         metadata = state_root.get(_STATE_METADATA_KEY)
         if isinstance(metadata, Mapping):
             for group_name, value in metadata.items():
@@ -181,7 +390,15 @@ class PluginGroupStateManager:
         if isinstance(existing, Mapping):
             state_root = dict(existing)
 
-        state_root[_STATE_ENABLED_KEY] = dict(self._enabled_overrides)
+        current_map = dict(self._enabled_by_profile.get(self._current_profile, self._enabled_overrides))
+        self._enabled_overrides = dict(current_map)
+        self._enabled_by_profile[self._current_profile] = dict(current_map)
+        state_root[_STATE_ENABLED_KEY] = dict(current_map)
+        state_root[_STATE_ENABLED_BY_PROFILE_KEY] = {
+            profile_name: dict(values)
+            for profile_name, values in self._enabled_by_profile.items()
+            if isinstance(profile_name, str) and isinstance(values, Mapping)
+        }
         state_root[_STATE_METADATA_KEY] = dict(self._metadata)
         payload[_STATE_ROOT_KEY] = state_root
 
@@ -220,6 +437,55 @@ class PluginGroupStateManager:
         known = self.known_group_names()
         by_casefold: Dict[str, str] = {name.casefold(): name for name in known}
         return by_casefold.get(token.casefold())
+
+    def _resolve_profile_name(self, profile_name: str) -> Optional[str]:
+        token = _normalise_profile_name(profile_name)
+        if token is None:
+            return None
+        for existing in self._enabled_by_profile.keys():
+            if str(existing).casefold() == token.casefold():
+                return existing
+        return None
+
+    @staticmethod
+    def _resolved_group_enabled(values: Mapping[str, bool], group_name: str) -> bool:
+        raw = values.get(group_name)
+        if raw is None:
+            return True
+        return bool(raw)
+
+    def _apply_enabled_updates(self, updates: Mapping[str, bool]) -> None:
+        active_profile = self._resolve_profile_name(self._current_profile) or _DEFAULT_PROFILE_NAME
+        active_map = dict(self._enabled_by_profile.get(active_profile, {}))
+        default_map = dict(self._enabled_by_profile.get(_DEFAULT_PROFILE_NAME, {}))
+        previous_default_resolved = {
+            group_name: self._resolved_group_enabled(default_map, group_name)
+            for group_name in updates.keys()
+        }
+
+        for group_name, enabled in updates.items():
+            active_map[group_name] = bool(enabled)
+        self._enabled_by_profile[active_profile] = dict(active_map)
+
+        # Default edits propagate to non-divergent profile values.
+        if active_profile.casefold() == _DEFAULT_PROFILE_NAME.casefold():
+            updated_default = dict(active_map)
+            for profile_name, profile_map in list(self._enabled_by_profile.items()):
+                if str(profile_name).casefold() == _DEFAULT_PROFILE_NAME.casefold():
+                    continue
+                current_map = dict(profile_map)
+                for group_name, enabled in updates.items():
+                    previous_default = previous_default_resolved.get(group_name, True)
+                    profile_value = self._resolved_group_enabled(current_map, group_name)
+                    if profile_value != previous_default:
+                        continue
+                    current_map[group_name] = bool(enabled)
+                self._enabled_by_profile[profile_name] = current_map
+            self._enabled_by_profile[_DEFAULT_PROFILE_NAME] = updated_default
+            self._enabled_overrides = dict(updated_default)
+            return
+
+        self._enabled_overrides = dict(active_map)
 
     def _touch_metadata(self, group_name: str, payload: Mapping[str, Any], *, count_disabled_update: bool) -> None:
         entry = self._metadata.setdefault(group_name, {})

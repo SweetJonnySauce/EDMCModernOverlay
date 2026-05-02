@@ -17,6 +17,25 @@
 - Record tests run (or skipped with reasons) when landing changes; default to headless tests for pure helpers.
 - Prefer fast/no-op paths in release builds; keep debug logging/dev overlays gated behind dev mode.
 
+## Test Type Selection Policy (Required)
+- Choose test type explicitly before coding for every behavior change.
+- Use **unit tests** when logic is pure/deterministic or dependencies can be injected without EDMC/plugin lifecycle wiring.
+- Use **harness tests** when behavior depends on `load.py` hooks, plugin startup/shutdown, journal/dashboard callbacks, EDMC module shims, or runtime lifecycle state.
+- For mixed changes, require both:
+  - unit tests for extracted/pure logic
+  - harness tests for wiring/lifecycle contracts
+- If no tests are added/updated, document why and what risk remains.
+
+## Mandatory Test Gate By Touchpoint
+- If touching `load.py` orchestration or hook flow: at least one harness test is required.
+- If touching pure helpers/services: unit tests are required.
+- Avoid harness tests for purely local logic that can be proven with unit tests.
+
+## Required Test Evidence In Final Report
+- List test files added/updated.
+- List exact test commands run.
+- Report pass/fail/skip outcomes and reasons for skips.
+
 ## Per-Iteration Test Plan
 - **Env setup (once per machine):** `python3 -m venv .venv && source .venv/bin/activate && python -m pip install -U pip && python -m pip install -r requirements-dev.txt`
 - **Headless quick pass (default for each step):** `source .venv/bin/activate && python -m pytest` (scope with `tests/…` or `-k` as needed).

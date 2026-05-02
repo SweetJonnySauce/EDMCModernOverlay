@@ -635,6 +635,15 @@ class PluginOverrideManager:
     def force_reload(self) -> None:
         """Forcefully reload the override configuration from disk."""
         self._mtime = None
+        if self._groupings_loader is not None:
+            try:
+                self._groupings_loader.load()
+                self._loader_loaded = True
+            except Exception as exc:  # pragma: no cover - defensive guard
+                self._logger.warning("Failed to force-reload overrides via loader: %s", exc)
+                return
+            self._load_config_from_loader()
+            return
         self._load_config()
 
     def infer_plugin_name(self, payload: Mapping[str, Any]) -> Optional[str]:

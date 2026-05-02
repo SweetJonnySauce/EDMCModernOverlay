@@ -13,6 +13,12 @@ HOTKEYS_OVERLAY_OFF_ACTION_ID = "edmcmodernoverlay.hotkeys.off"
 HOTKEYS_OVERLAY_TOGGLE_ACTION_ID = "edmcmodernoverlay.hotkeys.toggle"
 HOTKEYS_LAUNCH_CONTROLLER_ACTION_ID = "edmcmodernoverlay.hotkeys.launch_controller"
 HOTKEYS_LAUNCH_CONTROLLER_LABEL = "Launch Overlay Controller"
+HOTKEYS_SET_PROFILE_ACTION_ID = "edmcmodernoverlay.hotkeys.profile_set"
+HOTKEYS_SET_PROFILE_LABEL = "Set Overlay Profile"
+HOTKEYS_PROFILE_NEXT_ACTION_ID = "edmcmodernoverlay.hotkeys.profile_next"
+HOTKEYS_PROFILE_PREV_ACTION_ID = "edmcmodernoverlay.hotkeys.profile_prev"
+HOTKEYS_PROFILE_NEXT_LABEL = "Next Overlay Profile"
+HOTKEYS_PROFILE_PREV_LABEL = "Previous Overlay Profile"
 
 
 def _import_hotkeys_api_module() -> Any:
@@ -37,6 +43,8 @@ class HotkeysManager:
         set_group_state: Callable[..., Any],
         toggle_group_state: Callable[..., Any],
         launch_controller: Callable[[], None],
+        set_profile: Callable[[str], Any],
+        cycle_profile: Callable[[int], Any] | None = None,
         logger: logging.Logger,
         plugin_name: str,
     ) -> None:
@@ -44,6 +52,8 @@ class HotkeysManager:
         self._set_group_state = set_group_state
         self._toggle_group_state = toggle_group_state
         self._launch_controller = launch_controller
+        self._set_profile = set_profile
+        self._cycle_profile = cycle_profile
         self._logger = logger
         self._plugin_name = plugin_name
         self._lock = threading.RLock()
@@ -118,6 +128,56 @@ class HotkeysManager:
         except Exception as exc:  # pragma: no cover - defensive guard
             self._logger.warning("Hotkey Launch Controller failed: %s", exc, exc_info=exc)
 
+    def _set_profile_callback(self, *, payload: Any = None, source: str = "hotkey", hotkey: Any = None) -> None:
+        profile_name = ""
+        if isinstance(payload, dict):
+            for key in ("profile", "profile_name", "name"):
+                raw = payload.get(key)
+                if raw is None:
+                    continue
+                token = str(raw).strip()
+                if token:
+                    profile_name = token
+                    break
+        if not profile_name:
+            self._logger.warning("Hotkey Set Profile ignored: payload missing profile name.")
+            return
+        self._logger.debug(
+            "Hotkey Set Profile requested: source=%s hotkey=%s profile=%s payload=%s",
+            source,
+            hotkey,
+            profile_name,
+            payload,
+        )
+        try:
+            self._set_profile(profile_name)
+        except Exception as exc:  # pragma: no cover - defensive guard
+            self._logger.warning("Hotkey Set Profile failed: %s", exc, exc_info=exc)
+
+    def _cycle_profile_callback(
+        self,
+        *,
+        direction: int,
+        payload: Any = None,
+        source: str = "hotkey",
+        hotkey: Any = None,
+    ) -> None:
+        callback = self._cycle_profile
+        if callback is None:
+            self._logger.warning("Hotkey profile cycle ignored: callback unavailable.")
+            return
+        self._logger.debug(
+            "Hotkey Profile Cycle requested: source=%s hotkey=%s direction=%s payload=%s",
+            source,
+            hotkey,
+            direction,
+            payload,
+        )
+        try:
+            callback(int(direction))
+        except Exception as exc:  # pragma: no cover - defensive guard
+            self._logger.warning("Hotkey Profile Cycle failed: %s", exc, exc_info=exc)
+
     def _import_hotkeys_api(self) -> Tuple[Optional[Any], Optional[Exception]]:
         try:
             module = _import_hotkeys_api_module()
@@ -162,6 +222,33 @@ class HotkeysManager:
                 label=HOTKEYS_LAUNCH_CONTROLLER_LABEL,
                 plugin=self._plugin_name,
                 callback=self._launch_controller_callback,
+                thread_policy="main",
+                cardinality="single",
+                enabled=True,
+            ),
+            action_cls(
+                id=HOTKEYS_SET_PROFILE_ACTION_ID,
+                label=HOTKEYS_SET_PROFILE_LABEL,
+                plugin=self._plugin_name,
+                callback=self._set_profile_callback,
+                thread_policy="main",
+                cardinality="single",
+                enabled=True,
+            ),
+            action_cls(
+                id=HOTKEYS_PROFILE_NEXT_ACTION_ID,
+                label=HOTKEYS_PROFILE_NEXT_LABEL,
+                plugin=self._plugin_name,
+                callback=lambda **kwargs: self._cycle_profile_callback(direction=1, **kwargs),
+                thread_policy="main",
+                cardinality="single",
+                enabled=True,
+            ),
+            action_cls(
+                id=HOTKEYS_PROFILE_PREV_ACTION_ID,
+                label=HOTKEYS_PROFILE_PREV_LABEL,
+                plugin=self._plugin_name,
+                callback=lambda **kwargs: self._cycle_profile_callback(direction=-1, **kwargs),
                 thread_policy="main",
                 cardinality="single",
                 enabled=True,

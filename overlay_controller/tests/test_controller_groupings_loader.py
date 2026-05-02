@@ -161,3 +161,37 @@ def test_controller_rounds_offsets(tmp_path):
 
     saved = json.loads(user_path.read_text(encoding="utf-8"))
     assert saved["PluginA"]["idPrefixGroups"]["Main"] == {"offsetX": 0.016, "offsetY": 1.235}
+
+
+def test_controller_write_preserves_metadata_keys(tmp_path):
+    user_path = tmp_path / "overlay_groupings.user.json"
+    shipped_path = tmp_path / "overlay_groupings.json"
+    shipped_path.write_text(
+        json.dumps({"PluginA": {"idPrefixGroups": {"Main": {"idPrefixes": ["foo-"]}}}}, indent=2),
+        encoding="utf-8",
+    )
+    user_path.write_text(
+        json.dumps(
+            {
+                "_overlay_profile_state": {"current_profile": "Default"},
+                "_overlay_profile_overrides": {"Default": {}},
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    app = SimpleNamespace(
+        _groupings_user_path=user_path,
+        _groupings_path=user_path,
+        _groupings_shipped_path=shipped_path,
+        _groupings_data={"PluginA": {"idPrefixGroups": {"Main": {"idPrefixes": ["foo-"], "offsetX": 2}}}},
+        _user_overrides_nonce="nonce-1",
+        _send_plugin_cli=lambda _payload: None,
+    )
+
+    oc.OverlayConfigApp._write_groupings_config(app)
+
+    saved = json.loads(user_path.read_text(encoding="utf-8"))
+    assert saved["_overlay_profile_state"]["current_profile"] == "Default"
+    assert "_overlay_profile_overrides" in saved
+    assert saved["PluginA"]["idPrefixGroups"]["Main"]["offsetX"] == 2

@@ -9,6 +9,6 @@ typecheck:
 	$(PYTHON) -m mypy
 
 test:
-	$(PYTHON) -m pytest
+	PYQT_TESTS=1 $(PYTHON) -m pytest
 
 check: lint typecheck test

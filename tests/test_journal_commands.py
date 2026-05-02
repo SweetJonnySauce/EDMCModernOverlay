@@ -7,6 +7,7 @@ class _DummyRuntime:
     def __init__(self) -> None:
         self.messages: list[str] = []
         self.status_overlay_calls: list[tuple[str, ...]] = []
+        self.profile_overlay_calls: list[tuple[tuple[str, ...], str]] = []
         self.controller_launches = 0
         self.controller_enabled = True
         self.controller_should_fail = False
@@ -17,6 +18,11 @@ class _DummyRuntime:
         self.toggle_enabled = True
         self.toggle_should_fail = False
         self.group_status_enabled = True
+        self.profile_switch_calls: list[str] = []
+        self.profile_cycle_calls: list[int] = []
+        self.profile_status_enabled = True
+        self.profiles = ["Default", "Mining"]
+        self.current_profile = "Default"
         self.group_states = {
             "BGS-Tally Colonisation": True,
             "BGS-Tally Objectives": True,
@@ -72,6 +78,41 @@ class _DummyRuntime:
     def send_group_status_overlay(self, lines: list[str]) -> None:
         self.status_overlay_calls.append(tuple(lines))
 
+    def send_profile_status_overlay(self, profiles: list[str], current_profile: str = "") -> None:
+        self.profile_overlay_calls.append((tuple(profiles), str(current_profile)))
+
+    def set_current_profile(self, profile_name: str, source: str = "chat") -> dict[str, object]:
+        self.profile_switch_calls.append(profile_name)
+        self.current_profile = profile_name
+        return {
+            "profiles": list(self.profiles),
+            "current_profile": self.current_profile,
+            "manual_profile": self.current_profile,
+        }
+
+    def get_profile_status(self) -> dict[str, object]:
+        if not self.profile_status_enabled:
+            raise RuntimeError("disabled")
+        return {
+            "profiles": list(self.profiles),
+            "current_profile": self.current_profile,
+            "manual_profile": self.current_profile,
+        }
+
+    def cycle_profile(self, direction: int, source: str = "chat") -> dict[str, object]:
+        self.profile_cycle_calls.append(int(direction))
+        if not self.profiles:
+            return self.get_profile_status()
+        try:
+            current_idx = next(
+                idx for idx, value in enumerate(self.profiles) if value.casefold() == self.current_profile.casefold()
+            )
+        except StopIteration:
+            current_idx = 0
+        step = -1 if int(direction) < 0 else 1
+        self.current_profile = self.profiles[(current_idx + step) % len(self.profiles)]
+        return self.get_profile_status()
+
 
 def build_helper(
     runtime: _DummyRuntime | None = None,
@@ -106,6 +147,22 @@ def test_overlay_help_command():
     assert runtime.messages[-1].startswith("Overlay commands:")
 
 
+def test_overlay_help_uses_grouped_status_callback_when_available() -> None:
+    runtime, helper = build_helper()
+    grouped_messages: list[str] = []
+
+    def _send_grouped(text: str) -> None:
+        grouped_messages.append(text)
+
+    runtime.send_command_status_overlay = _send_grouped  # type: ignore[attr-defined]
+    runtime.send_test_message = lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("unexpected fallback"))  # type: ignore[method-assign]
+    runtime, helper = build_helper(runtime)
+    assert helper.handle_entry({"event": "SendText", "Message": "!overlay help"}) is True
+    assert grouped_messages
+    assert grouped_messages[-1].startswith("Overlay commands:")
+    assert runtime.messages == []
+
+
 def test_overlay_launch_command():
     runtime, helper = build_helper()
     assert helper.handle_entry({"event": "SendText", "Message": "!overlay"}) is True
@@ -119,11 +176,15 @@ def test_overlay_unknown_subcommand():
     assert runtime.messages == []
 
 
-def test_overlay_cycle_subcommands_are_noops():
+def test_overlay_cycle_subcommands_switch_profiles():
     runtime, helper = build_helper()
+    runtime.current_profile = "Default"
     assert helper.handle_entry({"event": "SendText", "Message": "!overlay next"}) is True
+    assert runtime.current_profile == "Mining"
     assert helper.handle_entry({"event": "SendText", "Message": "!overlay prev"}) is True
-    assert runtime.messages == []
+    assert runtime.current_profile == "Default"
+    assert runtime.profile_cycle_calls == [1, -1]
+    assert runtime.messages[-1] == "Overlay profile set to Default."
     assert runtime.group_set_calls == []
     assert runtime.group_toggle_calls == []
     assert runtime.opacity_calls == []
@@ -321,6 +382,29 @@ def test_overlay_status_command_falls_back_to_chat_message_when_overlay_sender_u
         "BGS-Tally Colonisation: Off",
         "BGS-Tally Objectives: On",
     ]
+
+
+def test_overlay_profile_switch_command() -> None:
+    runtime, helper = build_helper()
+    assert helper.handle_entry({"event": "SendText", "Message": "!overlay profile Mining"}) is True
+    assert runtime.profile_switch_calls == ["Mining"]
+    assert runtime.messages[-1] == "Overlay profile set to Mining."
+
+
+def test_overlay_profile_cycle_subcommand() -> None:
+    runtime, helper = build_helper()
+    runtime.current_profile = "Default"
+    assert helper.handle_entry({"event": "SendText", "Message": "!overlay profile next"}) is True
+    assert runtime.current_profile == "Mining"
+    assert runtime.profile_cycle_calls == [1]
+
+
+def test_overlay_profiles_command() -> None:
+    runtime, helper = build_helper()
+    runtime.current_profile = "Mining"
+    assert helper.handle_entry({"event": "SendText", "Message": "!overlay profiles"}) is True
+    assert runtime.profile_overlay_calls == [(("Default", "Mining"), "Mining")]
+    assert runtime.messages == []
 
 
 def test_overlay_logical_commands_do_not_mutate_opacity_and_numeric_opacity_still_works():

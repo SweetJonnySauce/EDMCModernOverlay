@@ -171,3 +171,22 @@ def test_set_plugin_group_enabled_sends_expected_payload(tmp_path: Path) -> None
         "enabled": False,
         "plugin_group": "BGS-Tally Objectives",
     }
+
+
+def test_reset_plugin_group_to_default_sends_expected_payload(tmp_path: Path) -> None:
+    log: list[object] = []
+    (tmp_path / "port.json").write_text('{"port": 2345}', encoding="utf-8")
+
+    def fake_connect(addr, timeout=0.0):
+        return FakeSocket(log, responses=['{"status": "ok"}\n'])
+
+    bridge = pb.PluginBridge(root=tmp_path, connect=fake_connect)
+    response = bridge.reset_plugin_group_to_default(group_name="BGS-Tally Objectives")
+
+    assert isinstance(response, dict)
+    assert response["status"] == "ok"
+    json_writes = [entry for entry in log if isinstance(entry, tuple) and entry[0] == "write"]
+    assert json.loads(json_writes[0][1]) == {
+        "cli": "plugin_group_reset_default",
+        "plugin_group": "BGS-Tally Objectives",
+    }

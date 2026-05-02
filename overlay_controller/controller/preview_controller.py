@@ -89,7 +89,6 @@ class PreviewController:
             widget.set_text_color(None)
         except Exception:
             pass
-        self.app._update_contextual_tip()
 
     def apply_snapshot_to_absolute_widget(
         self, selection: tuple[str, str], snapshot: GroupSnapshot, *, force_ui: bool = True
