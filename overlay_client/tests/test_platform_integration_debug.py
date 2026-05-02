@@ -5,7 +5,13 @@ import types
 
 from PyQt6.QtCore import Qt
 
-from overlay_client.platform_integration import PlatformContext, _IntegrationBase, _exstyle_flag_names, _style_flag_names
+from overlay_client.platform_integration import (
+    PlatformContext,
+    _IntegrationBase,
+    _WindowsIntegration,
+    _exstyle_flag_names,
+    _style_flag_names,
+)
 
 
 def test_style_flag_names_decode_common_window_bits() -> None:
@@ -53,3 +59,33 @@ def test_base_integration_sets_qt_transparent_input_when_enabled() -> None:
     integration.apply_click_through(True)
 
     assert window.flags_set == [(Qt.WindowType.WindowTransparentForInput, True)]
+
+
+def test_windows_integration_clears_layered_when_debug_toggle_enabled(monkeypatch) -> None:
+    exstyle_ref = {"value": 0x00080020}
+
+    class _User32:
+        def GetWindowLongW(self, hwnd, index):
+            return exstyle_ref["value"]
+
+        def SetWindowLongW(self, hwnd, index, value):
+            exstyle_ref["value"] = value
+            return value
+
+    widget = types.SimpleNamespace(winId=lambda: 0x1234, windowHandle=lambda: None)
+    monkeypatch.setattr(
+        "overlay_client.platform_integration.ctypes.windll",
+        types.SimpleNamespace(user32=_User32()),
+        raising=False,
+    )
+    integration = _WindowsIntegration(
+        widget,
+        logging.getLogger("test"),
+        PlatformContext(),
+        disable_ws_ex_layered=True,
+    )
+
+    integration.apply_click_through(True)
+
+    assert exstyle_ref["value"] & 0x00080000 == 0
+    assert exstyle_ref["value"] & 0x00000020 == 0x00000020

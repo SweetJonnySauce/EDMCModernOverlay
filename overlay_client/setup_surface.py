@@ -153,6 +153,7 @@ class SetupSurfaceMixin:
             _CLIENT_LOGGER,
             self._platform_context,
             disable_qt_window_transparent_input=disable_qt_window_transparent_input,
+            disable_ws_ex_layered=bool(getattr(debug_config, "disable_ws_ex_layered", False)),
             disable_ws_ex_transparent=bool(getattr(debug_config, "disable_ws_ex_transparent", False)),
         )
         _CLIENT_LOGGER.debug(

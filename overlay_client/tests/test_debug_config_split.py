@@ -35,6 +35,7 @@ def test_dev_settings_enabled_reads_file(monkeypatch, tmp_path):
         "disable_qt_tool": True,
         "disable_qt_window_transparent_input": True,
         "enable_no_drop_shadow": True,
+        "disable_ws_ex_layered": True,
         "disable_ws_ex_transparent": True,
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -48,4 +49,5 @@ def test_dev_settings_enabled_reads_file(monkeypatch, tmp_path):
     assert cfg.disable_qt_tool is True
     assert cfg.disable_qt_window_transparent_input is True
     assert cfg.enable_no_drop_shadow is True
+    assert cfg.disable_ws_ex_layered is True
     assert cfg.disable_ws_ex_transparent is True

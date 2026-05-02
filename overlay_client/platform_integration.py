@@ -36,6 +36,7 @@ class _IntegrationBase:
         context: PlatformContext,
         *,
         disable_qt_window_transparent_input: bool = False,
+        disable_ws_ex_layered: bool = False,
         disable_ws_ex_transparent: bool = False,
     ) -> None:
         self._widget = widget
@@ -43,6 +44,7 @@ class _IntegrationBase:
         self._context = context
         self._window: Optional[QWindow] = None
         self._disable_qt_window_transparent_input = disable_qt_window_transparent_input
+        self._disable_ws_ex_layered = disable_ws_ex_layered
         self._disable_ws_ex_transparent = disable_ws_ex_transparent
 
     def update_context(self, context: PlatformContext) -> None:
@@ -87,6 +89,7 @@ class _WindowsIntegration(_IntegrationBase):
         context: PlatformContext,
         *,
         disable_qt_window_transparent_input: bool = False,
+        disable_ws_ex_layered: bool = False,
         disable_ws_ex_transparent: bool = False,
     ) -> None:
         super().__init__(
@@ -94,17 +97,17 @@ class _WindowsIntegration(_IntegrationBase):
             logger,
             context,
             disable_qt_window_transparent_input=disable_qt_window_transparent_input,
+            disable_ws_ex_layered=disable_ws_ex_layered,
             disable_ws_ex_transparent=disable_ws_ex_transparent,
         )
         self._last_hwnd: Optional[int] = None
 
     def apply_click_through(self, transparent: bool) -> None:
         super().apply_click_through(transparent)
-        if not transparent:
-            return
         if self._disable_ws_ex_transparent:
             self._logger.debug("Skipping WS_EX_TRANSPARENT application due to dev toggle")
-            return
+        if self._disable_ws_ex_layered:
+            self._logger.debug("Skipping WS_EX_LAYERED application due to dev toggle")
         try:
             user32 = ctypes.windll.user32  # type: ignore[attr-defined]
             GWL_EXSTYLE = -20
@@ -112,8 +115,26 @@ class _WindowsIntegration(_IntegrationBase):
             WS_EX_TRANSPARENT = 0x20
             hwnd = int(self._widget.winId())
             style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED | WS_EX_TRANSPARENT)
-            self._logger.debug("Applied WS_EX_TRANSPARENT to overlay window (hwnd=%s)", hex(hwnd))
+            updated_style = style
+            if transparent and not self._disable_ws_ex_layered:
+                updated_style |= WS_EX_LAYERED
+            elif self._disable_ws_ex_layered:
+                updated_style &= ~WS_EX_LAYERED
+
+            if transparent and not self._disable_ws_ex_transparent:
+                updated_style |= WS_EX_TRANSPARENT
+            elif self._disable_ws_ex_transparent:
+                updated_style &= ~WS_EX_TRANSPARENT
+
+            if updated_style != style:
+                user32.SetWindowLongW(hwnd, GWL_EXSTYLE, updated_style)
+            self._logger.debug(
+                "Applied Windows click-through flags to overlay window (hwnd=%s, transparent=%s, style_before=%s, style_after=%s)",
+                hex(hwnd),
+                transparent,
+                hex(style),
+                hex(updated_style),
+            )
         except Exception as exc:  # pragma: no cover - best effort
             self._logger.debug("Failed to apply Windows click-through flags: %s", exc)
 
@@ -230,6 +251,7 @@ class _WaylandIntegration(_IntegrationBase):
         context: PlatformContext,
         *,
         disable_qt_window_transparent_input: bool = False,
+        disable_ws_ex_layered: bool = False,
         disable_ws_ex_transparent: bool = False,
     ) -> None:
         super().__init__(
@@ -237,6 +259,7 @@ class _WaylandIntegration(_IntegrationBase):
             logger,
             context,
             disable_qt_window_transparent_input=disable_qt_window_transparent_input,
+            disable_ws_ex_layered=disable_ws_ex_layered,
             disable_ws_ex_transparent=disable_ws_ex_transparent,
         )
         self._layer_shell = None
@@ -394,12 +417,14 @@ class PlatformController:
         context: PlatformContext,
         *,
         disable_qt_window_transparent_input: bool = False,
+        disable_ws_ex_layered: bool = False,
         disable_ws_ex_transparent: bool = False,
     ) -> None:
         self._widget = widget
         self._logger = logger
         self._context = context
         self._disable_qt_window_transparent_input = disable_qt_window_transparent_input
+        self._disable_ws_ex_layered = disable_ws_ex_layered
         self._disable_ws_ex_transparent = disable_ws_ex_transparent
         self._platform_name = (QGuiApplication.platformName() or "").lower()
         self._integration = self._select_integration()
@@ -412,6 +437,7 @@ class PlatformController:
                 self._logger,
                 self._context,
                 disable_qt_window_transparent_input=self._disable_qt_window_transparent_input,
+                disable_ws_ex_layered=self._disable_ws_ex_layered,
                 disable_ws_ex_transparent=self._disable_ws_ex_transparent,
             )
         if self._context.force_xwayland or self._platform_name.startswith("xcb"):
@@ -421,6 +447,7 @@ class PlatformController:
                 self._logger,
                 self._context,
                 disable_qt_window_transparent_input=self._disable_qt_window_transparent_input,
+                disable_ws_ex_layered=self._disable_ws_ex_layered,
                 disable_ws_ex_transparent=self._disable_ws_ex_transparent,
             )
         if (os.environ.get("XDG_SESSION_TYPE") or "").lower() == "x11":
@@ -430,6 +457,7 @@ class PlatformController:
                 self._logger,
                 self._context,
                 disable_qt_window_transparent_input=self._disable_qt_window_transparent_input,
+                disable_ws_ex_layered=self._disable_ws_ex_layered,
                 disable_ws_ex_transparent=self._disable_ws_ex_transparent,
             )
         self._logger.debug("Selecting Wayland integration for overlay client")
@@ -438,6 +466,7 @@ class PlatformController:
             self._logger,
             self._context,
             disable_qt_window_transparent_input=self._disable_qt_window_transparent_input,
+            disable_ws_ex_layered=self._disable_ws_ex_layered,
             disable_ws_ex_transparent=self._disable_ws_ex_transparent,
         )
 
