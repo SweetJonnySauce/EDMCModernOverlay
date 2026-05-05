@@ -281,13 +281,6 @@ def _normalise_ship_entry(raw: Mapping[str, Any], existing: Optional[Mapping[str
             "Ship_Localised",
         ),
     )
-    localised_ship_type = _first_non_empty(
-        raw,
-        (
-            "ShipType_Localised",
-            "Ship_Localised",
-        ),
-    )
     existing_type = str(merged.get("ship_type") or "").strip()
     if localised_ship_type:
         localised_token = str(localised_ship_type).strip()
@@ -296,15 +289,7 @@ def _normalise_ship_entry(raw: Mapping[str, Any], existing: Optional[Mapping[str
                 fallback_token and fallback_label.casefold() == fallback_token.casefold()
             ):
                 fallback_label = localised_token
-    if localised_ship_type:
-        localised_token = str(localised_ship_type).strip()
-        if localised_token and not localised_token.startswith("$"):
-            if not fallback_label or (
-                fallback_token and fallback_label.casefold() == fallback_token.casefold()
-            ):
-                fallback_label = localised_token
     # Ship-type display names come exclusively from ShipType + edmc_data.ship_name_map.
-    # Fall back to localised ship-type fields when the raw token is unmapped.
     # Fall back to localised ship-type fields when the raw token is unmapped.
     # Update when empty or when the stored value is the same raw ShipType token.
     if fallback_label and (

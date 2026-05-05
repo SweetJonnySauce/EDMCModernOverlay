@@ -657,8 +657,6 @@ class Preferences:
     min_font_point: float = 6.0
     max_font_point: float = DEFAULT_MAX_FONT_POINT
     legacy_font_step: int = DEFAULT_LEGACY_FONT_STEP
-    max_font_point: float = DEFAULT_MAX_FONT_POINT
-    legacy_font_step: int = DEFAULT_LEGACY_FONT_STEP
     title_bar_enabled: bool = False
     title_bar_height: int = DEFAULT_TITLE_BAR_HEIGHT
     cycle_payload_ids: bool = False
@@ -988,7 +986,6 @@ class Preferences:
         _config_set_value(_config_key("global_payload_opacity"), int(self.global_payload_opacity))
         _config_set_value(_config_key("show_connection_status"), bool(self.show_connection_status))
         _config_set_value(_config_key("debug_overlay_corner"), str(self.debug_overlay_corner or DEFAULT_DEBUG_OVERLAY_CORNER))
-        _config_set_value(_config_key("debug_overlay_corner"), str(self.debug_overlay_corner or DEFAULT_DEBUG_OVERLAY_CORNER))
         _config_set_value(_config_key("client_log_retention"), int(self.client_log_retention))
         _config_set_value(_config_key("gridlines_enabled"), bool(self.gridlines_enabled))
         _config_set_value(_config_key("gridline_spacing"), int(self.gridline_spacing))
@@ -1009,7 +1006,6 @@ class Preferences:
         _config_set_value(_config_key("title_bar_height"), int(self.title_bar_height))
         _config_set_value(_config_key("cycle_payload_ids"), bool(self.cycle_payload_ids))
         _config_set_value(_config_key("copy_payload_id_on_cycle"), bool(self.copy_payload_id_on_cycle))
-        _config_set_value(_config_key("scale_mode"), str(self.scale_mode or DEFAULT_SCALE_MODE))
         _config_set_value(_config_key("scale_mode"), str(self.scale_mode or DEFAULT_SCALE_MODE))
         _config_set_value(_config_key("nudge_overflow_payloads"), bool(self.nudge_overflow_payloads))
         _config_set_value(_config_key("payload_nudge_gutter"), int(self.payload_nudge_gutter))

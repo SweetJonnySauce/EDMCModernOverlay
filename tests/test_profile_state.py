@@ -163,28 +163,6 @@ def test_profile_store_storedships_prefers_name_over_localised_ship_type_for_shi
 
 
 def test_profile_store_storedships_does_not_treat_ship_type_localised_as_ship_name(tmp_path: Path) -> None:
-def test_profile_store_storedships_prefers_name_over_localised_ship_type_for_ship_name(tmp_path: Path) -> None:
-    user_path = tmp_path / "overlay_groupings.user.json"
-    user_path.write_text("{}\n", encoding="utf-8")
-    store = OverlayProfileStore(user_path=user_path)
-
-    changed = store.update_fleet_from_journal(
-        entry={
-            "event": "StoredShips",
-            "ShipsHere": [
-                {"ShipID": 18, "ShipType": "cutter", "ShipType_Localised": "Imperial Cutter", "Name": "Lana rhoades"}
-            ],
-            "ShipsRemote": [],
-        }
-    )
-    status = store.status()
-
-    assert changed is True
-    ship_18 = next(item for item in status["ships"] if item["ship_id"] == 18)
-    assert ship_18["ship_name"] == "Lana rhoades"
-
-
-def test_profile_store_storedships_does_not_treat_ship_type_localised_as_ship_name(tmp_path: Path) -> None:
     user_path = tmp_path / "overlay_groupings.user.json"
     user_path.write_text("{}\n", encoding="utf-8")
     store = OverlayProfileStore(user_path=user_path)
@@ -336,7 +314,6 @@ def test_profile_store_shipyardswap_uses_ship_name_map_for_ship_type(monkeypatch
 
 
 def test_profile_store_shipyardswap_does_not_treat_ship_type_localised_as_ship_name(tmp_path: Path) -> None:
-def test_profile_store_shipyardswap_does_not_treat_ship_type_localised_as_ship_name(tmp_path: Path) -> None:
     user_path = tmp_path / "overlay_groupings.user.json"
     user_path.write_text("{}\n", encoding="utf-8")
     store = OverlayProfileStore(user_path=user_path)
@@ -461,8 +438,6 @@ def test_profile_store_ignores_shiptargeted_entry_for_fleet_cache(tmp_path: Path
 
     assert changed is False
     assert status["ships"] == []
-
-
 def test_profile_store_storedships_merges_active_ship_from_state_when_omitted(tmp_path: Path) -> None:
     user_path = tmp_path / "overlay_groupings.user.json"
     user_path.write_text("{}\n", encoding="utf-8")

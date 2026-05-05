@@ -31,7 +31,6 @@ class _Panel:
         self._profile_table_order = list(order)
         self._status_var = _StatusVar()
         self._profile_ship_hint_var = _StatusVar()
-        self._profile_ship_hint_var = _StatusVar()
         self.reorder_calls: list[tuple[str, int]] = []
         self.refresh_count = 0
 
@@ -284,7 +283,6 @@ def test_build_ship_table_rows_uses_unnamed_when_name_missing() -> None:
 
     assert rows == [
         {"name": "Type-11 Prospector", "ship_id": 91, "ship_ident": "SW-29L", "type": "Type-11"},
-        {"name": "Type-11 Prospector", "ship_id": 91, "ship_ident": "SW-29L", "type": "Type-11"},
         {"name": "Kate Koss", "ship_id": 67, "ship_ident": "", "type": "Type-8"},
         {"name": "Unnamed", "ship_id": 68, "ship_ident": "TR-005", "type": "Python"},
     ]
@@ -399,8 +397,6 @@ def test_sync_profile_ship_list_shows_no_ships_hint_in_profiles_hint_only() -> N
     assert insert["values"] == ("no ships yet", "", "")
     assert panel._profile_ship_hint_var.value == helpers.NO_SHIPS_HINT
     assert panel._status_var.value == ""
-    assert panel._profile_ship_hint_var.value == helpers.NO_SHIPS_HINT
-    assert panel._status_var.value == ""
 
 
 def test_sync_profile_ship_list_clears_no_ships_hint_when_ships_exist() -> None:
@@ -408,7 +404,6 @@ def test_sync_profile_ship_list_clears_no_ships_hint_when_ships_exist() -> None:
     panel._profile_ship_table = _InsertShipTable()
     panel._profile_ship_checked_ids = set()
     panel._profile_menu_icons = {}
-    panel._profile_ship_hint_var.set(helpers.NO_SHIPS_HINT)
     panel._profile_ship_hint_var.set(helpers.NO_SHIPS_HINT)
     panel._status_var.set(helpers.NO_SHIPS_HINT)
 
@@ -451,7 +446,6 @@ def test_sync_profile_ship_list_clears_legacy_shared_no_ships_hint() -> None:
         },
     )
 
-    assert panel._profile_ship_hint_var.value == ""
     assert panel._profile_ship_hint_var.value == ""
     assert panel._status_var.value == ""
 
