@@ -331,6 +331,54 @@ def test_backend_status_refresh_prefers_client_runtime_source() -> None:
     assert panel._backend_warning_label.foreground == prefs.BACKEND_NOTICE_WARNING_COLOR
 
 
+def test_backend_status_refresh_does_not_show_true_overlay_for_unavailable_gnome_helper() -> None:
+    panel = object.__new__(prefs.PreferencesPanel)
+    panel._status_var = _StatusVar()
+    panel._backend_status_var = _StatusVar()
+    panel._backend_warning_var = _StatusVar()
+    panel._backend_warning_label = _FakeLabel()
+    panel._preferences = type("_Prefs", (), {"manual_backend_override": ""})()
+    panel._var_manual_backend_override = _StatusVar()
+    panel._backend_override_combo = _FakeCombo()
+    panel._backend_status_snapshot = {}
+    panel._backend_status_callback = lambda: {
+        "status": "ok",
+        "backend_status": {
+            "selected_backend": {"family": "native_wayland", "instance": "gnome_shell_wayland"},
+            "classification": "true_overlay",
+            "fallback_from": {"family": "compositor_helper", "instance": "gnome_shell_wayland"},
+            "fallback_reason": "missing_helper",
+            "shadow_mode": False,
+            "helper_states": [
+                {
+                    "helper": "gnome_shell_extension",
+                    "required": True,
+                    "installed": False,
+                    "enabled": False,
+                    "approved": False,
+                    "version": "",
+                }
+            ],
+            "review_required": False,
+            "review_reasons": [],
+            "probe": {"operating_system": "linux", "session_type": "wayland", "compositor": "gnome-shell"},
+        },
+    }
+
+    changed = panel._maybe_refresh_backend_status_from_callback(silent=True)
+
+    assert changed is True
+    assert panel._backend_status_var.value == (
+        "Backend: GNOME Wayland | Mode: Degraded overlay | Source: Live runtime"
+    )
+    assert "True overlay" not in panel._backend_status_var.value
+    assert panel._backend_warning_var.value == (
+        "Warning: Some overlay guarantees are reduced in this mode.; "
+        "A required helper for compositor_helper / gnome_shell_wayland is not available."
+    )
+    assert panel._backend_warning_label.foreground == prefs.BACKEND_NOTICE_WARNING_COLOR
+
+
 def test_backend_status_refresh_shows_manual_override_as_info() -> None:
     panel = object.__new__(prefs.PreferencesPanel)
     panel._status_var = _StatusVar()

@@ -450,31 +450,6 @@ def test_sync_profile_ship_list_clears_legacy_shared_no_ships_hint() -> None:
     assert panel._status_var.value == ""
 
 
-def test_sync_profile_ship_list_clears_legacy_shared_no_ships_hint() -> None:
-    panel = _Panel(selected="Default", order=["Default"])
-    panel._profile_ship_table = _InsertShipTable()
-    panel._profile_ship_checked_ids = set()
-    panel._profile_menu_icons = {}
-    panel._status_var.set("Swap ships in game and then close and reopen settings to have it show up on the ship list.")
-
-    helpers.sync_profile_ship_list(
-        panel,
-        {
-            "ships": [
-                {
-                    "ship_id": 91,
-                    "ship_name": "Type-11 Prospector",
-                    "ship_ident": "SW-29L",
-                    "ship_type": "Type-11",
-                }
-            ]
-        },
-    )
-
-    assert panel._profile_ship_hint_var.value == ""
-    assert panel._status_var.value == ""
-
-
 def test_profile_ship_table_click_apply_heading_sorts_apply_column() -> None:
     panel = _Panel(selected="PvE", order=["Default", "PvE"])
     panel._profile_ship_table = _ShipTableClick()

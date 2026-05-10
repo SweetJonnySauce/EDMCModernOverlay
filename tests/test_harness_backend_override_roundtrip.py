@@ -26,6 +26,7 @@ def runtime_for_backend_override(
         _adapter,
     ):
         runtime._preferences.manual_backend_override = ""
+        runtime._preferences.save = lambda: None
         runtime._runtime_manual_backend_override = ""
         yield runtime
 

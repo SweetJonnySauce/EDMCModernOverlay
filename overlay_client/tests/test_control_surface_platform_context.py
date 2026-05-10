@@ -9,20 +9,60 @@ try:  # pragma: no cover - exercised when PyQt6 is present
 except Exception:  # pragma: no cover - lightweight stub path
     if "PyQt6" not in sys.modules:
         sys.modules["PyQt6"] = types.ModuleType("PyQt6")
-    if "PyQt6.QtGui" not in sys.modules:
-        qtgui = types.ModuleType("PyQt6.QtGui")
-        qtgui.QGuiApplication = type(
-            "QGuiApplication",
-            (),
-            {"platformName": staticmethod(lambda: "wayland")},
-        )
-        qtgui.QPainter = object
-        sys.modules["PyQt6.QtGui"] = qtgui
+    qtgui = sys.modules.get("PyQt6.QtGui") or types.ModuleType("PyQt6.QtGui")
+    qtgui.QGuiApplication = getattr(
+        qtgui,
+        "QGuiApplication",
+        type("QGuiApplication", (), {"platformName": staticmethod(lambda: "wayland")}),
+    )
+    qtgui.QFont = getattr(qtgui, "QFont", object)
+    qtgui.QFontMetrics = getattr(qtgui, "QFontMetrics", object)
+    qtgui.QPainter = getattr(qtgui, "QPainter", object)
+    qtgui.QWindow = getattr(qtgui, "QWindow", object)
+    sys.modules["PyQt6.QtGui"] = qtgui
 
-from overlay_client.backend import ProbeSource
-from overlay_client.control_surface import ControlSurfaceMixin
-from overlay_client.platform_context import _backend_status_signature, _client_backend_status
-from overlay_client.platform_integration import PlatformContext
+    qtwidgets = sys.modules.get("PyQt6.QtWidgets") or types.ModuleType("PyQt6.QtWidgets")
+    qtwidgets.QWidget = getattr(qtwidgets, "QWidget", object)
+    sys.modules["PyQt6.QtWidgets"] = qtwidgets
+
+    qtcore = sys.modules.get("PyQt6.QtCore") or types.ModuleType("PyQt6.QtCore")
+    qtcore.Qt = type(
+        "Qt",
+        (),
+        {
+            "WidgetAttribute": type("WidgetAttribute", (), {"WA_TransparentForMouseEvents": object()}),
+            "WindowType": type(
+                "WindowType",
+                (),
+                {
+                    "WindowStaysOnTopHint": 1,
+                    "Tool": 2,
+                    "FramelessWindowHint": 4,
+                    "WindowTransparentForInput": object(),
+                },
+            ),
+            "PenStyle": type("PenStyle", (), {"NoPen": object()}),
+            "PenJoinStyle": type("PenJoinStyle", (), {"MiterJoin": object()}),
+        },
+    )
+    sys.modules["PyQt6.QtCore"] = qtcore
+
+qtgui = sys.modules.get("PyQt6.QtGui")
+if qtgui is not None:  # pragma: no cover - no-op when real PyQt6 is installed
+    qtgui.QGuiApplication = getattr(
+        qtgui,
+        "QGuiApplication",
+        type("QGuiApplication", (), {"platformName": staticmethod(lambda: "wayland")}),
+    )
+    qtgui.QFont = getattr(qtgui, "QFont", object)
+    qtgui.QFontMetrics = getattr(qtgui, "QFontMetrics", object)
+    qtgui.QPainter = getattr(qtgui, "QPainter", object)
+    qtgui.QWindow = getattr(qtgui, "QWindow", object)
+
+from overlay_client.backend import ProbeSource  # noqa: E402
+from overlay_client.control_surface import ControlSurfaceMixin  # noqa: E402
+from overlay_client.platform_context import _backend_status_signature, _client_backend_status  # noqa: E402
+from overlay_client.platform_integration import PlatformContext  # noqa: E402
 
 
 class _StubPlatformController:
@@ -108,11 +148,13 @@ def test_update_platform_context_computes_client_owned_status_and_logs_mismatch(
     assert window._plugin_backend_status_hint is not None
     assert window._client_backend_status.shadow_mode is False
     assert window._client_backend_status.selected_backend.instance.value == "gnome_shell_wayland"
+    assert window._client_backend_status.classification.value == "degraded_overlay"
     assert window._platform_controller.updated == []
     assert window._platform_controller.backend_statuses == []
     assert window._interaction_controller.reapply_calls == []
     assert window.restore_calls == 0
     assert window._last_backend_mismatch_signature is not None
+    assert "degraded_overlay" in window._last_backend_mismatch_signature
 
 
 def test_update_platform_context_pushes_client_backend_status_into_runtime_consumers(monkeypatch) -> None:

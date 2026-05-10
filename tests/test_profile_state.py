@@ -419,25 +419,6 @@ def test_profile_store_ignores_shiptargeted_entry_for_fleet_cache(tmp_path: Path
     assert status["ships"] == []
 
 
-def test_profile_store_ignores_shiptargeted_entry_for_fleet_cache(tmp_path: Path) -> None:
-    user_path = tmp_path / "overlay_groupings.user.json"
-    user_path.write_text("{}\n", encoding="utf-8")
-    store = OverlayProfileStore(user_path=user_path)
-
-    changed = store.update_fleet_from_journal(
-        entry={
-            "event": "ShipTargeted",
-            "ShipID": 57,
-            "Ship": "Type9_Military",
-            "Ship_Localised": "Type-10 Defender",
-            "ShipName": "Should Not Be Used",
-            "ShipIdent": "BAD-01",
-        }
-    )
-    status = store.status()
-
-    assert changed is False
-    assert status["ships"] == []
 def test_profile_store_storedships_merges_active_ship_from_state_when_omitted(tmp_path: Path) -> None:
     user_path = tmp_path / "overlay_groupings.user.json"
     user_path.write_text("{}\n", encoding="utf-8")

@@ -123,6 +123,36 @@ def test_platform_context_payload_includes_shadow_backend_status(monkeypatch):
     assert shadow["probe"]["qt_platform_name"] == "wayland"
 
 
+def test_platform_context_payload_degrades_gnome_wayland_without_helper(monkeypatch):
+    runtime = object.__new__(load._PluginRuntime)
+    runtime._preferences = _StubPrefs()
+    runtime._flatpak_context = {}
+
+    monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
+    monkeypatch.setenv("XDG_CURRENT_DESKTOP", "GNOME")
+    monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
+
+    context = runtime._platform_context_payload()
+
+    shadow = context["shadow_backend_status"]
+    assert shadow["shadow_mode"] is True
+    assert shadow["selected_backend"] == {
+        "family": "native_wayland",
+        "instance": "gnome_shell_wayland",
+    }
+    assert shadow["classification"] == "degraded_overlay"
+    assert shadow["fallback_from"] == {
+        "family": "compositor_helper",
+        "instance": "gnome_shell_wayland",
+    }
+    assert shadow["fallback_reason"] == "missing_helper"
+    assert shadow["report"]["classification"] == "degraded_overlay"
+    assert "classification=true_overlay" not in shadow["report"]["summary"]
+    assert shadow["helper_states"][0]["helper"] == "gnome_shell_extension"
+    assert shadow["helper_states"][0]["required"] is True
+    assert shadow["helper_states"][0]["installed"] is False
+
+
 def test_platform_context_payload_carries_manual_backend_override(monkeypatch):
     runtime = object.__new__(load._PluginRuntime)
     runtime._preferences = _StubPrefs()

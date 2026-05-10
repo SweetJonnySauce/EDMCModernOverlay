@@ -1,3 +1,53 @@
+import sys
+import types
+
+try:  # pragma: no cover - exercised when PyQt6 is present
+    from PyQt6 import QtGui as _QtGui  # noqa: F401
+except Exception:  # pragma: no cover - lightweight stub path
+    if "PyQt6" not in sys.modules:
+        sys.modules["PyQt6"] = types.ModuleType("PyQt6")
+    qtgui = sys.modules.get("PyQt6.QtGui") or types.ModuleType("PyQt6.QtGui")
+    qtgui.QGuiApplication = getattr(
+        qtgui,
+        "QGuiApplication",
+        type(
+            "QGuiApplication",
+            (),
+            {
+                "platformName": staticmethod(lambda: "wayland"),
+                "screens": staticmethod(lambda: []),
+            },
+        ),
+    )
+    qtgui.QWindow = getattr(qtgui, "QWindow", object)
+    sys.modules["PyQt6.QtGui"] = qtgui
+
+    qtwidgets = sys.modules.get("PyQt6.QtWidgets") or types.ModuleType("PyQt6.QtWidgets")
+    qtwidgets.QWidget = getattr(qtwidgets, "QWidget", object)
+    sys.modules["PyQt6.QtWidgets"] = qtwidgets
+
+    qtcore = sys.modules.get("PyQt6.QtCore") or types.ModuleType("PyQt6.QtCore")
+    qtcore.Qt = type(
+        "Qt",
+        (),
+        {
+            "WidgetAttribute": type("WidgetAttribute", (), {"WA_TransparentForMouseEvents": object()}),
+            "WindowType": type(
+                "WindowType",
+                (),
+                {
+                    "WindowStaysOnTopHint": 1,
+                    "Tool": 2,
+                    "FramelessWindowHint": 4,
+                    "WindowTransparentForInput": object(),
+                },
+            ),
+            "PenStyle": type("PenStyle", (), {"NoPen": object()}),
+            "PenJoinStyle": type("PenJoinStyle", (), {"MiterJoin": object()}),
+        },
+    )
+    sys.modules["PyQt6.QtCore"] = qtcore
+
 from overlay_client.backend import (
     BackendBundle,
     BackendCapabilities,

@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import sys
+import types
 from types import SimpleNamespace
 from typing import Any
-
-import pytest
 
 OVERLAY_ROOT = __file__.rsplit("/overlay_client/tests/", 1)[0]
 if OVERLAY_ROOT not in sys.path:
@@ -12,8 +11,84 @@ if OVERLAY_ROOT not in sys.path:
 
 try:
     from PyQt6.QtCore import QRect
-except Exception:  # pragma: no cover - import guard
-    pytest.skip("PyQt6 not available", allow_module_level=True)
+except Exception:  # pragma: no cover - lightweight stub path
+    if "PyQt6" not in sys.modules:
+        sys.modules["PyQt6"] = types.ModuleType("PyQt6")
+
+    qtcore = sys.modules.get("PyQt6.QtCore") or types.ModuleType("PyQt6.QtCore")
+
+    class _QRect:
+        def __init__(self, x: int, y: int, width: int, height: int) -> None:
+            self._x = x
+            self._y = y
+            self._width = width
+            self._height = height
+
+        def width(self) -> int:
+            return self._width
+
+        def height(self) -> int:
+            return self._height
+
+        def left(self) -> int:
+            return self._x
+
+        def top(self) -> int:
+            return self._y
+
+        def moveTo(self, x: int, y: int) -> None:
+            self._x = x
+            self._y = y
+
+    class _Qt:
+        class PenStyle:
+            NoPen = object()
+
+        class PenJoinStyle:
+            MiterJoin = object()
+
+    qtcore.QRect = getattr(qtcore, "QRect", _QRect)
+    qtcore.QPoint = getattr(qtcore, "QPoint", object)
+    qtcore.Qt = type(
+        "Qt",
+        (),
+        {
+            "WidgetAttribute": type("WidgetAttribute", (), {"WA_TransparentForMouseEvents": object()}),
+            "WindowType": type(
+                "WindowType",
+                (),
+                {
+                    "WindowStaysOnTopHint": 1,
+                    "Tool": 2,
+                    "FramelessWindowHint": 4,
+                    "WindowTransparentForInput": object(),
+                },
+            ),
+            "PenStyle": _Qt.PenStyle,
+            "PenJoinStyle": _Qt.PenJoinStyle,
+        },
+    )
+    sys.modules["PyQt6.QtCore"] = qtcore
+
+    qtgui = sys.modules.get("PyQt6.QtGui") or types.ModuleType("PyQt6.QtGui")
+
+    class _QPen:
+        def __init__(self, *_: Any, **__: Any) -> None:
+            return None
+
+        def setWidth(self, *_: Any, **__: Any) -> None:
+            return None
+
+        def setJoinStyle(self, *_: Any, **__: Any) -> None:
+            return None
+
+    qtgui.QColor = type("QColor", (), {"__init__": lambda self, *_, **__: None})
+    qtgui.QFont = type("QFont", (), {"__init__": lambda self, *_, **__: None})
+    qtgui.QPainter = getattr(qtgui, "QPainter", object)
+    qtgui.QPen = getattr(qtgui, "QPen", _QPen)
+    sys.modules["PyQt6.QtGui"] = qtgui
+
+    from PyQt6.QtCore import QRect
 
 from overlay_client.debug_cycle_overlay import DebugOverlayView  # noqa: E402
 from overlay_client.viewport_helper import ScaleMode, compute_viewport_transform  # noqa: E402
@@ -114,3 +189,31 @@ def test_debug_overlay_includes_backend_choice_and_source() -> None:
     assert "  choice=native_wayland / kwin_wayland" in painter.texts
     assert "  source=client_runtime" in painter.texts
     assert "  mode=true_overlay" in painter.texts
+
+
+def test_debug_overlay_backend_lines_do_not_show_true_overlay_for_unavailable_gnome_helper() -> None:
+    lines = DebugOverlayView._format_backend_lines(
+        {
+            "selected_backend": {"family": "native_wayland", "instance": "gnome_shell_wayland"},
+            "classification": "true_overlay",
+            "fallback_from": {"family": "compositor_helper", "instance": "gnome_shell_wayland"},
+            "fallback_reason": "missing_helper",
+            "shadow_mode": False,
+            "helper_states": [
+                {
+                    "helper": "gnome_shell_extension",
+                    "required": True,
+                    "installed": False,
+                    "enabled": False,
+                    "approved": False,
+                    "version": "",
+                }
+            ],
+            "review_required": False,
+            "review_reasons": [],
+        }
+    )
+
+    assert "  choice=native_wayland / gnome_shell_wayland" in lines
+    assert "  mode=degraded_overlay" in lines
+    assert all("true_overlay" not in line for line in lines)

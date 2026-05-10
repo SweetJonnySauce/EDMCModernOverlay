@@ -110,7 +110,8 @@ def test_selector_keeps_gnome_wayland_conservative_without_helper():
 
     assert status.selected_backend.family is BackendFamily.NATIVE_WAYLAND
     assert status.selected_backend.instance is BackendInstance.GNOME_SHELL_WAYLAND
-    assert status.classification is CapabilityClassification.TRUE_OVERLAY
+    assert status.classification is CapabilityClassification.DEGRADED_OVERLAY
+    assert status.is_true_overlay is False
     assert status.fallback_from == BackendDescriptor(BackendFamily.COMPOSITOR_HELPER, BackendInstance.GNOME_SHELL_WAYLAND)
     assert status.fallback_reason is FallbackReason.MISSING_HELPER
     assert status.review_required is False
@@ -120,6 +121,29 @@ def test_selector_keeps_gnome_wayland_conservative_without_helper():
     assert status.helper_states[0].available is False
     assert "helper_recommended:gnome_shell_extension" in status.notes
     assert "follow_mode_fallback:native_x11" in status.notes
+
+
+def test_selector_preserves_missing_helper_context_when_manual_gnome_override_matches_auto():
+    selector = BackendSelector()
+    status = selector.select(
+        PlatformProbeResult(
+            operating_system=OperatingSystem.LINUX,
+            session_type=SessionType.WAYLAND,
+            qt_platform_name="wayland",
+            compositor="gnome-shell",
+        ),
+        manual_override="gnome_shell_wayland",
+    )
+
+    assert status.selected_backend.family is BackendFamily.NATIVE_WAYLAND
+    assert status.selected_backend.instance is BackendInstance.GNOME_SHELL_WAYLAND
+    assert status.classification is CapabilityClassification.DEGRADED_OVERLAY
+    assert status.manual_override is BackendInstance.GNOME_SHELL_WAYLAND
+    assert status.fallback_from == BackendDescriptor(BackendFamily.COMPOSITOR_HELPER, BackendInstance.GNOME_SHELL_WAYLAND)
+    assert status.fallback_reason is FallbackReason.MISSING_HELPER
+    assert status.helper_states[0].helper is HelperKind.GNOME_SHELL_EXTENSION
+    assert status.helper_states[0].required is True
+    assert status.helper_states[0].available is False
 
 
 def test_selector_uses_compositor_helper_family_when_gnome_helper_exists():
@@ -256,3 +280,22 @@ def test_selector_reports_strict_xwayland_classification_without_review_guard():
     assert status.classification is CapabilityClassification.DEGRADED_OVERLAY
     assert status.fallback_reason is FallbackReason.XWAYLAND_COMPAT_ONLY
     assert status.review_required is False
+
+
+def test_selector_keeps_xwayland_auto_path_degraded_without_extra_fallback_when_manual_override_matches():
+    selector = BackendSelector()
+    status = selector.select(
+        PlatformProbeResult(
+            operating_system=OperatingSystem.LINUX,
+            session_type=SessionType.WAYLAND,
+            qt_platform_name="xcb",
+            compositor="kwin",
+        ),
+        manual_override="xwayland_compat",
+    )
+
+    assert status.selected_backend.instance is BackendInstance.XWAYLAND_COMPAT
+    assert status.classification is CapabilityClassification.DEGRADED_OVERLAY
+    assert status.manual_override is BackendInstance.XWAYLAND_COMPAT
+    assert status.fallback_from is None
+    assert status.fallback_reason is None

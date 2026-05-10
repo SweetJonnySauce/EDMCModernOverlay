@@ -32,12 +32,13 @@ class BackendSelector:
         override_instance, override_error = self._resolve_manual_override(manual_override, probe, auto_descriptor)
         descriptor = self._descriptor_for_override(override_instance, probe, auto_descriptor)
         classification = self._strict_classification(descriptor, probe)
+        fallback_context = self._fallback_context(descriptor, probe)
         if override_instance is not None and descriptor != auto_descriptor:
             fallback_from, fallback_reason = auto_descriptor, FallbackReason.MANUAL_OVERRIDE
-        elif override_instance is not None:
+        elif override_instance is not None and fallback_context[1] is not FallbackReason.MISSING_HELPER:
             fallback_from, fallback_reason = None, None
         else:
-            fallback_from, fallback_reason = self._fallback_context(descriptor, probe)
+            fallback_from, fallback_reason = fallback_context
         review_required, review_reasons = self._review_guard(
             descriptor,
             probe,
@@ -165,6 +166,10 @@ class BackendSelector:
         if descriptor.instance in {BackendInstance.COSMIC, BackendInstance.GAMESCOPE}:
             return CapabilityClassification.UNSUPPORTED
         if descriptor.instance is BackendInstance.XWAYLAND_COMPAT and probe.session_type is SessionType.WAYLAND:
+            return CapabilityClassification.DEGRADED_OVERLAY
+        if descriptor.instance is BackendInstance.GNOME_SHELL_WAYLAND and not probe.has_helper(
+            HelperKind.GNOME_SHELL_EXTENSION
+        ):
             return CapabilityClassification.DEGRADED_OVERLAY
         return CapabilityClassification.TRUE_OVERLAY
 

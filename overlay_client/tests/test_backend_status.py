@@ -116,10 +116,54 @@ def test_backend_status_report_helpers_accept_payload_dicts():
     payload = status.to_payload()
     report = build_status_report(payload)
 
+    assert status.is_true_overlay is False
+    assert payload["classification"] == "degraded_overlay"
     assert report["family"] == "native_wayland"
     assert report["instance"] == "gnome_shell_wayland"
+    assert report["classification"] == "degraded_overlay"
     assert report["fallback_reason"] == "missing_helper"
     assert format_status_report_line(payload) == report["summary"]
+    assert "classification=degraded_overlay" in report["summary"]
+    assert format_status_ui_summary(payload) == (
+        "Backend: GNOME Wayland | Mode: Degraded overlay | Source: Live runtime"
+    )
+    assert format_status_ui_warning(payload) == (
+        "Warning: Some overlay guarantees are reduced in this mode.; "
+        "A required helper for compositor_helper / gnome_shell_wayland is not available."
+    )
+
+
+def test_backend_status_downgrades_gnome_true_overlay_payload_when_required_helper_inactive():
+    payload = {
+        "selected_backend": {"family": "native_wayland", "instance": "gnome_shell_wayland"},
+        "classification": "true_overlay",
+        "fallback_from": {"family": "compositor_helper", "instance": "gnome_shell_wayland"},
+        "fallback_reason": "missing_helper",
+        "shadow_mode": False,
+        "helper_states": [
+            {
+                "helper": "gnome_shell_extension",
+                "required": True,
+                "installed": True,
+                "enabled": False,
+                "approved": False,
+                "version": "",
+            }
+        ],
+        "review_required": False,
+        "review_reasons": [],
+    }
+
+    report = build_status_report(payload)
+
+    assert report["classification"] == "degraded_overlay"
+    assert report["helper_unavailable"] == ["gnome_shell_extension"]
+    assert report["warning_required"] is True
+    assert "classification=degraded_overlay" in format_status_report_line(payload)
+    assert "classification=true_overlay" not in format_status_report_line(payload)
+    assert format_status_ui_summary(payload) == (
+        "Backend: GNOME Wayland | Mode: Degraded overlay | Source: Live runtime"
+    )
 
 
 def test_backend_status_ui_helpers_label_plugin_hint_and_inactive_helpers():

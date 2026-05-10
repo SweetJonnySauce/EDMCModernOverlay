@@ -66,6 +66,12 @@ class BackendSelectionStatus:
 
     @property
     def is_true_overlay(self) -> bool:
+        if _gnome_helper_blocks_true_overlay(
+            instance=self.selected_backend.instance.value,
+            fallback_reason=self.fallback_reason.value if self.fallback_reason is not None else "",
+            helper_unavailable=_required_unavailable_helpers(self.helper_states),
+        ):
+            return False
         return self.classification is CapabilityClassification.TRUE_OVERLAY
 
     @property
@@ -73,10 +79,17 @@ class BackendSelectionStatus:
         return self.review_required and bool(self.review_reasons)
 
     def to_payload(self) -> dict[str, object]:
+        fallback_reason = self.fallback_reason.value if self.fallback_reason is not None else ""
+        classification = _effective_classification(
+            instance=self.selected_backend.instance.value,
+            classification=self.classification.value,
+            fallback_reason=fallback_reason,
+            helper_unavailable=_required_unavailable_helpers(self.helper_states),
+        )
         payload: dict[str, object] = {
             "probe": self.probe.to_payload(),
             "selected_backend": self.selected_backend.to_payload(),
-            "classification": self.classification.value,
+            "classification": classification,
             "manual_override": self.manual_override.value if self.manual_override is not None else None,
             "override_error": self.override_error,
             "helper_states": [state.to_payload() for state in self.helper_states],
@@ -177,6 +190,12 @@ def build_status_report(status: BackendSelectionStatus | Mapping[str, object]) -
                     version=str(raw_state.get("version") or ""),
                 )
             )
+    classification = _effective_classification(
+        instance=instance,
+        classification=classification,
+        fallback_reason=fallback_reason,
+        helper_unavailable=helper_unavailable,
+    )
     warning_required = bool(
         classification in {CapabilityClassification.DEGRADED_OVERLAY.value, CapabilityClassification.UNSUPPORTED.value}
         or fallback_reason
@@ -323,6 +342,41 @@ def _status_subject(status: BackendSelectionStatus | Mapping[str, object]) -> Ba
     if isinstance(nested, Mapping) and "selected_backend" in nested:
         return nested
     return status
+
+
+def _required_unavailable_helpers(states: tuple[HelperCapabilityState, ...]) -> list[str]:
+    return [state.helper.value for state in states if state.required and not state.available]
+
+
+def _effective_classification(
+    *,
+    instance: str,
+    classification: str,
+    fallback_reason: str,
+    helper_unavailable: list[str],
+) -> str:
+    if classification == CapabilityClassification.UNSUPPORTED.value:
+        return classification
+    if _gnome_helper_blocks_true_overlay(
+        instance=instance,
+        fallback_reason=fallback_reason,
+        helper_unavailable=helper_unavailable,
+    ):
+        return CapabilityClassification.DEGRADED_OVERLAY.value
+    return classification
+
+
+def _gnome_helper_blocks_true_overlay(
+    *,
+    instance: str,
+    fallback_reason: str,
+    helper_unavailable: list[str],
+) -> bool:
+    if instance != BackendInstance.GNOME_SHELL_WAYLAND.value:
+        return False
+    if fallback_reason == FallbackReason.MISSING_HELPER.value:
+        return True
+    return HelperKind.GNOME_SHELL_EXTENSION.value in helper_unavailable
 
 
 def _support_label(family: str, instance: str) -> str:

@@ -1109,7 +1109,7 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 
 | Phase | Description | Status |
 | --- | --- | --- |
-| 1 | Status truthfulness and degraded fallback for missing/unhealthy helper | Not Started |
+| 1 | Status truthfulness and degraded fallback for missing/unhealthy helper | Completed |
 | 2 | Visibility terminology rename from `force_render` to `keep_overlay_visible` | Not Started |
 | 3 | GNOME Shell extension package skeleton, metadata, and protocol constants | Not Started |
 | 4 | Session-DBus helper health/version MVP and client handshake/status object | Not Started |
@@ -1148,12 +1148,34 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 - Risks: existing tests may encode the current optimistic classification; wording changes can surprise users.
 - Mitigations: update selector/status tests first, keep fallback reason/helper state visible, and keep user-facing warnings actionable.
 
+#### Phase 1 Implementation Notes
+- Touch points to inspect before coding: backend selector/status rules, backend status contracts/formatting, status consumers in preferences/log/debug-overlay surfaces, and existing selector/status/consumer tests.
+- Expected unchanged behavior: non-GNOME backend selection, selected backend identity (`native_wayland` / `gnome_shell_wayland`), helper diagnostic fields, `fallback_reason=missing_helper`, manual override handling, and `xwayland_compat` availability as degraded compatibility.
+- Out of scope for this phase: GNOME Shell extension files, installer lifecycle, DBus helper implementation, target discovery, presentation/attachment work, and the `force_render` rename.
+- Test type choice: unit tests for selector/status classification and pure formatting logic; harness tests only if `load.py`, EDMC preferences wiring, or plugin/client status bridge wiring is touched.
+- Tests to run after coding: targeted backend selector/status/consumer tests, plus any touched preferences/status bridge harness tests.
+
 | Stage | Description | Status |
 | --- | --- | --- |
-| 1.1 | Update backend selector/status rules so GNOME Wayland with missing/unhealthy helper reports `degraded_overlay` | Not Started |
-| 1.2 | Preserve helper diagnostics: helper kind, required/unavailable state, `fallback_reason=missing_helper`, and selected backend identity | Not Started |
-| 1.3 | Update preferences/status/log/debug-overlay wording tests so no surface says `true_overlay` while helper is unhealthy | Not Started |
-| 1.4 | Add regression tests for manual override and `xwayland_compat` degraded fallback behavior | Not Started |
+| 1.1 | Update backend selector/status rules so GNOME Wayland with missing/unhealthy helper reports `degraded_overlay` | Completed |
+| 1.2 | Preserve helper diagnostics: helper kind, required/unavailable state, `fallback_reason=missing_helper`, and selected backend identity | Completed |
+| 1.3 | Update preferences/status/log/debug-overlay wording tests so no surface says `true_overlay` while helper is unhealthy | Completed |
+| 1.4 | Add regression tests for manual override and `xwayland_compat` degraded fallback behavior | Completed |
+
+#### Phase 1 Execution Notes
+- Selector now classifies GNOME Wayland without the required GNOME Shell extension as `degraded_overlay` while preserving `selected_backend=native_wayland / gnome_shell_wayland`, `fallback_from=compositor_helper / gnome_shell_wayland`, and `fallback_reason=missing_helper`.
+- Status/report formatting defensively downgrades stale or plugin-provided GNOME Wayland payloads when `fallback_reason=missing_helper` or the required `gnome_shell_extension` helper is unavailable.
+- `xwayland_compat` remains degraded compatibility. Existing explicit override behavior is preserved: when a manual override changes from a native Wayland auto backend to `xwayland_compat`, fallback reason is `manual_override`; when the manual override already matches the selected XWayland path, no extra fallback reason is added.
+- Added/updated coverage for selector/status, backend consumers, platform context, control-surface log text, debug overlay backend text, plugin config payload, and preferences backend warning text.
+
+#### Phase 1 Tests Run
+- `python3 -m py_compile overlay_client/backend/selector.py overlay_client/backend/status.py` -> passed.
+- `python3 -m pytest overlay_client/tests/test_backend_selector.py overlay_client/tests/test_backend_status.py tests/test_overlay_config_payload.py -q` -> passed, `28 passed`.
+- `python3 -m pytest overlay_client/tests/test_backend_selector.py overlay_client/tests/test_backend_status.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_backend_contracts.py overlay_client/tests/test_platform_probe.py overlay_client/tests/test_platform_context.py overlay_client/tests/test_control_surface_platform_context.py overlay_client/tests/test_debug_overlay_view.py tests/test_overlay_config_payload.py tests/test_preferences_panel_controller_tab.py -q` -> passed, `89 passed`.
+- `python3 -m pytest tests/test_preferences_panel_controller_tab.py -q` -> passed, `17 passed`.
+- `python3 -m pytest tests/test_harness_backend_selection_wiring.py tests/test_harness_backend_status_roundtrip.py tests/test_harness_backend_override_roundtrip.py -q -rs` -> skipped locally, `6 skipped`; missing dev dependency `semantic_version`.
+- `git diff --check` -> passed.
+- `make check` -> passed; ruff and mypy passed, full pytest reported `843 passed, 21 skipped`.
 
 #### Phase 1 Exit Criteria
 - GNOME Wayland without healthy helper never reports user-facing `Mode: True overlay`.

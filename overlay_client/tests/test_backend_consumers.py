@@ -1,6 +1,55 @@
 import logging
+import sys
+import types
 
 import pytest
+
+try:  # pragma: no cover - exercised when PyQt6 is present
+    from PyQt6 import QtGui as _QtGui  # noqa: F401
+except Exception:  # pragma: no cover - lightweight stub path
+    if "PyQt6" not in sys.modules:
+        sys.modules["PyQt6"] = types.ModuleType("PyQt6")
+    qtgui = sys.modules.get("PyQt6.QtGui") or types.ModuleType("PyQt6.QtGui")
+    qtgui.QGuiApplication = getattr(
+        qtgui,
+        "QGuiApplication",
+        type(
+            "QGuiApplication",
+            (),
+            {
+                "platformName": staticmethod(lambda: "wayland"),
+                "screens": staticmethod(lambda: []),
+            },
+        ),
+    )
+    qtgui.QWindow = getattr(qtgui, "QWindow", object)
+    sys.modules["PyQt6.QtGui"] = qtgui
+
+    qtwidgets = sys.modules.get("PyQt6.QtWidgets") or types.ModuleType("PyQt6.QtWidgets")
+    qtwidgets.QWidget = getattr(qtwidgets, "QWidget", object)
+    sys.modules["PyQt6.QtWidgets"] = qtwidgets
+
+    qtcore = sys.modules.get("PyQt6.QtCore") or types.ModuleType("PyQt6.QtCore")
+    qtcore.Qt = type(
+        "Qt",
+        (),
+        {
+            "WidgetAttribute": type("WidgetAttribute", (), {"WA_TransparentForMouseEvents": object()}),
+            "WindowType": type(
+                "WindowType",
+                (),
+                {
+                    "WindowStaysOnTopHint": 1,
+                    "Tool": 2,
+                    "FramelessWindowHint": 4,
+                    "WindowTransparentForInput": object(),
+                },
+            ),
+            "PenStyle": type("PenStyle", (), {"NoPen": object()}),
+            "PenJoinStyle": type("PenJoinStyle", (), {"MiterJoin": object()}),
+        },
+    )
+    sys.modules["PyQt6.QtCore"] = qtcore
 
 from overlay_client.backend.bundles import (
     gnome_shell_wayland,
@@ -366,6 +415,7 @@ def test_derive_linux_backend_status_infers_gnome_and_generic_wayland_paths_from
     generic_bundle = resolve_linux_bundle_from_status(generic_status)
 
     assert gnome_status.selected_backend.instance is BackendInstance.GNOME_SHELL_WAYLAND
+    assert gnome_status.classification is CapabilityClassification.DEGRADED_OVERLAY
     assert generic_status.selected_backend.instance is BackendInstance.COSMIC
     assert gnome_bundle.descriptor.instance is BackendInstance.GNOME_SHELL_WAYLAND
     assert generic_bundle.descriptor.instance is BackendInstance.WAYLAND_LAYER_SHELL_GENERIC
@@ -383,7 +433,7 @@ def test_resolve_linux_bundle_from_status_preserves_selected_xwayland_bundle():
             BackendFamily.XWAYLAND_COMPAT,
             BackendInstance.XWAYLAND_COMPAT,
         ),
-        classification=CapabilityClassification.TRUE_OVERLAY,
+        classification=CapabilityClassification.DEGRADED_OVERLAY,
     )
 
     bundle = resolve_linux_bundle_from_status(status)
@@ -423,7 +473,7 @@ def test_resolve_tracker_fallback_bundle_uses_xwayland_for_wayland_selection():
             BackendFamily.NATIVE_WAYLAND,
             BackendInstance.GNOME_SHELL_WAYLAND,
         ),
-        classification=CapabilityClassification.TRUE_OVERLAY,
+        classification=CapabilityClassification.DEGRADED_OVERLAY,
     )
 
     fallback_bundle = resolve_tracker_fallback_bundle(status)
