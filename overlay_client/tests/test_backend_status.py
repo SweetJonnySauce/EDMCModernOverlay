@@ -166,6 +166,36 @@ def test_backend_status_downgrades_gnome_true_overlay_payload_when_required_help
     )
 
 
+def test_backend_status_downgrades_gnome_true_overlay_until_validation_gate_passes():
+    payload = {
+        "selected_backend": {"family": "compositor_helper", "instance": "gnome_shell_wayland"},
+        "classification": "true_overlay",
+        "shadow_mode": False,
+        "helper_states": [
+            {
+                "helper": "gnome_shell_extension",
+                "required": True,
+                "installed": True,
+                "enabled": True,
+                "approved": True,
+                "version": "1.0.0",
+            }
+        ],
+        "review_required": False,
+        "review_reasons": [],
+    }
+
+    report = build_status_report(payload)
+
+    assert report["classification"] == "degraded_overlay"
+    assert report["helper_unavailable"] == []
+    assert "classification=degraded_overlay" in report["summary"]
+    assert "classification=true_overlay" not in report["summary"]
+    assert format_status_ui_summary(payload) == (
+        "Backend: GNOME Shell helper | Mode: Degraded overlay | Source: Live runtime"
+    )
+
+
 def test_backend_status_ui_helpers_label_plugin_hint_and_inactive_helpers():
     status = BackendSelectionStatus(
         probe=_probe(),

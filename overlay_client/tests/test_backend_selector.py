@@ -160,12 +160,15 @@ def test_selector_uses_compositor_helper_family_when_gnome_helper_exists():
 
     assert status.selected_backend.family is BackendFamily.COMPOSITOR_HELPER
     assert status.selected_backend.instance is BackendInstance.GNOME_SHELL_WAYLAND
-    assert status.classification is CapabilityClassification.TRUE_OVERLAY
+    assert status.classification is CapabilityClassification.DEGRADED_OVERLAY
+    assert status.is_true_overlay is False
     assert status.fallback_from is None
     assert status.fallback_reason is None
     assert len(status.helper_states) == 1
     assert status.helper_states[0].available is True
+    assert status.helper_states[0].detail == "health_only_true_overlay_pending_validation"
     assert "helper_recommended:gnome_shell_extension" not in status.notes
+    assert "helper_health_only:true_overlay_pending_validation" in status.notes
 
 
 def test_selector_marks_backlog_wayland_targets_unsupported():

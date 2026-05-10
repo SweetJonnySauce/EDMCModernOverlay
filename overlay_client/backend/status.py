@@ -374,9 +374,9 @@ def _gnome_helper_blocks_true_overlay(
 ) -> bool:
     if instance != BackendInstance.GNOME_SHELL_WAYLAND.value:
         return False
-    if fallback_reason == FallbackReason.MISSING_HELPER.value:
-        return True
-    return HelperKind.GNOME_SHELL_EXTENSION.value in helper_unavailable
+    # Phase 4 helper health is necessary evidence, but it is not enough to
+    # claim GNOME Wayland true-overlay support before Q10 validation.
+    return True
 
 
 def _support_label(family: str, instance: str) -> str:

@@ -5,6 +5,12 @@ import re
 from pathlib import Path
 
 from overlay_client.backend import (
+    GNOME_SHELL_HELPER_CAPABILITIES,
+    GNOME_SHELL_HELPER_DBUS_HEALTH_METHOD,
+    GNOME_SHELL_HELPER_DBUS_HELLO_METHOD,
+    GNOME_SHELL_HELPER_DBUS_INTERFACE,
+    GNOME_SHELL_HELPER_DBUS_OBJECT_PATH,
+    GNOME_SHELL_HELPER_DBUS_SERVICE,
     GNOME_SHELL_HELPER_SHELL_VERSIONS,
     GNOME_SHELL_HELPER_UUID,
     HELPER_KIND,
@@ -55,15 +61,34 @@ def test_gnome_shell_extension_constants_match_client_contract() -> None:
     assert _js_constant("HELPER_KIND") == HELPER_KIND.value
     assert int(_js_constant("HELPER_PROTOCOL")) == HELPER_PROTOCOL
     assert _js_constant("HELPER_VERSION") == HELPER_VERSION
+    assert _js_constant("HELPER_DBUS_SERVICE") == GNOME_SHELL_HELPER_DBUS_SERVICE
+    assert _js_constant("HELPER_DBUS_OBJECT_PATH") == GNOME_SHELL_HELPER_DBUS_OBJECT_PATH
+    assert _js_constant("HELPER_DBUS_INTERFACE") == GNOME_SHELL_HELPER_DBUS_INTERFACE
+    assert _js_constant("HELPER_DBUS_HELLO_METHOD") == GNOME_SHELL_HELPER_DBUS_HELLO_METHOD
+    assert _js_constant("HELPER_DBUS_HEALTH_METHOD") == GNOME_SHELL_HELPER_DBUS_HEALTH_METHOD
 
 
-def test_extension_source_imports_local_constants_without_runtime_behavior() -> None:
+def test_gnome_shell_extension_capabilities_match_client_contract() -> None:
+    source = (HELPER_DIR / "constants.js").read_text(encoding="utf-8")
+
+    for capability in GNOME_SHELL_HELPER_CAPABILITIES:
+        assert f"'{capability}'" in source
+
+
+def test_extension_source_exposes_only_health_dbus_runtime() -> None:
     source = (HELPER_DIR / "extension.js").read_text(encoding="utf-8")
 
     assert "from './constants.js'" in source
-    assert "org.gnome.Shell" not in source
-    assert "Gio.DBus" not in source
-    assert "DBus" not in source
+    assert "Gio.bus_own_name" in source
+    assert "Gio.DBusExportedObject.wrapJSObject" in source
+    assert "HELPER_DBUS_SERVICE" in source
+    assert "HELPER_DBUS_OBJECT_PATH" in source
+    assert "HELPER_DBUS_INTERFACE" in source
+    assert "HELPER_DBUS_HELLO_METHOD" in source
+    assert "HELPER_DBUS_HEALTH_METHOD" in source
+    assert "get_window_actors" not in source
+    assert "global.display" not in source
+    assert "Meta.Window" not in source
 
 
 def test_protocol_bump_fixture_tracks_contract_review_triggers() -> None:

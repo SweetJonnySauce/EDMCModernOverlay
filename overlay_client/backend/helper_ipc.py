@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Mapping
+from typing import Callable, Mapping
 
 from .contracts import BackendInstance, HelperKind
 
@@ -16,6 +18,14 @@ except Exception:  # pragma: no cover - defensive fallback for unusual import co
 
 GNOME_SHELL_HELPER_UUID = "edmc-modern-overlay-helper@edmcmodernoverlay.github.io"
 GNOME_SHELL_HELPER_SHELL_VERSIONS = ("46", "47", "48", "49", "50")
+GNOME_SHELL_HELPER_DBUS_SERVICE = "org.edmc.ModernOverlay.Helper"
+GNOME_SHELL_HELPER_DBUS_OBJECT_PATH = "/org/edmc/ModernOverlay/Helper"
+GNOME_SHELL_HELPER_DBUS_INTERFACE = "org.edmc.ModernOverlay.Helper"
+GNOME_SHELL_HELPER_DBUS_HELLO_METHOD = "Hello"
+GNOME_SHELL_HELPER_DBUS_HEALTH_METHOD = "GetHealth"
+GNOME_SHELL_HELPER_CAPABILITIES = ("hello", "health", "version", "protocol", "capabilities")
+GNOME_SHELL_HELPER_REQUIRED_CAPABILITIES = GNOME_SHELL_HELPER_CAPABILITIES
+GNOME_SHELL_HELPER_HEALTH_STALE_SECONDS = 10.0
 HELPER_KIND = HelperKind.GNOME_SHELL_EXTENSION
 HELPER_PROTOCOL = 1
 HELPER_VERSION = MODERN_OVERLAY_VERSION
@@ -36,8 +46,80 @@ class HelperMessageType(str, Enum):
     EVENT = "event"
 
 
+class HelperHealthState(str, Enum):
+    """Fail-closed health states for helper DBus validation."""
+
+    HEALTHY = "healthy"
+    MISSING_SERVICE = "missing_service"
+    DBUS_UNREACHABLE = "dbus_unreachable"
+    MALFORMED_PAYLOAD = "malformed_payload"
+    HELPER_KIND_MISMATCH = "helper_kind_mismatch"
+    VERSION_INCOMPATIBLE = "version_incompatible"
+    PROTOCOL_INCOMPATIBLE = "protocol_incompatible"
+    CAPABILITY_MISSING = "capability_missing"
+    STALE = "stale"
+    INACTIVE = "inactive"
+    ERROR = "error"
+
+
 class HelperBoundaryError(ValueError):
     """Raised when helper-boundary configuration or messages fail validation."""
+
+
+class HelperDbusProbeError(RuntimeError):
+    """Raised by DBus probe callers when helper health cannot be fetched."""
+
+
+class HelperDbusServiceMissing(HelperDbusProbeError):
+    """Raised when the expected helper DBus service is not owned."""
+
+
+class HelperDbusUnreachable(HelperDbusProbeError):
+    """Raised when the session bus or helper service cannot be reached."""
+
+
+@dataclass(frozen=True, slots=True)
+class HelperHealthStatus:
+    """Validated health snapshot for a helper-owned DBus endpoint."""
+
+    state: HelperHealthState
+    helper_kind: HelperKind = HELPER_KIND
+    helper_version: str = ""
+    expected_version: str = HELPER_VERSION
+    helper_protocol: int | None = None
+    expected_protocol: int = HELPER_PROTOCOL
+    capabilities: tuple[str, ...] = field(default_factory=tuple)
+    missing_capabilities: tuple[str, ...] = field(default_factory=tuple)
+    observed_at_monotonic: float = 0.0
+    stale_after_seconds: float = GNOME_SHELL_HELPER_HEALTH_STALE_SECONDS
+    detail: str = ""
+    raw_status: str = ""
+
+    @property
+    def healthy(self) -> bool:
+        return self.state is HelperHealthState.HEALTHY
+
+    def is_stale(self, now_monotonic: float) -> bool:
+        if self.observed_at_monotonic <= 0:
+            return False
+        return (float(now_monotonic) - self.observed_at_monotonic) > self.stale_after_seconds
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "state": self.state.value,
+            "healthy": self.healthy,
+            "helper_kind": self.helper_kind.value,
+            "helper_version": self.helper_version,
+            "expected_version": self.expected_version,
+            "helper_protocol": self.helper_protocol,
+            "expected_protocol": self.expected_protocol,
+            "capabilities": list(self.capabilities),
+            "missing_capabilities": list(self.missing_capabilities),
+            "observed_at_monotonic": self.observed_at_monotonic,
+            "stale_after_seconds": self.stale_after_seconds,
+            "detail": self.detail,
+            "raw_status": self.raw_status,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,6 +280,163 @@ def parse_helper_message(
     )
 
 
+def probe_gnome_shell_helper_health(
+    fetch_health: Callable[[], object],
+    *,
+    clock: Callable[[], float] = time.monotonic,
+    stale_after_seconds: float = GNOME_SHELL_HELPER_HEALTH_STALE_SECONDS,
+) -> HelperHealthStatus:
+    """Fetch and validate the GNOME Shell helper health payload.
+
+    The DBus transport caller is injected so this boundary stays unit-testable and
+    dependency-light. Transport errors map to explicit fail-closed health states.
+    """
+
+    try:
+        raw_health = fetch_health()
+    except HelperDbusServiceMissing as exc:
+        return _helper_health_status(HelperHealthState.MISSING_SERVICE, detail=str(exc))
+    except HelperDbusProbeError as exc:
+        return _helper_health_status(HelperHealthState.DBUS_UNREACHABLE, detail=str(exc))
+    except Exception as exc:  # pragma: no cover - defensive transport boundary
+        return _helper_health_status(HelperHealthState.DBUS_UNREACHABLE, detail=exc.__class__.__name__)
+
+    observed_at = float(clock())
+    return validate_gnome_shell_helper_health_payload(
+        raw_health,
+        observed_at_monotonic=observed_at,
+        now_monotonic=observed_at,
+        stale_after_seconds=stale_after_seconds,
+    )
+
+
+def validate_gnome_shell_helper_health_payload(
+    raw_health: object,
+    *,
+    observed_at_monotonic: float,
+    now_monotonic: float | None = None,
+    expected_kind: HelperKind = HELPER_KIND,
+    expected_version: str = HELPER_VERSION,
+    expected_protocol: int = HELPER_PROTOCOL,
+    required_capabilities: tuple[str, ...] = GNOME_SHELL_HELPER_REQUIRED_CAPABILITIES,
+    stale_after_seconds: float = GNOME_SHELL_HELPER_HEALTH_STALE_SECONDS,
+) -> HelperHealthStatus:
+    """Validate a GNOME Shell helper health payload and fail closed."""
+
+    try:
+        payload = _coerce_health_payload(raw_health)
+    except HelperBoundaryError as exc:
+        return _helper_health_status(HelperHealthState.MALFORMED_PAYLOAD, detail=str(exc))
+
+    raw_status = _payload_text(payload, "status").lower()
+    helper_kind_token = _payload_text(payload, "helper_kind").lower()
+    if not raw_status or not helper_kind_token:
+        return _helper_health_status(HelperHealthState.MALFORMED_PAYLOAD, detail="missing status or helper_kind")
+    try:
+        helper_kind = HelperKind(helper_kind_token)
+    except ValueError:
+        return _helper_health_status(
+            HelperHealthState.HELPER_KIND_MISMATCH,
+            detail=f"unexpected helper_kind={helper_kind_token}",
+            raw_status=raw_status,
+        )
+    if helper_kind is not expected_kind:
+        return _helper_health_status(
+            HelperHealthState.HELPER_KIND_MISMATCH,
+            helper_kind=helper_kind,
+            detail=f"expected helper_kind={expected_kind.value}",
+            raw_status=raw_status,
+        )
+
+    helper_version = _payload_text(payload, "helper_version")
+    helper_protocol = _payload_int(payload, "helper_protocol")
+    capabilities = _payload_capabilities(payload.get("capabilities"))
+
+    if raw_status in {"inactive", "disabled"}:
+        return _helper_health_status(
+            HelperHealthState.INACTIVE,
+            helper_version=helper_version,
+            helper_protocol=helper_protocol,
+            capabilities=capabilities,
+            raw_status=raw_status,
+        )
+    if raw_status in {"error", "failed"}:
+        return _helper_health_status(
+            HelperHealthState.ERROR,
+            helper_version=helper_version,
+            helper_protocol=helper_protocol,
+            capabilities=capabilities,
+            detail=_payload_text(payload, "detail"),
+            raw_status=raw_status,
+        )
+    if raw_status not in {"healthy", "active", "ok"}:
+        return _helper_health_status(
+            HelperHealthState.MALFORMED_PAYLOAD,
+            detail=f"unexpected status={raw_status}",
+            raw_status=raw_status,
+        )
+
+    if helper_protocol is None:
+        return _helper_health_status(
+            HelperHealthState.MALFORMED_PAYLOAD,
+            helper_version=helper_version,
+            detail="helper_protocol is missing or invalid",
+            raw_status=raw_status,
+        )
+    if int(helper_protocol) != int(expected_protocol):
+        return _helper_health_status(
+            HelperHealthState.PROTOCOL_INCOMPATIBLE,
+            helper_version=helper_version,
+            helper_protocol=helper_protocol,
+            detail=f"expected protocol={expected_protocol}",
+            raw_status=raw_status,
+        )
+    if not helper_version or (expected_version and helper_version != expected_version):
+        return _helper_health_status(
+            HelperHealthState.VERSION_INCOMPATIBLE,
+            helper_version=helper_version,
+            helper_protocol=helper_protocol,
+            capabilities=capabilities,
+            detail=f"expected version={expected_version}",
+            raw_status=raw_status,
+        )
+
+    required = tuple(str(capability).strip() for capability in required_capabilities if str(capability).strip())
+    missing_capabilities = tuple(capability for capability in required if capability not in capabilities)
+    if missing_capabilities:
+        return _helper_health_status(
+            HelperHealthState.CAPABILITY_MISSING,
+            helper_version=helper_version,
+            helper_protocol=helper_protocol,
+            capabilities=capabilities,
+            missing_capabilities=missing_capabilities,
+            raw_status=raw_status,
+        )
+
+    observed_at = float(observed_at_monotonic)
+    now = observed_at if now_monotonic is None else float(now_monotonic)
+    if observed_at > 0 and (now - observed_at) > stale_after_seconds:
+        return _helper_health_status(
+            HelperHealthState.STALE,
+            helper_version=helper_version,
+            helper_protocol=helper_protocol,
+            capabilities=capabilities,
+            observed_at_monotonic=observed_at,
+            stale_after_seconds=stale_after_seconds,
+            raw_status=raw_status,
+        )
+
+    return _helper_health_status(
+        HelperHealthState.HEALTHY,
+        helper_version=helper_version,
+        helper_protocol=helper_protocol,
+        capabilities=capabilities,
+        observed_at_monotonic=observed_at,
+        stale_after_seconds=stale_after_seconds,
+        raw_status=raw_status,
+    )
+
+
 def _validate_endpoint(endpoint: HelperEndpointConfig, *, runtime_dir: str) -> HelperEndpointConfig:
     if endpoint.transport is HelperTransport.UNIX_SOCKET:
         address = str(endpoint.address or "").strip()
@@ -233,3 +472,70 @@ def _validate_endpoint(endpoint: HelperEndpointConfig, *, runtime_dir: str) -> H
         object_path=object_path,
         interface_name=interface_name,
     )
+
+
+def _helper_health_status(
+    state: HelperHealthState,
+    *,
+    helper_kind: HelperKind = HELPER_KIND,
+    helper_version: str = "",
+    helper_protocol: int | None = None,
+    capabilities: tuple[str, ...] = (),
+    missing_capabilities: tuple[str, ...] = (),
+    observed_at_monotonic: float = 0.0,
+    stale_after_seconds: float = GNOME_SHELL_HELPER_HEALTH_STALE_SECONDS,
+    detail: str = "",
+    raw_status: str = "",
+) -> HelperHealthStatus:
+    return HelperHealthStatus(
+        state=state,
+        helper_kind=helper_kind,
+        helper_version=helper_version,
+        expected_version=HELPER_VERSION,
+        helper_protocol=helper_protocol,
+        expected_protocol=HELPER_PROTOCOL,
+        capabilities=capabilities,
+        missing_capabilities=missing_capabilities,
+        observed_at_monotonic=observed_at_monotonic,
+        stale_after_seconds=stale_after_seconds,
+        detail=detail,
+        raw_status=raw_status,
+    )
+
+
+def _coerce_health_payload(raw_health: object) -> Mapping[str, object]:
+    raw = raw_health
+    if isinstance(raw, (tuple, list)) and len(raw) == 1:
+        raw = raw[0]
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise HelperBoundaryError("helper health payload is not valid JSON") from exc
+        raw = parsed
+    if not isinstance(raw, Mapping):
+        raise HelperBoundaryError("helper health payload must be a mapping or JSON object string")
+    return raw
+
+
+def _payload_text(payload: Mapping[str, object], key: str) -> str:
+    value = payload.get(key)
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _payload_int(payload: Mapping[str, object], key: str) -> int | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _payload_capabilities(value: object) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple, set, frozenset)):
+        return ()
+    return tuple(sorted(str(item).strip() for item in value if str(item).strip()))

@@ -1272,18 +1272,54 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 - Adds client handshake, fail-closed validation, reconnect/stale handling, and the Q8 authoritative status object.
 - Risks: DBus lifecycle mismatch, Shell extension load errors, stale helper state, false healthy status.
 - Mitigations: narrow DBus interface, protocol/kind validation, timeout/staleness tests, and degraded fallback on every failure.
+- Touch points:
+  - `helpers/gnome_shell_extension/constants.js` and `extension.js` for the extension-owned DBus service/object.
+  - `overlay_client/backend/helper_ipc.py` for DBus identity constants, helper-health status, and pure handshake validation.
+  - `overlay_client/backend/__init__.py` for exporting the new helper health contract.
+  - `overlay_client/backend/selector.py` and status tests only as needed to keep GNOME Wayland degraded-by-default while the helper is still health-only.
+  - `tests/test_gnome_shell_extension_manifest.py` and new helper DBus/health unit tests.
+- Expected unchanged behavior:
+  - No target discovery, geometry, presentation, attachment, click-through, installer lifecycle, debug collector, or `keep_overlay_visible` behavior changes.
+  - `xwayland_compat` remains a degraded compatibility/fallback path only.
+  - GNOME Wayland still cannot report `true_overlay` in production during this phase, even if the health-only helper responds successfully; Q10 validation is still required before any true-overlay claim.
+- DBus interface shape for this phase:
+  - Service: `org.edmc.ModernOverlay.Helper`
+  - Object path: `/org/edmc/ModernOverlay/Helper`
+  - Interface: `org.edmc.ModernOverlay.Helper`
+  - Methods: `Hello(in s client, out s health)` and `GetHealth(out s health)`, where `health` is a JSON object string.
+  - Health payload fields: `status`, `helper_kind`, `helper_version`, `helper_protocol`, `capabilities`, `uuid`, DBus identity fields, and timestamp fields for diagnostics/freshness.
+- Helper health states:
+  - `healthy` only when helper kind, version, protocol, required capabilities, and freshness validate.
+  - Fail closed to distinct states for `missing_service`, `dbus_unreachable`, `malformed_payload`, `helper_kind_mismatch`, `version_incompatible`, `protocol_incompatible`, `capability_missing`, `stale`, `inactive`, and `error`.
+  - `protocol_incompatible` is the required protocol-mismatch state from IQ5.
+- Freshness/staleness rule:
+  - Client-side health is stale when the validated observation is older than the helper-health stale timeout.
+  - Stale health is not healthy and must not enable a true-overlay claim.
+- Test type choice:
+  - Unit/fake-helper tests for payload parsing, missing/unreachable DBus mapping, kind/version/protocol/capability validation, stale observations, malformed payloads, and inactive/error states.
+  - Manifest/source tests for DBus constants, method names, and package scope.
+  - Backend selector/status unit tests if degraded-by-default GNOME classification is touched.
+  - No harness tests are required unless `load.py`, preferences, installer, or plugin/client bridge wiring is touched.
+- Tests to run after coding: targeted helper DBus/health tests, manifest tests, touched backend selector/status tests, then `make check`.
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 4.1 | Implement extension-owned session-DBus service/object with hello/health/version/protocol/capabilities only | Not Started |
-| 4.2 | Implement client DBus probe/handshake with helper kind, helper version, helper protocol, and freshness validation | Not Started |
-| 4.3 | Add helper remediation states for DBus unreachable, protocol incompatible, inactive/error, and healthy | Not Started |
-| 4.4 | Add unit/fake-helper tests for accepted protocol, rejected old/new protocols, stale health, and missing service | Not Started |
-| 4.5 | Keep helper MVP behind degraded-by-default behavior and `gnome_helper_experimental=false` as required by IQ6 | Not Started |
+| 4.1 | Implement extension-owned session-DBus service/object with hello/health/version/protocol/capabilities only | Completed |
+| 4.2 | Implement client DBus probe/handshake with helper kind, helper version, helper protocol, and freshness validation | Completed |
+| 4.3 | Add helper remediation states for DBus unreachable, protocol incompatible, inactive/error, and healthy | Completed |
+| 4.4 | Add unit/fake-helper tests for accepted protocol, rejected old/new protocols, stale health, and missing service | Completed |
+| 4.5 | Keep helper MVP behind degraded-by-default behavior and `gnome_helper_experimental=false` as required by IQ6 | Completed |
+
+#### Phase 4 Execution Notes
+- Added DBus identity and health constants for the GNOME helper service `org.edmc.ModernOverlay.Helper`, object `/org/edmc/ModernOverlay/Helper`, interface `org.edmc.ModernOverlay.Helper`, and methods `Hello` / `GetHealth`.
+- Extended the GNOME Shell extension skeleton so it owns the session-bus name and exports only the health/version/protocol/capabilities DBus surface. It does not inspect windows, discover targets, manage presentation, control stacking, install itself, or alter click-through behavior.
+- Added pure client-side helper-health validation in `overlay_client/backend/helper_ipc.py`, including explicit states for healthy, missing service, DBus unreachable, malformed payload, helper-kind mismatch, version incompatible, protocol incompatible, capability missing, stale, inactive, and error.
+- Added an injectable `probe_gnome_shell_helper_health()` boundary so unit tests can fake DBus transport errors and later phases can wire a real DBus caller without changing validation semantics.
+- Kept GNOME Wayland degraded-by-default in selector/status logic while this helper is health-only. Even a present helper remains `degraded_overlay` until later Q10 validation allows a true-overlay claim.
 
 #### Phase 4 Exit Criteria
 - Live helper can prove it is active/reachable without target discovery.
-- Client status reports `healthy` only when DBus, helper kind, version, and protocol validate.
+- Client health status reports `healthy` only when DBus payload shape, helper kind, version, protocol, required capabilities, and freshness validate.
 - Protocol mismatch and DBus failure degrade visibly and fail closed.
 - Incomplete helper code cannot enable `true_overlay` without Q10 validation.
 
@@ -1488,10 +1524,16 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 - None yet.
 
 ### Phase 4 Execution Summary
-- Not started.
+- Completed on 2026-05-10.
+- Implemented the health-only GNOME Shell helper DBus service/object and matching Python helper-health validation contract.
+- Added DBus constants, helper-health states, fake transport error mapping, stale health handling, and manifest/source tests for the health-only extension scope.
+- Updated GNOME Wayland selector/status behavior so a present health-only helper still reports `degraded_overlay`; no Phase 4 path can report `true_overlay` before later target/presentation validation.
 
 ### Tests Run For Phase 4
-- None yet.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_dbus_health.py tests/test_gnome_shell_extension_manifest.py overlay_client/tests/test_backend_selector.py overlay_client/tests/test_backend_status.py overlay_client/tests/test_helper_ipc_boundary.py -q` -> passed, `59 passed`.
+- `overlay_client/.venv/bin/python -m pytest tests/test_gnome_shell_extension_manifest.py overlay_client/tests/test_gnome_shell_helper_dbus_health.py -q` -> passed, `27 passed`.
+- `make check` -> passed; ruff and mypy passed, full pytest reported `882 passed, 21 skipped`.
+- `git diff --check` -> passed.
 
 ### Phase 5 Execution Summary
 - Not started.

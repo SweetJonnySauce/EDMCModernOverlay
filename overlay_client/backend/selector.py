@@ -167,9 +167,7 @@ class BackendSelector:
             return CapabilityClassification.UNSUPPORTED
         if descriptor.instance is BackendInstance.XWAYLAND_COMPAT and probe.session_type is SessionType.WAYLAND:
             return CapabilityClassification.DEGRADED_OVERLAY
-        if descriptor.instance is BackendInstance.GNOME_SHELL_WAYLAND and not probe.has_helper(
-            HelperKind.GNOME_SHELL_EXTENSION
-        ):
+        if descriptor.instance is BackendInstance.GNOME_SHELL_WAYLAND:
             return CapabilityClassification.DEGRADED_OVERLAY
         return CapabilityClassification.TRUE_OVERLAY
 
@@ -221,6 +219,8 @@ class BackendSelector:
         ):
             notes.append("helper_recommended:gnome_shell_extension")
             notes.append("follow_mode_fallback:native_x11")
+        elif descriptor.instance is BackendInstance.GNOME_SHELL_WAYLAND:
+            notes.append("helper_health_only:true_overlay_pending_validation")
         elif descriptor.instance in {
             BackendInstance.COSMIC,
             BackendInstance.GAMESCOPE,
@@ -249,7 +249,11 @@ class BackendSelector:
                     installed=helper_available,
                     enabled=helper_available,
                     approved=helper_available,
-                    detail="required_for_true_overlay",
+                    detail=(
+                        "health_only_true_overlay_pending_validation"
+                        if helper_available
+                        else "required_for_true_overlay"
+                    ),
                 ),
             )
         if descriptor.instance is BackendInstance.KWIN_WAYLAND:
