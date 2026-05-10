@@ -1321,6 +1321,10 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 - Added an injectable `probe_gnome_shell_helper_health()` boundary so unit tests can fake DBus transport errors and later phases can wire a real DBus caller without changing validation semantics.
 - Kept GNOME Wayland degraded-by-default in selector/status logic while this helper is health-only. Even a present helper remains `degraded_overlay` until later Q10 validation allows a true-overlay claim.
 
+#### Phase 4 Tests Run
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_dbus_health.py overlay_client/tests/test_helper_ipc_boundary.py tests/test_gnome_shell_extension_manifest.py overlay_client/tests/test_backend_selector.py overlay_client/tests/test_backend_status.py -q` -> passed, `59 passed`.
+- `make check` -> passed during Phase 4 implementation; ruff and mypy passed, full pytest passed. Exact pass/skip count was not preserved in the original Phase 4 notes.
+
 #### Phase 4 Exit Criteria
 - Live helper can prove it is active/reachable without target discovery.
 - Client health status reports `healthy` only when DBus payload shape, helper kind, version, protocol, required capabilities, and freshness validate.
