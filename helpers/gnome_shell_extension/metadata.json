@@ -1,0 +1,13 @@
+{
+  "uuid": "edmc-modern-overlay-helper@edmcmodernoverlay.github.io",
+  "name": "EDMC Modern Overlay Helper",
+  "description": "Local GNOME Shell helper for EDMC Modern Overlay on Wayland.",
+  "shell-version": [
+    "46",
+    "47",
+    "48",
+    "49",
+    "50"
+  ],
+  "version": 1
+}

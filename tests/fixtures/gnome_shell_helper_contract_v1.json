@@ -1,0 +1,11 @@
+{
+  "helper_kind": "gnome_shell_extension",
+  "helper_protocol": 1,
+  "helper_version_source": "version.__version__",
+  "protocol_bump_required_when": [
+    "DBus method names, signatures, or return payload semantics change",
+    "Helper signal names, signatures, event names, or payload semantics change",
+    "Required helper identity, capability, freshness, or session-token validation changes",
+    "Target geometry, presentation, or attachment contracts change incompatibly"
+  ]
+}

@@ -9,7 +9,17 @@ from typing import Mapping
 
 from .contracts import BackendInstance, HelperKind
 
-HELPER_PROTOCOL_VERSION = 1
+try:
+    from version import __version__ as MODERN_OVERLAY_VERSION
+except Exception:  # pragma: no cover - defensive fallback for unusual import contexts
+    MODERN_OVERLAY_VERSION = ""
+
+GNOME_SHELL_HELPER_UUID = "edmc-modern-overlay-helper@edmcmodernoverlay.github.io"
+GNOME_SHELL_HELPER_SHELL_VERSIONS = ("46", "47", "48", "49", "50")
+HELPER_KIND = HelperKind.GNOME_SHELL_EXTENSION
+HELPER_PROTOCOL = 1
+HELPER_VERSION = MODERN_OVERLAY_VERSION
+HELPER_PROTOCOL_VERSION = HELPER_PROTOCOL
 
 
 class HelperTransport(str, Enum):

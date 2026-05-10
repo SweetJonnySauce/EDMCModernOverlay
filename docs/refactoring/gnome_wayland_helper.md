@@ -1111,7 +1111,7 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 | --- | --- | --- |
 | 1 | Status truthfulness and degraded fallback for missing/unhealthy helper | Completed |
 | 2 | Visibility terminology rename from `force_render` to `keep_overlay_visible` | Completed |
-| 3 | GNOME Shell extension package skeleton, metadata, and protocol constants | Not Started |
+| 3 | GNOME Shell extension package skeleton, metadata, and protocol constants | Completed |
 | 4 | Session-DBus helper health/version MVP and client handshake/status object | Not Started |
 | 5 | Installer lifecycle and post-install GNOME Wayland remediation | Not Started |
 | 6 | Helper state surfaces, diagnostics, collectors, and debug overlay metrics | Not Started |
@@ -1231,13 +1231,34 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 - Risks: invalid GNOME metadata, version drift, accidental bundling of unrelated files.
 - Mitigations: manifest tests, explicit package allowlist, and protocol constants checked on both helper/client sides.
 
+#### Phase 3 Implementation Notes
+- Touch points to inspect before coding: existing helper IPC boundary (`overlay_client/backend/helper_ipc.py`), backend helper kind constants, plugin version source (`version.py`), release/manifest tests, and installer tests that already mention the GNOME helper kind.
+- Expected unchanged behavior: GNOME Wayland without a healthy helper remains `degraded_overlay`; the extension package is not installed, enabled, probed, or used for target discovery/presentation in this phase; no `true_overlay` claim changes; `keep_overlay_visible` behavior remains unchanged.
+- Package layout: source-directory artifact at `helpers/gnome_shell_extension/` with `metadata.json`, `extension.js`, and a small local JS constants module. The directory name at install time is the fixed UUID `edmc-modern-overlay-helper@edmcmodernoverlay.github.io`.
+- Version/protocol ownership: Python backend helper IPC constants are the client source of truth for expected helper kind/protocol/version. The JS helper constants intentionally mirror them; manifest tests fail if UUID, helper kind, protocol, helper version, or shell-version support drifts.
+- Shell-version support: `metadata.json` lists explicit GNOME Shell versions `46`, `47`, `48`, `49`, and `50`; newer versions require porting-guide review and smoke validation before metadata is extended.
+- Test type choice: unit/manifest tests only for metadata validity, package allowlist, UUID, shell-version range, protocol constants, and helper-version sync. No harness tests are required because this phase does not touch `load.py`, plugin lifecycle hooks, installer lifecycle, runtime helper health, target discovery, or presentation.
+- Tests to run after coding: targeted helper package/protocol manifest tests, existing helper IPC boundary tests, then `make check`.
+
 | Stage | Description | Status |
 | --- | --- | --- |
-| 3.1 | Create `helpers/gnome_shell_extension/` with `metadata.json`, fixed UUID, shell versions `46`-`50`, and source-directory artifact shape | Not Started |
-| 3.2 | Add helper constants: `HELPER_KIND`, `HELPER_PROTOCOL=1`, and `helper_version` tracking the plugin version | Not Started |
-| 3.3 | Add client expected protocol/kind constants in the backend/helper contract layer | Not Started |
-| 3.4 | Add manifest/package tests for UUID, shell versions, helper version source, package contents, and metadata validity | Not Started |
-| 3.5 | Add protocol-bump checklist/test fixture scaffolding for future helper contract changes | Not Started |
+| 3.1 | Create `helpers/gnome_shell_extension/` with `metadata.json`, fixed UUID, shell versions `46`-`50`, and source-directory artifact shape | Completed |
+| 3.2 | Add helper constants: `HELPER_KIND`, `HELPER_PROTOCOL=1`, and `helper_version` tracking the plugin version | Completed |
+| 3.3 | Add client expected protocol/kind constants in the backend/helper contract layer | Completed |
+| 3.4 | Add manifest/package tests for UUID, shell versions, helper version source, package contents, and metadata validity | Completed |
+| 3.5 | Add protocol-bump checklist/test fixture scaffolding for future helper contract changes | Completed |
+
+#### Phase 3 Execution Notes
+- Added source-directory GNOME Shell extension skeleton at `helpers/gnome_shell_extension/` with `metadata.json`, `constants.js`, and `extension.js`.
+- Metadata uses fixed UUID `edmc-modern-overlay-helper@edmcmodernoverlay.github.io`, explicit shell versions `46` through `50`, and extension artifact version `1`.
+- Added backend helper contract constants for UUID, supported Shell versions, helper kind, helper protocol, and helper version. `HELPER_VERSION` tracks `version.__version__`; `HELPER_PROTOCOL_VERSION` remains as a compatibility alias for the existing helper IPC boundary.
+- Extension JS constants intentionally mirror the Python helper contract constants and are checked by tests. The extension currently only stores identity on enable/disable; it does not expose DBus, target discovery, presentation, attachment, click-through, installer lifecycle, or any active runtime dependency.
+- Added protocol-bump fixture scaffolding at `tests/fixtures/gnome_shell_helper_contract_v1.json` so future DBus, signal, target geometry, presentation, or validation contract changes require an explicit protocol review.
+
+#### Phase 3 Tests Run
+- `overlay_client/.venv/bin/python -m pytest tests/test_gnome_shell_extension_manifest.py overlay_client/tests/test_helper_ipc_boundary.py -q` -> passed, `14 passed`.
+- `make check` -> passed; ruff and mypy passed, full pytest reported `860 passed, 21 skipped`.
+- `git diff --check` -> passed.
 
 #### Phase 3 Exit Criteria
 - Extension source directory exists and is inspectable.
