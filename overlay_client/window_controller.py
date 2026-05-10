@@ -109,7 +109,7 @@ class WindowController:
         state: "WindowState",
         target_tuple: Geometry,
         *,
-        force_render: bool,
+        keep_overlay_visible: bool,
         update_follow_visibility_fn: Callable[[bool], None],
         update_auto_scale_fn: Callable[[int, int], None],
         ensure_transient_parent_fn: Callable[[str], None],
@@ -121,7 +121,7 @@ class WindowController:
         ensure_transient_parent_fn(state.identifier or "")
         if fullscreen_hint_fn():
             self._fullscreen_hint_logged = True
-        should_show = force_render or (state.is_visible and state.is_foreground)
+        should_show = keep_overlay_visible or (state.is_visible and state.is_foreground)
         actual_visible = is_visible_fn()
         if self._last_visibility_state != should_show or actual_visible != should_show:
             update_follow_visibility_fn(should_show)

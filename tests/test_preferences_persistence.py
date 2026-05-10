@@ -56,6 +56,7 @@ def test_preferences_save_persists_config_and_shadow(plugin_dir: Path, monkeypat
     preferences.controller_toggle_argument = "tog"
     preferences.manual_backend_override = "xwayland_compat"
     preferences.global_payload_opacity = 73
+    preferences.keep_overlay_visible = True
     preferences.last_on_payload_opacity = 80
     preferences.save()
 
@@ -68,6 +69,8 @@ def test_preferences_save_persists_config_and_shadow(plugin_dir: Path, monkeypat
     assert shadow["controller_toggle_argument"] == "tog"
     assert shadow["manual_backend_override"] == "xwayland_compat"
     assert shadow["global_payload_opacity"] == 73
+    assert shadow["keep_overlay_visible"] is True
+    assert "force_render" not in shadow
     assert shadow["last_on_payload_opacity"] == 80
 
     assert config.store[prefs._config_key("status_message_gutter")] == 30
@@ -78,6 +81,8 @@ def test_preferences_save_persists_config_and_shadow(plugin_dir: Path, monkeypat
     assert config.store[prefs._config_key("controller_toggle_argument")] == "tog"
     assert config.store[prefs._config_key("manual_backend_override")] == "xwayland_compat"
     assert config.store[prefs._config_key("global_payload_opacity")] == 73
+    assert config.store[prefs._config_key("keep_overlay_visible")] is True
+    assert prefs._config_key("force_render") not in config.store
     assert config.store[prefs._config_key("last_on_payload_opacity")] == 80
 
 
@@ -195,6 +200,74 @@ def test_preferences_reload_backfills_missing_config_values_from_shadow_when_ver
     assert config.store[prefs._config_key(STANDALONE_MODE_PREF_KEY)] is True
     assert config.store[prefs._config_key("controller_toggle_argument")] == "shadowtoggle"
     assert config.store[prefs._config_key("scale_mode")] == "fill"
+
+
+def test_preferences_reads_legacy_force_render_config_and_writes_new_key(
+    plugin_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = DummyConfig(
+        {
+            prefs.CONFIG_VERSION_KEY: prefs.CONFIG_STATE_VERSION,
+            prefs._config_key("force_render"): True,
+        }
+    )
+    monkeypatch.setattr(prefs, "EDMC_CONFIG", config)
+
+    preferences = prefs.Preferences(plugin_dir, dev_mode=True)
+
+    assert preferences.keep_overlay_visible is True
+    assert config.store[prefs._config_key("keep_overlay_visible")] is True
+
+
+def test_preferences_prefers_keep_overlay_visible_config_over_legacy_force_render(
+    plugin_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = DummyConfig(
+        {
+            prefs.CONFIG_VERSION_KEY: prefs.CONFIG_STATE_VERSION,
+            prefs._config_key("keep_overlay_visible"): False,
+            prefs._config_key("force_render"): True,
+        }
+    )
+    monkeypatch.setattr(prefs, "EDMC_CONFIG", config)
+
+    preferences = prefs.Preferences(plugin_dir, dev_mode=True)
+
+    assert preferences.keep_overlay_visible is False
+
+
+def test_preferences_reads_legacy_force_render_shadow_and_writes_new_key(
+    plugin_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shadow_path = plugin_dir / prefs.PREFERENCES_FILE
+    shadow_path.write_text(json.dumps({"force_render": True}, indent=2), encoding="utf-8")
+    monkeypatch.setattr(prefs, "EDMC_CONFIG", None)
+
+    preferences = prefs.Preferences(plugin_dir, dev_mode=True)
+
+    assert preferences.keep_overlay_visible is True
+    shadow = _shadow(shadow_path)
+    assert shadow["keep_overlay_visible"] is True
+    assert "force_render" not in shadow
+
+
+def test_preferences_prefers_keep_overlay_visible_shadow_over_legacy_force_render(
+    plugin_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shadow_path = plugin_dir / prefs.PREFERENCES_FILE
+    shadow_path.write_text(
+        json.dumps({"keep_overlay_visible": False, "force_render": True}, indent=2),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(prefs, "EDMC_CONFIG", None)
+
+    preferences = prefs.Preferences(plugin_dir, dev_mode=True)
+
+    assert preferences.keep_overlay_visible is False
 
 
 def test_preferences_fresh_install_defaults_match_legacy_overlay_layout(

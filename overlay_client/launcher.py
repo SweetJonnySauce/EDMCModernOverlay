@@ -254,10 +254,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     _CLIENT_LOGGER.info("Starting overlay client (pid=%s)", os.getpid())
     _CLIENT_LOGGER.debug("Resolved port file path to %s", port_file)
     _CLIENT_LOGGER.debug(
-        "Loaded initial settings from %s: retention=%d force_render=%s manual_backend_override=%s",
+        "Loaded initial settings from %s: retention=%d keep_overlay_visible=%s manual_backend_override=%s",
         settings_path,
         initial_settings.client_log_retention,
-        initial_settings.force_render,
+        initial_settings.keep_overlay_visible,
         initial_settings.manual_backend_override or "auto",
     )
     if dev_settings.trace_enabled:

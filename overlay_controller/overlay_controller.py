@@ -40,7 +40,7 @@ try:  # When run as a package (`python -m overlay_controller.overlay_controller`
     from overlay_controller.input_bindings import BindingConfig, BindingManager
     from overlay_controller.gamepad import GamepadBridge
     from overlay_controller.services import ModeTimers, PluginBridge
-    from overlay_controller.services.plugin_bridge import ForceRenderOverrideManager
+    from overlay_controller.services.plugin_bridge import KeepOverlayVisibleOverrideManager
     from overlay_controller.services.group_state import GroupSnapshot
     from overlay_controller.preview import snapshot_math
     from overlay_controller.controller import (
@@ -59,7 +59,7 @@ except ImportError:  # Fallback for spec-from-file/test harness
     from input_bindings import BindingConfig, BindingManager  # type: ignore
     from gamepad import GamepadBridge  # type: ignore
     from services import ModeTimers, PluginBridge  # type: ignore
-    from services.plugin_bridge import ForceRenderOverrideManager  # type: ignore
+    from services.plugin_bridge import KeepOverlayVisibleOverrideManager  # type: ignore
     from services.group_state import GroupSnapshot  # type: ignore
     import preview.snapshot_math as snapshot_math  # type: ignore
     from controller import (  # type: ignore
@@ -115,19 +115,30 @@ def _include_dropdown_plugin(plugin_name: object) -> bool:
         return False
     return token not in _HIDDEN_DROPDOWN_PLUGIN_NAMES
 
+def _KeepOverlayVisibleOverrideManager(
+    root: Path,
+    *,
+    connect: Optional[Callable[..., object]] = None,
+    logger: Optional[Callable[[str], None]] = None,
+):
+    """Compatibility shim returning the service keep-overlay-visible manager."""
+
+    return KeepOverlayVisibleOverrideManager(
+        port_path=root / "port.json",
+        connect=connect,
+        logger=logger or _controller_debug,
+    )
+
+
 def _ForceRenderOverrideManager(
     root: Path,
     *,
     connect: Optional[Callable[..., object]] = None,
     logger: Optional[Callable[[str], None]] = None,
 ):
-    """Compatibility shim returning the service ForceRenderOverrideManager."""
+    """Legacy compatibility shim for tests using the old helper name."""
 
-    return ForceRenderOverrideManager(
-        port_path=root / "port.json",
-        connect=connect,
-        logger=logger or _controller_debug,
-    )
+    return _KeepOverlayVisibleOverrideManager(root, connect=connect, logger=logger)
 
 class OverlayConfigApp(tk.Tk):
     """Basic UI skeleton that mirrors the design mockups."""
@@ -204,7 +215,7 @@ class OverlayConfigApp(tk.Tk):
         self._groupings_cache: dict[str, object] = {}
         self._group_state = self._app_context.group_state
         self._plugin_bridge: PluginBridge | None = self._app_context.plugin_bridge
-        self._force_render_override = self._app_context.force_render_override
+        self._keep_overlay_visible_override = self._app_context.keep_overlay_visible_override
         self._absolute_user_state: dict[tuple[str, str], dict[str, float | None]] = {}
         self._anchor_restore_state: dict[tuple[str, str], dict[str, float | None]] = {}
         self._anchor_restore_handles: dict[tuple[str, str], str | None] = {}
@@ -372,7 +383,7 @@ class OverlayConfigApp(tk.Tk):
             self._status_poll_handle = self._mode_timers.start_status_poll(self._poll_cache_and_status)
         else:
             self._status_poll_handle = self.after(self._current_mode_profile.status_poll_ms, self._poll_cache_and_status)
-        self.after(0, self._activate_force_render_override)
+        self.after(0, self._activate_keep_overlay_visible_override)
         self.after(0, self._start_controller_heartbeat)
         self.after(0, self._center_and_show)
 
@@ -470,23 +481,33 @@ class OverlayConfigApp(tk.Tk):
         traceback.print_exception(exc, val, tb, file=sys.stderr)
 
 
-    def _activate_force_render_override(self) -> None:
-        manager = safe_getattr(self, "_force_render_override", None)
+    def _activate_keep_overlay_visible_override(self) -> None:
+        manager = safe_getattr(self, "_keep_overlay_visible_override", None)
         if manager is None:
             return
         try:
             manager.activate()
         except Exception as exc:
-            log_exception(_controller_debug, "ForceRender override activate failed", exc)
+            log_exception(_controller_debug, "Keep-overlay-visible override activate failed", exc)
 
-    def _deactivate_force_render_override(self) -> None:
-        manager = safe_getattr(self, "_force_render_override", None)
+    def _deactivate_keep_overlay_visible_override(self) -> None:
+        manager = safe_getattr(self, "_keep_overlay_visible_override", None)
         if manager is None:
             return
         try:
             manager.deactivate()
         except Exception as exc:
-            log_exception(_controller_debug, "ForceRender override deactivate failed", exc)
+            log_exception(_controller_debug, "Keep-overlay-visible override deactivate failed", exc)
+
+    def _activate_force_render_override(self) -> None:
+        """Legacy alias for the keep-overlay-visible override."""
+
+        self._activate_keep_overlay_visible_override()
+
+    def _deactivate_force_render_override(self) -> None:
+        """Legacy alias for the keep-overlay-visible override."""
+
+        self._deactivate_keep_overlay_visible_override()
 
     def _send_plugin_cli(self, payload: Dict[str, Any]) -> bool:
         bridge = safe_getattr(self, "_plugin_bridge", None)
@@ -614,7 +635,7 @@ class OverlayConfigApp(tk.Tk):
         self._closing = True
         self._cancel_status_poll()
         self._stop_controller_heartbeat()
-        self._deactivate_force_render_override()
+        self._deactivate_keep_overlay_visible_override()
         self._restore_foreground_window()
         self._stop_gamepad_bridge()
         self.destroy()

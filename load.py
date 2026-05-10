@@ -541,9 +541,9 @@ class _PluginRuntime:
         self._lock = threading.Lock()
         self._lifecycle = LifecycleTracker(LOGGER)
         self._prefs_lock = threading.Lock()
-        self._force_monitor_stop = threading.Event()
-        self._force_monitor_thread: Optional[threading.Thread] = None
-        self._controller_force_render_override = False
+        self._keep_visible_monitor_stop = threading.Event()
+        self._keep_visible_monitor_thread: Optional[threading.Thread] = None
+        self._controller_keep_overlay_visible_override = False
         self._running = False
         self._capture_active = False
         self._state: Dict[str, Any] = {
@@ -672,7 +672,7 @@ class _PluginRuntime:
             return PLUGIN_NAME
 
         self._start_prefs_worker()
-        self._start_force_render_monitor_if_needed()
+        self._start_keep_overlay_visible_monitor_if_needed()
         self._start_version_status_check()
         register_publisher(self._publish_external)
         self._hotkeys.start()
@@ -704,10 +704,14 @@ class _PluginRuntime:
             except Exception:
                 pass
             self._payload_log_handler = None
-        self._force_monitor_stop.set()
+        self._keep_visible_monitor_stop.set()
         self._terminate_controller_process()
-        self._lifecycle.join_thread(self._force_monitor_thread, "ModernOverlayForceMonitor", timeout=2.0)
-        self._force_monitor_thread = None
+        self._lifecycle.join_thread(
+            self._keep_visible_monitor_thread,
+            "ModernOverlayKeepVisibleMonitor",
+            timeout=2.0,
+        )
+        self._keep_visible_monitor_thread = None
         self._lifecycle.join_thread(self._version_check_thread, "ModernOverlayVersionCheck", timeout=2.0)
         self._version_check_thread = None
         self._stop_prefs_worker()
@@ -1124,33 +1128,38 @@ class _PluginRuntime:
             self._prefs_worker = PrefsWorker(self._lifecycle, LOGGER)
         return self._prefs_worker.submit(func, wait=wait, timeout=timeout)
 
-    def _start_force_render_monitor_if_needed(self) -> None:
-        if self._force_monitor_thread and self._force_monitor_thread.is_alive():
+    def _start_keep_overlay_visible_monitor_if_needed(self) -> None:
+        if self._keep_visible_monitor_thread and self._keep_visible_monitor_thread.is_alive():
             return
-        if not self._controller_force_render_override:
+        if not self._controller_keep_overlay_visible_override:
             return
-        self._force_monitor_stop.clear()
+        self._keep_visible_monitor_stop.clear()
 
         def _worker() -> None:
             try:
-                while not self._force_monitor_stop.wait(timeout=5.0):
-                    if not self._controller_force_render_override:
+                while not self._keep_visible_monitor_stop.wait(timeout=5.0):
+                    if not self._controller_keep_overlay_visible_override:
                         return
                     if self._overlay_controller_active():
                         continue
                     with self._prefs_lock:
-                        if self._controller_force_render_override:
-                            self._controller_force_render_override = False
-                            LOGGER.info("Overlay Controller no longer detected; force-render override cleared.")
+                        if self._controller_keep_overlay_visible_override:
+                            self._controller_keep_overlay_visible_override = False
+                            LOGGER.info("Overlay Controller no longer detected; keep-overlay-visible override cleared.")
                             self._send_overlay_config()
                     return
             except Exception as exc:
-                LOGGER.debug("Force-render monitor terminated with error: %s", exc, exc_info=exc)
+                LOGGER.debug("Keep-overlay-visible monitor terminated with error: %s", exc, exc_info=exc)
 
-        thread = threading.Thread(target=_worker, name="ModernOverlayForceMonitor", daemon=True)
-        self._force_monitor_thread = thread
+        thread = threading.Thread(target=_worker, name="ModernOverlayKeepVisibleMonitor", daemon=True)
+        self._keep_visible_monitor_thread = thread
         self._lifecycle.track_thread(thread)
         thread.start()
+
+    def _start_force_render_monitor_if_needed(self) -> None:
+        """Legacy alias for tests/extensions using the old name."""
+
+        self._start_keep_overlay_visible_monitor_if_needed()
 
     def _start_version_status_check(self) -> None:
         thread = self._version_check_thread
@@ -1174,10 +1183,15 @@ class _PluginRuntime:
         override = self._log_retention_override
         return override if override is not None else base_value
 
-    def _resolve_force_render(self) -> bool:
-        return bool(getattr(self._preferences, "force_render", False)) or bool(
-            getattr(self, "_controller_force_render_override", False)
+    def _resolve_keep_overlay_visible(self) -> bool:
+        return bool(getattr(self._preferences, "keep_overlay_visible", False)) or bool(
+            getattr(self, "_controller_keep_overlay_visible_override", False)
         )
+
+    def _resolve_force_render(self) -> bool:
+        """Legacy alias for the keep-overlay-visible effective setting."""
+
+        return self._resolve_keep_overlay_visible()
 
     def _set_log_retention_override(self, value: Optional[int]) -> bool:
         if value is not None:
@@ -1658,13 +1672,14 @@ class _PluginRuntime:
         LOGGER.debug(
             "Applying updated preferences: show_connection_status=%s "
             "client_log_retention=%d gridlines_enabled=%s gridline_spacing=%d overlay_opacity=%.2f "
-            "force_render=%s standalone_mode=%s manual_backend_override=%s debug_overlay=%s cycle_payload_ids=%s font_min=%.1f font_max=%.1f",
+            "keep_overlay_visible=%s standalone_mode=%s manual_backend_override=%s debug_overlay=%s "
+            "cycle_payload_ids=%s font_min=%.1f font_max=%.1f",
             self._preferences.show_connection_status,
             self._resolve_client_log_retention(),
             self._preferences.gridlines_enabled,
             self._preferences.gridline_spacing,
             self._preferences.overlay_opacity,
-            self._resolve_force_render(),
+            self._resolve_keep_overlay_visible(),
             standalone_mode_preference_value(self._preferences),
             self._preferences.manual_backend_override or "auto",
             self._preferences.show_debug_overlay,
@@ -2233,31 +2248,47 @@ class _PluginRuntime:
             self._preferences.save()
         self._send_overlay_config()
 
-    def _update_force_render_locked(
+    def _update_keep_overlay_visible_locked(
         self,
         *,
-        force_value: Optional[bool],
+        keep_visible_value: Optional[bool],
     ) -> Tuple[bool, bool, bool]:
         preferences = self._preferences
-        previous_force = bool(getattr(preferences, "force_render", False))
+        previous_value = bool(getattr(preferences, "keep_overlay_visible", False))
         broadcast = False
         dirty = False
-        if force_value is not None:
-            flag = bool(force_value)
-            if flag != previous_force:
-                preferences.force_render = flag
+        if keep_visible_value is not None:
+            flag = bool(keep_visible_value)
+            if flag != previous_value:
+                preferences.keep_overlay_visible = flag
                 dirty = True
                 broadcast = True
-        return previous_force, dirty, broadcast
+        return previous_value, dirty, broadcast
 
-    def set_force_render_preference(self, value: bool) -> None:
+    def set_keep_overlay_visible_preference(self, value: bool) -> None:
         with self._prefs_lock:
-            _prev_force, dirty, broadcast = self._update_force_render_locked(force_value=value)
+            _prev_value, dirty, broadcast = self._update_keep_overlay_visible_locked(
+                keep_visible_value=value,
+            )
             if not dirty:
                 return
             self._preferences.save()
         if broadcast:
             self._send_overlay_config()
+
+    def _update_force_render_locked(
+        self,
+        *,
+        force_value: Optional[bool],
+    ) -> Tuple[bool, bool, bool]:
+        """Legacy alias for the keep-overlay-visible preference update."""
+
+        return self._update_keep_overlay_visible_locked(keep_visible_value=force_value)
+
+    def set_force_render_preference(self, value: bool) -> None:
+        """Legacy alias for the keep-overlay-visible preference callback."""
+
+        self.set_keep_overlay_visible_preference(value)
 
     def set_standalone_mode_preference(self, value: bool) -> None:
         with self._prefs_lock:
@@ -2820,35 +2851,40 @@ class _PluginRuntime:
                 if not applied:
                     raise ValueError("Overlay config payload did not include any recognised directives")
                 return {"status": "ok"}
-            if command == "force_render_override":
+            if command in {"keep_overlay_visible_override", "force_render_override"}:
                 preferences = self._preferences
                 if preferences is None:
-                    raise RuntimeError("Preferences are not initialised; cannot apply force-render override")
-                if "force_render" not in payload:
-                    raise ValueError("force_render_override payload requires 'force_render'")
-                desired_force = bool(payload.get("force_render"))
+                    raise RuntimeError("Preferences are not initialised; cannot apply keep-overlay-visible override")
+                if "keep_overlay_visible" in payload:
+                    desired_keep_visible = bool(payload.get("keep_overlay_visible"))
+                elif "force_render" in payload:
+                    desired_keep_visible = bool(payload.get("force_render"))
+                else:
+                    raise ValueError(
+                        "keep_overlay_visible_override payload requires 'keep_overlay_visible'"
+                    )
 
-                def _apply_force_override() -> Tuple[bool, bool]:
+                def _apply_keep_visible_override() -> Tuple[bool, bool]:
                     with self._prefs_lock:
-                        previous_override = bool(self._controller_force_render_override)
-                        if desired_force == previous_override:
+                        previous_override = bool(self._controller_keep_overlay_visible_override)
+                        if desired_keep_visible == previous_override:
                             return previous_override, False
-                        self._controller_force_render_override = desired_force
+                        self._controller_keep_overlay_visible_override = desired_keep_visible
                         return previous_override, True
 
                 previous_override, broadcast = self._submit_pref_task(
-                    _apply_force_override,
+                    _apply_keep_visible_override,
                     wait=True,
                 )
-                if desired_force:
-                    self._start_force_render_monitor_if_needed()
+                if desired_keep_visible:
+                    self._start_keep_overlay_visible_monitor_if_needed()
                 if broadcast:
                     self._send_overlay_config()
                 return {
                     "status": "ok",
-                    "force_render": self._resolve_force_render(),
-                    "previous_force_render": previous_override,
-                    "force_render_override": bool(self._controller_force_render_override),
+                    "keep_overlay_visible": self._resolve_keep_overlay_visible(),
+                    "previous_keep_overlay_visible": previous_override,
+                    "keep_overlay_visible_override": bool(self._controller_keep_overlay_visible_override),
                 }
             if command == "legacy_overlay":
                 legacy_payload = payload.get("payload")
@@ -3108,7 +3144,7 @@ class _PluginRuntime:
         payload = build_overlay_config_payload(
             self._preferences,
             diagnostics_enabled=diagnostics_enabled,
-            force_render=self._resolve_force_render(),
+            keep_overlay_visible=self._resolve_keep_overlay_visible(),
             client_log_retention=self._resolve_client_log_retention(),
             platform_context=self._platform_context_payload(),
             plugin_group_states=group_states,
@@ -3119,7 +3155,7 @@ class _PluginRuntime:
         shadow_backend_status = payload.get("platform_context", {}).get("shadow_backend_status")
         LOGGER.debug(
             "Published overlay config: opacity=%s global_payload_opacity=%s show_status=%s debug_overlay_corner=%s status_bottom_margin=%s client_log_retention=%d gridlines_enabled=%s "
-            "gridline_spacing=%d force_render=%s standalone_mode=%s title_bar_enabled=%s title_bar_height=%d debug_overlay=%s physical_clamp=%s cycle_payload_ids=%s copy_payload_id_on_cycle=%s "
+            "gridline_spacing=%d keep_overlay_visible=%s standalone_mode=%s title_bar_enabled=%s title_bar_height=%d debug_overlay=%s physical_clamp=%s cycle_payload_ids=%s copy_payload_id_on_cycle=%s "
             "nudge_overflow=%s payload_gutter=%d payload_log_delay=%.2f font_min=%.1f font_max=%.1f font_step=%d platform_context=%s clamp_overrides=%s",
             payload["opacity"],
             payload["global_payload_opacity"],
@@ -3129,7 +3165,7 @@ class _PluginRuntime:
             payload["client_log_retention"],
             payload["gridlines_enabled"],
             payload["gridline_spacing"],
-            payload["force_render"],
+            payload["keep_overlay_visible"],
             payload["standalone_mode"],
             payload["title_bar_enabled"],
             payload["title_bar_height"],
@@ -3835,7 +3871,7 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
         gridline_spacing_callback = plugin_runtime.set_gridline_spacing_preference if plugin_runtime else None
         payload_nudge_callback = plugin_runtime.set_payload_nudge_preference if plugin_runtime else None
         payload_gutter_callback = plugin_runtime.set_payload_nudge_gutter_preference if plugin_runtime else None
-        force_render_callback = plugin_runtime.set_force_render_preference if plugin_runtime else None
+        keep_overlay_visible_callback = plugin_runtime.set_keep_overlay_visible_preference if plugin_runtime else None
         standalone_mode_callback = plugin_runtime.set_standalone_mode_preference if plugin_runtime else None
         title_bar_config_callback = plugin_runtime.set_title_bar_compensation_preference if plugin_runtime else None
         debug_overlay_callback = plugin_runtime.set_debug_overlay_preference if plugin_runtime else None
@@ -3891,7 +3927,7 @@ def plugin_prefs(parent, cmdr: str, is_beta: bool):  # pragma: no cover - option
             gridline_spacing_callback,
             payload_nudge_callback,
             payload_gutter_callback,
-            force_render_callback,
+            keep_overlay_visible_callback,
             standalone_mode_callback,
             title_bar_config_callback,
             debug_overlay_callback,
@@ -3960,13 +3996,16 @@ def prefs_changed(cmdr: str, is_beta: bool) -> None:  # pragma: no cover - save 
             LOGGER.debug(
                 "Preferences saved: show_connection_status=%s "
                 "client_log_retention=%d gridlines_enabled=%s gridline_spacing=%d "
-                "force_render=%s standalone_mode=%s title_bar_enabled=%s title_bar_height=%d manual_backend_override=%s "
+                "keep_overlay_visible=%s standalone_mode=%s title_bar_enabled=%s title_bar_height=%d "
+                "manual_backend_override=%s "
                 "debug_overlay=%s cycle_payload_ids=%s copy_payload_id_on_cycle=%s font_min=%.1f font_max=%.1f",
                 _preferences.show_connection_status,
                 _plugin._resolve_client_log_retention() if _plugin else _preferences.client_log_retention,
                 _preferences.gridlines_enabled,
                 _preferences.gridline_spacing,
-                _plugin._resolve_force_render() if _plugin else bool(getattr(_preferences, "force_render", False)),
+                _plugin._resolve_keep_overlay_visible()
+                if _plugin
+                else bool(getattr(_preferences, "keep_overlay_visible", False)),
                 standalone_mode_preference_value(_preferences),
                 _preferences.title_bar_enabled,
                 _preferences.title_bar_height,

@@ -23,7 +23,13 @@ class AppContext:
     mode_profile: ControllerModeProfile
     controller_heartbeat_ms: int
     plugin_bridge: PluginBridge
-    force_render_override: object | None
+    keep_overlay_visible_override: object | None
+
+    @property
+    def force_render_override(self) -> object | None:
+        """Legacy alias for the keep-overlay-visible override manager."""
+
+        return self.keep_overlay_visible_override
 
 
 def build_app_context(
@@ -63,7 +69,7 @@ def build_app_context(
     )
 
     plugin_bridge = PluginBridge(root=root, logger=logger)
-    force_render_override = plugin_bridge.force_render_override
+    keep_overlay_visible_override = plugin_bridge.keep_overlay_visible_override
 
     return AppContext(
         root=root,
@@ -77,5 +83,5 @@ def build_app_context(
         mode_profile=mode_profile,
         controller_heartbeat_ms=15000,
         plugin_bridge=plugin_bridge,
-        force_render_override=force_render_override,
+        keep_overlay_visible_override=keep_overlay_visible_override,
     )

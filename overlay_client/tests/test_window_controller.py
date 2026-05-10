@@ -160,7 +160,7 @@ def test_post_process_follow_state_updates_visibility_and_fullscreen_hint() -> N
     controller.post_process_follow_state(
         state,
         (0, 0, 1920, 1080),
-        force_render=False,
+        keep_overlay_visible=False,
         update_follow_visibility_fn=update_visibility,
         update_auto_scale_fn=auto_scale,
         ensure_transient_parent_fn=ensure_parent,

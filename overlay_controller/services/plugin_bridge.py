@@ -34,7 +34,7 @@ class PluginBridge:
         self._connect = connect or socket.create_connection
         self._log = logger or _noop_log
         self._time = time_source
-        self._force_render_override = ForceRenderOverrideManager(
+        self._keep_overlay_visible_override = KeepOverlayVisibleOverrideManager(
             port_path=self._port_path,
             connect=self._connect,
             logger=self._log,
@@ -44,8 +44,14 @@ class PluginBridge:
         self._last_override_reload_nonce: Optional[str] = None
 
     @property
-    def force_render_override(self) -> "ForceRenderOverrideManager":
-        return self._force_render_override
+    def keep_overlay_visible_override(self) -> "KeepOverlayVisibleOverrideManager":
+        return self._keep_overlay_visible_override
+
+    @property
+    def force_render_override(self) -> "KeepOverlayVisibleOverrideManager":
+        """Legacy alias for the keep-overlay-visible override manager."""
+
+        return self._keep_overlay_visible_override
 
     def read_port(self) -> Optional[int]:
         try:
@@ -226,8 +232,8 @@ class PluginBridge:
         return sent
 
 
-class ForceRenderOverrideManager:
-    """Manages temporary force-render overrides while the controller is open."""
+class KeepOverlayVisibleOverrideManager:
+    """Manages temporary keep-overlay-visible overrides while the controller is open."""
 
     def __init__(
         self,
@@ -246,17 +252,17 @@ class ForceRenderOverrideManager:
     def activate(self) -> None:
         if self._active:
             return
-        response = self._send_override({"cli": "force_render_override", "force_render": True})
+        response = self._send_override({"cli": "keep_overlay_visible_override", "keep_overlay_visible": True})
         if response is None:
-            self._safe_log("Overlay CLI unavailable while enabling force-render override.")
+            self._safe_log("Overlay CLI unavailable while enabling keep-overlay-visible override.")
         self._active = True
 
     def deactivate(self) -> None:
         if not self._active:
             return
-        response = self._send_override({"cli": "force_render_override", "force_render": False})
+        response = self._send_override({"cli": "keep_overlay_visible_override", "keep_overlay_visible": False})
         if response is None:
-            self._safe_log("Overlay CLI unavailable while disabling force-render override.")
+            self._safe_log("Overlay CLI unavailable while disabling keep-overlay-visible override.")
         self._active = False
 
     def _send_override(self, payload: JsonDict) -> Optional[JsonDict]:
@@ -291,7 +297,7 @@ class ForceRenderOverrideManager:
                         if status == "error":
                             error_msg = response.get("error")
                             if error_msg:
-                                self._safe_log(f"Overlay client rejected force-render override: {error_msg}")
+                                self._safe_log(f"Overlay client rejected keep-overlay-visible override: {error_msg}")
                             return None
         except OSError:
             return None
@@ -315,3 +321,6 @@ class ForceRenderOverrideManager:
             self._logger(message)
         except Exception:
             print(f"[overlay-controller] {message}", file=sys.stderr)
+
+
+ForceRenderOverrideManager = KeepOverlayVisibleOverrideManager

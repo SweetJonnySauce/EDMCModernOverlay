@@ -54,7 +54,7 @@ class _FakePrefs:
         self.client_log_retention = load.DEFAULT_CLIENT_LOG_RETENTION
         self.gridlines_enabled = False
         self.gridline_spacing = 120
-        self.force_render = False
+        self.keep_overlay_visible = False
         self.show_debug_overlay = False
         self.manual_backend_override = ""
         self.min_font_point = 6.0
@@ -104,9 +104,9 @@ def _make_runtime(monkeypatch, tmp_path):
         self._legacy_tcp_server = server
         self._track_handle(server)
 
-    def _fake_start_force_monitor(self) -> None:
-        thread = _DummyThread("ModernOverlayForceMonitor")
-        self._force_monitor_thread = thread
+    def _fake_start_keep_visible_monitor(self) -> None:
+        thread = _DummyThread("ModernOverlayKeepVisibleMonitor")
+        self._keep_visible_monitor_thread = thread
         self._track_thread(thread)
 
     def _fake_start_version_check(self) -> None:
@@ -126,7 +126,11 @@ def _make_runtime(monkeypatch, tmp_path):
 
     monkeypatch.setattr(load._PluginRuntime, "_start_watchdog", _fake_start_watchdog)
     monkeypatch.setattr(load._PluginRuntime, "_start_legacy_tcp_server", _fake_start_legacy_tcp_server)
-    monkeypatch.setattr(load._PluginRuntime, "_start_force_render_monitor_if_needed", _fake_start_force_monitor)
+    monkeypatch.setattr(
+        load._PluginRuntime,
+        "_start_keep_overlay_visible_monitor_if_needed",
+        _fake_start_keep_visible_monitor,
+    )
     monkeypatch.setattr(load._PluginRuntime, "_start_version_status_check", _fake_start_version_check)
     monkeypatch.setattr(load._PluginRuntime, "_start_prefs_worker", _fake_start_prefs_worker)
     monkeypatch.setattr(load._PluginRuntime, "_schedule_config_rebroadcasts", _fake_schedule_config)

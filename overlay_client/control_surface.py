@@ -40,13 +40,13 @@ TRANSPARENCY_WARNING_BODY_COLOR = "#ffa500"
 class ControlSurfaceMixin:
     """Setter/status surface, cycle helpers, repaint scheduling, and config toggles."""
 
-    def set_force_render(self, force: bool) -> None:
-        flag = bool(force)
-        if flag == self._force_render:
+    def set_keep_overlay_visible(self, visible: bool) -> None:
+        flag = bool(visible)
+        if flag == self._keep_overlay_visible:
             return
-        self._force_render = flag
+        self._keep_overlay_visible = flag
         if flag:
-            self._interaction_controller.handle_force_render_enter()
+            self._interaction_controller.handle_keep_overlay_visible_enter()
             self._update_follow_visibility(True)
             if sys.platform.startswith("linux"):
                 self._interaction_controller.restore_drag_interactivity(
@@ -63,6 +63,11 @@ class ControlSurfaceMixin:
                 and not self._last_follow_state.is_foreground
             ):
                 self._update_follow_visibility(False)
+
+    def set_force_render(self, force: bool) -> None:
+        """Legacy alias for the keep-overlay-visible setting."""
+
+        self.set_keep_overlay_visible(force)
 
     def set_standalone_mode(self, enabled: Optional[bool]) -> None:
         flag = bool(enabled)

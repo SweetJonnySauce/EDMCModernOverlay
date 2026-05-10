@@ -84,7 +84,7 @@ These are EDMC best practices. Evaluate the code to make sure it's adhering to t
 | `edmc_modern_overlay.client_log_retention` | int | `config.get_int` | No | clamp `>= 1` |
 | `edmc_modern_overlay.gridlines_enabled` | bool | `config.get_bool` | No | none |
 | `edmc_modern_overlay.gridline_spacing` | int | `config.get_str` + `number_from_string` | Yes | clamp `>= 10` |
-| `edmc_modern_overlay.force_render` | bool | `config.get_bool` | No | none |
+| `edmc_modern_overlay.keep_overlay_visible` | bool | `config.get_bool` | No | legacy `edmc_modern_overlay.force_render` accepted on read |
 | `edmc_modern_overlay.force_xwayland` | bool | `config.get_bool` | No | none |
 | `edmc_modern_overlay.physical_clamp_enabled` | bool | `config.get_bool` | No | none |
 | `edmc_modern_overlay.physical_clamp_overrides` | JSON string | `config.get_str` | No | JSON -> `Dict[str, float]` |

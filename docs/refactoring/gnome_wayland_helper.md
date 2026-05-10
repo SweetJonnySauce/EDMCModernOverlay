@@ -1110,7 +1110,7 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 | Phase | Description | Status |
 | --- | --- | --- |
 | 1 | Status truthfulness and degraded fallback for missing/unhealthy helper | Completed |
-| 2 | Visibility terminology rename from `force_render` to `keep_overlay_visible` | Not Started |
+| 2 | Visibility terminology rename from `force_render` to `keep_overlay_visible` | Completed |
 | 3 | GNOME Shell extension package skeleton, metadata, and protocol constants | Not Started |
 | 4 | Session-DBus helper health/version MVP and client handshake/status object | Not Started |
 | 5 | Installer lifecycle and post-install GNOME Wayland remediation | Not Started |
@@ -1190,12 +1190,34 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 - Risks: config/controller/client compatibility regressions across process boundaries.
 - Mitigations: accept legacy `force_render` during migration, write config/payload tests, and keep logs explicit about visibility semantics.
 
+#### Phase 2 Implementation Notes
+- Touch points to inspect before coding: EDMC preferences/config persistence, `overlay_settings.json` shadow/bootstrap settings, plugin-to-client `OverlayConfig` payloads, controller CLI override payloads, overlay client initial/config application, visibility/follow-window code, logs, docs, and all tests that mention `force_render`.
+- Expected unchanged behavior: the setting still means "keep overlay visible when Elite Dangerous is not the foreground window"; effective visibility remains preference OR controller runtime override; controller open/close still temporarily enables/disables the runtime override; legacy `force_render` settings and payloads remain accepted.
+- Migration/precedence rule: when both `keep_overlay_visible` and legacy `force_render` are present, `keep_overlay_visible` wins. If `keep_overlay_visible` is absent, fall back to `force_render`. New writes and new payloads use `keep_overlay_visible`.
+- Out of scope for this phase: GNOME Shell extension files, installer lifecycle, DBus helper health, target discovery, presentation/attachment behavior, and any status/classification changes beyond terminology updates.
+- Test type choice: unit tests for pure config/payload/migration parsing; harness tests for `load.py`, preferences persistence, and plugin/controller bridge wiring touched by the rename.
+- Tests to run after coding: targeted client config, overlay config payload, plugin bridge, preferences persistence, lifecycle/visibility tests, affected harness backend/controller tests, then `make check`.
+
 | Stage | Description | Status |
 | --- | --- | --- |
-| 2.1 | Add `keep_overlay_visible` config/settings support with fallback read from legacy `force_render` | Not Started |
-| 2.2 | Update preferences labels, overlay settings JSON handling, controller bridge payloads, and runtime override naming | Not Started |
-| 2.3 | Update logs/docs/tests to distinguish payload rendering, overlay visibility, and compositor presentation | Not Started |
-| 2.4 | Add migration/compatibility tests for old `force_render` inputs and new `keep_overlay_visible` outputs | Not Started |
+| 2.1 | Add `keep_overlay_visible` config/settings support with fallback read from legacy `force_render` | Completed |
+| 2.2 | Update preferences labels, overlay settings JSON handling, controller bridge payloads, and runtime override naming | Completed |
+| 2.3 | Update logs/docs/tests to distinguish payload rendering, overlay visibility, and compositor presentation | Completed |
+| 2.4 | Add migration/compatibility tests for old `force_render` inputs and new `keep_overlay_visible` outputs | Completed |
+
+#### Phase 2 Execution Notes
+- EDMC preferences now persist `edmc_modern_overlay.keep_overlay_visible` and write `keep_overlay_visible` to `overlay_settings.json`; legacy `force_render` config/shadow values are accepted on read.
+- OverlayConfig and controller CLI payloads now emit `keep_overlay_visible`; legacy `force_render_override` and `force_render` CLI payloads remain accepted for migration.
+- Overlay client/bootstrap/config application, follow-window visibility logic, controller bridge naming, logs, FAQ, and compliance docs now use keep-overlay-visible terminology.
+- Compatibility aliases remain in code for existing tests/extensions that directly call old Python names, but new writes and new payloads use `keep_overlay_visible`.
+
+#### Phase 2 Tests Run
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_client_config.py tests/test_preferences_persistence.py tests/test_overlay_config_payload.py overlay_controller/tests/test_plugin_bridge.py overlay_controller/tests/test_app_context.py tests/test_harness_cli_ingestion.py tests/test_lifecycle_tracking.py overlay_client/tests/test_interaction_controller.py overlay_client/tests/test_exception_scoping.py overlay_client/tests/test_follow_helpers.py overlay_client/tests/test_follow_surface_mixin.py overlay_client/tests/test_window_controller.py tests/test_overlay_controller_platform.py -q` -> initially failed, `68 passed, 3 skipped, 2 failed`; harness fixture still inherited the repo-local preference value, then was pinned to `keep_overlay_visible = false` for override semantics.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_client_config.py tests/test_preferences_persistence.py tests/test_overlay_config_payload.py overlay_controller/tests/test_plugin_bridge.py overlay_controller/tests/test_app_context.py tests/test_harness_cli_ingestion.py tests/test_lifecycle_tracking.py overlay_client/tests/test_interaction_controller.py overlay_client/tests/test_exception_scoping.py overlay_client/tests/test_follow_helpers.py overlay_client/tests/test_follow_surface_mixin.py overlay_client/tests/test_window_controller.py tests/test_overlay_controller_platform.py -q` -> passed, `70 passed, 3 skipped`.
+- `overlay_client/.venv/bin/python -m pytest tests/test_preferences_panel_controller_tab.py tests/test_harness_backend_override_roundtrip.py tests/test_harness_backend_status_roundtrip.py tests/test_overlay_controller_platform.py overlay_client/tests/test_developer_helpers.py overlay_client/tests/test_client_config_defaults.py -q` -> collection failed; `overlay_client/tests/test_developer_helpers.py` does not exist.
+- `overlay_client/.venv/bin/python -m pytest tests/test_preferences_panel_controller_tab.py tests/test_harness_backend_override_roundtrip.py tests/test_harness_backend_status_roundtrip.py tests/test_overlay_controller_platform.py overlay_client/tests/test_client_config_defaults.py -q` -> passed, `34 passed`.
+- `overlay_client/.venv/bin/python -m ruff check .` -> passed.
+- `make check` -> passed; ruff and mypy passed, full pytest reported `854 passed, 21 skipped`.
 
 #### Phase 2 Exit Criteria
 - New installs/settings use `keep_overlay_visible` terminology.

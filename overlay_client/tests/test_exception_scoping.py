@@ -118,9 +118,9 @@ def test_interaction_controller_logs_transient_parent_failure(monkeypatch):
         set_window_transparent_input_fn=lambda _transparent: None,
     )
 
-    controller.handle_force_render_enter()
+    controller.handle_keep_overlay_visible_enter()
 
-    assert any("Failed to clear transient parent on force-render" in msg for msg in logs)
+    assert any("Failed to clear transient parent on keep-overlay-visible" in msg for msg in logs)
 
 
 def test_describe_screen_logs_on_failure(monkeypatch):

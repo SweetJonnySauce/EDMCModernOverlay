@@ -109,7 +109,7 @@ class _FollowSurfaceStub(FollowSurfaceMixin):
         self._cursor_saved = False
         self._saved_cursor = None
         self._follow_enabled = True
-        self._force_render = False
+        self._keep_overlay_visible = False
         self._lost_window_logged = False
         self._fullscreen_hint_logged = False
         self._title_bar_enabled = False
@@ -250,9 +250,9 @@ def test_normalise_tracker_geometry_updates_logs(monkeypatch: pytest.MonkeyPatch
     assert desired == tracker_qt
 
 
-def test_handle_missing_follow_state_force_render_enables_visibility(monkeypatch: pytest.MonkeyPatch):
+def test_handle_missing_follow_state_keep_overlay_visible_enables_visibility(monkeypatch: pytest.MonkeyPatch):
     stub = _FollowSurfaceStub()
-    stub._force_render = True
+    stub._keep_overlay_visible = True
     applied: list[bool] = []
 
     def apply_click_through(self=None, flag: bool = False) -> None:

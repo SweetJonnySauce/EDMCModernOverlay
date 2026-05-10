@@ -11,7 +11,7 @@ class _StubPrefs:
         self.client_log_retention = load.DEFAULT_CLIENT_LOG_RETENTION
         self.gridlines_enabled = False
         self.gridline_spacing = 100
-        self.force_render = False
+        self.keep_overlay_visible = False
         self.manual_backend_override = ""
         self.title_bar_enabled = False
         self.title_bar_height = 0
@@ -68,6 +68,8 @@ def test_overlay_config_includes_physical_clamp_flag(monkeypatch):
     assert payload["legacy_font_step"] == 2
     assert payload["plugin_group_states"] == {"BGS-Tally Objectives": False}
     assert payload["plugin_group_state_default_on"] is True
+    assert payload["keep_overlay_visible"] is False
+    assert "force_render" not in payload
 
 
 def test_overlay_config_defaults_keep_clamp_off(monkeypatch):

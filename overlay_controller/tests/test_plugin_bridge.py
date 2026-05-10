@@ -88,14 +88,14 @@ def test_active_group_dedupes_same_payload(tmp_path: Path) -> None:
     assert payload["edit_nonce"] == "n1"
 
 
-def test_force_render_override_logs_on_failure(tmp_path: Path) -> None:
+def test_keep_overlay_visible_override_logs_on_failure(tmp_path: Path) -> None:
     log: list[object] = []
     (tmp_path / "port.json").write_text('{"port": 2345}', encoding="utf-8")
 
     def failing_connect(*_args, **_kwargs):
         raise OSError("socket unavailable")
 
-    manager = pb.ForceRenderOverrideManager(
+    manager = pb.KeepOverlayVisibleOverrideManager(
         port_path=tmp_path / "port.json",
         connect=failing_connect,
         logger=lambda msg: log.append(("log", msg)),
@@ -103,11 +103,11 @@ def test_force_render_override_logs_on_failure(tmp_path: Path) -> None:
 
     manager.activate()
     manager.deactivate()
-    assert any("enabling force-render override" in entry[1] for entry in log if entry[0] == "log")
-    assert any("disabling force-render override" in entry[1] for entry in log if entry[0] == "log")
+    assert any("enabling keep-overlay-visible override" in entry[1] for entry in log if entry[0] == "log")
+    assert any("disabling keep-overlay-visible override" in entry[1] for entry in log if entry[0] == "log")
 
 
-def test_force_render_override_sends_payloads(tmp_path: Path) -> None:
+def test_keep_overlay_visible_override_sends_payloads(tmp_path: Path) -> None:
     log: list[object] = []
     responses = ['{"status": "ok"}\n']
     (tmp_path / "port.json").write_text('{"port": 4567}', encoding="utf-8")
@@ -119,7 +119,7 @@ def test_force_render_override_sends_payloads(tmp_path: Path) -> None:
         log.append(("connect", addr, timeout))
         return FakeSocket(log, responses=resp)
 
-    manager = pb.ForceRenderOverrideManager(
+    manager = pb.KeepOverlayVisibleOverrideManager(
         port_path=tmp_path / "port.json",
         connect=fake_connect,
         logger=lambda msg: log.append(("log", msg)),
@@ -130,11 +130,12 @@ def test_force_render_override_sends_payloads(tmp_path: Path) -> None:
     manager.deactivate()
 
     json_writes = [entry[1] for entry in log if isinstance(entry, tuple) and entry[0] == "write" and entry[1].startswith("{")]
-    assert json_writes, "expected force-render override payloads to be written"
+    assert json_writes, "expected keep-overlay-visible override payloads to be written"
     first_payload = json.loads(json_writes[0])
-    assert first_payload["force_render"] is True
+    assert first_payload["keep_overlay_visible"] is True
+    assert first_payload["cli"] == "keep_overlay_visible_override"
     second_payload = json.loads(json_writes[-1])
-    assert second_payload["force_render"] is False
+    assert second_payload["keep_overlay_visible"] is False
 
 
 def test_request_cli_reads_status_response(tmp_path: Path) -> None:

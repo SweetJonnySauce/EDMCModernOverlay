@@ -99,13 +99,13 @@ def test_restore_drag_interactivity_respects_flags(monkeypatch):
     assert calls.applied[-1] is False
 
 
-def test_handle_force_render_reapplies_current(monkeypatch):
+def test_handle_keep_overlay_visible_reapplies_current(monkeypatch):
     controller, calls, _ = _build_controller(monkeypatch, is_wayland=True)
     controller.set_click_through(False)
     calls.applied.clear()
     monkeypatch.setattr("overlay_client.interaction_controller.sys.platform", "linux")
 
-    controller.handle_force_render_enter()
+    controller.handle_keep_overlay_visible_enter()
 
     # First call applies transparent input (best-effort), then re-applies current False state.
     assert calls.applied[0] is True

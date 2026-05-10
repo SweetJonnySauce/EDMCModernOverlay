@@ -14,7 +14,7 @@ class InitialClientSettings:
 
     client_log_retention: int = 5
     global_payload_opacity: int = 100
-    force_render: bool = False
+    keep_overlay_visible: bool = False
     standalone_mode: bool = False
     manual_backend_override: str = ""
     physical_clamp_enabled: bool = False
@@ -38,6 +38,16 @@ class InitialClientSettings:
     edmc_log_level_name: Optional[str] = None
     edmc_log_level_source: Optional[str] = None
 
+    @property
+    def force_render(self) -> bool:
+        """Legacy alias for settings written before Phase 2 terminology cleanup."""
+
+        return self.keep_overlay_visible
+
+    @force_render.setter
+    def force_render(self, value: bool) -> None:
+        self.keep_overlay_visible = bool(value)
+
 
 @dataclass
 class DeveloperHelperConfig:
@@ -50,7 +60,7 @@ class DeveloperHelperConfig:
     gridlines_enabled: Optional[bool] = None
     gridline_spacing: Optional[int] = None
     show_status: Optional[bool] = None
-    force_render: Optional[bool] = None
+    keep_overlay_visible: Optional[bool] = None
     standalone_mode: Optional[bool] = None
     manual_backend_override: Optional[str] = None
     show_debug_overlay: Optional[bool] = None
@@ -68,6 +78,16 @@ class DeveloperHelperConfig:
     nudge_overflow_payloads: Optional[bool] = None
     payload_nudge_gutter: Optional[int] = None
     payload_log_delay_seconds: Optional[float] = None
+
+    @property
+    def force_render(self) -> Optional[bool]:
+        """Legacy alias for older OverlayConfig payload consumers."""
+
+        return self.keep_overlay_visible
+
+    @force_render.setter
+    def force_render(self, value: Optional[bool]) -> None:
+        self.keep_overlay_visible = None if value is None else bool(value)
 
     @classmethod
     def from_payload(cls, payload: Dict[str, Any]) -> "DeveloperHelperConfig":
@@ -128,6 +148,10 @@ class DeveloperHelperConfig:
         else:
             mode_token = None
 
+        keep_overlay_visible_value = payload.get("keep_overlay_visible")
+        if keep_overlay_visible_value is None and "keep_overlay_visible" not in payload:
+            keep_overlay_visible_value = payload.get("force_render")
+
         return cls(
             background_opacity=_float(payload.get("opacity"), None),
             global_payload_opacity=_int(payload.get("global_payload_opacity"), None),
@@ -136,7 +160,7 @@ class DeveloperHelperConfig:
             gridlines_enabled=_bool(payload.get("gridlines_enabled"), None),
             gridline_spacing=_int(payload.get("gridline_spacing"), None),
             show_status=_bool(payload.get("show_status"), None),
-            force_render=_bool(payload.get("force_render"), None),
+            keep_overlay_visible=_bool(keep_overlay_visible_value, None),
             standalone_mode=_bool(payload.get("standalone_mode"), None),
             manual_backend_override=_backend_override(payload.get("manual_backend_override"), None),
             show_debug_overlay=_bool(payload.get("show_debug_overlay"), None),
@@ -181,7 +205,10 @@ def load_initial_settings(settings_path: Path) -> InitialClientSettings:
     except (TypeError, ValueError):
         payload_opacity = defaults.global_payload_opacity
     payload_opacity = max(0, min(payload_opacity, 100))
-    force_render = bool(data.get("force_render", defaults.force_render))
+    keep_overlay_visible_value = data.get("keep_overlay_visible")
+    if keep_overlay_visible_value is None and "keep_overlay_visible" not in data:
+        keep_overlay_visible_value = data.get("force_render", defaults.keep_overlay_visible)
+    keep_overlay_visible = bool(keep_overlay_visible_value)
     standalone_mode = bool(data.get("standalone_mode", defaults.standalone_mode))
     raw_manual_backend_override = data.get("manual_backend_override", defaults.manual_backend_override)
     try:
@@ -264,7 +291,7 @@ def load_initial_settings(settings_path: Path) -> InitialClientSettings:
     return InitialClientSettings(
         client_log_retention=max(1, retention),
         global_payload_opacity=payload_opacity,
-        force_render=force_render,
+        keep_overlay_visible=keep_overlay_visible,
         standalone_mode=standalone_mode,
         manual_backend_override=manual_backend_override,
         show_debug_overlay=show_debug_overlay,

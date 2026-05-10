@@ -233,7 +233,7 @@ def test_restore_foreground_noop_on_linux(monkeypatch):
     assert window._previous_foreground_hwnd is None
 
 
-def test_force_render_override_restores_previous(tmp_path):
+def test_keep_overlay_visible_override_restores_previous(tmp_path):
     log: list[object] = []
     (tmp_path / "port.json").write_text('{"port": 5555}', encoding="utf-8")
 
@@ -280,15 +280,15 @@ def test_force_render_override_restores_previous(tmp_path):
         log.append(("connect", addr, timeout))
         return FakeSocket(log, responses=['{"status": "ok"}\n'])
 
-    mgr = oc._ForceRenderOverrideManager(tmp_path, connect=fake_connect)
+    mgr = oc._KeepOverlayVisibleOverrideManager(tmp_path, connect=fake_connect)
 
     mgr.activate()
     mgr.deactivate()
 
     json_writes = [entry[1] for entry in log if isinstance(entry, tuple) and entry[0] == "write"]
-    assert json_writes, "expected force-render override payloads to be written"
-    assert any('"force_render": true' in payload for payload in json_writes)
-    assert any('"force_render": false' in payload for payload in json_writes)
+    assert json_writes, "expected keep-overlay-visible override payloads to be written"
+    assert any('"keep_overlay_visible": true' in payload for payload in json_writes)
+    assert any('"keep_overlay_visible": false' in payload for payload in json_writes)
     assert not mgr._active
 
 

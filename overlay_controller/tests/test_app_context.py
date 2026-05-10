@@ -17,7 +17,8 @@ def test_build_app_context_paths_and_bridge(tmp_path, monkeypatch):
     assert ctx.settings_path == tmp_path / "overlay_settings.json"
     assert ctx.port_path == tmp_path / "port.json"
     assert ctx.plugin_bridge is not None
-    assert ctx.force_render_override is ctx.plugin_bridge.force_render_override
+    assert ctx.keep_overlay_visible_override is ctx.plugin_bridge.keep_overlay_visible_override
+    assert ctx.force_render_override is ctx.keep_overlay_visible_override
     active = ctx.mode_profile.resolve("active")
     inactive = ctx.mode_profile.resolve("inactive")
     assert active.write_debounce_ms == 75

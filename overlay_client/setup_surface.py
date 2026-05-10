@@ -112,7 +112,7 @@ class SetupSurfaceMixin:
         self._base_height: int = int(BASE_HEIGHT)
         self._base_width: int = int(BASE_WIDTH)
         self._log_retention: int = max(1, int(initial.client_log_retention))
-        self._force_render: bool = bool(getattr(initial, "force_render", False))
+        self._keep_overlay_visible: bool = bool(getattr(initial, "keep_overlay_visible", False))
         self._standalone_mode: bool = bool(getattr(initial, "standalone_mode", False))
         if not sys.platform.startswith("win"):
             self._standalone_mode = False

@@ -7,7 +7,7 @@ from PyQt6.QtCore import Qt
 
 
 class InteractionController:
-    """Handles click-through, drag restoration, and force-render platform quirks."""
+    """Handles click-through, drag restoration, and keep-visible platform quirks."""
 
     def __init__(
         self,
@@ -64,21 +64,26 @@ class InteractionController:
         )
         self.set_click_through(False, force=True, reason="restore_drag_interactivity")
 
-    def handle_force_render_enter(self) -> None:
+    def handle_keep_overlay_visible_enter(self) -> None:
         if sys.platform.startswith("linux") and self._is_wayland():
             window_handle = self._window_handle()
             if window_handle is not None:
                 try:
                     self._set_transient_parent(None)
                 except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
-                    self._log("Failed to clear transient parent on force-render: %s", exc, "")
+                    self._log("Failed to clear transient parent on keep-overlay-visible: %s", exc, "")
                 except Exception as exc:  # pragma: no cover - unexpected Qt errors
-                    self._log("Unexpected error clearing transient parent on force-render: %s", exc, "")
+                    self._log("Unexpected error clearing transient parent on keep-overlay-visible: %s", exc, "")
             self._clear_transient_parent_ids()
         if sys.platform.startswith("linux"):
             # Best-effort: ask the platform controller to apply transparent input, then restore desired state.
             self._apply_click_through(True)
-        self.reapply_current(reason="force_render_enter")
+        self.reapply_current(reason="keep_overlay_visible_enter")
+
+    def handle_force_render_enter(self) -> None:
+        """Legacy alias for the keep-overlay-visible transition."""
+
+        self.handle_keep_overlay_visible_enter()
 
     def _apply_click_through_state(self, transparent: bool, reason: str) -> None:
         self._set_widget_attribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, transparent)

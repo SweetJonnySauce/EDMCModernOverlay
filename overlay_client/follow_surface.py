@@ -375,7 +375,7 @@ class FollowSurfaceMixin:
         self._window_controller.post_process_follow_state(
             normalized_state,
             target_tuple,
-            force_render=self._force_render,
+            keep_overlay_visible=self._keep_overlay_visible,
             update_follow_visibility_fn=self._update_follow_visibility,
             update_auto_scale_fn=self._update_auto_legacy_scale,
             ensure_transient_parent_fn=_ensure_parent,
@@ -428,7 +428,7 @@ class FollowSurfaceMixin:
             _CLIENT_LOGGER.debug("Elite Dangerous window not found; waiting for window to appear; %s", self.format_scale_debug())
             self._lost_window_logged = True
         if self._last_follow_state is None:
-            if self._force_render:
+            if self._keep_overlay_visible:
                 self._update_follow_visibility(True)
                 if sys.platform.startswith("linux"):
                     self._platform_controller.apply_click_through(True)
@@ -436,7 +436,7 @@ class FollowSurfaceMixin:
             else:
                 self._update_follow_visibility(False)
             return
-        if self._force_render:
+        if self._keep_overlay_visible:
             self._update_follow_visibility(True)
             if sys.platform.startswith("linux"):
                 self._platform_controller.apply_click_through(True)

@@ -89,6 +89,8 @@ BACKEND_NOTICE_INFO_COLOR = "#1565c0"
 DEFAULT_DEBUG_OVERLAY_CORNER = "SE"
 DEFAULT_GRIDLINES_ENABLED = True
 DEFAULT_FORCE_XWAYLAND = True
+KEEP_OVERLAY_VISIBLE_PREF_KEY = "keep_overlay_visible"
+LEGACY_FORCE_RENDER_PREF_KEY = "force_render"
 DEFAULT_MAX_FONT_POINT = 12.0
 DEFAULT_LEGACY_FONT_STEP = 4
 DEFAULT_TITLE_BAR_HEIGHT = 30
@@ -105,7 +107,7 @@ CONFIG_BACKED_PREFERENCE_NAMES = (
     "client_log_retention",
     "gridlines_enabled",
     "gridline_spacing",
-    "force_render",
+    KEEP_OVERLAY_VISIBLE_PREF_KEY,
     STANDALONE_MODE_PREF_KEY,
     "force_xwayland",
     "physical_clamp_enabled",
@@ -647,7 +649,7 @@ class Preferences:
     client_log_retention: int = DEFAULT_CLIENT_LOG_RETENTION
     gridlines_enabled: bool = DEFAULT_GRIDLINES_ENABLED
     gridline_spacing: int = 120
-    force_render: bool = False
+    keep_overlay_visible: bool = False
     standalone_mode: bool = False
     manual_backend_override: str = ""
     force_xwayland: bool = DEFAULT_FORCE_XWAYLAND
@@ -670,6 +672,16 @@ class Preferences:
     controller_launch_command: str = "!ovr"
     controller_toggle_argument: str = TOGGLE_ARGUMENT_DEFAULT
     last_on_payload_opacity: int = 100
+
+    @property
+    def force_render(self) -> bool:
+        """Legacy alias for the keep-overlay-visible preference."""
+
+        return self.keep_overlay_visible
+
+    @force_render.setter
+    def force_render(self, value: bool) -> None:
+        self.keep_overlay_visible = bool(value)
 
     def __post_init__(self) -> None:
         self.plugin_dir = Path(self.plugin_dir)
@@ -762,7 +774,12 @@ class Preferences:
             "client_log_retention": _config_get_int(_config_key("client_log_retention"), self.client_log_retention),
             "gridlines_enabled": _config_get_bool(_config_key("gridlines_enabled"), self.gridlines_enabled),
             "gridline_spacing": _config_get_locale_number(_config_key("gridline_spacing"), self.gridline_spacing),
-            "force_render": _config_get_bool(_config_key("force_render"), self.force_render),
+            KEEP_OVERLAY_VISIBLE_PREF_KEY: _config_get_bool(
+                _config_key(KEEP_OVERLAY_VISIBLE_PREF_KEY),
+                self.keep_overlay_visible,
+            )
+            if _config_has_value(_config_key(KEEP_OVERLAY_VISIBLE_PREF_KEY))
+            else _config_get_bool(_config_key(LEGACY_FORCE_RENDER_PREF_KEY), self.keep_overlay_visible),
             "standalone_mode": _config_get_bool(
                 _config_key(STANDALONE_MODE_PREF_KEY),
                 self.standalone_mode,
@@ -847,7 +864,10 @@ class Preferences:
         )
         self.gridlines_enabled = _coerce_bool(data.get("gridlines_enabled"), self.gridlines_enabled)
         self.gridline_spacing = _coerce_int(data.get("gridline_spacing"), self.gridline_spacing, minimum=10)
-        self.force_render = _coerce_bool(data.get("force_render"), self.force_render)
+        keep_overlay_visible_value = data.get(KEEP_OVERLAY_VISIBLE_PREF_KEY)
+        if keep_overlay_visible_value is None and KEEP_OVERLAY_VISIBLE_PREF_KEY not in data:
+            keep_overlay_visible_value = data.get(LEGACY_FORCE_RENDER_PREF_KEY)
+        self.keep_overlay_visible = _coerce_bool(keep_overlay_visible_value, self.keep_overlay_visible)
         self.standalone_mode = _coerce_bool(
             data.get(STANDALONE_MODE_PREF_KEY),
             self.standalone_mode,
@@ -949,7 +969,7 @@ class Preferences:
             "client_log_retention": int(self.client_log_retention),
             "gridlines_enabled": bool(self.gridlines_enabled),
             "gridline_spacing": int(self.gridline_spacing),
-            "force_render": bool(self.force_render),
+            KEEP_OVERLAY_VISIBLE_PREF_KEY: bool(self.keep_overlay_visible),
             STANDALONE_MODE_PREF_KEY: bool(self.standalone_mode),
             "manual_backend_override": str(self.manual_backend_override or ""),
             "physical_clamp_enabled": bool(self.physical_clamp_enabled),
@@ -989,7 +1009,7 @@ class Preferences:
         _config_set_value(_config_key("client_log_retention"), int(self.client_log_retention))
         _config_set_value(_config_key("gridlines_enabled"), bool(self.gridlines_enabled))
         _config_set_value(_config_key("gridline_spacing"), int(self.gridline_spacing))
-        _config_set_value(_config_key("force_render"), bool(self.force_render))
+        _config_set_value(_config_key(KEEP_OVERLAY_VISIBLE_PREF_KEY), bool(self.keep_overlay_visible))
         _config_set_value(_config_key(STANDALONE_MODE_PREF_KEY), bool(self.standalone_mode))
         _config_set_value(_config_key("manual_backend_override"), str(self.manual_backend_override or ""))
         _config_set_value(_config_key("physical_clamp_enabled"), bool(self.physical_clamp_enabled))
@@ -1047,7 +1067,7 @@ class PreferencesPanel:
         set_gridline_spacing_callback: Optional[Callable[[int], None]] = None,
         set_payload_nudge_callback: Optional[Callable[[bool], None]] = None,
         set_payload_gutter_callback: Optional[Callable[[int], None]] = None,
-        set_force_render_callback: Optional[Callable[[bool], None]] = None,
+        set_keep_overlay_visible_callback: Optional[Callable[[bool], None]] = None,
         set_standalone_mode_callback: Optional[Callable[[bool], None]] = None,
         set_title_bar_config_callback: Optional[Callable[[bool, int], None]] = None,
         set_debug_overlay_callback: Optional[Callable[[bool], None]] = None,
@@ -1108,7 +1128,7 @@ class PreferencesPanel:
         self._var_gridline_spacing = tk.IntVar(value=max(10, int(preferences.gridline_spacing)))
         self._var_payload_nudge = tk.BooleanVar(value=preferences.nudge_overflow_payloads)
         self._var_payload_gutter = tk.IntVar(value=max(0, int(preferences.payload_nudge_gutter)))
-        self._var_force_render = tk.BooleanVar(value=preferences.force_render)
+        self._var_keep_overlay_visible = tk.BooleanVar(value=preferences.keep_overlay_visible)
         self._var_standalone_mode = tk.BooleanVar(value=preferences.standalone_mode)
         self._var_physical_clamp = tk.BooleanVar(value=preferences.physical_clamp_enabled)
         self._var_physical_clamp_overrides = tk.StringVar(
@@ -1204,7 +1224,7 @@ class PreferencesPanel:
         self._set_gridline_spacing = set_gridline_spacing_callback
         self._set_payload_nudge = set_payload_nudge_callback
         self._set_payload_gutter = set_payload_gutter_callback
-        self._set_force_render = set_force_render_callback
+        self._set_keep_overlay_visible = set_keep_overlay_visible_callback
         self._set_standalone_mode = set_standalone_mode_callback
         self._set_title_bar_config = set_title_bar_config_callback
         self._set_debug_overlay = set_debug_overlay_callback
@@ -1542,17 +1562,17 @@ class PreferencesPanel:
         status_row.grid(row=user_row, column=0, sticky="w", pady=ROW_PAD)
         user_row += 1
 
-        force_row = ttk.Frame(user_section, style=self._frame_style)
-        force_checkbox = nb.Checkbutton(
-            force_row,
+        keep_visible_row = ttk.Frame(user_section, style=self._frame_style)
+        keep_visible_checkbox = nb.Checkbutton(
+            keep_visible_row,
             text="Keep overlay visible when Elite Dangerous is not the foreground window",
-            variable=self._var_force_render,
+            variable=self._var_keep_overlay_visible,
             onvalue=True,
             offvalue=False,
-            command=self._on_force_render_toggle,
+            command=self._on_keep_overlay_visible_toggle,
         )
-        force_checkbox.pack(side="left")
-        force_row.grid(row=user_row, column=0, sticky="w", pady=ROW_PAD)
+        keep_visible_checkbox.pack(side="left")
+        keep_visible_row.grid(row=user_row, column=0, sticky="w", pady=ROW_PAD)
         user_row += 1
 
         backend_override_row = ttk.Frame(user_section, style=self._frame_style)
@@ -3094,17 +3114,22 @@ class PreferencesPanel:
         except Exception as exc:  # pragma: no cover - defensive UI handler
             LOGGER.debug("Controller launch callback failed from preferences UI: %s", exc, exc_info=True)
 
-    def _on_force_render_toggle(self) -> None:
-        value = bool(self._var_force_render.get())
-        if self._set_force_render:
+    def _on_keep_overlay_visible_toggle(self) -> None:
+        value = bool(self._var_keep_overlay_visible.get())
+        if self._set_keep_overlay_visible:
             try:
-                self._set_force_render(value)
+                self._set_keep_overlay_visible(value)
             except Exception as exc:
-                self._status_var.set(f"Failed to update force-render option: {exc}")
+                self._status_var.set(f"Failed to update keep-overlay-visible option: {exc}")
                 return
         else:
-            self._preferences.force_render = value
+            self._preferences.keep_overlay_visible = value
             self._preferences.save()
+
+    def _on_force_render_toggle(self) -> None:
+        """Legacy callback alias retained for old harnesses."""
+
+        self._on_keep_overlay_visible_toggle()
 
     def _on_standalone_mode_toggle(self) -> None:
         value = bool(self._var_standalone_mode.get())

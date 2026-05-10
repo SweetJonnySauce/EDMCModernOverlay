@@ -25,7 +25,9 @@ def runtime_with_capture(
         profile_store_path = tmp_path / "overlay_groupings.user.json"
         runtime._groupings_user_path = profile_store_path
         runtime._profile_store = OverlayProfileStore(user_path=profile_store_path, logger=load.LOGGER)
+        runtime._preferences.keep_overlay_visible = False
         runtime._send_overlay_config = lambda *args, **kwargs: None
+        runtime._start_keep_overlay_visible_monitor_if_needed = lambda: None
 
         published: list[dict[str, Any]] = []
         runtime._publish_payload = lambda payload: published.append(dict(payload))
@@ -93,6 +95,48 @@ def test_cli_legacy_and_controller_commands_publish_expected_payloads(
         and payload.get("label") == "Docking"
         for payload in published
     )
+
+
+def test_cli_keep_overlay_visible_override_accepts_new_and_legacy_payloads(
+    runtime_with_capture: tuple[Any, list[dict[str, Any]]]
+) -> None:
+    runtime, _published = runtime_with_capture
+
+    new_response = runtime._handle_cli_payload(
+        {"cli": "keep_overlay_visible_override", "keep_overlay_visible": True}
+    )
+    assert new_response == {
+        "status": "ok",
+        "keep_overlay_visible": True,
+        "previous_keep_overlay_visible": False,
+        "keep_overlay_visible_override": True,
+    }
+
+    legacy_response = runtime._handle_cli_payload({"cli": "force_render_override", "force_render": False})
+    assert legacy_response == {
+        "status": "ok",
+        "keep_overlay_visible": False,
+        "previous_keep_overlay_visible": True,
+        "keep_overlay_visible_override": False,
+    }
+
+
+def test_cli_keep_overlay_visible_override_prefers_new_key_over_legacy_key(
+    runtime_with_capture: tuple[Any, list[dict[str, Any]]]
+) -> None:
+    runtime, _published = runtime_with_capture
+
+    response = runtime._handle_cli_payload(
+        {
+            "cli": "keep_overlay_visible_override",
+            "keep_overlay_visible": False,
+            "force_render": True,
+        }
+    )
+
+    assert response["status"] == "ok"
+    assert response["keep_overlay_visible"] is False
+    assert response["keep_overlay_visible_override"] is False
 
 
 def test_cli_unsupported_command_returns_error(runtime_with_capture: tuple[Any, list[dict[str, Any]]]) -> None:

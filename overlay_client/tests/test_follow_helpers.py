@@ -120,7 +120,7 @@ def test_post_process_follow_state_calls_transient_parent_and_visibility(monkeyp
             kwargs["ensure_transient_parent_fn"](state.identifier or "")
             if kwargs["fullscreen_hint_fn"]():
                 self._fullscreen_hint_logged = True
-            should_show = kwargs["force_render"] or (state.is_visible and state.is_foreground)
+            should_show = kwargs["keep_overlay_visible"] or (state.is_visible and state.is_foreground)
             kwargs["update_follow_visibility_fn"](should_show)
             self._last_visibility_state = should_show
 
@@ -128,7 +128,7 @@ def test_post_process_follow_state_calls_transient_parent_and_visibility(monkeyp
     monkeypatch.setattr(window, "_update_follow_visibility", lambda show: visibility_calls.append(show))
     monkeypatch.setattr(window, "_update_auto_legacy_scale", lambda w, h: None)
     monkeypatch.setattr(window, "_ensure_transient_parent", lambda ident: parent_calls.append(ident))
-    monkeypatch.setattr(window, "_force_render", False, raising=False)
+    monkeypatch.setattr(window, "_keep_overlay_visible", False, raising=False)
     monkeypatch.setattr(window, "_fullscreen_hint_logged", False, raising=False)
 
     state = WindowState(x=0, y=0, width=100, height=50, is_foreground=True, is_visible=False, identifier="abc")

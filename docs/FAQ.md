@@ -141,10 +141,13 @@ The launch command is configurable in the EDMC preferences pane (default `!ovr`)
 
 ## Why does the overlay stay visible when I alt‑tab out of Elite Dangerous on Windows?
 
-The overlay hides itself when the game window is not foreground. This behavior is controlled by the `force_render` setting.
+The overlay hides itself when the game window is not foreground. This behavior is controlled by the `keep_overlay_visible` setting.
 
-- `force_render = false` (default): overlay hides when Elite is not the active/foreground window.
-- `force_render = true`: overlay remains visible even if Elite loses focus.
+- `keep_overlay_visible = false` (default): overlay hides when Elite is not the active/foreground window.
+- `keep_overlay_visible = true`: overlay remains visible even if Elite loses focus.
+
+Older settings files may still contain `force_render`; the plugin accepts that legacy key and writes
+`keep_overlay_visible` going forward.
 
 You can toggle this via the EDMC preferences panel checkbox labeled "Keep overlay visible when Elite Dangerous is not the foreground window". The overlay client and plugin exchange this value through the regular `OverlayConfig` updates, so changes take effect immediately without restarting.
 
