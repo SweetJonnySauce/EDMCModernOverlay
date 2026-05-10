@@ -290,10 +290,10 @@
         "kind": "gnome_shell_extension",
         "label": "GNOME Shell extension",
         "required_for_true_overlay": true,
-        "install_mode": "manual_enable",
+        "install_mode": "installer_user_local",
         "notes": [
           "Required for the long-term GNOME helper-backed path and full compositor-native behavior.",
-          "This installer does not install or enable GNOME Shell extensions automatically."
+          "This installer can copy and enable the user-local GNOME Shell extension with explicit approval while logged into GNOME Wayland."
         ]
       },
       "provenance": "Detected GNOME Shell on Wayland."

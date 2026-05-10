@@ -374,7 +374,8 @@ def test_backend_status_refresh_does_not_show_true_overlay_for_unavailable_gnome
     assert "True overlay" not in panel._backend_status_var.value
     assert panel._backend_warning_var.value == (
         "Warning: Some overlay guarantees are reduced in this mode.; "
-        "A required helper for compositor_helper / gnome_shell_wayland is not available."
+        "A required helper for compositor_helper / gnome_shell_wayland is not available. "
+        "Re-run the Linux installer while logged into GNOME Wayland to install or repair it."
     )
     assert panel._backend_warning_label.foreground == prefs.BACKEND_NOTICE_WARNING_COLOR
 

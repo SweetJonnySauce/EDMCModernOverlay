@@ -129,7 +129,8 @@ def test_backend_status_report_helpers_accept_payload_dicts():
     )
     assert format_status_ui_warning(payload) == (
         "Warning: Some overlay guarantees are reduced in this mode.; "
-        "A required helper for compositor_helper / gnome_shell_wayland is not available."
+        "A required helper for compositor_helper / gnome_shell_wayland is not available. "
+        "Re-run the Linux installer while logged into GNOME Wayland to install or repair it."
     )
 
 

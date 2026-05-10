@@ -452,7 +452,10 @@ def _ui_fallback_message(*, fallback_reason: str, fallback_from: str, manual_ove
         return "Using XWayland compatibility mode because a native Wayland path is not active."
     if fallback_reason == FallbackReason.MISSING_HELPER.value:
         if fallback_from:
-            return f"A required helper for {fallback_from} is not available."
+            message = f"A required helper for {fallback_from} is not available."
+            if "gnome_shell_wayland" in fallback_from:
+                message += " Re-run the Linux installer while logged into GNOME Wayland to install or repair it."
+            return message
         return "A required compositor helper is not available."
     if fallback_reason == FallbackReason.MISSING_PROTOCOL.value:
         return "Required compositor protocols are not available."

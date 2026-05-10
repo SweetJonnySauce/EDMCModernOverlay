@@ -13,7 +13,14 @@ readonly EUROCAPS_FONT_NAME="Eurocaps.ttf"
 readonly MODERN_PLUGIN_DIR_NAME="EDMCModernOverlay"
 readonly LEGACY_PLUGIN_DIR_NAME="EDMC-ModernOverlay"
 readonly CHECKSUM_MANIFEST_BASENAME="checksums.txt"
+readonly GNOME_HELPER_UUID="edmc-modern-overlay-helper@edmcmodernoverlay.github.io"
+readonly GNOME_HELPER_SOURCE_RELATIVE_PATH="helpers/gnome_shell_extension"
+readonly GNOME_HELPER_DBUS_SERVICE="org.edmc.ModernOverlay.Helper"
+readonly GNOME_HELPER_DBUS_OBJECT_PATH="/org/edmc/ModernOverlay/Helper"
+readonly GNOME_HELPER_DBUS_INTERFACE="org.edmc.ModernOverlay.Helper"
+readonly GNOME_HELPER_DBUS_HEALTH_METHOD="GetHealth"
 COMPOSITOR_OVERRIDE="auto"
+GNOME_HELPER_ACTION="${MODERN_OVERLAY_GNOME_HELPER_ACTION:-auto}"
 
 ASSUME_YES=false
 DRY_RUN=false
@@ -65,6 +72,7 @@ COMPOSITOR_HELPER_LABEL=""
 COMPOSITOR_HELPER_REQUIRED=0
 COMPOSITOR_HELPER_INSTALL_MODE=""
 declare -a COMPOSITOR_HELPER_NOTES=()
+declare -a GNOME_HELPER_MISSING_PREREQUISITES=()
 
 print_usage() {
     cat <<'EOF'
@@ -76,6 +84,8 @@ Options:
       --profile <id>        Force a distro profile from scripts/install_matrix.json (e.g. debian, fedora).
       --compositor <id|none|auto>
                              Force compositor profile (default: auto). Use 'none' to skip compositor overrides.
+      --gnome-helper-action <auto|install|update|disable|uninstall|status|skip>
+                             GNOME Shell helper lifecycle action when GNOME Wayland is detected (default: auto).
       --log[=<path>]        Write verbose installer output to a log file (default path if omitted).
       --log-file <path>     Alternate way to specify the log file path.
       --help                Show this message.
@@ -105,6 +115,14 @@ parse_args() {
             --compositor=*)
                 COMPOSITOR_OVERRIDE="${1#*=}"
                 COMPOSITOR_OVERRIDE="${COMPOSITOR_OVERRIDE,,}"
+                ;;
+            --gnome-helper-action)
+                shift || { echo "❌ --gnome-helper-action requires an argument." >&2; exit 1; }
+                GNOME_HELPER_ACTION="${1,,}"
+                ;;
+            --gnome-helper-action=*)
+                GNOME_HELPER_ACTION="${1#*=}"
+                GNOME_HELPER_ACTION="${GNOME_HELPER_ACTION,,}"
                 ;;
             --log)
                 LOG_ENABLED=true
@@ -159,6 +177,14 @@ parse_args() {
     if ((${#POSITIONAL_ARGS[@]} == 1)); then
         PLUGIN_DIR_OVERRIDE="${POSITIONAL_ARGS[0]}"
     fi
+    case "${GNOME_HELPER_ACTION,,}" in
+        auto|install|update|disable|uninstall|status|skip) ;;
+        *)
+            echo "❌ Unknown GNOME helper action: ${GNOME_HELPER_ACTION}" >&2
+            print_usage
+            exit 1
+            ;;
+    esac
 }
 
 format_command() {
@@ -1292,8 +1318,364 @@ with open(path, "w", encoding="utf-8") as handle:
 PY
 }
 
+gnome_helper_source_dir() {
+    local src_dir="${1:-}"
+    if [[ -n "${MODERN_OVERLAY_GNOME_HELPER_SOURCE_DIR:-}" ]]; then
+        printf '%s' "$MODERN_OVERLAY_GNOME_HELPER_SOURCE_DIR"
+        return
+    fi
+    if [[ -n "$src_dir" ]]; then
+        printf '%s/%s' "$src_dir" "$GNOME_HELPER_SOURCE_RELATIVE_PATH"
+        return
+    fi
+    printf '%s/%s/%s' "${RELEASE_ROOT:-$SCRIPT_DIR}" "$MODERN_PLUGIN_DIR_NAME" "$GNOME_HELPER_SOURCE_RELATIVE_PATH"
+}
+
+gnome_helper_extension_base_dir() {
+    if [[ -n "${MODERN_OVERLAY_GNOME_HELPER_EXTENSION_BASE:-}" ]]; then
+        printf '%s' "$MODERN_OVERLAY_GNOME_HELPER_EXTENSION_BASE"
+        return
+    fi
+    if [[ -n "${XDG_DATA_HOME:-}" ]]; then
+        printf '%s/gnome-shell/extensions' "$XDG_DATA_HOME"
+        return
+    fi
+    printf '%s/.local/share/gnome-shell/extensions' "$HOME"
+}
+
+gnome_helper_install_dir() {
+    printf '%s/%s' "$(gnome_helper_extension_base_dir)" "$GNOME_HELPER_UUID"
+}
+
+is_gnome_wayland_helper_context() {
+    if [[ "${COMPOSITOR_SELECTED:-0}" -ne 1 || "${COMPOSITOR_FOUND:-0}" -ne 1 ]]; then
+        return 1
+    fi
+    if [[ "${COMPOSITOR_HELPER_KIND:-}" != "gnome_shell_extension" ]]; then
+        return 1
+    fi
+    if [[ "$(detect_display_stack)" != "wayland" ]]; then
+        return 1
+    fi
+    if [[ "${COMPOSITOR_ID:-}" == "gnome-shell" ]]; then
+        return 0
+    fi
+    local desktop_tokens="${XDG_CURRENT_DESKTOP:-},${COMPOSITOR_DESKTOPS:-}"
+    desktop_tokens="${desktop_tokens,,}"
+    [[ "$desktop_tokens" == *"gnome"* || "$desktop_tokens" == *"ubuntu"* ]]
+}
+
+session_bus_available() {
+    if [[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
+        return 0
+    fi
+    [[ -n "${XDG_RUNTIME_DIR:-}" && -S "${XDG_RUNTIME_DIR}/bus" ]]
+}
+
+check_gnome_helper_prerequisites() {
+    local action="${1:-auto}"
+    local source_dir="${2:-}"
+    GNOME_HELPER_MISSING_PREREQUISITES=()
+    if ! is_gnome_wayland_helper_context; then
+        GNOME_HELPER_MISSING_PREREQUISITES+=("GNOME Wayland session")
+    fi
+    if ! session_bus_available; then
+        GNOME_HELPER_MISSING_PREREQUISITES+=("user session DBus")
+    fi
+    if ! command -v gnome-extensions >/dev/null 2>&1; then
+        GNOME_HELPER_MISSING_PREREQUISITES+=("gnome-extensions")
+    fi
+    if [[ "$action" == "install" || "$action" == "update" || "$action" == "auto" ]]; then
+        if ! command -v gjs >/dev/null 2>&1; then
+            GNOME_HELPER_MISSING_PREREQUISITES+=("gjs")
+        fi
+        if ! command -v gdbus >/dev/null 2>&1; then
+            GNOME_HELPER_MISSING_PREREQUISITES+=("gdbus")
+        fi
+        if [[ ! -d "$source_dir" ]]; then
+            GNOME_HELPER_MISSING_PREREQUISITES+=("$GNOME_HELPER_SOURCE_RELATIVE_PATH")
+        fi
+    elif [[ "$action" == "status" ]]; then
+        if ! command -v gdbus >/dev/null 2>&1; then
+            GNOME_HELPER_MISSING_PREREQUISITES+=("gdbus")
+        fi
+    fi
+    ((${#GNOME_HELPER_MISSING_PREREQUISITES[@]} == 0))
+}
+
+print_gnome_helper_missing_prerequisites() {
+    if ((${#GNOME_HELPER_MISSING_PREREQUISITES[@]} == 0)); then
+        return
+    fi
+    echo "⚠️  GNOME Shell helper lifecycle prerequisites are not satisfied:"
+    local item
+    for item in "${GNOME_HELPER_MISSING_PREREQUISITES[@]}"; do
+        echo "    - $item"
+    done
+    echo "    Log into a GNOME Wayland session, install the missing tools, then rerun this installer."
+}
+
+gnome_helper_info() {
+    gnome-extensions info "$GNOME_HELPER_UUID" 2>/dev/null || return 1
+}
+
+gnome_helper_info_field() {
+    local info="$1"
+    local key="$2"
+    printf '%s\n' "$info" | awk -F': ' -v target="$key" '
+        {
+            name=$1
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", name)
+            if (name == target) {
+                print $2
+                exit
+            }
+        }
+    '
+}
+
+gnome_helper_global_user_extensions_disabled() {
+    if ! command -v gsettings >/dev/null 2>&1; then
+        return 1
+    fi
+    local value
+    value="$(gsettings get org.gnome.shell disable-user-extensions 2>/dev/null || true)"
+    [[ "${value,,}" == "true" ]]
+}
+
+print_gnome_helper_global_disabled_remediation() {
+    cat <<EOF
+⚠️  GNOME user extensions are globally disabled.
+    The installer will not change this setting automatically.
+    To allow the helper, run this yourself, then log out and back in:
+      gsettings set org.gnome.shell disable-user-extensions false
+EOF
+}
+
+gnome_helper_health_state() {
+    local output=""
+    if ! output="$(gdbus call --session \
+        --dest "$GNOME_HELPER_DBUS_SERVICE" \
+        --object-path "$GNOME_HELPER_DBUS_OBJECT_PATH" \
+        --method "${GNOME_HELPER_DBUS_INTERFACE}.${GNOME_HELPER_DBUS_HEALTH_METHOD}" 2>/dev/null)"; then
+        printf '%s' "dbus_unreachable"
+        return
+    fi
+    if [[ "$output" != *"gnome_shell_extension"* ]]; then
+        printf '%s' "helper_kind_mismatch"
+        return
+    fi
+    if [[ "$output" != *"helper_protocol"* && "$output" != *"protocol"* ]]; then
+        printf '%s' "protocol_incompatible"
+        return
+    fi
+    if [[ "$output" != *"health"* && "$output" != *"healthy"* ]]; then
+        printf '%s' "malformed_payload"
+        return
+    fi
+    printf '%s' "healthy"
+}
+
+print_gnome_helper_logout_required() {
+    local action="$1"
+    echo "ℹ️  Log out and log back in before relying on the GNOME helper ${action}."
+    echo "    After logging back in, rerun this installer with '--gnome-helper-action status' to verify ACTIVE state and DBus health."
+}
+
+copy_gnome_helper_source_directory() {
+    local source_dir="$1"
+    local install_dir="$2"
+    local base_dir
+    base_dir="$(dirname "$install_dir")"
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "📝 [dry-run] Would replace '$install_dir' with source directory '$source_dir'."
+        return
+    fi
+    mkdir -p "$base_dir"
+    rm -rf "$install_dir"
+    mkdir -p "$install_dir"
+    cp -a "$source_dir"/. "$install_dir"/
+}
+
+enable_gnome_helper_extension() {
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "📝 [dry-run] Would enable GNOME Shell extension '$GNOME_HELPER_UUID'."
+        return 0
+    fi
+    gnome-extensions enable "$GNOME_HELPER_UUID"
+}
+
+disable_gnome_helper_extension() {
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "📝 [dry-run] Would disable GNOME Shell extension '$GNOME_HELPER_UUID'."
+        return 0
+    fi
+    gnome-extensions disable "$GNOME_HELPER_UUID" >/dev/null 2>&1 || true
+}
+
+print_gnome_helper_status() {
+    local source_dir="$1"
+    local install_dir
+    install_dir="$(gnome_helper_install_dir)"
+    if ! check_gnome_helper_prerequisites "status" "$source_dir"; then
+        print_gnome_helper_missing_prerequisites
+        return
+    fi
+    echo "ℹ️  GNOME Shell helper UUID: $GNOME_HELPER_UUID"
+    echo "    Install path: $install_dir"
+    if [[ ! -d "$install_dir" ]]; then
+        echo "    State: not_installed"
+        return
+    fi
+    local info
+    if ! info="$(gnome_helper_info)"; then
+        echo "    State: installed_not_discovered"
+        print_gnome_helper_logout_required "install/update"
+        return
+    fi
+    local enabled shell_state health
+    enabled="$(gnome_helper_info_field "$info" "Enabled")"
+    shell_state="$(gnome_helper_info_field "$info" "State")"
+    echo "    Enabled: ${enabled:-unknown}"
+    echo "    Shell state: ${shell_state:-unknown}"
+    if gnome_helper_global_user_extensions_disabled; then
+        echo "    State: globally_disabled"
+        print_gnome_helper_global_disabled_remediation
+        return
+    fi
+    if [[ "${enabled,,}" != "yes" ]]; then
+        echo "    State: disabled"
+        return
+    fi
+    if [[ "${shell_state,,}" != "active" ]]; then
+        echo "    State: inactive_or_error"
+        print_gnome_helper_logout_required "enable"
+        return
+    fi
+    health="$(gnome_helper_health_state)"
+    echo "    DBus health: $health"
+}
+
+run_gnome_helper_install_or_update() {
+    local action="$1"
+    local dest_dir="$2"
+    local source_dir="$3"
+    local install_dir
+    install_dir="$(gnome_helper_install_dir)"
+    if ! check_gnome_helper_prerequisites "$action" "$source_dir"; then
+        print_gnome_helper_missing_prerequisites
+        write_compositor_helper_approval "$dest_dir" 0 "prerequisites_missing"
+        return
+    fi
+
+    local verb="Install"
+    if [[ "$action" == "update" ]]; then
+        verb="Update"
+    elif [[ "$action" == "auto" && -d "$install_dir" ]]; then
+        verb="Update"
+        action="update"
+    else
+        action="install"
+    fi
+    local prompt_message="${verb} and enable ${COMPOSITOR_HELPER_LABEL:-GNOME Shell helper} at '$install_dir'?"
+    if ! prompt_yes_no_default_no "$prompt_message"; then
+        write_compositor_helper_approval "$dest_dir" 0 "declined"
+        echo "ℹ️  GNOME Shell helper ${action} declined; rerun this installer from GNOME Wayland when you want to install it."
+        return
+    fi
+
+    write_compositor_helper_approval "$dest_dir" 1 "installer_${action}"
+    copy_gnome_helper_source_directory "$source_dir" "$install_dir"
+    echo "✅ GNOME Shell helper files copied to '$install_dir'."
+
+    local info
+    if ! info="$(gnome_helper_info)"; then
+        echo "⚠️  GNOME Shell has not discovered '$GNOME_HELPER_UUID' yet."
+        print_gnome_helper_logout_required "$action"
+        return
+    fi
+
+    if gnome_helper_global_user_extensions_disabled; then
+        print_gnome_helper_global_disabled_remediation
+        return
+    fi
+
+    if enable_gnome_helper_extension; then
+        echo "✅ GNOME Shell helper enable requested."
+    else
+        echo "⚠️  GNOME Shell helper enable failed. Run 'gnome-extensions info $GNOME_HELPER_UUID' for details."
+        print_gnome_helper_logout_required "$action"
+        return
+    fi
+
+    print_gnome_helper_logout_required "$action"
+}
+
+run_gnome_helper_disable() {
+    local dest_dir="$1"
+    if ! check_gnome_helper_prerequisites "disable" ""; then
+        print_gnome_helper_missing_prerequisites
+        return
+    fi
+    if ! prompt_yes_no_default_no "Disable GNOME Shell helper '$GNOME_HELPER_UUID'?"; then
+        echo "ℹ️  GNOME Shell helper disable declined."
+        return
+    fi
+    write_compositor_helper_approval "$dest_dir" 0 "installer_disable"
+    disable_gnome_helper_extension
+    echo "✅ GNOME Shell helper disable requested."
+    print_gnome_helper_logout_required "disable"
+}
+
+run_gnome_helper_uninstall() {
+    local dest_dir="$1"
+    local install_dir
+    install_dir="$(gnome_helper_install_dir)"
+    if ! check_gnome_helper_prerequisites "uninstall" ""; then
+        print_gnome_helper_missing_prerequisites
+        return
+    fi
+    if ! prompt_yes_no_default_no "Disable and remove GNOME Shell helper directory '$install_dir'?"; then
+        echo "ℹ️  GNOME Shell helper uninstall declined."
+        return
+    fi
+    write_compositor_helper_approval "$dest_dir" 0 "installer_uninstall"
+    disable_gnome_helper_extension
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "📝 [dry-run] Would remove GNOME Shell helper directory '$install_dir'."
+    else
+        rm -rf "$install_dir"
+    fi
+    echo "✅ GNOME Shell helper uninstall requested."
+    print_gnome_helper_logout_required "uninstall"
+}
+
+handle_gnome_helper_lifecycle() {
+    local dest_dir="$1"
+    local source_dir="$2"
+    if [[ "${GNOME_HELPER_ACTION,,}" == "skip" ]]; then
+        echo "ℹ️  GNOME Shell helper lifecycle skipped by --gnome-helper-action skip."
+        return
+    fi
+    case "${GNOME_HELPER_ACTION,,}" in
+        status)
+            print_gnome_helper_status "$source_dir"
+            ;;
+        disable)
+            run_gnome_helper_disable "$dest_dir"
+            ;;
+        uninstall)
+            run_gnome_helper_uninstall "$dest_dir"
+            ;;
+        install|update|auto)
+            run_gnome_helper_install_or_update "${GNOME_HELPER_ACTION,,}" "$dest_dir" "$source_dir"
+            ;;
+    esac
+}
+
 handle_compositor_helper_guidance() {
     local dest_dir="$1"
+    local src_dir="${2:-}"
     if [[ "${COMPOSITOR_SELECTED:-0}" -ne 1 || "${COMPOSITOR_FOUND:-0}" -ne 1 ]]; then
         return
     fi
@@ -1311,6 +1693,10 @@ handle_compositor_helper_guidance() {
         for note in "${COMPOSITOR_HELPER_NOTES[@]}"; do
             echo "    Helper note: $note"
         done
+    fi
+    if is_gnome_wayland_helper_context; then
+        handle_gnome_helper_lifecycle "$dest_dir" "$(gnome_helper_source_dir "$src_dir")"
+        return
     fi
     local approved=0
     local approval_source="declined"
@@ -2487,7 +2873,7 @@ PY
 
     maybe_install_eurocaps "$dest_dir"
     handle_compositor_overrides "$dest_dir"
-    handle_compositor_helper_guidance "$dest_dir"
+    handle_compositor_helper_guidance "$dest_dir" "$src_dir"
     final_notes
     if [[ "$DRY_RUN" != true && "$ASSUME_YES" != true && -t 0 ]]; then
         read -r -p $'Install finished, hit Enter to continue...'

@@ -1112,8 +1112,8 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 | 1 | Status truthfulness and degraded fallback for missing/unhealthy helper | Completed |
 | 2 | Visibility terminology rename from `force_render` to `keep_overlay_visible` | Completed |
 | 3 | GNOME Shell extension package skeleton, metadata, and protocol constants | Completed |
-| 4 | Session-DBus helper health/version MVP and client handshake/status object | Not Started |
-| 5 | Installer lifecycle and post-install GNOME Wayland remediation | Not Started |
+| 4 | Session-DBus helper health/version MVP and client handshake/status object | Completed |
+| 5 | Installer lifecycle and post-install GNOME Wayland remediation | Completed |
 | 6 | Helper state surfaces, diagnostics, collectors, and debug overlay metrics | Not Started |
 | 7 | Helper-backed target discovery and coordinate contract | Not Started |
 | 8 | Shell-mediated presentation, attachment, stacking, and click-through behavior | Not Started |
@@ -1328,22 +1328,61 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 - Incomplete helper code cannot enable `true_overlay` without Q10 validation.
 
 ### Phase 5: Installer Lifecycle And Post-Install Remediation
-- Status: Not Started
+- Status: Completed
 - Implements Q6, Q7, and IQ4 installer authority decisions.
 - Installer detects GNOME Wayland and runs the Q6 helper install/enable flow with explicit user approval.
 - Post-install X11-to-GNOME-Wayland remediation is settings/status warning plus rerun-installer instruction, not in-settings install/uninstall buttons.
 - Risks: silently changing host configuration, stale Shell discovery, confusing approval/install/active state, unsafe cleanup.
 - Mitigations: direct user-local copy, explicit approval before mutations, user-owned global-extension remediation, logout/login requirement, and source-directory-only artifact.
 
+#### Phase 5 Implementation Notes
+- Touch points:
+  - `scripts/install_linux.sh` for helper lifecycle detection, prerequisite checks, source-directory copy, enable/disable/uninstall actions, logout/login notices, and explicit approval prompts.
+  - `scripts/install_matrix.json` for GNOME helper install-mode notes that match the new installer-owned first-pass lifecycle.
+  - `tests/test_install_linux.py` for shell/script lifecycle coverage with fake `gnome-extensions`, `gjs`, `gdbus`, and `gsettings` commands.
+  - `overlay_client/backend/status.py` and status/preference tests only for Q7 rerun-installer remediation wording when GNOME Wayland helper state is missing/unavailable.
+- Expected unchanged behavior:
+  - Missing, inactive, unreachable, or unhealthy GNOME helper remains `degraded_overlay`; Phase 5 must not enable `true_overlay`.
+  - Helper health/version/protocol remains the Phase 4 health-only contract; no target discovery or presentation behavior is added.
+  - `keep_overlay_visible` behavior and naming stay unchanged.
+  - Non-GNOME helper guidance remains advisory and records approval only; KWin/wlroots/etc. are not installed by this phase.
+- Lifecycle flow:
+  - Detect GNOME Wayland from compositor selection/session before offering helper install/update.
+  - Check prerequisites before install/enable: GNOME Shell Wayland session, user session bus, `gnome-extensions`, `gjs`, `gdbus`, and `helpers/gnome_shell_extension/`.
+  - With user approval, copy the source directory directly to `~/.local/share/gnome-shell/extensions/edmc-modern-overlay-helper@edmcmodernoverlay.github.io/`.
+  - Verify GNOME can discover the UUID with `gnome-extensions info`.
+  - Check `org.gnome.shell disable-user-extensions`; if globally disabled, print the manual `gsettings set org.gnome.shell disable-user-extensions false` remediation and do not change it automatically.
+  - Enable with `gnome-extensions enable <uuid>`, then require logout/login before final `ACTIVE` and DBus health verification.
+  - Update replaces the helper directory in place with no backup after approval; disable/uninstall only target the exact helper UUID directory and require logout/login before final verification.
+- Approval boundaries:
+  - Install, update, disable, uninstall, and any configuration-changing action require explicit approval or `--yes`.
+  - The installer never silently changes the global user-extension setting.
+- Test type selection:
+  - Shell/script tests cover installer lifecycle behavior and fake GNOME command responses.
+  - Unit tests cover pure status remediation wording.
+  - Harness tests are not required unless `load.py`, preferences wiring, or plugin/client bridge wiring changes.
+
 | Stage | Description | Status |
 | --- | --- | --- |
-| 5.1 | Extend installer to detect GNOME Wayland, prerequisites, installed path, extension discovery, and helper state | Not Started |
-| 5.2 | Add user-approved install flow: copy source directory, verify discovery, enable extension, require logout/login, then verify health after login | Not Started |
-| 5.3 | Add update flow: disable, clean replace, enable, require logout/login, verify active/version/protocol; no backup kept | Not Started |
-| 5.4 | Add disable/uninstall flow that removes only the real helper UUID directory and requires logout/login before final verification | Not Started |
-| 5.5 | Add global user-extension disabled remediation that shows instructions but does not run `gsettings set ... false` automatically | Not Started |
-| 5.6 | Add Q7 settings/status warning instructing rerun installer when user switches to GNOME Wayland after installing under X11 | Not Started |
-| 5.7 | Add installer/script tests for install, update, uninstall, global-disabled, and rerun-installer remediation paths | Not Started |
+| 5.1 | Extend installer to detect GNOME Wayland, prerequisites, installed path, extension discovery, and helper state | Completed |
+| 5.2 | Add user-approved install flow: copy source directory, verify discovery, enable extension, require logout/login, then verify health after login | Completed |
+| 5.3 | Add update flow: disable, clean replace, enable, require logout/login, verify active/version/protocol; no backup kept | Completed |
+| 5.4 | Add disable/uninstall flow that removes only the real helper UUID directory and requires logout/login before final verification | Completed |
+| 5.5 | Add global user-extension disabled remediation that shows instructions but does not run `gsettings set ... false` automatically | Completed |
+| 5.6 | Add Q7 settings/status warning instructing rerun installer when user switches to GNOME Wayland after installing under X11 | Completed |
+| 5.7 | Add installer/script tests for install, update, uninstall, global-disabled, and rerun-installer remediation paths | Completed |
+
+#### Phase 5 Execution Notes
+- Added Linux installer GNOME helper lifecycle support with `--gnome-helper-action <auto|install|update|disable|uninstall|status|skip>`.
+- GNOME Wayland lifecycle now checks session/prerequisites before helper install/enable, installs from `helpers/gnome_shell_extension/`, writes to the user-local UUID directory, and requires approval before copy/enable/disable/uninstall actions.
+- Global `org.gnome.shell disable-user-extensions=true` is detected and reported with manual remediation instructions; the installer does not change it.
+- Install/update/disable/uninstall flows require logout/login before final Shell `ACTIVE` and DBus health verification; `--gnome-helper-action status` performs the post-login status/health check.
+- Updated GNOME helper matrix notes from manual-only guidance to installer-owned user-local lifecycle.
+- Added Q7 remediation wording to status/preferences warning surfaces: missing GNOME helper tells the user to rerun the Linux installer while logged into GNOME Wayland.
+
+#### Phase 5 Tests Run
+- `overlay_client/.venv/bin/python -m pytest tests/test_install_linux.py overlay_client/tests/test_backend_status.py tests/test_preferences_panel_controller_tab.py -q` -> passed, `42 passed`.
+- `make check` -> passed; ruff and mypy passed, full pytest reported `886 passed, 21 skipped`.
 
 #### Phase 5 Exit Criteria
 - Installer is the only first-pass helper install path and follows Q6 lifecycle rules.
@@ -1513,3 +1552,4 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 - Reworked implementation phases on 2026-05-10: expanded from five broad phases to nine requirement-covered phases spanning status truthfulness, visibility rename, extension packaging, DBus health, installer lifecycle, diagnostics, target discovery, presentation/attachment, and release validation. Added a phase coverage matrix against all requirement groups.
 - Phase status, execution notes, and exact test commands now live only in each `## Phase Details` phase section. Do not add duplicate per-phase summaries in this execution log; duplicate summaries caused Phase 1-3 to drift after later commits.
 - When a phase is implemented, update that phase section only: set `Status: Completed`, mark every stage `Completed`, add/update `Execution Notes`, add/update `Tests Run`, then add one short execution-log bullet if historical context is useful.
+- Completed Phase 5 on 2026-05-10: Linux installer gained user-approved GNOME helper lifecycle support and Q7 rerun-installer remediation wording.

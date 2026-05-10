@@ -32,6 +32,13 @@ def _write_trimmed_installer(tmpdir: str) -> Path:
     return path
 
 
+def _write_fake_command(directory: Path, name: str, body: str) -> Path:
+    path = directory / name
+    path.write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + body, encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
 def test_pacman_status_check_marks_installed_and_missing() -> None:
     env = os.environ.copy()
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -314,17 +321,56 @@ echo "FOUND=${{COMPOSITOR_FOUND:-0}}"
     assert lines.get("FOUND") in {"", "0"}
 
 
-def test_helper_guidance_records_auto_approved_state() -> None:
+def test_gnome_helper_guidance_installs_user_local_extension_with_approval() -> None:
     env = os.environ.copy()
     with tempfile.TemporaryDirectory() as tmpdir:
+        tools_dir = Path(tmpdir) / "bin"
+        tools_dir.mkdir()
+        enable_marker = Path(tmpdir) / "enabled.txt"
+        _write_fake_command(
+            tools_dir,
+            "gnome-extensions",
+            f"""
+case "${{1:-}}" in
+  info)
+    echo "edmc-modern-overlay-helper@edmcmodernoverlay.github.io"
+    echo "  Enabled: No"
+    echo "  State: INITIALIZED"
+    ;;
+  enable)
+    echo "${{2:-}}" > "{enable_marker}"
+    ;;
+  disable)
+    exit 0
+    ;;
+esac
+""",
+        )
+        _write_fake_command(tools_dir, "gsettings", "echo false\n")
+        _write_fake_command(tools_dir, "gjs", "echo 'gjs 1.80.2'\n")
+        _write_fake_command(
+            tools_dir,
+            "gdbus",
+            "echo \"('{\\\"status\\\":\\\"healthy\\\",\\\"helper_kind\\\":\\\"gnome_shell_extension\\\",\\\"helper_protocol\\\":1}',)\"\n",
+        )
+        helper_source = Path(tmpdir) / "helper-source"
+        helper_source.mkdir()
+        (helper_source / "metadata.json").write_text("{}", encoding="utf-8")
+        extension_base = Path(tmpdir) / "extensions"
         installer_path = _write_trimmed_installer(tmpdir)
         dest_dir = Path(tmpdir) / "plugins" / "EDMCModernOverlay"
         (dest_dir / "overlay_client").mkdir(parents=True)
+        env["PATH"] = f"{tools_dir}:{env.get('PATH','')}"
+        env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/tmp/test-bus"
+        env["MODERN_OVERLAY_GNOME_HELPER_EXTENSION_BASE"] = str(extension_base)
+        env["MODERN_OVERLAY_GNOME_HELPER_SOURCE_DIR"] = str(helper_source)
         script = f"""
 export MODERN_OVERLAY_INSTALLER_IMPORT=1
 source "{installer_path}"
 ASSUME_YES=true
 DRY_RUN=false
+XDG_SESSION_TYPE=wayland
+XDG_CURRENT_DESKTOP=GNOME
 COMPOSITOR_SELECTED=1
 COMPOSITOR_FOUND=1
 COMPOSITOR_ID="gnome-shell"
@@ -332,7 +378,7 @@ COMPOSITOR_LABEL="GNOME Shell (Wayland)"
 COMPOSITOR_HELPER_KIND="gnome_shell_extension"
 COMPOSITOR_HELPER_LABEL="GNOME Shell extension"
 COMPOSITOR_HELPER_REQUIRED=1
-COMPOSITOR_HELPER_INSTALL_MODE="manual_enable"
+COMPOSITOR_HELPER_INSTALL_MODE="installer_user_local"
 COMPOSITOR_HELPER_NOTES=("Required helper")
 handle_compositor_helper_guidance "{dest_dir}"
 echo "DONE=1"
@@ -341,11 +387,257 @@ echo "DONE=1"
         approval_path = dest_dir / "overlay_client" / "helper_approval.json"
         assert approval_path.exists()
         approval = approval_path.read_text(encoding="utf-8")
+        installed_metadata = extension_base / "edmc-modern-overlay-helper@edmcmodernoverlay.github.io" / "metadata.json"
+        assert installed_metadata.exists()
+        assert enable_marker.read_text(encoding="utf-8").strip() == "edmc-modern-overlay-helper@edmcmodernoverlay.github.io"
     lines = dict(line.split("=", 1) for line in output.strip().splitlines() if "=" in line)
     assert lines.get("DONE") == "1"
     assert '"approved": true' in approval
-    assert '"approval_source": "assume_yes"' in approval
+    assert '"approval_source": "installer_install"' in approval
     assert '"helper_kind": "gnome_shell_extension"' in approval
+
+
+def test_gnome_helper_install_reports_global_disabled_without_enabling() -> None:
+    env = os.environ.copy()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tools_dir = Path(tmpdir) / "bin"
+        tools_dir.mkdir()
+        enable_marker = Path(tmpdir) / "enabled.txt"
+        _write_fake_command(
+            tools_dir,
+            "gnome-extensions",
+            f"""
+case "${{1:-}}" in
+  info)
+    echo "edmc-modern-overlay-helper@edmcmodernoverlay.github.io"
+    echo "  Enabled: No"
+    echo "  State: INITIALIZED"
+    ;;
+  enable)
+    echo "${{2:-}}" > "{enable_marker}"
+    ;;
+  disable)
+    exit 0
+    ;;
+esac
+""",
+        )
+        _write_fake_command(tools_dir, "gsettings", "echo true\n")
+        _write_fake_command(tools_dir, "gjs", "echo 'gjs 1.80.2'\n")
+        _write_fake_command(tools_dir, "gdbus", "exit 0\n")
+        helper_source = Path(tmpdir) / "helper-source"
+        helper_source.mkdir()
+        (helper_source / "metadata.json").write_text("{}", encoding="utf-8")
+        extension_base = Path(tmpdir) / "extensions"
+        installer_path = _write_trimmed_installer(tmpdir)
+        dest_dir = Path(tmpdir) / "plugins" / "EDMCModernOverlay"
+        (dest_dir / "overlay_client").mkdir(parents=True)
+        env["PATH"] = f"{tools_dir}:{env.get('PATH','')}"
+        env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/tmp/test-bus"
+        env["MODERN_OVERLAY_GNOME_HELPER_EXTENSION_BASE"] = str(extension_base)
+        env["MODERN_OVERLAY_GNOME_HELPER_SOURCE_DIR"] = str(helper_source)
+        script = f"""
+export MODERN_OVERLAY_INSTALLER_IMPORT=1
+source "{installer_path}"
+ASSUME_YES=true
+DRY_RUN=false
+XDG_SESSION_TYPE=wayland
+XDG_CURRENT_DESKTOP=GNOME
+COMPOSITOR_SELECTED=1
+COMPOSITOR_FOUND=1
+COMPOSITOR_ID="gnome-shell"
+COMPOSITOR_LABEL="GNOME Shell (Wayland)"
+COMPOSITOR_HELPER_KIND="gnome_shell_extension"
+COMPOSITOR_HELPER_LABEL="GNOME Shell extension"
+COMPOSITOR_HELPER_REQUIRED=1
+COMPOSITOR_HELPER_INSTALL_MODE="installer_user_local"
+        handle_compositor_helper_guidance "{dest_dir}"
+echo "DONE=1"
+"""
+        output = _run_bash(script, env)
+        assert not enable_marker.exists()
+    assert "gsettings set org.gnome.shell disable-user-extensions false" in output
+
+
+def test_gnome_helper_update_replaces_existing_source_directory() -> None:
+    env = os.environ.copy()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tools_dir = Path(tmpdir) / "bin"
+        tools_dir.mkdir()
+        enable_marker = Path(tmpdir) / "enabled.txt"
+        _write_fake_command(
+            tools_dir,
+            "gnome-extensions",
+            f"""
+case "${{1:-}}" in
+  info)
+    echo "edmc-modern-overlay-helper@edmcmodernoverlay.github.io"
+    echo "  Enabled: Yes"
+    echo "  State: ACTIVE"
+    ;;
+  enable)
+    echo "${{2:-}}" > "{enable_marker}"
+    ;;
+  disable)
+    exit 0
+    ;;
+esac
+""",
+        )
+        _write_fake_command(tools_dir, "gsettings", "echo false\n")
+        _write_fake_command(tools_dir, "gjs", "echo 'gjs 1.80.2'\n")
+        _write_fake_command(tools_dir, "gdbus", "exit 0\n")
+        helper_source = Path(tmpdir) / "helper-source"
+        helper_source.mkdir()
+        (helper_source / "metadata.json").write_text('{"version": 2}', encoding="utf-8")
+        extension_base = Path(tmpdir) / "extensions"
+        helper_dir = extension_base / "edmc-modern-overlay-helper@edmcmodernoverlay.github.io"
+        helper_dir.mkdir(parents=True)
+        (helper_dir / "metadata.json").write_text('{"version": 1}', encoding="utf-8")
+        (helper_dir / "stale.js").write_text("// old file\n", encoding="utf-8")
+        installer_path = _write_trimmed_installer(tmpdir)
+        dest_dir = Path(tmpdir) / "plugins" / "EDMCModernOverlay"
+        (dest_dir / "overlay_client").mkdir(parents=True)
+        env["PATH"] = f"{tools_dir}:{env.get('PATH','')}"
+        env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/tmp/test-bus"
+        env["MODERN_OVERLAY_GNOME_HELPER_EXTENSION_BASE"] = str(extension_base)
+        env["MODERN_OVERLAY_GNOME_HELPER_SOURCE_DIR"] = str(helper_source)
+        script = f"""
+export MODERN_OVERLAY_INSTALLER_IMPORT=1
+source "{installer_path}"
+ASSUME_YES=true
+DRY_RUN=false
+GNOME_HELPER_ACTION=update
+XDG_SESSION_TYPE=wayland
+XDG_CURRENT_DESKTOP=GNOME
+COMPOSITOR_SELECTED=1
+COMPOSITOR_FOUND=1
+COMPOSITOR_ID="gnome-shell"
+COMPOSITOR_LABEL="GNOME Shell (Wayland)"
+COMPOSITOR_HELPER_KIND="gnome_shell_extension"
+COMPOSITOR_HELPER_LABEL="GNOME Shell extension"
+COMPOSITOR_HELPER_REQUIRED=1
+handle_compositor_helper_guidance "{dest_dir}"
+echo "DONE=1"
+"""
+        output = _run_bash(script, env)
+        assert (helper_dir / "metadata.json").read_text(encoding="utf-8") == '{"version": 2}'
+        assert not (helper_dir / "stale.js").exists()
+        assert enable_marker.read_text(encoding="utf-8").strip() == "edmc-modern-overlay-helper@edmcmodernoverlay.github.io"
+    lines = dict(line.split("=", 1) for line in output.strip().splitlines() if "=" in line)
+    assert lines.get("DONE") == "1"
+
+
+def test_gnome_helper_uninstall_removes_only_helper_uuid_directory() -> None:
+    env = os.environ.copy()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tools_dir = Path(tmpdir) / "bin"
+        tools_dir.mkdir()
+        disable_marker = Path(tmpdir) / "disabled.txt"
+        _write_fake_command(
+            tools_dir,
+            "gnome-extensions",
+            f"""
+case "${{1:-}}" in
+  info)
+    echo "edmc-modern-overlay-helper@edmcmodernoverlay.github.io"
+    echo "  Enabled: Yes"
+    echo "  State: ACTIVE"
+    ;;
+  disable)
+    echo "${{2:-}}" > "{disable_marker}"
+    ;;
+  enable)
+    exit 0
+    ;;
+esac
+""",
+        )
+        extension_base = Path(tmpdir) / "extensions"
+        helper_dir = extension_base / "edmc-modern-overlay-helper@edmcmodernoverlay.github.io"
+        other_dir = extension_base / "other-extension@example.test"
+        helper_dir.mkdir(parents=True)
+        other_dir.mkdir()
+        (helper_dir / "metadata.json").write_text("{}", encoding="utf-8")
+        installer_path = _write_trimmed_installer(tmpdir)
+        dest_dir = Path(tmpdir) / "plugins" / "EDMCModernOverlay"
+        (dest_dir / "overlay_client").mkdir(parents=True)
+        env["PATH"] = f"{tools_dir}:{env.get('PATH','')}"
+        env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/tmp/test-bus"
+        env["MODERN_OVERLAY_GNOME_HELPER_EXTENSION_BASE"] = str(extension_base)
+        script = f"""
+export MODERN_OVERLAY_INSTALLER_IMPORT=1
+source "{installer_path}"
+ASSUME_YES=true
+DRY_RUN=false
+GNOME_HELPER_ACTION=uninstall
+XDG_SESSION_TYPE=wayland
+XDG_CURRENT_DESKTOP=GNOME
+COMPOSITOR_SELECTED=1
+COMPOSITOR_FOUND=1
+COMPOSITOR_ID="gnome-shell"
+COMPOSITOR_LABEL="GNOME Shell (Wayland)"
+COMPOSITOR_HELPER_KIND="gnome_shell_extension"
+COMPOSITOR_HELPER_LABEL="GNOME Shell extension"
+COMPOSITOR_HELPER_REQUIRED=1
+        handle_compositor_helper_guidance "{dest_dir}"
+echo "DONE=1"
+"""
+        output = _run_bash(script, env)
+        assert not helper_dir.exists()
+        assert other_dir.exists()
+        assert disable_marker.read_text(encoding="utf-8").strip() == "edmc-modern-overlay-helper@edmcmodernoverlay.github.io"
+    lines = dict(line.split("=", 1) for line in output.strip().splitlines() if "=" in line)
+    assert lines.get("DONE") == "1"
+
+
+def test_gnome_helper_status_reports_dbus_health_when_active() -> None:
+    env = os.environ.copy()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tools_dir = Path(tmpdir) / "bin"
+        tools_dir.mkdir()
+        _write_fake_command(
+            tools_dir,
+            "gnome-extensions",
+            """
+echo "edmc-modern-overlay-helper@edmcmodernoverlay.github.io"
+echo "  Enabled: Yes"
+echo "  State: ACTIVE"
+""",
+        )
+        _write_fake_command(tools_dir, "gsettings", "echo false\n")
+        _write_fake_command(
+            tools_dir,
+            "gdbus",
+            "echo \"('{\\\"status\\\":\\\"healthy\\\",\\\"helper_kind\\\":\\\"gnome_shell_extension\\\",\\\"helper_protocol\\\":1}',)\"\n",
+        )
+        extension_base = Path(tmpdir) / "extensions"
+        helper_dir = extension_base / "edmc-modern-overlay-helper@edmcmodernoverlay.github.io"
+        helper_dir.mkdir(parents=True)
+        installer_path = _write_trimmed_installer(tmpdir)
+        dest_dir = Path(tmpdir) / "plugins" / "EDMCModernOverlay"
+        (dest_dir / "overlay_client").mkdir(parents=True)
+        env["PATH"] = f"{tools_dir}:{env.get('PATH','')}"
+        env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/tmp/test-bus"
+        env["MODERN_OVERLAY_GNOME_HELPER_EXTENSION_BASE"] = str(extension_base)
+        script = f"""
+export MODERN_OVERLAY_INSTALLER_IMPORT=1
+source "{installer_path}"
+GNOME_HELPER_ACTION=status
+XDG_SESSION_TYPE=wayland
+XDG_CURRENT_DESKTOP=GNOME
+COMPOSITOR_SELECTED=1
+COMPOSITOR_FOUND=1
+COMPOSITOR_ID="gnome-shell"
+COMPOSITOR_LABEL="GNOME Shell (Wayland)"
+COMPOSITOR_HELPER_KIND="gnome_shell_extension"
+COMPOSITOR_HELPER_LABEL="GNOME Shell extension"
+COMPOSITOR_HELPER_REQUIRED=1
+handle_compositor_helper_guidance "{dest_dir}"
+echo "DONE=1"
+"""
+        output = _run_bash(script, env)
+    assert "DBus health: healthy" in output
 
 
 def test_helper_guidance_records_declined_state_without_installing() -> None:
