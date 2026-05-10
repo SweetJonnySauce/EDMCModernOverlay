@@ -1114,7 +1114,7 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 | 3 | GNOME Shell extension package skeleton, metadata, and protocol constants | Completed |
 | 4 | Session-DBus helper health/version MVP and client handshake/status object | Completed |
 | 5 | Installer lifecycle and post-install GNOME Wayland remediation | Completed |
-| 6 | Helper state surfaces, diagnostics, collectors, and debug overlay metrics | Not Started |
+| 6 | Helper state surfaces, diagnostics, collectors, and debug overlay metrics | Completed |
 | 7 | Helper-backed target discovery and coordinate contract | Not Started |
 | 8 | Shell-mediated presentation, attachment, stacking, and click-through behavior | Not Started |
 | 9 | Release validation, docs, privacy/security closeout, and support claim gate | Not Started |
@@ -1395,21 +1395,57 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 - Tests prove approval/install/enabled/active/healthy states are distinct.
 
 ### Phase 6: Diagnostics, Collectors, And Debug Overlay Metrics
-- Status: Not Started
+- Status: Completed
 - Implements Q8 across all required surfaces.
 - Renders one client-authoritative helper/backend status object into preferences, logs, EDMC/plugin bridge output, `utils/collect_overlay_debug_*`, and live debug overlay metrics.
 - Risks: status drift between UI/logs/collectors; debug output leaking too much host data; support output missing host facts when client is down.
 - Mitigations: stable field names, compact display text, collector host facts, and Q11 redaction rules.
 
+#### Phase 6 Implementation Notes
+- Touch points:
+  - `overlay_client/backend/status.py` remains the authoritative helper/backend status formatter. Phase 6 extends `BackendSelectionStatus.to_payload()` / `build_status_report()` instead of introducing a parallel status model.
+  - Preferences/settings status text continues to use `format_status_ui_summary()` and `format_status_ui_warning()`.
+  - Overlay client and EDMC/plugin bridge logs continue to use `format_status_report_line()` for the grep-friendly one-line summary.
+  - `utils/collect_overlay_debug_linux.sh` adds GNOME/session/helper host facts and parses the latest backend status line from overlay logs when available.
+  - `utils/collect_overlay_debug_windows.ps1` reports GNOME helper as `not_required` and does not probe GNOME.
+  - `overlay_client/debug_cycle_overlay.py` renders backend/helper status and the experimental flag in the live debug metrics overlay.
+- Expected unchanged behavior:
+  - Missing, inactive, unreachable, or health-only GNOME helper remains `degraded_overlay`; no Phase 6 diagnostic field may enable `true_overlay`.
+  - No target discovery, placement, attachment, stacking, click-through, installer lifecycle, or `keep_overlay_visible` behavior changes.
+  - Existing backend identity and fallback fields remain stable.
+- Stable Phase 6 fields:
+  - Backend: `family`, `instance`, `classification`, `fallback_from`, `fallback_reason`, `manual_override`, `override_error`, `source`, `warning_required`.
+  - Helper: `helper`, `state`, `required`, `installed`, `enabled`, `available`, `approved`, `healthy`, `version`, `protocol`, `capabilities`, `detail`, plus compact `helpers` and grep-friendly `helper_details` summaries.
+  - Experimental: `gnome_helper_experimental`, defaulting to `false` unless a future payload explicitly sets it.
+  - Linux collector host facts: session type, desktop, GNOME Shell version, helper UUID, abbreviated user-local install path, installed/discovered/enabled/state, global user-extension disabled state, and DBus health result.
+- Privacy/redaction boundaries:
+  - Default collectors do not dump process lists or broad window lists.
+  - Collectors avoid sensitive environment dumps and keep existing narrowly scoped environment keys.
+  - User-home paths are abbreviated to `~` where printed.
+  - Any future broad debug escalation must be opt-in and documented separately; Phase 6 does not add it.
+- Test type selection:
+  - Unit tests cover status report fields, UI summary text, and debug overlay backend lines.
+  - Script tests cover Linux collector GNOME/helper output using fake GNOME commands.
+  - Static/script checks cover Windows collector `not_required` behavior unless PowerShell is available in the local test environment.
+  - Harness tests are only required if `load.py`, preferences lifecycle wiring, or plugin/client bridge lifecycle code changes.
+
 | Stage | Description | Status |
 | --- | --- | --- |
-| 6.1 | Define and wire the authoritative helper/backend status object with Q8 stable field names | Not Started |
-| 6.2 | Update preferences/settings and user-facing backend summary with compact helper state/action text | Not Started |
-| 6.3 | Add stable grep-friendly overlay client and EDMC/plugin bridge log lines | Not Started |
-| 6.4 | Update `utils/collect_overlay_debug_linux.sh` to collect status line plus GNOME/session/extension/DBus host facts | Not Started |
-| 6.5 | Update `utils/collect_overlay_debug_windows.ps1` to report GNOME helper `not_required` without probing GNOME | Not Started |
-| 6.6 | Add live debug overlay metrics lines for backend/classification/helper state and experimental flag | Not Started |
-| 6.7 | Add tests or scripted checks for required status fields and redaction-sensitive defaults | Not Started |
+| 6.1 | Define and wire the authoritative helper/backend status object with Q8 stable field names | Completed |
+| 6.2 | Update preferences/settings and user-facing backend summary with compact helper state/action text | Completed |
+| 6.3 | Add stable grep-friendly overlay client and EDMC/plugin bridge log lines | Completed |
+| 6.4 | Update `utils/collect_overlay_debug_linux.sh` to collect status line plus GNOME/session/extension/DBus host facts | Completed |
+| 6.5 | Update `utils/collect_overlay_debug_windows.ps1` to report GNOME helper `not_required` without probing GNOME | Completed |
+| 6.6 | Add live debug overlay metrics lines for backend/classification/helper state and experimental flag | Completed |
+| 6.7 | Add tests or scripted checks for required status fields and redaction-sensitive defaults | Completed |
+
+#### Phase 6 Tests Run
+- `bash -n utils/collect_overlay_debug_linux.sh` -> passed.
+- `overlay_client/.venv/bin/python -m py_compile overlay_client/backend/status.py overlay_client/debug_cycle_overlay.py` -> passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_status.py overlay_client/tests/test_debug_overlay_view.py tests/test_preferences_panel_controller_tab.py tests/test_debug_collectors.py -q` -> passed, `30 passed`.
+- `overlay_client/.venv/bin/python -m pytest tests/test_debug_collectors.py -q` -> passed, `2 passed`.
+- `git diff --check` -> passed.
+- `make check` -> passed; ruff and mypy passed, full pytest reported `888 passed, 21 skipped`.
 
 #### Phase 6 Exit Criteria
 - Preferences, logs, collectors, and debug metrics agree on helper state.

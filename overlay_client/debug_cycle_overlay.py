@@ -229,6 +229,8 @@ class DebugOverlayView:
         support_label = str(report.get("support_label") or "unknown")
         source = str(report.get("source") or "unknown")
         classification = str(report.get("classification") or "unknown")
+        fallback_from = str(report.get("fallback_from") or "")
+        fallback_reason = str(report.get("fallback_reason") or "")
         lines = [
             "Backend:",
             f"  choice={support_label}",
@@ -236,7 +238,50 @@ class DebugOverlayView:
         ]
         if classification and classification != "unknown":
             lines.append(f"  mode={classification}")
+        if fallback_from or fallback_reason:
+            lines.append(
+                "  fallback_from={} reason={}".format(
+                    fallback_from or "none",
+                    fallback_reason or "none",
+                )
+            )
+        helper_details = report.get("helper_details")
+        if isinstance(helper_details, list) and helper_details:
+            for raw_detail in helper_details:
+                if not isinstance(raw_detail, Mapping):
+                    continue
+                helper = str(raw_detail.get("helper") or "unknown")
+                version = str(raw_detail.get("version") or "none")
+                protocol = str(raw_detail.get("protocol") or "none")
+                state = str(raw_detail.get("state") or "unknown")
+                capabilities = raw_detail.get("capabilities")
+                line = (
+                    f"  helper={helper}"
+                    f" state={state}"
+                    f" required={DebugOverlayView._debug_bool(raw_detail.get('required'))}"
+                    f" healthy={DebugOverlayView._debug_bool(raw_detail.get('healthy'))}"
+                    f" available={DebugOverlayView._debug_bool(raw_detail.get('available'))}"
+                    f" installed={DebugOverlayView._debug_bool(raw_detail.get('installed'))}"
+                    f" enabled={DebugOverlayView._debug_bool(raw_detail.get('enabled'))}"
+                    f" approved={DebugOverlayView._debug_bool(raw_detail.get('approved'))}"
+                    f" version={version}"
+                    f" protocol={protocol}"
+                )
+                if isinstance(capabilities, list) and capabilities:
+                    line += " capabilities={}".format(",".join(str(item) for item in capabilities if str(item)))
+                lines.append(line)
+        else:
+            lines.append("  helper=none")
+        lines.append(
+            "  gnome_helper_experimental={}".format(
+                DebugOverlayView._debug_bool(report.get("gnome_helper_experimental"))
+            )
+        )
         return lines
+
+    @staticmethod
+    def _debug_bool(value: object) -> str:
+        return "true" if bool(value) else "false"
 
     @staticmethod
     def _format_env_override_lines(env_override_debug: Optional[Mapping[str, object]]) -> List[str]:

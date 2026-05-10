@@ -189,6 +189,8 @@ def test_debug_overlay_includes_backend_choice_and_source() -> None:
     assert "  choice=native_wayland / kwin_wayland" in painter.texts
     assert "  source=client_runtime" in painter.texts
     assert "  mode=true_overlay" in painter.texts
+    assert "  helper=none" in painter.texts
+    assert "  gnome_helper_experimental=false" in painter.texts
 
 
 def test_debug_overlay_backend_lines_do_not_show_true_overlay_for_unavailable_gnome_helper() -> None:
@@ -216,4 +218,10 @@ def test_debug_overlay_backend_lines_do_not_show_true_overlay_for_unavailable_gn
 
     assert "  choice=native_wayland / gnome_shell_wayland" in lines
     assert "  mode=degraded_overlay" in lines
+    assert "  fallback_from=compositor_helper / gnome_shell_wayland reason=missing_helper" in lines
+    assert (
+        "  helper=gnome_shell_extension state=inactive required=true healthy=false "
+        "available=false installed=false enabled=false approved=false version=none protocol=none"
+    ) in lines
+    assert "  gnome_helper_experimental=false" in lines
     assert all("true_overlay" not in line for line in lines)

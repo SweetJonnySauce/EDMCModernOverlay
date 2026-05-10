@@ -369,7 +369,8 @@ def test_backend_status_refresh_does_not_show_true_overlay_for_unavailable_gnome
 
     assert changed is True
     assert panel._backend_status_var.value == (
-        "Backend: GNOME Wayland | Mode: Degraded overlay | Source: Live runtime"
+        "Backend: GNOME Wayland | Mode: Degraded overlay | Source: Live runtime | "
+        "Helper: GNOME Shell extension inactive"
     )
     assert "True overlay" not in panel._backend_status_var.value
     assert panel._backend_warning_var.value == (

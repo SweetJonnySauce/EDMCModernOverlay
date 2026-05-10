@@ -232,6 +232,11 @@ OVERLAY_CLIENT_DIR="${ROOT_DIR}/overlay_client"
 SETTINGS_PATH="${ROOT_DIR}/overlay_settings.json"
 PORT_PATH="${ROOT_DIR}/port.json"
 ENV_OVERRIDES_PATH="${OVERLAY_CLIENT_DIR}/env_overrides.json"
+GNOME_HELPER_UUID="edmc-modern-overlay-helper@edmcmodernoverlay.github.io"
+GNOME_HELPER_DBUS_SERVICE="org.edmc.ModernOverlay.Helper"
+GNOME_HELPER_DBUS_OBJECT_PATH="/org/edmc/ModernOverlay/Helper"
+GNOME_HELPER_DBUS_INTERFACE="org.edmc.ModernOverlay.Helper"
+GNOME_HELPER_DBUS_HEALTH_METHOD="GetHealth"
 
 print_header() {
     printf '\n=== %s ===\n' "$1"
@@ -286,6 +291,11 @@ print_command_availability() {
         'wmctrl|-V'
         'xwininfo|-version'
         'xprop|-version'
+        'gnome-shell|--version'
+        'gnome-extensions|'
+        'gsettings|'
+        'gjs|--version'
+        'gdbus|'
     )
 
     for entry in "${entries[@]}"; do
@@ -537,6 +547,125 @@ check_wayland_helpers() {
             printf '%s: <not found>\n' "$cmd"
         fi
     done
+}
+
+print_gnome_wayland_helper_status() {
+    print_header "GNOME Wayland Helper"
+    printf 'session_type=%s\n' "${XDG_SESSION_TYPE:-<unset>}"
+    printf 'current_desktop=%s\n' "${XDG_CURRENT_DESKTOP:-<unset>}"
+    printf 'helper=gnome_shell_extension\n'
+    local desktop_lower="${XDG_CURRENT_DESKTOP:-}"
+    desktop_lower="${desktop_lower,,}"
+    if [[ "${XDG_SESSION_TYPE:-}" == "wayland" && "$desktop_lower" == *gnome* ]]; then
+        printf 'required=true\n'
+    else
+        printf 'required=false\n'
+    fi
+    printf 'gnome_helper_experimental=false\n'
+
+    if command -v gnome-shell >/dev/null 2>&1; then
+        printf 'gnome_shell_version=%s\n' "$(gnome-shell --version 2>/dev/null || echo '<unavailable>')"
+    else
+        printf 'gnome_shell_version=<not_found>\n'
+    fi
+
+    local data_home="${XDG_DATA_HOME:-${HOME}/.local/share}"
+    local extension_path="${data_home}/gnome-shell/extensions/${GNOME_HELPER_UUID}"
+    printf 'helper_uuid=%s\n' "$GNOME_HELPER_UUID"
+    printf 'helper_install_path=%s\n' "$(abbrev_path "$extension_path")"
+    if [[ -d "$extension_path" ]]; then
+        printf 'helper_installed=true\n'
+    else
+        printf 'helper_installed=false\n'
+    fi
+
+    if command -v gsettings >/dev/null 2>&1; then
+        local disabled
+        disabled="$(gsettings get org.gnome.shell disable-user-extensions 2>/dev/null || echo '<unavailable>')"
+        printf 'user_extensions_disabled=%s\n' "$disabled"
+    else
+        printf 'user_extensions_disabled=<gsettings_not_found>\n'
+    fi
+
+    if command -v gnome-extensions >/dev/null 2>&1; then
+        local info
+        local status
+        info="$(gnome-extensions info "$GNOME_HELPER_UUID" 2>&1)"
+        status=$?
+        if [[ $status -eq 0 ]]; then
+            local enabled
+            local state
+            enabled="$(printf '%s\n' "$info" | awk -F': ' '/^[[:space:]]*Enabled:/ {print $2; exit}')"
+            state="$(printf '%s\n' "$info" | awk -F': ' '/^[[:space:]]*State:/ {print $2; exit}')"
+            printf 'helper_discovered=true\n'
+            printf 'helper_enabled=%s\n' "${enabled:-<unknown>}"
+            printf 'helper_state=%s\n' "${state:-<unknown>}"
+        else
+            printf 'helper_discovered=false\n'
+            printf 'helper_enabled=<unknown>\n'
+            printf 'helper_state=<unknown>\n'
+        fi
+    else
+        printf 'helper_discovered=<gnome_extensions_not_found>\n'
+        printf 'helper_enabled=<unknown>\n'
+        printf 'helper_state=<unknown>\n'
+    fi
+
+    if command -v gdbus >/dev/null 2>&1; then
+        local health_output
+        local status
+        health_output="$(gdbus call --session \
+            --dest "$GNOME_HELPER_DBUS_SERVICE" \
+            --object-path "$GNOME_HELPER_DBUS_OBJECT_PATH" \
+            --method "${GNOME_HELPER_DBUS_INTERFACE}.${GNOME_HELPER_DBUS_HEALTH_METHOD}" 2>&1)"
+        status=$?
+        if [[ $status -ne 0 ]]; then
+            if [[ "$health_output" == *ServiceUnknown* ]]; then
+                printf 'dbus_health=missing_service\n'
+            else
+                printf 'dbus_health=dbus_unreachable\n'
+            fi
+        elif command -v python3 >/dev/null 2>&1; then
+            if ! python3 - "$health_output" <<'PY'
+import ast
+import json
+import sys
+
+raw = sys.argv[1]
+try:
+    parsed = ast.literal_eval(raw)
+    payload = parsed[0] if isinstance(parsed, tuple) and parsed else raw
+    if not isinstance(payload, str):
+        raise ValueError("payload is not a string")
+    data = json.loads(payload)
+except Exception:
+    print("dbus_health=malformed_payload")
+    raise SystemExit(0)
+
+status = str(data.get("status") or data.get("state") or "unknown")
+helper_kind = str(data.get("helper_kind") or "unknown")
+version = str(data.get("version") or data.get("helper_version") or "none")
+protocol = data.get("protocol", data.get("helper_protocol", "none"))
+capabilities = data.get("capabilities")
+if isinstance(capabilities, list):
+    capability_text = ",".join(str(item) for item in capabilities if str(item))
+else:
+    capability_text = "none"
+print(f"dbus_health={status}")
+print(f"dbus_helper_kind={helper_kind}")
+print(f"dbus_helper_version={version}")
+print(f"dbus_helper_protocol={protocol}")
+print(f"dbus_helper_capabilities={capability_text or 'none'}")
+PY
+            then
+                printf 'dbus_health=malformed_payload\n'
+            fi
+        else
+            printf 'dbus_health=payload_available\n'
+        fi
+    else
+        printf 'dbus_health=<gdbus_not_found>\n'
+    fi
 }
 
 print_monitor_info() {
@@ -1015,6 +1144,14 @@ if backend_info:
     helpers = backend_summary.get("helpers", "none")
     if helpers != "none":
         lines.append(f"  helpers={helpers}")
+    helper_details = backend_summary.get("helper_details", "none")
+    if helper_details != "none":
+        lines.append(f"  helper_details={helper_details}")
+    lines.append(
+        "  gnome_helper_experimental={}".format(
+            backend_summary.get("gnome_helper_experimental", "false")
+        )
+    )
 else:
     lines.append("  selected=<unavailable>")
 if backend_mismatch_info:
@@ -1242,6 +1379,7 @@ check_required_packages
 check_virtualenv
 check_python_modules
 check_wayland_helpers
+print_gnome_wayland_helper_status
 print_debug_overlay_snapshot
 dump_json "overlay_settings.json" "$SETTINGS_PATH"
 print_env_overrides

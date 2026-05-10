@@ -59,6 +59,7 @@ class BackendSelectionStatus:
     review_reasons: tuple[str, ...] = field(default_factory=tuple)
     notes: tuple[str, ...] = field(default_factory=tuple)
     shadow_mode: bool = False
+    gnome_helper_experimental: bool = False
 
     @property
     def uses_fallback(self) -> bool:
@@ -97,6 +98,7 @@ class BackendSelectionStatus:
             "review_reasons": list(self.review_reasons),
             "notes": list(self.notes),
             "shadow_mode": self.shadow_mode,
+            "gnome_helper_experimental": self.gnome_helper_experimental,
         }
         if self.fallback_from is not None:
             payload["fallback_from"] = self.fallback_from.to_payload()
@@ -132,6 +134,22 @@ def build_status_report(status: BackendSelectionStatus | Mapping[str, object]) -
             )
             for state in subject.helper_states
         ]
+        helper_details = [
+            _helper_detail_payload(
+                helper=state.helper.value,
+                required=state.required,
+                installed=state.installed,
+                enabled=state.enabled,
+                approved=state.approved,
+                version=state.version,
+                detail=state.detail,
+                capabilities=(),
+                protocol="",
+                state="",
+                healthy=None,
+            )
+            for state in subject.helper_states
+        ]
         helper_unavailable = [
             state.helper.value for state in subject.helper_states if state.required and not state.available
         ]
@@ -141,6 +159,7 @@ def build_status_report(status: BackendSelectionStatus | Mapping[str, object]) -
         review_required = bool(subject.review_required)
         review_reasons = list(subject.review_reasons)
         source = "plugin_hint" if subject.shadow_mode else "client_runtime"
+        gnome_helper_experimental = bool(subject.gnome_helper_experimental)
     else:
         selected_backend = subject.get("selected_backend")
         if not isinstance(selected_backend, Mapping):
@@ -168,6 +187,7 @@ def build_status_report(status: BackendSelectionStatus | Mapping[str, object]) -
             review_reasons = []
         source = "plugin_hint" if bool(subject.get("shadow_mode")) else "client_runtime"
         helper_states = []
+        helper_details = []
         helper_unavailable = []
         helper_optional_unavailable = []
         for raw_state in subject.get("helper_states", []) if isinstance(subject, Mapping) else []:
@@ -190,6 +210,26 @@ def build_status_report(status: BackendSelectionStatus | Mapping[str, object]) -
                     version=str(raw_state.get("version") or ""),
                 )
             )
+            helper_details.append(
+                _helper_detail_payload(
+                    helper=helper_name,
+                    required=required,
+                    installed=bool(raw_state.get("installed")),
+                    enabled=bool(raw_state.get("enabled")),
+                    approved=bool(raw_state.get("approved")),
+                    version=str(raw_state.get("version") or ""),
+                    detail=str(raw_state.get("detail") or ""),
+                    capabilities=_string_list(raw_state.get("capabilities")),
+                    protocol=raw_state.get("protocol", raw_state.get("helper_protocol", "")),
+                    state=str(raw_state.get("state") or ""),
+                    healthy=raw_state.get("healthy"),
+                )
+            )
+        gnome_helper_experimental = _bool_from_status(
+            subject.get("gnome_helper_experimental"),
+            subject.get("experimental_flags"),
+            "gnome_helper_experimental",
+        )
     classification = _effective_classification(
         instance=instance,
         classification=classification,
@@ -216,8 +256,10 @@ def build_status_report(status: BackendSelectionStatus | Mapping[str, object]) -
         "review_required": review_required,
         "review_reasons": review_reasons,
         "helper_states": helper_states,
+        "helper_details": helper_details,
         "helper_unavailable": helper_unavailable,
         "helper_optional_unavailable": helper_optional_unavailable,
+        "gnome_helper_experimental": gnome_helper_experimental,
         "warning_required": warning_required,
     }
     report["summary"] = format_status_report_line(report)
@@ -235,6 +277,16 @@ def format_status_report_line(status: BackendSelectionStatus | Mapping[str, obje
     helper_token = "none"
     if isinstance(helper_states, list) and helper_states:
         helper_token = ",".join(str(item) for item in helper_states if str(item))
+    helper_details = report.get("helper_details")
+    helper_detail_token = "none"
+    if isinstance(helper_details, list) and helper_details:
+        detail_items = [
+            _format_helper_detail_summary(raw_detail)
+            for raw_detail in helper_details
+            if isinstance(raw_detail, Mapping)
+        ]
+        if detail_items:
+            helper_detail_token = ",".join(detail_items)
     review_reasons = report.get("review_reasons")
     review_token = "none"
     if isinstance(review_reasons, list) and review_reasons:
@@ -249,7 +301,9 @@ def format_status_report_line(status: BackendSelectionStatus | Mapping[str, obje
         f"override_error={_token_value(report.get('override_error'))} "
         f"review_required={'true' if bool(report.get('review_required')) else 'false'} "
         f"review_reasons={review_token} "
-        f"helpers={helper_token}"
+        f"helpers={helper_token} "
+        f"helper_details={helper_detail_token} "
+        f"gnome_helper_experimental={'true' if bool(report.get('gnome_helper_experimental')) else 'false'}"
     )
 
 
@@ -267,6 +321,9 @@ def format_status_ui_summary(status: BackendSelectionStatus | Mapping[str, objec
         summary = f"{summary} | Overlay backend: {_ui_backend_override_label(manual_override)}"
     elif override_error:
         summary = f"{summary} | Overlay backend: invalid ({override_error})"
+    helper_summary = _ui_helper_summary(report)
+    if helper_summary:
+        summary = f"{summary} | Helper: {helper_summary}"
     return summary
 
 
@@ -443,6 +500,29 @@ def _ui_source_label(value: str) -> str:
     return labels.get(value, value or "unknown")
 
 
+def _ui_helper_summary(report: Mapping[str, object]) -> str:
+    details = report.get("helper_details")
+    if not isinstance(details, list):
+        return ""
+    labels: list[str] = []
+    for raw_detail in details:
+        if not isinstance(raw_detail, Mapping):
+            continue
+        helper = _ui_helper_label(str(raw_detail.get("helper") or ""))
+        if helper == "unknown helper":
+            continue
+        available = bool(raw_detail.get("available"))
+        required = bool(raw_detail.get("required"))
+        if available:
+            state = "available"
+        elif required:
+            state = "inactive"
+        else:
+            state = "optional inactive"
+        labels.append(f"{helper} {state}")
+    return ", ".join(labels)
+
+
 def _ui_fallback_message(*, fallback_reason: str, fallback_from: str, manual_override: str) -> str:
     if fallback_reason == FallbackReason.MANUAL_OVERRIDE.value:
         if manual_override:
@@ -508,3 +588,89 @@ def _format_helper_summary(
     approval = "approved" if approved else "unapproved"
     version_token = version.strip() or "none"
     return f"{base}:{requirement}:{state}:{approval}:{version_token}"
+
+
+def _format_helper_detail_summary(detail: Mapping[str, object]) -> str:
+    helper = _token_value(detail.get("helper"))
+    version = _token_value(detail.get("version"))
+    protocol = _token_value(detail.get("protocol"))
+    state = _token_value(detail.get("state"))
+    capabilities = detail.get("capabilities")
+    if isinstance(capabilities, list) and capabilities:
+        capability_token = "+".join(_token_value(item) for item in capabilities if str(item))
+    else:
+        capability_token = "none"
+    return (
+        f"{helper}:"
+        f"state={state}:"
+        f"required={'true' if bool(detail.get('required')) else 'false'}:"
+        f"installed={'true' if bool(detail.get('installed')) else 'false'}:"
+        f"enabled={'true' if bool(detail.get('enabled')) else 'false'}:"
+        f"healthy={'true' if bool(detail.get('healthy')) else 'false'}:"
+        f"version={version}:"
+        f"protocol={protocol}:"
+        f"capabilities={capability_token}"
+    )
+
+
+def _helper_detail_payload(
+    *,
+    helper: str,
+    required: bool,
+    installed: bool,
+    enabled: bool,
+    approved: bool,
+    version: str,
+    detail: str,
+    capabilities: tuple[str, ...],
+    protocol: object,
+    state: str,
+    healthy: object | None,
+) -> dict[str, object]:
+    available = bool(installed and enabled)
+    healthy_value = _bool_from_optional(healthy, default=available)
+    state_value = state.strip() or ("healthy" if healthy_value else "inactive")
+    protocol_value = str(protocol or "").strip()
+    return {
+        "helper": helper or "unknown",
+        "required": bool(required),
+        "installed": bool(installed),
+        "enabled": bool(enabled),
+        "available": available,
+        "approved": bool(approved),
+        "healthy": healthy_value,
+        "state": state_value,
+        "version": version.strip() or "",
+        "protocol": protocol_value,
+        "detail": detail.strip(),
+        "capabilities": list(capabilities),
+    }
+
+
+def _string_list(value: object) -> tuple[str, ...]:
+    if isinstance(value, list):
+        return tuple(str(item) for item in value if str(item))
+    if isinstance(value, tuple):
+        return tuple(str(item) for item in value if str(item))
+    return ()
+
+
+def _bool_from_status(value: object, flags: object, key: str) -> bool:
+    if value is not None:
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
+    if isinstance(flags, Mapping):
+        flag_value = flags.get(key)
+        if isinstance(flag_value, str):
+            return flag_value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(flag_value)
+    return False
+
+
+def _bool_from_optional(value: object | None, *, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on", "healthy"}
+    return bool(value)
