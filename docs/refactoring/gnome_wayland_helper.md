@@ -141,7 +141,7 @@ Current issue:
 
 | ID | Requirement | Notes |
 | --- | --- | --- |
-| R-VN-1 | Rename `force_render` to a visibility-focused name before helper implementation depends on it. | Candidate names: `keep_overlay_visible`, `keep_visible_when_unfocused`, or another name chosen during Phase 1. The current name keeps confusing rendering with visibility/presentation. |
+| R-VN-1 | Rename `force_render` to `keep_overlay_visible` before helper implementation depends on it. | IQ3 decision: this happens immediately after status truthfulness, before helper behavior depends on visibility terminology. |
 | R-VN-2 | The rename must preserve behavior: the setting keeps the overlay visible when Elite Dangerous is not foreground; it does not force payload rendering. | This distinction matters for GNOME helper validation and support triage. |
 | R-VN-3 | The migration must be backward compatible with existing EDMC config keys, `overlay_settings.json`, controller CLI payloads, and tests. | Existing installs may still store or send `force_render`; accept legacy input during a migration window. |
 | R-VN-4 | Controller runtime override terminology must be renamed consistently away from "force render." | It is a temporary visibility override while the controller is active, not a renderer override. |
@@ -152,7 +152,7 @@ Current issue:
 | ID | Requirement | Notes |
 | --- | --- | --- |
 | R-OA-1 | The plan must define what "attach" means for GNOME Wayland. | Candidate models: PyQt overlay follows helper geometry, Shell extension manages Shell actor/presentation, or a staged hybrid. |
-| R-OA-2 | The first implementation must preserve the existing PyQt renderer unless Phase 4 validation proves that Shell-owned presentation is required. | Avoid rewriting rendering before target discovery is proven. |
+| R-OA-2 | The first implementation must preserve the existing PyQt renderer unless helper presentation/attachment validation proves that Shell-owned rendering is required. | Avoid rewriting rendering before target discovery and Shell-mediated presentation are proven. |
 | R-OA-3 | Behavior must be defined for minimized target, hidden target, target on another workspace, focus loss, monitor move, game exit, and resolution/display-mode changes. | Each state should either attach, hide, degrade, or unsupported with reason. |
 | R-OA-4 | Overlay attachment must handle helper stale/disconnected state by degrading visibly and avoiding stale geometry drift. | Do not keep blindly following old coordinates forever. |
 | R-OA-5 | The helper-backed path must keep existing manual backend override escape hatches available. | Users/support must still be able to force `xwayland_compat`. |
@@ -1014,8 +1014,10 @@ Recommended implementation order after these are answered:
 3. Helper package skeleton and manifest tests.
 4. DBus health/version MVP.
 5. Installer lifecycle.
-6. Target discovery.
-7. Presentation/stacking behavior.
+6. Diagnostics, collectors, and debug overlay metrics.
+7. Target discovery.
+8. Presentation/stacking behavior.
+9. Release validation and docs closeout.
 
 ### Temporary Research Extension Cleanup
 
@@ -1103,113 +1105,234 @@ Validation preflight:
 
 ## Phase Overview
 
+The implementation plan is intentionally broader than five phases. Each phase has a narrow behavioral goal, test gate, and rollback/degraded path. This keeps GNOME Shell integration incremental while preventing accidental `true_overlay` claims before Q10 validation passes.
+
 | Phase | Description | Status |
 | --- | --- | --- |
-| 1 | Correct GNOME Wayland status truthfulness and lock helper-missing requirements | Not Started |
-| 2 | Design/package the GNOME Shell extension helper and helper IPC contract | Not Started |
-| 3 | Add explicit helper install/enable/update/remediation flows | Not Started |
-| 4 | Wire helper runtime state into GNOME target discovery and overlay attachment | Not Started |
-| 5 | Validate true-overlay behavior on real GNOME Wayland environments and close release docs | Not Started |
+| 1 | Status truthfulness and degraded fallback for missing/unhealthy helper | Not Started |
+| 2 | Visibility terminology rename from `force_render` to `keep_overlay_visible` | Not Started |
+| 3 | GNOME Shell extension package skeleton, metadata, and protocol constants | Not Started |
+| 4 | Session-DBus helper health/version MVP and client handshake/status object | Not Started |
+| 5 | Installer lifecycle and post-install GNOME Wayland remediation | Not Started |
+| 6 | Helper state surfaces, diagnostics, collectors, and debug overlay metrics | Not Started |
+| 7 | Helper-backed target discovery and coordinate contract | Not Started |
+| 8 | Shell-mediated presentation, attachment, stacking, and click-through behavior | Not Started |
+| 9 | Release validation, docs, privacy/security closeout, and support claim gate | Not Started |
+
+## Phase Coverage Against Requirements
+
+| Requirement Area | Primary Phase(s) | Coverage Notes |
+| --- | --- | --- |
+| Support classification requirements | 1, 4, 6, 9 | Phase 1 fixes degraded-vs-true truthfulness; Phase 4 adds health/protocol authority; Phase 6 renders the same state everywhere; Phase 9 gates release claims. |
+| Helper installation and enablement requirements | 5, 6, 9 | Phase 5 owns installer lifecycle, user approval, logout/login, and Q7 rerun-installer remediation; Phase 6 exposes state; Phase 9 validates. |
+| Extension packaging requirements | 3, 5, 9 | Phase 3 creates metadata/package/protocol constants; Phase 5 installs source-directory artifact; Phase 9 validates metadata/release claims. |
+| Install/enable lifecycle requirements | 5, 6, 9 | Phase 5 implements install/update/disable/uninstall and global user-extension manual remediation; Phase 6 reports lifecycle state; Phase 9 validates flows. |
+| Helper runtime contract requirements | 3, 4, 7, 8 | Phase 3 defines constants; Phase 4 proves DBus health/fail-closed behavior; Phase 7 adds target state; Phase 8 adds presentation/attachment actions. |
+| Runtime detection requirements | 1, 4, 5, 6 | Phase 1 fixes classification; Phase 4 detects active helper health/protocol; Phase 5 detects installed/enabled states; Phase 6 exposes diagnostics. |
+| IPC and transport requirements | 3, 4, 7, 8 | Phase 3 defines protocol; Phase 4 implements DBus health; Phase 7/8 add typed target/presentation messages. |
+| Target window contract requirements | 7, 8, 9 | Phase 7 owns identity, geometry, content rects, and stale/ambiguous states; Phase 8 consumes them for attachment; Phase 9 validates real behavior. |
+| Overlay behavior requirements | 2, 7, 8, 9 | Phase 2 removes visibility terminology confusion; Phase 7 provides target state; Phase 8 delivers chrome-free/stacking/click-through behavior; Phase 9 validates. |
+| Visibility terminology requirements | 2, 6, 9 | Phase 2 renames/migrates; Phase 6 surfaces clear terminology; Phase 9 validates no release confusion. |
+| Overlay attachment requirements | 7, 8, 9 | Phase 7 discovers target and geometry; Phase 8 mediates presentation/attachment; Phase 9 validates supported modes. |
+| Security and privacy requirements | 3, 4, 6, 9 | Phase 3/4 keep helper narrow/versioned/local; Phase 6 limits diagnostics; Phase 9 closes Q11 privacy/security gate. |
+| Validation matrix requirements | 9 | Phase 9 is the Q10 gate and records exact tested environment, pass/fail/deferred outcomes, and release wording. |
+| Documentation and support requirements | 5, 6, 9 | Phase 5 owns install/remediation docs; Phase 6 owns diagnostics/debug output; Phase 9 updates wiki/troubleshooting/release notes. |
 
 ## Phase Details
 
-### Phase 1: Status Truthfulness And Requirements Lock
-- Correct the current inconsistency where GNOME Wayland without helper can show `Mode: True overlay`.
-- Preserve current helper diagnostics and fallback reason while making the classification truthful.
-- This phase is intentionally small and should land before extension implementation starts.
-- Risks: status wording changes could surprise users; tests currently lock conservative `true_overlay` behavior.
-- Mitigations: update tests and release notes explicitly; keep selected backend identity stable; keep missing-helper warning visible.
+### Phase 1: Status Truthfulness And Degraded Fallback
+- Implements IQ1.
+- Corrects the current inconsistency where GNOME Wayland without a healthy helper can show `Mode: True overlay`.
+- Keeps selected backend identity and helper diagnostics visible while changing support classification to `degraded_overlay` when helper state is not `healthy`.
+- Preserves `xwayland_compat` as a degraded compatibility fallback/override, not a true-overlay claim.
+- Risks: existing tests may encode the current optimistic classification; wording changes can surprise users.
+- Mitigations: update selector/status tests first, keep fallback reason/helper state visible, and keep user-facing warnings actionable.
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 1.1 | Update selector/status requirements so GNOME Wayland without helper is `degraded_overlay` with `fallback_reason=missing_helper` | Not Started |
-| 1.2 | Update preferences/debug/log wording tests so user-facing surfaces no longer conflict | Not Started |
-| 1.3 | Record the requirement baseline and defer true-overlay claim until helper validation | Not Started |
-| 1.4 | Choose replacement visibility-setting terminology for `force_render` and document backward-compatible migration rules | Not Started |
+| 1.1 | Update backend selector/status rules so GNOME Wayland with missing/unhealthy helper reports `degraded_overlay` | Not Started |
+| 1.2 | Preserve helper diagnostics: helper kind, required/unavailable state, `fallback_reason=missing_helper`, and selected backend identity | Not Started |
+| 1.3 | Update preferences/status/log/debug-overlay wording tests so no surface says `true_overlay` while helper is unhealthy | Not Started |
+| 1.4 | Add regression tests for manual override and `xwayland_compat` degraded fallback behavior | Not Started |
 
 #### Phase 1 Exit Criteria
-- GNOME Wayland without active helper never reports user-facing `Mode: True overlay`.
-- Missing-helper state remains visible in preferences, logs, debug overlay, and diagnostics.
-- Tests document the intended classification rules before helper implementation begins.
-- `force_render` rename terminology and compatibility rules are locked before helper implementation starts.
+- GNOME Wayland without healthy helper never reports user-facing `Mode: True overlay`.
+- Missing/unhealthy helper state remains visible in preferences, logs, debug overlay, and diagnostics.
+- `xwayland_compat` remains available as degraded compatibility, not true overlay.
+- Unit/harness tests cover selector/status and status consumers touched by this phase.
 
-### Phase 2: GNOME Shell Extension Package And Helper IPC Design
-- Create the extension package and helper protocol without yet relying on it for true-overlay claims.
-- Define the helper messages needed for target discovery, geometry updates, helper health, version negotiation, and degraded reasons.
-- Keep helper logic separated from plugin payload rendering and from EDMC hook code.
-- Risks: over-wide helper API; GNOME Shell version drift; insecure or ambiguous helper transport.
-- Mitigations: versioned manifest/protocol; fail-closed validation; narrow event allowlist; fake-helper tests before real GNOME wiring.
+### Phase 2: Visibility Terminology Rename
+- Implements IQ3 and R-VN requirements.
+- Renames misleading `force_render` terminology to `keep_overlay_visible` before helper behavior depends on it.
+- Keeps behavior unchanged: this is a visibility/focus override, not a payload rendering control.
+- Risks: config/controller/client compatibility regressions across process boundaries.
+- Mitigations: accept legacy `force_render` during migration, write config/payload tests, and keep logs explicit about visibility semantics.
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 2.1 | Choose extension package layout, UUID, supported GNOME versions, and build/install artifact shape | Not Started |
-| 2.2 | Define helper IPC event schema for hello/health/target-window/geometry/focus/output changes | Not Started |
-| 2.3 | Add extension package skeleton and manifest validation tests | Not Started |
-| 2.4 | Add fake-helper message tests against `helper_ipc.py` and backend status conversion | Not Started |
+| 2.1 | Add `keep_overlay_visible` config/settings support with fallback read from legacy `force_render` | Not Started |
+| 2.2 | Update preferences labels, overlay settings JSON handling, controller bridge payloads, and runtime override naming | Not Started |
+| 2.3 | Update logs/docs/tests to distinguish payload rendering, overlay visibility, and compositor presentation | Not Started |
+| 2.4 | Add migration/compatibility tests for old `force_render` inputs and new `keep_overlay_visible` outputs | Not Started |
 
 #### Phase 2 Exit Criteria
-- A versioned GNOME Shell extension artifact exists in the repo.
-- Helper IPC schema is test-covered without needing a live GNOME session.
-- No runtime true-overlay claim depends on unvalidated helper behavior yet.
+- New installs/settings use `keep_overlay_visible` terminology.
+- Existing `force_render` config/settings/controller payloads remain accepted during migration.
+- Tests prove behavior is unchanged and terminology is no longer render-focused.
 
-### Phase 3: Install, Enable, Update, And Remediation Flow
-- Provide a way to install and enable the helper during plugin installation.
-- Provide a way to install/enable/remediate later when the user switches from X11 to GNOME Wayland or changes DE/session.
-- Keep install and enable user-approved and reversible.
-- Risks: distro-specific extension paths; GNOME Shell restart/enable quirks; confusing "approved" vs "installed" state.
-- Mitigations: separate state labels; installer tests; preferences remediation UI; clear troubleshooting docs.
+### Phase 3: Extension Package Skeleton And Protocol Constants
+- Implements the first IQ2 helper MVP stage.
+- Adds the inspectable source-directory helper package at `helpers/gnome_shell_extension/` without depending on it for production true-overlay claims.
+- Establishes metadata, UUID, shell-version entries, helper version, helper protocol, and manifest tests.
+- Risks: invalid GNOME metadata, version drift, accidental bundling of unrelated files.
+- Mitigations: manifest tests, explicit package allowlist, and protocol constants checked on both helper/client sides.
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 3.1 | Extend installer flow to copy/package the extension and record install/enable outcome separately from approval | Not Started |
-| 3.2 | Add a post-install remediation path from preferences or a helper CLI for GNOME Wayland sessions missing the helper | Not Started |
-| 3.3 | Add detection for installed/enabled/version-compatible helper state and surface it in backend status | Not Started |
-| 3.4 | Document manual install, enable, disable, update, and uninstall commands | Not Started |
+| 3.1 | Create `helpers/gnome_shell_extension/` with `metadata.json`, fixed UUID, shell versions `46`-`50`, and source-directory artifact shape | Not Started |
+| 3.2 | Add helper constants: `HELPER_KIND`, `HELPER_PROTOCOL=1`, and `helper_version` tracking the plugin version | Not Started |
+| 3.3 | Add client expected protocol/kind constants in the backend/helper contract layer | Not Started |
+| 3.4 | Add manifest/package tests for UUID, shell versions, helper version source, package contents, and metadata validity | Not Started |
+| 3.5 | Add protocol-bump checklist/test fixture scaffolding for future helper contract changes | Not Started |
 
 #### Phase 3 Exit Criteria
-- Users can install or remediate the helper without reinstalling the whole plugin.
-- The status UI distinguishes approval, installed, enabled, active, and incompatible helper states.
-- Installer tests prove no silent install/enable behavior is introduced.
+- Extension source directory exists and is inspectable.
+- Metadata and package contents are test-covered.
+- Helper/client protocol constants are centralized and mismatch behavior is testable.
+- No user-visible `true_overlay` behavior depends on the skeleton.
 
-### Phase 4: Helper-Backed Target Discovery And Overlay Attachment
-- Use the helper as the GNOME Wayland target-discovery source once active and version-compatible.
-- Attach the existing PyQt overlay to helper-reported Elite window geometry/state while preserving rendering behavior.
-- Keep fallback behavior clear when helper data goes stale or the target disappears.
-- Risks: geometry drift; stale helper events; focus/click-through regressions; Shell restarts; game launched under Wine/Proton with unstable identity.
-- Mitigations: monotonic timestamps/nonces; stale-data timeout; explicit reacquire flow; fake-helper event tests; manual multi-monitor validation.
+### Phase 4: DBus Health/Version MVP And Status Object
+- Implements the second IQ2 helper MVP stage.
+- Adds the minimal GNOME Shell extension runtime that owns the session-DBus service and exposes helper health/version/protocol/capabilities.
+- Adds client handshake, fail-closed validation, reconnect/stale handling, and the Q8 authoritative status object.
+- Risks: DBus lifecycle mismatch, Shell extension load errors, stale helper state, false healthy status.
+- Mitigations: narrow DBus interface, protocol/kind validation, timeout/staleness tests, and degraded fallback on every failure.
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 4.1 | Define target-window identity and geometry contract for Elite Dangerous on GNOME Wayland | Not Started |
-| 4.2 | Implement helper-backed discovery adapter behind `gnome_shell_wayland` bundle ownership | Not Started |
-| 4.3 | Wire helper geometry/state into overlay follow/attachment without changing payload rendering | Not Started |
-| 4.4 | Add stale/disconnected helper fallback behavior and diagnostics | Not Started |
-| 4.5 | Validate click-through/focus behavior requirements and record any GNOME limitation explicitly | Not Started |
+| 4.1 | Implement extension-owned session-DBus service/object with hello/health/version/protocol/capabilities only | Not Started |
+| 4.2 | Implement client DBus probe/handshake with helper kind, helper version, helper protocol, and freshness validation | Not Started |
+| 4.3 | Add helper remediation states for DBus unreachable, protocol incompatible, inactive/error, and healthy | Not Started |
+| 4.4 | Add unit/fake-helper tests for accepted protocol, rejected old/new protocols, stale health, and missing service | Not Started |
+| 4.5 | Keep helper MVP behind degraded-by-default behavior and `gnome_helper_experimental=false` as required by IQ6 | Not Started |
 
 #### Phase 4 Exit Criteria
-- Helper-backed GNOME target discovery is backend-owned and does not reintroduce scattered compositor policy.
-- Overlay attachment can follow the game window from helper state in testable fake-helper scenarios.
-- Missing/stale helper data degrades predictably and visibly.
+- Live helper can prove it is active/reachable without target discovery.
+- Client status reports `healthy` only when DBus, helper kind, version, and protocol validate.
+- Protocol mismatch and DBus failure degrade visibly and fail closed.
+- Incomplete helper code cannot enable `true_overlay` without Q10 validation.
 
-### Phase 5: Real GNOME Wayland Validation And Release Closeout
-- Prove the helper works in real GNOME Wayland environments before claiming `true_overlay`.
-- Record pass/fail/deferred outcomes and exact limitations.
-- Update docs/release notes based on evidence, not implementation confidence.
-- Risks: insufficient tester coverage; environment-specific GNOME/Mutter behavior; fractional scaling and multi-monitor bugs.
-- Mitigations: minimum validation matrix; explicit deferrals; avoid overclaiming support.
+### Phase 5: Installer Lifecycle And Post-Install Remediation
+- Implements Q6, Q7, and IQ4 installer authority decisions.
+- Installer detects GNOME Wayland and runs the Q6 helper install/enable flow with explicit user approval.
+- Post-install X11-to-GNOME-Wayland remediation is settings/status warning plus rerun-installer instruction, not in-settings install/uninstall buttons.
+- Risks: silently changing host configuration, stale Shell discovery, confusing approval/install/active state, unsafe cleanup.
+- Mitigations: direct user-local copy, explicit approval before mutations, user-owned global-extension remediation, logout/login requirement, and source-directory-only artifact.
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 5.1 | Validate GNOME Wayland helper install/enable/active status on at least one first-party GNOME environment | Not Started |
-| 5.2 | Validate overlay attach/follow across moves, resizes, focus changes, fullscreen/borderless transitions, and restart/reconnect | Not Started |
-| 5.3 | Validate at least one mixed-monitor or fractional-scaling GNOME Wayland scenario, or record explicit deferral | Not Started |
-| 5.4 | Run EDMC compliance review for new installer/preferences/helper surfaces | Not Started |
-| 5.5 | Update release notes/wiki/troubleshooting and close final support classification claims | Not Started |
+| 5.1 | Extend installer to detect GNOME Wayland, prerequisites, installed path, extension discovery, and helper state | Not Started |
+| 5.2 | Add user-approved install flow: copy source directory, verify discovery, enable extension, require logout/login, then verify health after login | Not Started |
+| 5.3 | Add update flow: disable, clean replace, enable, require logout/login, verify active/version/protocol; no backup kept | Not Started |
+| 5.4 | Add disable/uninstall flow that removes only the real helper UUID directory and requires logout/login before final verification | Not Started |
+| 5.5 | Add global user-extension disabled remediation that shows instructions but does not run `gsettings set ... false` automatically | Not Started |
+| 5.6 | Add Q7 settings/status warning instructing rerun installer when user switches to GNOME Wayland after installing under X11 | Not Started |
+| 5.7 | Add installer/script tests for install, update, uninstall, global-disabled, and rerun-installer remediation paths | Not Started |
 
 #### Phase 5 Exit Criteria
-- GNOME Wayland true-overlay classification has recorded helper-active validation evidence.
-- Any unsupported/degraded GNOME cases have exact reasons and visible diagnostics.
-- Docs and release notes match shipped behavior.
+- Installer is the only first-pass helper install path and follows Q6 lifecycle rules.
+- Helper install/update/uninstall requires explicit user approval and logout/login before final verification.
+- Settings/status remediation after X11-to-Wayland switch tells the user to rerun installer under GNOME Wayland.
+- Tests prove approval/install/enabled/active/healthy states are distinct.
+
+### Phase 6: Diagnostics, Collectors, And Debug Overlay Metrics
+- Implements Q8 across all required surfaces.
+- Renders one client-authoritative helper/backend status object into preferences, logs, EDMC/plugin bridge output, `utils/collect_overlay_debug_*`, and live debug overlay metrics.
+- Risks: status drift between UI/logs/collectors; debug output leaking too much host data; support output missing host facts when client is down.
+- Mitigations: stable field names, compact display text, collector host facts, and Q11 redaction rules.
+
+| Stage | Description | Status |
+| --- | --- | --- |
+| 6.1 | Define and wire the authoritative helper/backend status object with Q8 stable field names | Not Started |
+| 6.2 | Update preferences/settings and user-facing backend summary with compact helper state/action text | Not Started |
+| 6.3 | Add stable grep-friendly overlay client and EDMC/plugin bridge log lines | Not Started |
+| 6.4 | Update `utils/collect_overlay_debug_linux.sh` to collect status line plus GNOME/session/extension/DBus host facts | Not Started |
+| 6.5 | Update `utils/collect_overlay_debug_windows.ps1` to report GNOME helper `not_required` without probing GNOME | Not Started |
+| 6.6 | Add live debug overlay metrics lines for backend/classification/helper state and experimental flag | Not Started |
+| 6.7 | Add tests or scripted checks for required status fields and redaction-sensitive defaults | Not Started |
+
+#### Phase 6 Exit Criteria
+- Preferences, logs, collectors, and debug metrics agree on helper state.
+- Debug collectors remain useful if overlay client is stopped or stale.
+- No collector/debug surface reports `true_overlay` when helper is unhealthy.
+- Default diagnostics avoid broad process/window dumps per Q11.
+
+### Phase 7: Helper-Backed Target Discovery And Coordinate Contract
+- Implements the third IQ2 helper MVP stage plus Q4/Q5 contracts.
+- Uses the helper as the GNOME Wayland target-discovery source only when active/version-compatible.
+- Emits Shell global logical geometry with explicit `frameRect`, `bufferRect`, `contentRect`, and decoration inset semantics.
+- Risks: attaching to launcher or wrong window, geometry/content-rect mismatch, stale target tokens, launcher diversity beyond Steam.
+- Mitigations: weighted target identity, no broad process substring scans, target ambiguity states, fake-helper fixtures, and live GNOME probes.
+
+| Stage | Description | Status |
+| --- | --- | --- |
+| 7.1 | Implement helper target enumeration using Shell-visible title/class/app/window state with launcher-only and ambiguity rejection | Not Started |
+| 7.2 | Emit target state with stable target token, title/app metadata, focus/visibility/workspace/minimized/fullscreen, timestamp, and sequence | Not Started |
+| 7.3 | Emit geometry contract: Shell global logical `frameRect`, `bufferRect`, `contentRect`, decoration insets, monitor/output identity, and scale metadata when available | Not Started |
+| 7.4 | Add client adapter for helper target/geometry state without treating Qt `moveEvent` as proof of compositor-visible placement | Not Started |
+| 7.5 | Add fake-helper tests for found/not_found/launcher_only/ambiguous/stale target and borderless/windowed geometry cases | Not Started |
+| 7.6 | Record degraded behavior when helper cannot derive content rect or required geometry metadata | Not Started |
+
+#### Phase 7 Exit Criteria
+- Helper can identify the real Elite Dangerous client and reject launcher-only/ambiguous states.
+- Client consumes helper target/geometry state through a typed adapter and degrades on stale/missing/invalid state.
+- Content/client rect alignment is explicit and test-covered for windowed and borderless fixtures.
+
+### Phase 8: Shell-Mediated Presentation And Attachment
+- Implements the fourth IQ2 helper MVP stage and the core Q1 behavior.
+- Keeps the PyQt renderer first, while Shell-side mediation provides enough presentation/attachment control for true-overlay requirements.
+- Escalates rendering into the extension only if validation proves PyQt cannot satisfy chrome-free, stacking, click-through, and visibility requirements.
+- Risks: GNOME/Mutter private API drift, click-through/focus loops, titlebar/chrome, stacking demotion, Shell restarts, multi-monitor positioning.
+- Mitigations: feature-test Shell APIs, degrade on unsupported APIs, keep rendering out of extension unless forced, and validate windowed/borderless behavior separately.
+
+| Stage | Description | Status |
+| --- | --- | --- |
+| 8.1 | Prototype Shell-mediated placement/presentation hooks while preserving PyQt payload rendering | Not Started |
+| 8.2 | Ensure normal overlay mode is chrome/titlebar-free and standalone mode remains explicitly setting-gated | Not Started |
+| 8.3 | Maintain overlay stacking above the game after click-through/focus changes in windowed and borderless modes | Not Started |
+| 8.4 | Eliminate foreground/visibility flashing without relying on `keep_overlay_visible` as a workaround | Not Started |
+| 8.5 | Handle target minimize, workspace change, monitor move, game exit/relaunch, helper reload, and stale/disconnected helper states | Not Started |
+| 8.6 | Add tests for presentation state machines where possible and manual validation notes where GNOME behavior cannot be headless-tested | Not Started |
+
+#### Phase 8 Exit Criteria
+- Windowed and borderless presentation requirements pass in fake-helper and real GNOME validation where applicable.
+- Overlay remains chrome-free, click-through-capable, and stacked above the game after focus changes.
+- Unsupported Shell API or presentation failure degrades visibly and never claims `true_overlay`.
+- Rendering remains in PyQt unless a recorded validation failure requires moving specific responsibility into the extension.
+
+### Phase 9: Release Validation, Documentation, And Support Claim Gate
+- Implements Q9, Q10, Q11 closeout and validates all earlier phases together.
+- Proves helper-active behavior on Ubuntu GNOME Wayland/GNOME Shell 46 first, with exact environment details recorded.
+- Updates user docs, troubleshooting, release notes, and privacy/security copy based on evidence.
+- Risks: overclaiming GNOME version/distro support, missing multi-monitor/fractional-scaling edge cases, stale test extensions affecting results.
+- Mitigations: Q10 validation matrix, IQ7 cleanup preflight, explicit deferrals, and release wording that separates target from validated environments.
+
+| Stage | Description | Status |
+| --- | --- | --- |
+| 9.1 | Run IQ7 cleanup preflight and record GNOME Shell version, distro/session, monitor layout, scaling, EDMC install mode, helper version, and protocol | Not Started |
+| 9.2 | Run Q10 install/lifecycle validation: install, update, disable, uninstall, rerun-installer remediation, logout/login, health/protocol verification | Not Started |
+| 9.3 | Run Q10 backend/status validation across preferences, logs, collectors, and debug overlay metrics | Not Started |
+| 9.4 | Run Q10 windowed overlay validation: identity, content alignment, move, resize, chrome-free, click-through, stacking | Not Started |
+| 9.5 | Run Q10 borderless fullscreen validation: identity, viewport alignment, chrome-free, no flashing, click-through, stacking | Not Started |
+| 9.6 | Run Q10 failure/recovery validation for disabled/global-disabled/DBus/protocol/game-not-found/launcher-only/ambiguous states | Not Started |
+| 9.7 | Run Q10 privacy/security review and EDMC compliance review for installer/preferences/helper surfaces | Not Started |
+| 9.8 | Update docs/wiki/troubleshooting/release notes with support wording, privacy copy, install/remediation instructions, and any deferrals | Not Started |
+
+#### Phase 9 Exit Criteria
+- Q10 validation matrix has recorded pass/fail/deferred outcomes.
+- GNOME Wayland `true_overlay` claim is allowed only if every required gate passes.
+- Any failed/deferred item is reflected in degraded/experimental release wording with exact missing guarantees.
+- Docs and diagnostics match shipped behavior.
 
 ## Execution Log
 - Plan created on 2026-05-09.
@@ -1277,6 +1400,7 @@ Validation preflight:
 - Closed IQ5 on 2026-05-10: helper version tracks the plugin version exactly; helper protocol is a separate integer contract version starting at `1`; client expected protocol starts at `1`; protocol mismatch reports `protocol_incompatible`; tests/checklist enforce explicit protocol-bump decisions for contract changes.
 - Closed IQ6 on 2026-05-10: incomplete helper code may merge incrementally only behind degraded-by-default production behavior and/or `gnome_helper_experimental=false` by default; the flag is stored in overlay settings, appears in diagnostics, and never permits `true_overlay` without Q10 validation.
 - Closed IQ7 on 2026-05-10: added cleanup instructions for temporary research extensions and validation preflight requiring research UUIDs to be absent before production helper validation.
+- Reworked implementation phases on 2026-05-10: expanded from five broad phases to nine requirement-covered phases spanning status truthfulness, visibility rename, extension packaging, DBus health, installer lifecycle, diagnostics, target discovery, presentation/attachment, and release validation. Added a phase coverage matrix against all requirement groups.
 - Record one execution summary subsection per completed phase.
 - Record exact test commands and outcomes for each completed phase.
 
@@ -1284,4 +1408,52 @@ Validation preflight:
 - Not started.
 
 ### Tests Run For Phase 1
+- None yet.
+
+### Phase 2 Execution Summary
+- Not started.
+
+### Tests Run For Phase 2
+- None yet.
+
+### Phase 3 Execution Summary
+- Not started.
+
+### Tests Run For Phase 3
+- None yet.
+
+### Phase 4 Execution Summary
+- Not started.
+
+### Tests Run For Phase 4
+- None yet.
+
+### Phase 5 Execution Summary
+- Not started.
+
+### Tests Run For Phase 5
+- None yet.
+
+### Phase 6 Execution Summary
+- Not started.
+
+### Tests Run For Phase 6
+- None yet.
+
+### Phase 7 Execution Summary
+- Not started.
+
+### Tests Run For Phase 7
+- None yet.
+
+### Phase 8 Execution Summary
+- Not started.
+
+### Tests Run For Phase 8
+- None yet.
+
+### Phase 9 Execution Summary
+- Not started.
+
+### Tests Run For Phase 9
 - None yet.
