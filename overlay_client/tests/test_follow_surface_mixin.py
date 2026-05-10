@@ -127,6 +127,8 @@ class _FollowSurfaceStub(FollowSurfaceMixin):
         self._last_screen_name = None
         self._transient_parent_window = None
         self._transient_parent_id = None
+        self._raise_calls = 0
+        self._visible = False
 
         self._interaction_controller = type(
             "StubInteraction",
@@ -156,6 +158,7 @@ class _FollowSurfaceStub(FollowSurfaceMixin):
                 "platform_label": lambda self=None: "stub",
                 "uses_transient_parent": lambda self=None: False,
                 "is_wayland_backend": lambda self=None: False,
+                "should_raise_overlay_window": lambda self=None: True,
             },
         )()
 
@@ -172,16 +175,16 @@ class _FollowSurfaceStub(FollowSurfaceMixin):
         return None
 
     def raise_(self) -> None:
-        return None
+        self._raise_calls += 1
 
     def isVisible(self) -> bool:
-        return False
+        return self._visible
 
     def show(self) -> None:
-        return None
+        self._visible = True
 
     def hide(self) -> None:
-        return None
+        self._visible = False
 
     def _current_physical_size(self):
         return (100.0, 50.0)
@@ -290,3 +293,32 @@ def test_ensure_transient_parent_uses_platform_controller_policy():
     assert handle.transient_parents == [None]
     assert stub._transient_parent_window is None
     assert stub._transient_parent_id is None
+
+
+def test_raise_overlay_if_allowed_skips_raise_when_policy_disables_it():
+    stub = _FollowSurfaceStub()
+    stub._visible = True
+    stub._platform_controller = type(
+        "StubPlatform",
+        (),
+        {
+            "should_raise_overlay_window": lambda self=None: False,
+            "apply_click_through": lambda *args, **kwargs: None,
+            "platform_label": lambda self=None: "stub",
+            "uses_transient_parent": lambda self=None: False,
+            "is_wayland_backend": lambda self=None: True,
+        },
+    )()
+
+    stub._raise_overlay_if_allowed()
+
+    assert stub._raise_calls == 0
+
+
+def test_raise_overlay_if_allowed_raises_when_policy_allows_it():
+    stub = _FollowSurfaceStub()
+    stub._visible = True
+
+    stub._raise_overlay_if_allowed()
+
+    assert stub._raise_calls == 1

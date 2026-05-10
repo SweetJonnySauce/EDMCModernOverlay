@@ -6,6 +6,7 @@ import sys
 from typing import TYPE_CHECKING, Any, Mapping, Optional
 
 from overlay_client.backend import BackendSelectionStatus, BackendSelector, ProbeInputs, ProbeSource, SessionType, collect_platform_probe
+from overlay_client.backend.probe_gnome import probe_gnome_shell_helper
 from overlay_client.platform_integration import PlatformContext  # type: ignore
 
 if TYPE_CHECKING:
@@ -55,6 +56,11 @@ def _client_backend_status(
     compositor_hint = context.compositor or runtime_probe.compositor
     if runtime_probe.compositor:
         compositor_hint = runtime_probe.compositor
+    gnome_helper_state = probe_gnome_shell_helper(
+        session_type=session_hint,
+        compositor=compositor_hint,
+        env=env_map,
+    )
     probe = collect_platform_probe(
         ProbeInputs(
             source=source,
@@ -64,6 +70,7 @@ def _client_backend_status(
             compositor=compositor_hint,
             is_flatpak=flatpak_flag,
             flatpak_app_id=flatpak_app,
+            helper_probe_states=((gnome_helper_state,) if gnome_helper_state is not None else ()),
             env=env_map,
         )
     )

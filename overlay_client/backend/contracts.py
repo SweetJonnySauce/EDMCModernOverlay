@@ -8,6 +8,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from overlay_client.backend.helper_ipc import HelperBoundaryConfig, HelperMessage
     from overlay_client.platform_integration import PlatformContext
     from overlay_client.window_tracking import MonitorProvider, WindowTracker
 
@@ -72,6 +73,7 @@ class FallbackReason(str, Enum):
     MANUAL_OVERRIDE = "manual_override"
     MISSING_PROTOCOL = "missing_protocol"
     MISSING_HELPER = "missing_helper"
+    INCOMPATIBLE_HELPER = "incompatible_helper"
     COMPOSITOR_RESTRICTION = "compositor_restriction"
     XWAYLAND_COMPAT_ONLY = "xwayland_compat_only"
     TRACKING_UNAVAILABLE = "tracking_unavailable"
@@ -90,6 +92,14 @@ class HelperKind(str, Enum):
     KWIN_EFFECT = "kwin_effect"
     EXTERNAL_HELPER = "external_helper"
     UNKNOWN = "unknown"
+
+
+class HelperProbeAvailability(str, Enum):
+    """Normalized runtime probe states for helper-backed integrations."""
+
+    AVAILABLE = "available"
+    MISSING = "missing"
+    INCOMPATIBLE = "incompatible"
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +145,32 @@ class BackendCapabilities:
 
 
 @dataclass(frozen=True, slots=True)
+class HelperProbeState:
+    """Normalized runtime evidence for a single helper-backed integration."""
+
+    helper: HelperKind
+    availability: HelperProbeAvailability = HelperProbeAvailability.MISSING
+    version: str = ""
+    detail: str = ""
+
+    @property
+    def is_available(self) -> bool:
+        return self.availability is HelperProbeAvailability.AVAILABLE
+
+    @property
+    def is_incompatible(self) -> bool:
+        return self.availability is HelperProbeAvailability.INCOMPATIBLE
+
+    def to_payload(self) -> dict[str, str]:
+        return {
+            "helper": self.helper.value,
+            "availability": self.availability.value,
+            "version": self.version,
+            "detail": self.detail,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class PlatformProbeResult:
     """Pure snapshot of the local platform and capability environment."""
 
@@ -146,12 +182,23 @@ class PlatformProbeResult:
     flatpak_app_id: str = ""
     available_protocols: frozenset[str] = field(default_factory=frozenset)
     available_helpers: frozenset[HelperKind] = field(default_factory=frozenset)
+    helper_probe_states: tuple[HelperProbeState, ...] = field(default_factory=tuple)
 
     def has_protocol(self, protocol_name: str) -> bool:
         return protocol_name in self.available_protocols
 
     def has_helper(self, helper: HelperKind) -> bool:
         return helper in self.available_helpers
+
+    def helper_state(self, helper: HelperKind) -> HelperProbeState | None:
+        for state in self.helper_probe_states:
+            if state.helper is helper:
+                return state
+        return None
+
+    def has_incompatible_helper(self, helper: HelperKind) -> bool:
+        state = self.helper_state(helper)
+        return state is not None and state.is_incompatible
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -163,6 +210,7 @@ class PlatformProbeResult:
             "flatpak_app_id": self.flatpak_app_id,
             "available_protocols": sorted(self.available_protocols),
             "available_helpers": sorted(helper.value for helper in self.available_helpers),
+            "helper_probe_states": [state.to_payload() for state in self.helper_probe_states],
         }
 
 
@@ -214,6 +262,32 @@ class InputPolicyBackend(Protocol):
 
 
 @runtime_checkable
+class HelperRuntime(Protocol):
+    """Client-owned runtime session for a compositor helper connection."""
+
+    @property
+    def boundary(self) -> "HelperBoundaryConfig":
+        """Return the validated helper boundary for the runtime session."""
+
+    @property
+    def hello_message(self) -> "HelperMessage | None":
+        """Return the validated helper hello message once started."""
+
+    @property
+    def last_error(self) -> Exception | None:
+        """Return the last handshake or event-processing error, if any."""
+
+    def start(self) -> "HelperMessage":
+        """Start the helper runtime, perform handshake, and subscribe to events."""
+
+    def stop(self) -> None:
+        """Stop the helper runtime and unsubscribe from helper events."""
+
+    def drain_events(self) -> tuple["HelperMessage", ...]:
+        """Return queued validated helper events and clear the queue."""
+
+
+@runtime_checkable
 class HelperIpcBackend(Protocol):
     """Contract for compositor-native helper communication components."""
 
@@ -224,6 +298,9 @@ class HelperIpcBackend(Protocol):
     @property
     def helper_kind(self) -> HelperKind:
         """Return the helper identity this component communicates with."""
+
+    def create_runtime(self, *, session_token: str, logger: logging.Logger) -> HelperRuntime:
+        """Create the client-owned runtime session for this helper."""
 
 
 @dataclass(frozen=True, slots=True)

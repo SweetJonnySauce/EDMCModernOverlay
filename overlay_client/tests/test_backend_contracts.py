@@ -10,6 +10,9 @@ from overlay_client.backend import (
     HelperCapabilityState,
     HelperIpcBackend,
     HelperKind,
+    HelperProbeAvailability,
+    HelperProbeState,
+    HelperRuntime,
     InputPolicyBackend,
     OperatingSystem,
     PlatformProbe,
@@ -29,6 +32,14 @@ class _Probe:
             compositor="kwin",
             available_protocols=frozenset({"layer-shell", "foreign-toplevel"}),
             available_helpers=frozenset({HelperKind.KWIN_SCRIPT}),
+            helper_probe_states=(
+                HelperProbeState(
+                    helper=HelperKind.KWIN_SCRIPT,
+                    availability=HelperProbeAvailability.AVAILABLE,
+                    version="1.2.3",
+                    detail="runtime_detected",
+                ),
+            ),
         )
 
 
@@ -66,6 +77,33 @@ class _HelperIpc:
     def helper_kind(self) -> HelperKind:
         return HelperKind.KWIN_SCRIPT
 
+    def create_runtime(self, *, session_token: str, logger):
+        del session_token, logger
+        return _HelperRuntime()
+
+
+class _HelperRuntime:
+    @property
+    def boundary(self):
+        return None
+
+    @property
+    def hello_message(self):
+        return None
+
+    @property
+    def last_error(self):
+        return None
+
+    def start(self):
+        return None
+
+    def stop(self) -> None:
+        return None
+
+    def drain_events(self):
+        return ()
+
 
 def test_backend_family_values_include_locked_support_labels():
     assert BackendFamily.NATIVE_X11.value == "native_x11"
@@ -87,6 +125,7 @@ def test_platform_probe_and_component_protocols_are_runtime_checkable():
     assert isinstance(presentation, PresentationBackend)
     assert isinstance(input_policy, InputPolicyBackend)
     assert isinstance(helper_ipc, HelperIpcBackend)
+    assert isinstance(helper_ipc.create_runtime(session_token="token", logger=None), HelperRuntime)
 
 
 def test_platform_probe_result_tracks_protocol_and_helper_availability():
@@ -100,6 +139,13 @@ def test_platform_probe_result_tracks_protocol_and_helper_availability():
     assert result.has_protocol("ext-foreign-toplevel-list-v1") is False
     assert result.has_helper(HelperKind.KWIN_SCRIPT) is True
     assert result.has_helper(HelperKind.GNOME_SHELL_EXTENSION) is False
+    assert result.has_incompatible_helper(HelperKind.KWIN_SCRIPT) is False
+    assert result.helper_state(HelperKind.KWIN_SCRIPT) == HelperProbeState(
+        helper=HelperKind.KWIN_SCRIPT,
+        availability=HelperProbeAvailability.AVAILABLE,
+        version="1.2.3",
+        detail="runtime_detected",
+    )
 
 
 def test_backend_bundle_and_selection_status_capture_stable_identity():
@@ -178,6 +224,14 @@ def test_backend_selection_status_serializes_to_plain_payload():
         "instance": "kwin_wayland",
     }
     assert payload["probe"]["qt_platform_name"] == "wayland"
+    assert payload["probe"]["helper_probe_states"] == [
+        {
+            "helper": "kwin_script",
+            "availability": "available",
+            "version": "1.2.3",
+            "detail": "runtime_detected",
+        }
+    ]
     assert payload["notes"] == ["shadow_selector_result", "fedora_kde_wayland"]
 
 
@@ -219,6 +273,10 @@ def test_actual_linux_bundle_components_conform_to_tightened_protocols():
         assert isinstance(bundle.discovery, TargetDiscoveryBackend)
         assert isinstance(bundle.presentation, PresentationBackend)
         assert isinstance(bundle.input_policy, InputPolicyBackend)
+
+    helper_bundle = build_gnome_shell_wayland_bundle(helper_enabled=True)
+    assert helper_bundle.helper_ipc is not None
+    assert isinstance(helper_bundle.helper_ipc, HelperIpcBackend)
 
 
 def test_fix219_intentionally_keeps_combined_presentation_input_adapter_shape_for_linux_bundles():

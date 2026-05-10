@@ -103,6 +103,7 @@ def test_interaction_controller_logs_transient_parent_failure(monkeypatch):
 
     controller = InteractionController(
         is_wayland_fn=lambda: True,
+        should_use_tool_window_fn=lambda: False,
         log_fn=_log,
         prepare_window_fn=lambda _window: None,
         apply_click_through_fn=lambda _transparent: None,
@@ -111,6 +112,7 @@ def test_interaction_controller_logs_transient_parent_failure(monkeypatch):
         window_handle_fn=lambda: object(),
         set_widget_attribute_fn=lambda *_args, **_kwargs: None,
         set_window_flag_fn=lambda *_args, **_kwargs: None,
+        is_visible_fn=lambda: False,
         ensure_visible_fn=lambda: None,
         raise_fn=lambda: None,
         set_children_attr_fn=lambda _transparent: None,

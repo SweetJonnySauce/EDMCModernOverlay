@@ -8,6 +8,7 @@ from typing import Protocol
 from PyQt6.QtGui import QGuiApplication, QWindow
 from PyQt6.QtWidgets import QWidget
 
+from overlay_client.backend.gnome_helper_control import GnomeShellHelperControlClient
 from overlay_client.window_integration import IntegrationBase
 
 
@@ -40,6 +41,7 @@ class _WaylandIntegration(IntegrationBase):
     def __init__(self, widget: QWidget, logger: logging.Logger, context: LinuxIntegrationContext) -> None:
         super().__init__(widget, logger, context)
         self._layer_shell = None
+        self._gnome_helper_control: GnomeShellHelperControlClient | None = None
 
     def prepare_window(self, window: QWindow | None) -> None:
         super().prepare_window(window)
@@ -66,13 +68,25 @@ class _WaylandIntegration(IntegrationBase):
         super().apply_click_through(transparent)
         window = self._window or self._widget.windowHandle()
         compositor = (self._context.compositor or "").lower()
-        if not transparent or window is None:
+        if window is None:
             return
         if self._layer_shell is not None:
+            if not transparent:
+                return
             self._configure_layer_shell_interactivity()
         elif compositor == "kwin":
+            if not transparent:
+                return
             self._apply_kwin_input_region(window)
+        elif compositor in {"gnome-shell", "mutter"}:
+            if self._apply_gnome_helper_input_passthrough(transparent):
+                return
+            if not transparent:
+                return
+            self._apply_native_transparency(window)
         else:
+            if not transparent:
+                return
             self._apply_native_transparency(window)
 
     def _initialise_layer_shell(self, window: QWindow) -> None:
@@ -180,6 +194,24 @@ class _WaylandIntegration(IntegrationBase):
                     self._logger.debug("Wayland wl_surface acquired; compositor should honour transparent input")
         except Exception as exc:  # pragma: no cover - diagnostic only
             self._logger.debug("Unable to query Wayland native resources: %s", exc)
+
+    def _apply_gnome_helper_input_passthrough(self, transparent: bool) -> bool:
+        control = self._gnome_helper_control_client()
+        if control is None:
+            return False
+
+        applied = control.set_overlay_input_passthrough(transparent)
+        if applied:
+            self._logger.debug("Applied GNOME helper overlay input passthrough: %s", transparent)
+        return applied
+
+    def _gnome_helper_control_client(self) -> GnomeShellHelperControlClient | None:
+        compositor = (self._context.compositor or "").lower()
+        if compositor not in {"gnome-shell", "mutter"}:
+            return None
+        if self._gnome_helper_control is None:
+            self._gnome_helper_control = GnomeShellHelperControlClient(self._logger)
+        return self._gnome_helper_control
 
 
 def create_wayland_integration(

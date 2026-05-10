@@ -1,5 +1,7 @@
 from overlay_client.backend import (
     HelperKind,
+    HelperProbeAvailability,
+    HelperProbeState,
     OperatingSystem,
     ProbeInputs,
     ProbeSource,
@@ -70,3 +72,51 @@ def test_collect_platform_probe_infers_gnome_wayland_desktop():
     )
 
     assert gnome.compositor == "gnome-shell"
+
+
+def test_collect_platform_probe_derives_available_helpers_from_probe_state():
+    probe = collect_platform_probe(
+        ProbeInputs(
+            sys_platform="linux",
+            session_type="wayland",
+            compositor="gnome-shell",
+            helper_probe_states=(
+                HelperProbeState(
+                    helper=HelperKind.GNOME_SHELL_EXTENSION,
+                    availability=HelperProbeAvailability.AVAILABLE,
+                    version="stage2.3",
+                    detail="session_dbus_reachable",
+                ),
+            ),
+        )
+    )
+
+    assert probe.has_helper(HelperKind.GNOME_SHELL_EXTENSION) is True
+    assert probe.has_incompatible_helper(HelperKind.GNOME_SHELL_EXTENSION) is False
+    assert probe.helper_state(HelperKind.GNOME_SHELL_EXTENSION) == HelperProbeState(
+        helper=HelperKind.GNOME_SHELL_EXTENSION,
+        availability=HelperProbeAvailability.AVAILABLE,
+        version="stage2.3",
+        detail="session_dbus_reachable",
+    )
+
+
+def test_collect_platform_probe_tracks_incompatible_helper_without_marking_it_available():
+    probe = collect_platform_probe(
+        ProbeInputs(
+            sys_platform="linux",
+            session_type="wayland",
+            compositor="gnome-shell",
+            helper_probe_states=(
+                HelperProbeState(
+                    helper=HelperKind.GNOME_SHELL_EXTENSION,
+                    availability=HelperProbeAvailability.INCOMPATIBLE,
+                    detail="protocol_version_mismatch:2",
+                ),
+            ),
+        )
+    )
+
+    assert probe.has_helper(HelperKind.GNOME_SHELL_EXTENSION) is False
+    assert probe.has_incompatible_helper(HelperKind.GNOME_SHELL_EXTENSION) is True
+    assert probe.helper_state(HelperKind.GNOME_SHELL_EXTENSION) is not None

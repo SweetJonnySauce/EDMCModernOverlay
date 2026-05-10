@@ -30,6 +30,11 @@ Use these steps to gather diagnostics when the overlay misbehaves. EDMC’s own 
 - Overlay Controller log: `logs/EDMCModernOverlay/overlay_controller.log` (same directory as the client log). The controller writes a startup banner every time `!ovr` launches it and captures any uncaught exceptions or stack traces before it exits. Set EDMC to DEBUG (or use dev mode) so geometry/routing DEBUG logs are flushed to the file even before Tk initialises.
 - Debug flags live in `debug.json` in the plugin directory; Modern Overlay now auto-creates this file whenever EDMC logging is DEBUG (or dev mode is active) so users don’t need to craft it manually before capturing payloads. Developer-only overlay helpers (tracing, outlines, vertex markers) live in `dev_settings.json`, which is created/read only when dev mode is enabled so normal troubleshooting stays focused on capture/logging knobs.
 
+## GNOME Shell helper status
+- On GNOME Wayland, `missing_helper` means the GNOME Shell extension is absent or disabled. For the supported per-user copy/enable/disable/uninstall workflow, use the [GNOME helper README](../helpers/gnome_shell_extension/edmc-modern-overlay@edmc.local/README.md).
+- `incompatible_helper` means the extension is present but the helper contract failed, typically because the D-Bus service, handshake, or protocol version did not validate cleanly.
+- Disabling or uninstalling the extension should return the overlay to the existing missing-helper fallback path. If the extension files were replaced or re-enabled and the helper does not reconnect cleanly, restart the Overlay Client before treating it as a runtime regression.
+
 ## Windows: Python auto-install (installer)
 - The Windows `.exe` installer can download and install Python automatically if no Python 3.10+ is found.
 - If Python is detected on `PATH`, it will be reused; otherwise the installer checks the default per-user install path.

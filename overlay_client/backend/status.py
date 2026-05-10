@@ -29,7 +29,7 @@ class HelperCapabilityState:
 
     @property
     def available(self) -> bool:
-        return self.installed and self.enabled
+        return self.installed and self.enabled and self.approved
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -255,6 +255,7 @@ def format_status_ui_warning(status: BackendSelectionStatus | Mapping[str, objec
     """Return a user-facing backend notice line for warning or informational states."""
 
     report = build_status_report(status)
+    helper_detail_by_name = _helper_detail_by_name(status)
     warning_reasons: list[str] = []
     info_reasons: list[str] = []
     classification = str(report.get("classification") or "")
@@ -272,6 +273,7 @@ def format_status_ui_warning(status: BackendSelectionStatus | Mapping[str, objec
         fallback_reason=fallback_reason,
         fallback_from=fallback_from,
         manual_override=manual_override,
+        helper_detail_by_name=helper_detail_by_name,
     )
     if fallback_message:
         if fallback_reason == FallbackReason.MANUAL_OVERRIDE.value and manual_override:
@@ -283,7 +285,10 @@ def format_status_ui_warning(status: BackendSelectionStatus | Mapping[str, objec
         warning_reasons.append(f"Saved Overlay backend selection is invalid for this session: {override_error}.")
         warning_reasons.append("Set Overlay backend to Auto or choose a valid backend for this session.")
     helper_unavailable = report.get("helper_unavailable")
-    if isinstance(helper_unavailable, list) and helper_unavailable and fallback_reason != FallbackReason.MISSING_HELPER.value:
+    if isinstance(helper_unavailable, list) and helper_unavailable and fallback_reason not in {
+        FallbackReason.MISSING_HELPER.value,
+        FallbackReason.INCOMPATIBLE_HELPER.value,
+    }:
         helpers = ", ".join(_ui_helper_label(str(helper)) for helper in helper_unavailable if str(helper))
         if helpers:
             warning_reasons.append(f"Required helper unavailable: {helpers}.")
@@ -389,7 +394,13 @@ def _ui_source_label(value: str) -> str:
     return labels.get(value, value or "unknown")
 
 
-def _ui_fallback_message(*, fallback_reason: str, fallback_from: str, manual_override: str) -> str:
+def _ui_fallback_message(
+    *,
+    fallback_reason: str,
+    fallback_from: str,
+    manual_override: str,
+    helper_detail_by_name: Mapping[str, str] | None = None,
+) -> str:
     if fallback_reason == FallbackReason.MANUAL_OVERRIDE.value:
         if manual_override:
             return f"Using {_ui_backend_override_label(manual_override)} because it is selected in Overlay backend."
@@ -397,9 +408,25 @@ def _ui_fallback_message(*, fallback_reason: str, fallback_from: str, manual_ove
     if fallback_reason == FallbackReason.XWAYLAND_COMPAT_ONLY.value:
         return "Using XWayland compatibility mode because a native Wayland path is not active."
     if fallback_reason == FallbackReason.MISSING_HELPER.value:
+        gnome_detail = ""
+        if helper_detail_by_name is not None:
+            gnome_detail = str(helper_detail_by_name.get(HelperKind.GNOME_SHELL_EXTENSION.value) or "")
         if fallback_from:
-            return f"A required helper for {fallback_from} is not available."
-        return "A required compositor helper is not available."
+            message = f"A required helper for {fallback_from} is not available."
+        else:
+            message = "A required compositor helper is not available."
+        if gnome_detail == "host_prerequisite_missing:python3-gi":
+            return (
+                f"{message} Install host package 'python3-gi' and rebuild overlay_client/.venv "
+                "for GNOME helper support."
+            )
+        if gnome_detail == "python_dependency_missing:pydbus":
+            return f"{message} Rebuild overlay_client/.venv to restore the GNOME helper Python dependency."
+        return message
+    if fallback_reason == FallbackReason.INCOMPATIBLE_HELPER.value:
+        if fallback_from:
+            return f"A required helper for {fallback_from} is present but incompatible."
+        return "A required compositor helper is present but incompatible."
     if fallback_reason == FallbackReason.MISSING_PROTOCOL.value:
         return "Required compositor protocols are not available."
     if fallback_reason == FallbackReason.COMPOSITOR_RESTRICTION.value:
@@ -429,6 +456,25 @@ def _ui_helper_label(value: str) -> str:
     return labels.get(value, value or "unknown helper")
 
 
+def _helper_detail_by_name(status: BackendSelectionStatus | Mapping[str, object]) -> dict[str, str]:
+    subject = _status_subject(status)
+    details: dict[str, str] = {}
+    if isinstance(subject, BackendSelectionStatus):
+        for state in subject.helper_states:
+            detail = str(state.detail or "").strip()
+            if detail:
+                details[state.helper.value] = detail
+        return details
+    for raw_state in subject.get("helper_states", []) if isinstance(subject, Mapping) else []:
+        if not isinstance(raw_state, Mapping):
+            continue
+        helper_name = str(raw_state.get("helper") or "").strip()
+        detail = str(raw_state.get("detail") or "").strip()
+        if helper_name and detail:
+            details[helper_name] = detail
+    return details
+
+
 def _token_value(value: object) -> str:
     text = str(value or "").strip()
     if not text:
@@ -446,7 +492,12 @@ def _format_helper_summary(
     version: str,
 ) -> str:
     base = helper or "unknown"
-    state = "available" if installed and enabled else "inactive"
+    if installed and enabled and approved:
+        state = "available"
+    elif installed and enabled:
+        state = "incompatible"
+    else:
+        state = "inactive"
     requirement = "required" if required else "optional"
     approval = "approved" if approved else "unapproved"
     version_token = version.strip() or "none"

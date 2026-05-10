@@ -125,7 +125,7 @@ class SetupSurfaceMixin:
         self._data_client: Optional[OverlayDataClient] = None
         self._last_follow_state: Optional[WindowState] = None
         self._lost_window_logged: bool = False
-        self._last_tracker_state: Optional[Tuple[str, int, int, int, int]] = None
+        self._last_tracker_state: Optional[Tuple[str, int, int, int, int, bool, bool]] = None
         self._last_geometry_log: Optional[Tuple[int, int, int, int]] = None
         self._last_move_log: Optional[Tuple[int, int]] = None
         self._last_screen_name: Optional[str] = None
@@ -170,6 +170,7 @@ class SetupSurfaceMixin:
         self._visibility_helper = VisibilityHelper(log_fn=_CLIENT_LOGGER.debug)
         self._interaction_controller = InteractionController(
             is_wayland_fn=lambda: self._platform_controller.is_wayland_backend(),
+            should_use_tool_window_fn=lambda: self._platform_controller.should_use_tool_window(),
             log_fn=_CLIENT_LOGGER.debug,
             prepare_window_fn=lambda window: self._platform_controller.prepare_window(window),
             apply_click_through_fn=lambda transparent: self._platform_controller.apply_click_through(transparent),
@@ -178,8 +179,9 @@ class SetupSurfaceMixin:
             window_handle_fn=lambda: self.windowHandle(),
             set_widget_attribute_fn=lambda attr, enabled: self.setAttribute(attr, enabled),
             set_window_flag_fn=self._set_window_flag,
+            is_visible_fn=lambda: self.isVisible(),
             ensure_visible_fn=lambda: self.show() if not self.isVisible() else None,
-            raise_fn=lambda: self.raise_() if self.isVisible() else None,
+            raise_fn=lambda: self._raise_overlay_if_allowed(),
             set_children_attr_fn=lambda transparent: self._set_children_click_through(transparent),
             transparent_input_supported=self._transparent_input_supported,
             set_window_transparent_input_fn=lambda transparent: self.windowHandle().setFlag(Qt.WindowType.WindowTransparentForInput, transparent) if self.windowHandle() else None,

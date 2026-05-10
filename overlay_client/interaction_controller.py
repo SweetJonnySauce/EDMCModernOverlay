@@ -13,6 +13,7 @@ class InteractionController:
         self,
         *,
         is_wayland_fn: Callable[[], bool],
+        should_use_tool_window_fn: Callable[[], bool] | None,
         log_fn: Callable[[str, object, object], None],
         prepare_window_fn: Callable[[object], None],
         apply_click_through_fn: Callable[[bool], None],
@@ -21,6 +22,7 @@ class InteractionController:
         window_handle_fn: Callable[[], object | None],
         set_widget_attribute_fn: Callable[[Qt.WidgetAttribute, bool], None],
         set_window_flag_fn: Callable[[Qt.WindowType, bool], None],
+        is_visible_fn: Callable[[], bool],
         ensure_visible_fn: Callable[[], None],
         raise_fn: Callable[[], None],
         set_children_attr_fn: Callable[[bool], None],
@@ -28,6 +30,7 @@ class InteractionController:
         set_window_transparent_input_fn: Callable[[bool], None],
     ) -> None:
         self._is_wayland = is_wayland_fn
+        self._should_use_tool_window = should_use_tool_window_fn
         self._log = log_fn
         self._prepare_window = prepare_window_fn
         self._apply_click_through = apply_click_through_fn
@@ -36,6 +39,7 @@ class InteractionController:
         self._window_handle = window_handle_fn
         self._set_widget_attribute = set_widget_attribute_fn
         self._set_window_flag = set_window_flag_fn
+        self._is_visible = is_visible_fn
         self._ensure_visible = ensure_visible_fn
         self._raise = raise_fn
         self._set_children_attr = set_children_attr_fn
@@ -81,12 +85,19 @@ class InteractionController:
         self.reapply_current(reason="force_render_enter")
 
     def _apply_click_through_state(self, transparent: bool, reason: str) -> None:
+        was_visible = self._is_visible()
         self._set_widget_attribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, transparent)
         self._set_children_attr(transparent)
         self._set_window_flag(Qt.WindowType.WindowStaysOnTopHint, True)
         self._set_window_flag(Qt.WindowType.FramelessWindowHint, True)
-        self._set_window_flag(Qt.WindowType.Tool, not self._is_wayland())
-        self._ensure_visible()
+        use_tool_window = (
+            bool(self._should_use_tool_window())
+            if callable(self._should_use_tool_window)
+            else not self._is_wayland()
+        )
+        self._set_window_flag(Qt.WindowType.Tool, use_tool_window)
+        if was_visible:
+            self._ensure_visible()
         window = self._window_handle()
         self._log(
             "Set click-through to %s (reason=%s window_flag=%s)",
@@ -99,4 +110,5 @@ class InteractionController:
             self._apply_click_through(transparent)
             if self._transparent_input_supported:
                 self._set_window_transparent_input(transparent)
-        self._raise()
+        if was_visible:
+            self._raise()

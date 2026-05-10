@@ -159,6 +159,34 @@ def test_create_elite_window_tracker_uses_status_based_wayland_fallback(monkeypa
     ]
 
 
+def test_create_elite_window_tracker_preserves_helper_backed_gnome_bundle_when_tracker_exists(monkeypatch):
+    sentinel = object()
+    seen_instances = []
+
+    def _factory(bundle, logger, *, title_hint="elite - dangerous", monitor_provider=None):
+        del logger, title_hint, monitor_provider
+        seen_instances.append(bundle.descriptor.instance)
+        if bundle.descriptor.instance is BackendInstance.GNOME_SHELL_WAYLAND:
+            return sentinel
+        raise AssertionError(f"unexpected fallback bundle {bundle.descriptor.instance}")
+
+    monkeypatch.setattr("overlay_client.window_tracking.sys.platform", "linux")
+    monkeypatch.setattr(backend_consumers, "create_bundle_tracker", _factory)
+
+    tracker = create_elite_window_tracker(
+        logging.getLogger("test.window_tracking.selected_status_helper"),
+        backend_status=_status(
+            BackendInstance.GNOME_SHELL_WAYLAND,
+            family=BackendFamily.COMPOSITOR_HELPER,
+            session_type=SessionType.WAYLAND,
+            compositor="gnome-shell",
+        ),
+    )
+
+    assert tracker is sentinel
+    assert seen_instances == [BackendInstance.GNOME_SHELL_WAYLAND]
+
+
 def test_create_elite_window_tracker_uses_status_based_x11_fallback(monkeypatch):
     sentinel = object()
     seen_instances = []

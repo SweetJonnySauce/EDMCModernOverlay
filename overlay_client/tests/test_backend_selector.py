@@ -6,6 +6,8 @@ from overlay_client.backend import (
     CapabilityClassification,
     FallbackReason,
     HelperKind,
+    HelperProbeAvailability,
+    HelperProbeState,
     OperatingSystem,
     PlatformProbeResult,
     SessionType,
@@ -141,6 +143,41 @@ def test_selector_uses_compositor_helper_family_when_gnome_helper_exists():
     assert status.fallback_reason is None
     assert len(status.helper_states) == 1
     assert status.helper_states[0].available is True
+    assert "helper_recommended:gnome_shell_extension" not in status.notes
+
+
+def test_selector_reports_incompatible_gnome_helper_without_marking_it_available():
+    selector = BackendSelector()
+    status = selector.select(
+        PlatformProbeResult(
+            operating_system=OperatingSystem.LINUX,
+            session_type=SessionType.WAYLAND,
+            qt_platform_name="wayland",
+            compositor="gnome-shell",
+            helper_probe_states=(
+                HelperProbeState(
+                    helper=HelperKind.GNOME_SHELL_EXTENSION,
+                    availability=HelperProbeAvailability.INCOMPATIBLE,
+                    version="stage2.3",
+                    detail="protocol_version_mismatch:2",
+                ),
+            ),
+        )
+    )
+
+    assert status.selected_backend.family is BackendFamily.NATIVE_WAYLAND
+    assert status.selected_backend.instance is BackendInstance.GNOME_SHELL_WAYLAND
+    assert status.classification is CapabilityClassification.TRUE_OVERLAY
+    assert status.fallback_from == BackendDescriptor(BackendFamily.COMPOSITOR_HELPER, BackendInstance.GNOME_SHELL_WAYLAND)
+    assert status.fallback_reason is FallbackReason.INCOMPATIBLE_HELPER
+    assert len(status.helper_states) == 1
+    assert status.helper_states[0].available is False
+    assert status.helper_states[0].installed is True
+    assert status.helper_states[0].enabled is True
+    assert status.helper_states[0].approved is False
+    assert status.helper_states[0].version == "stage2.3"
+    assert status.helper_states[0].detail == "protocol_version_mismatch:2"
+    assert "helper_incompatible:gnome_shell_extension" in status.notes
     assert "helper_recommended:gnome_shell_extension" not in status.notes
 
 

@@ -10,6 +10,17 @@ from typing import Mapping
 from .contracts import BackendInstance, HelperKind
 
 HELPER_PROTOCOL_VERSION = 1
+GNOME_SHELL_HELPER_SERVICE_NAME = "org.edmc.EDMCModernOverlay"
+GNOME_SHELL_HELPER_OBJECT_PATH = "/org/edmc/EDMCModernOverlay"
+GNOME_SHELL_HELPER_INTERFACE_NAME = "org.edmc.EDMCModernOverlay.Helper"
+GNOME_SHELL_HELPER_SET_OVERLAY_INPUT_PASSTHROUGH_METHOD = "SetOverlayInputPassthrough"
+GNOME_SHELL_ALLOWED_EVENTS = frozenset(
+    {
+        "active_window_changed",
+        "window_geometry_changed",
+        "presentation_state_changed",
+    }
+)
 
 
 class HelperTransport(str, Enum):
@@ -94,6 +105,25 @@ class HelperMessage:
             "helper_version": self.helper_version,
             "payload": dict(self.payload),
         }
+
+
+def build_gnome_shell_helper_boundary(session_token: str) -> HelperBoundaryConfig:
+    """Return the validated GNOME session-DBus helper boundary."""
+
+    return validate_helper_boundary(
+        HelperBoundaryConfig(
+            backend_instance=BackendInstance.GNOME_SHELL_WAYLAND,
+            helper_kind=HelperKind.GNOME_SHELL_EXTENSION,
+            endpoint=HelperEndpointConfig(
+                transport=HelperTransport.SESSION_DBUS,
+                service_name=GNOME_SHELL_HELPER_SERVICE_NAME,
+                object_path=GNOME_SHELL_HELPER_OBJECT_PATH,
+                interface_name=GNOME_SHELL_HELPER_INTERFACE_NAME,
+            ),
+            session_token=session_token,
+            allowed_events=GNOME_SHELL_ALLOWED_EVENTS,
+        )
+    )
 
 
 def validate_helper_boundary(

@@ -45,7 +45,7 @@ class FollowSurfaceMixin:
             if self._cursor_saved:
                 self.setCursor(self._saved_cursor)
                 self._cursor_saved = False
-        self.raise_()
+        self._raise_overlay_if_allowed()
 
     def _poll_modifiers(self) -> None:
         if not self._drag_enabled or self._drag_active:
@@ -70,6 +70,18 @@ class FollowSurfaceMixin:
 
     def _restore_drag_interactivity(self) -> None:
         self._interaction_controller.restore_drag_interactivity(self._drag_enabled, self._drag_active, self.format_scale_debug)
+
+    def _raise_overlay_if_allowed(self) -> None:
+        should_raise = True
+        platform_controller = getattr(self, "_platform_controller", None)
+        if platform_controller is not None:
+            policy = getattr(platform_controller, "should_raise_overlay_window", None)
+            if callable(policy):
+                should_raise = bool(policy())
+        if not should_raise:
+            return
+        if self.isVisible():
+            self.raise_()
 
     def _set_children_click_through(self, transparent: bool) -> None:
         for child_name in ("message_label",):
@@ -281,7 +293,7 @@ class FollowSurfaceMixin:
         def _set_geometry(target: Tuple[int, int, int, int]) -> None:
             self._last_set_geometry = target
             self.setGeometry(QRect(*target))
-            self.raise_()
+            self._raise_overlay_if_allowed()
 
         def _classify_override(target: Tuple[int, int, int, int], actual: Tuple[int, int, int, int]) -> str:
             classification = self._classify_geometry_override(target, actual)
@@ -452,7 +464,7 @@ class FollowSurfaceMixin:
             is_visible_fn=lambda: self.isVisible(),
             show_fn=lambda: self.show(),
             hide_fn=lambda: self.hide(),
-            raise_fn=lambda: self.raise_(),
+            raise_fn=lambda: self._raise_overlay_if_allowed(),
             apply_drag_state_fn=self._apply_drag_state,
             format_scale_debug_fn=self.format_scale_debug,
         )

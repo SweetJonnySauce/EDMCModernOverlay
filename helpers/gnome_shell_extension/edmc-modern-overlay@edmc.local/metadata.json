@@ -1,0 +1,12 @@
+{
+  "uuid": "edmc-modern-overlay@edmc.local",
+  "name": "EDMC Modern Overlay",
+  "description": "GNOME Shell helper for EDMC Modern Overlay.",
+  "url": "https://github.com/SweetJonnySauce/EDMCModernOverlay",
+  "shell-version": [
+    "46",
+    "47",
+    "48",
+    "49"
+  ]
+}

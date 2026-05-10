@@ -180,7 +180,9 @@ class BackendSelector:
         ):
             return (
                 BackendDescriptor(BackendFamily.COMPOSITOR_HELPER, BackendInstance.GNOME_SHELL_WAYLAND),
-                FallbackReason.MISSING_HELPER,
+                FallbackReason.INCOMPATIBLE_HELPER
+                if probe.has_incompatible_helper(HelperKind.GNOME_SHELL_EXTENSION)
+                else FallbackReason.MISSING_HELPER,
             )
         return None, None
 
@@ -214,7 +216,10 @@ class BackendSelector:
         if descriptor.instance is BackendInstance.GNOME_SHELL_WAYLAND and not probe.has_helper(
             HelperKind.GNOME_SHELL_EXTENSION
         ):
-            notes.append("helper_recommended:gnome_shell_extension")
+            if probe.has_incompatible_helper(HelperKind.GNOME_SHELL_EXTENSION):
+                notes.append("helper_incompatible:gnome_shell_extension")
+            else:
+                notes.append("helper_recommended:gnome_shell_extension")
             notes.append("follow_mode_fallback:native_x11")
         elif descriptor.instance in {
             BackendInstance.COSMIC,
@@ -237,14 +242,21 @@ class BackendSelector:
     ) -> tuple[HelperCapabilityState, ...]:
         if descriptor.instance is BackendInstance.GNOME_SHELL_WAYLAND:
             helper_available = probe.has_helper(HelperKind.GNOME_SHELL_EXTENSION)
+            helper_probe_state = probe.helper_state(HelperKind.GNOME_SHELL_EXTENSION)
+            helper_incompatible = probe.has_incompatible_helper(HelperKind.GNOME_SHELL_EXTENSION)
             return (
                 HelperCapabilityState(
                     helper=HelperKind.GNOME_SHELL_EXTENSION,
                     required=True,
-                    installed=helper_available,
-                    enabled=helper_available,
+                    installed=helper_available or helper_incompatible,
+                    enabled=helper_available or helper_incompatible,
                     approved=helper_available,
-                    detail="required_for_true_overlay",
+                    version=helper_probe_state.version if helper_probe_state is not None else "",
+                    detail=(
+                        helper_probe_state.detail
+                        if helper_probe_state is not None and helper_probe_state.detail
+                        else "required_for_true_overlay"
+                    ),
                 ),
             )
         if descriptor.instance is BackendInstance.KWIN_WAYLAND:

@@ -170,7 +170,9 @@ Modern Overlay now ships with compositor-aware helpers and multiple fallbacks. T
   ```
 - **KDE Plasma (KWin):** Set `force_xwayland` to **false** in `overlay_settings.json`. KWin—Plasma handles Wayland windows natively, and forcing XWayland can break input/stacking.
 
-- **XWayland mode:** On Wayland sessions the overlay forces itself to launch under XWayland for compatibility. Keep this path in mind on GNOME Shell (Wayland), where native layer-shell hooks are not yet available; the overlay behaves like it does on X11 and stays pinned above Elite.
+- **GNOME Shell (Wayland):** GNOME now has a helper-backed path through the bundled GNOME Shell extension. The Linux installer records helper approval, but it does not install or enable the extension automatically. For the exact per-user copy, enable, disable, and uninstall steps, see the [GNOME helper README](../helpers/gnome_shell_extension/edmc-modern-overlay@edmc.local/README.md). If the extension is absent or disabled, backend status should report `missing_helper`; if it is present but the D-Bus/helper contract fails, status should report `incompatible_helper`.
+
+- **XWayland compatibility mode:** When you explicitly use the XWayland compatibility backend, the overlay behaves like it does on X11. Keep this path in mind for environments where compositor-native behavior is unavailable or you are intentionally testing the compatibility path.
   ```bash
   # Example for Debian/Ubuntu; xprop/xwininfo ship in x11-utils and swaymsg comes with sway.
   sudo apt install wmctrl x11-utils sway

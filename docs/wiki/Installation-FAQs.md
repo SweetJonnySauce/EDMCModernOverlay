@@ -37,7 +37,8 @@ Releases ship a `checksums.txt` manifest. Both installers (`install_linux.sh` an
   - Fedora / RHEL / CentOS Stream: `python3`, `python3-pip`, `python3-virtualenv`, `rsync`, `curl`, `wmctrl`, `libxkbcommon`, `libxkbcommon-x11`, `xcb-util-cursor`, and Wayland helpers `xwininfo`, `xprop`
   - openSUSE / SLE: `python3`, `python3-pip`, `python3-virtualenv`, `rsync`, `curl`, `wmctrl`, plus Qt helpers `libxcb-cursor0`, `libxkbcommon-x11-0`, and Wayland helpers `xprop`, `xwininfo`
   - Arch / Manjaro / SteamOS: `python`, `python-pip`, `rsync`, `curl`, `wmctrl`, plus Qt helpers `libxcb`, `xcb-util-cursor`, `libxkbcommon`, and Wayland helpers `xorg-xprop`, `xorg-xwininfo`
-  - Wayland-only Python dependency `pydbus` is installed inside `overlay_client/.venv` from `overlay_client/requirements/wayland.txt` when a Wayland session is detected; no system package is required.
+  - Wayland installs `pydbus` inside `overlay_client/.venv` from `overlay_client/requirements/wayland.txt`.
+  - On Debian / Ubuntu GNOME Wayland, if you approve the GNOME helper path, the installer may also ask permission to install the host package `python3-gi` and rebuild `overlay_client/.venv` so the GNOME helper runtime can see the distro-provided `gi` module.
   
 ## Compositor-aware overrides (Linux): 
 `install_linux.sh` detects your compositor (via `install_matrix.json`) and can offer compositor-specific env overrides (e.g., Qt scaling tweaks on KDE/Wayland). Use `--compositor auto|<id>|none` to control this and `--yes` to auto-apply. Accepted overrides are stored in `overlay_client/env_overrides.json` with provenance; user-set env vars always win at runtime. Force Xwayland is only set when the manifest entry requests it.

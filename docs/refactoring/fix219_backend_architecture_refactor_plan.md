@@ -129,6 +129,26 @@ flowchart TD
 ## Open Questions
 - None currently. Post-`fix219` Windows backend-contract cleanup, Linux standalone runtime/presentation work, and physical-clamp / geometry-follow redesign are planned explicitly in the `Architecture Progress Snapshot` rather than treated as open questions in this plan.
 
+## 1.0.0 Release Notes Staging
+- Purpose:
+  - Start collecting the `1.0.0` release-note points that fall out of `fix219` and its follow-up cleanup work before the final `RELEASE_NOTES.md` edit.
+  - Keep this as a staging area only until follow-up Phase `5` validation, EDMC compliance review, and release signoff are recorded.
+- Confirmed release-note candidates:
+  - The overlay now uses an explicit backend architecture with client-authoritative runtime backend selection instead of scattered platform/backend decisions.
+  - Backend status and diagnostics are now first-class surfaces, including live runtime reporting that distinguishes backend family/instance, fallback reason, and helper state.
+  - Wayland `xwayland_compat` is now reported honestly as an explicit `degraded_overlay` compatibility path rather than a conservative temporary `true_overlay` classification.
+  - GNOME Wayland now has a real helper-backed path via the GNOME Shell extension helper, but helper install and enable remain explicit user actions rather than silent installer behavior.
+  - On Debian/Ubuntu GNOME Wayland, approved GNOME-helper installs may prompt to install host package `python3-gi` and rebuild `overlay_client/.venv` so the helper runtime can see the required `gi` module.
+- Items that remain gated on follow-up Phase `5` evidence before final release-note wording:
+  - Final claimed support classifications and exact compositor support wording must follow recorded real-environment validation rather than code inspection.
+  - Fullscreen is not a hard requirement for any backend; final wording should state the supported play mode per backend honestly, and borderless/windowed or windowed are acceptable supported outcomes where fullscreen stacking is not proven.
+  - Current GNOME helper evidence must not be described as a fullscreen-only limitation unless later validation proves that. The active blocker was reproduced in borderless/windowed-sized testing, so final wording must treat it as an unresolved supported-mode stacking issue until proven otherwise.
+  - Any retained limitations, deferred environments, or helper-path caveats must be stated explicitly in the final release notes if Phase `5` leaves them unresolved.
+  - EDMC compliance findings and any release-signoff caveats must be folded into the final `1.0.0` release notes after the follow-up plan closes.
+- Update rule:
+  - Add new `1.0.0` release-note candidates here as they are implemented and proven.
+  - Do not treat this section as the shipped release note itself; the final wording still belongs in `RELEASE_NOTES.md`.
+
 ## Decisions (Locked)
 - Linux backend tracks remain explicit: `native_x11`, `xwayland_compat`, and `native_wayland_*`.
 - Native Wayland is preferred where truly ready, but `xwayland_compat` remains an explicit fallback.
@@ -139,6 +159,7 @@ flowchart TD
 - The Tk controller remains in place as-is and is not a refactor target.
 - Manual backend override remains available as a visible troubleshooting escape hatch.
 - Capability state must be visible to users/support and fully inspectable in diagnostics.
+- Fullscreen is not a hard requirement for any backend; support claims must be tied to the backend's declared supported play mode, and borderless/windowed or windowed remain acceptable supported outcomes when fullscreen behavior is not proven.
 - No currently working environment may be downgraded without explicit owner review.
 - Short-term stabilization comes first in sequencing, but long-term backend cleanup remains mandatory.
 
@@ -692,6 +713,7 @@ flowchart LR
 - Plan created on 2026-04-02.
 - Record one execution summary subsection per completed phase.
 - Record exact test commands and outcomes for each completed phase.
+- 2026-04-05: added the `1.0.0` release-notes staging section to capture confirmed `fix219` / follow-up release-note candidates before `RELEASE_NOTES.md` is updated; final wording remains gated on follow-up Phase `5` validation, compliance, and signoff evidence.
 
 ### Phase 1 Execution Summary
 - Stage `1.1` completed on 2026-04-02.

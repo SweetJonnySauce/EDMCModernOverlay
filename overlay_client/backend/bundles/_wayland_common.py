@@ -12,6 +12,7 @@ from overlay_client.backend.contracts import (
     BackendDescriptor,
     BackendFamily,
     BackendInstance,
+    HelperIpcBackend,
     InputPolicyBackend,
     PresentationBackend,
     SessionType,
@@ -74,17 +75,21 @@ def create_unavailable_tracker(
 def build_native_wayland_bundle(
     instance: BackendInstance,
     tracker_factory: WaylandTrackerFactory,
+    *,
+    family: BackendFamily = BackendFamily.NATIVE_WAYLAND,
+    platform_label: str = "Wayland",
+    helper_ipc: HelperIpcBackend | None = None,
 ) -> BackendBundle:
     """Build a native Wayland bundle with an explicit backend identity."""
 
     window_backend = NativeWaylandWindowBackend(instance=instance)
     return BackendBundle(
         descriptor=BackendDescriptor(
-            family=BackendFamily.NATIVE_WAYLAND,
+            family=family,
             instance=instance,
         ),
         capabilities=BackendCapabilities(
-            platform_label="Wayland",
+            platform_label=platform_label,
             uses_native_wayland_windowing=True,
             requires_transient_parent=False,
             tracker_available=tracker_factory is not create_unavailable_tracker,
@@ -96,4 +101,5 @@ def build_native_wayland_bundle(
         discovery=NativeWaylandDiscoveryBackend(instance=instance, tracker_factory=tracker_factory),
         presentation=window_backend,
         input_policy=window_backend,
+        helper_ipc=helper_ipc,
     )

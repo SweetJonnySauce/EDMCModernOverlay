@@ -14,6 +14,7 @@ from overlay_client.backend.bundles import (
 from overlay_client.backend.bundles import _wayland_common
 from overlay_client.backend.consumers import (
     create_bundle_integration,
+    create_bundle_helper_runtime,
     create_bundle_tracker,
     derive_linux_backend_status,
     is_wayland_bundle,
@@ -29,6 +30,7 @@ from overlay_client.backend.contracts import (
     BackendFamily,
     BackendInstance,
     CapabilityClassification,
+    HelperKind,
     OperatingSystem,
     PlatformProbeResult,
     SessionType,
@@ -60,6 +62,19 @@ class _CapabilityOnlyInputPolicy:
     @property
     def backend_instance(self) -> BackendInstance:
         return BackendInstance.NATIVE_X11
+
+
+class _CapabilityOnlyHelperIpc:
+    @property
+    def backend_instance(self) -> BackendInstance:
+        return BackendInstance.NATIVE_X11
+
+    @property
+    def helper_kind(self):
+        return HelperKind.EXTERNAL_HELPER
+
+    def create_runtime(self, *, session_token: str, logger):
+        return (session_token, logger)
 
 
 def test_consumer_helper_uses_native_x11_integration_factory(monkeypatch):
@@ -133,6 +148,58 @@ def test_capability_helpers_use_backend_declared_metadata_over_descriptor_infere
     assert platform_label_for_bundle(bundle) == "Wayland"
     assert is_wayland_bundle(bundle) is True
     assert uses_transient_parent(bundle) is False
+
+
+def test_create_bundle_helper_runtime_returns_none_when_bundle_has_no_helper():
+    bundle = BackendBundle(
+        descriptor=BackendDescriptor(
+            family=BackendFamily.NATIVE_X11,
+            instance=BackendInstance.NATIVE_X11,
+        ),
+        capabilities=BackendCapabilities(
+            platform_label="X11",
+            uses_native_wayland_windowing=False,
+            requires_transient_parent=True,
+        ),
+        discovery=_CapabilityOnlyDiscovery(),
+        presentation=_CapabilityOnlyPresentation(),
+        input_policy=_CapabilityOnlyInputPolicy(),
+    )
+
+    runtime = create_bundle_helper_runtime(
+        bundle,
+        session_token="session-token",
+        logger=logging.getLogger("test.backend.consumers.helper.none"),
+    )
+
+    assert runtime is None
+
+
+def test_create_bundle_helper_runtime_uses_helper_ipc_backend_factory():
+    logger = logging.getLogger("test.backend.consumers.helper.factory")
+    bundle = BackendBundle(
+        descriptor=BackendDescriptor(
+            family=BackendFamily.COMPOSITOR_HELPER,
+            instance=BackendInstance.GNOME_SHELL_WAYLAND,
+        ),
+        capabilities=BackendCapabilities(
+            platform_label="Wayland",
+            uses_native_wayland_windowing=True,
+            requires_transient_parent=False,
+        ),
+        discovery=_CapabilityOnlyDiscovery(),
+        presentation=_CapabilityOnlyPresentation(),
+        input_policy=_CapabilityOnlyInputPolicy(),
+        helper_ipc=_CapabilityOnlyHelperIpc(),
+    )
+
+    runtime = create_bundle_helper_runtime(
+        bundle,
+        session_token="session-token",
+        logger=logger,
+    )
+
+    assert runtime == ("session-token", logger)
 
 
 def test_consumer_helper_uses_xwayland_integration_factory(monkeypatch):
@@ -283,13 +350,24 @@ def test_consumer_helper_uses_hyprland_tracker_factory(monkeypatch):
     assert observed["monitor_provider"] is monitor_provider
 
 
-def test_consumer_helper_allows_missing_tracker_for_gnome_wayland_bundle():
-    bundle = gnome_shell_wayland.build_gnome_shell_wayland_bundle()
+def test_consumer_helper_exposes_tracker_for_helper_enabled_gnome_wayland_bundle():
+    bundle = gnome_shell_wayland.build_gnome_shell_wayland_bundle(helper_enabled=True)
     logger = logging.getLogger("test.backend.consumers.gnome")
 
     tracker = create_bundle_tracker(bundle, logger, title_hint="elite", monitor_provider=lambda: [])
 
+    assert tracker is not None
+    assert bundle.helper_ipc is not None
+
+
+def test_consumer_helper_keeps_missing_tracker_for_helper_disabled_gnome_wayland_bundle():
+    bundle = gnome_shell_wayland.build_gnome_shell_wayland_bundle(helper_enabled=False)
+    logger = logging.getLogger("test.backend.consumers.gnome.disabled")
+
+    tracker = create_bundle_tracker(bundle, logger, title_hint="elite", monitor_provider=lambda: [])
+
     assert tracker is None
+    assert bundle.helper_ipc is None
 
 
 def test_consumer_helper_allows_missing_tracker_for_generic_wayland_bundle():
@@ -369,6 +447,28 @@ def test_derive_linux_backend_status_infers_gnome_and_generic_wayland_paths_from
     assert generic_status.selected_backend.instance is BackendInstance.COSMIC
     assert gnome_bundle.descriptor.instance is BackendInstance.GNOME_SHELL_WAYLAND
     assert generic_bundle.descriptor.instance is BackendInstance.WAYLAND_LAYER_SHELL_GENERIC
+
+
+def test_resolve_linux_bundle_from_status_uses_helper_enabled_gnome_bundle_when_selected():
+    status = BackendSelectionStatus(
+        probe=PlatformProbeResult(
+            operating_system=OperatingSystem.LINUX,
+            session_type=SessionType.WAYLAND,
+            qt_platform_name="wayland",
+            compositor="gnome-shell",
+        ),
+        selected_backend=BackendDescriptor(
+            BackendFamily.COMPOSITOR_HELPER,
+            BackendInstance.GNOME_SHELL_WAYLAND,
+        ),
+        classification=CapabilityClassification.TRUE_OVERLAY,
+    )
+
+    bundle = resolve_linux_bundle_from_status(status)
+
+    assert bundle.descriptor.family is BackendFamily.COMPOSITOR_HELPER
+    assert bundle.helper_ipc is not None
+    assert platform_label_for_bundle(bundle) == "GNOME Shell helper"
 
 
 def test_resolve_linux_bundle_from_status_preserves_selected_xwayland_bundle():

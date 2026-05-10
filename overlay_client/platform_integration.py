@@ -18,6 +18,7 @@ from overlay_client.backend.consumers import (
     resolve_linux_bundle_from_status,
     uses_transient_parent,
 )
+from overlay_client.backend.contracts import BackendFamily, BackendInstance
 from overlay_client.window_integration import IntegrationBase as _IntegrationBase, MonitorSnapshot
 
 
@@ -140,3 +141,29 @@ class PlatformController:
         if sys.platform.startswith("win"):
             return "Windows"
         return platform_label_for_bundle(self._current_linux_bundle())
+
+    def should_raise_overlay_window(self) -> bool:
+        """Return whether the overlay should explicitly raise itself for the current backend."""
+
+        if sys.platform.startswith("win"):
+            return True
+        status = self._current_linux_status()
+        if (
+            status.selected_backend.family is BackendFamily.COMPOSITOR_HELPER
+            and status.selected_backend.instance is BackendInstance.GNOME_SHELL_WAYLAND
+        ):
+            return False
+        return True
+
+    def should_use_tool_window(self) -> bool:
+        """Return whether the overlay should use Qt.Tool classification for the current backend."""
+
+        if sys.platform.startswith("win"):
+            return True
+        status = self._current_linux_status()
+        if (
+            status.selected_backend.family is BackendFamily.COMPOSITOR_HELPER
+            and status.selected_backend.instance is BackendInstance.GNOME_SHELL_WAYLAND
+        ):
+            return True
+        return not is_wayland_bundle(self._current_linux_bundle())

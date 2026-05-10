@@ -1326,6 +1326,7 @@ handle_compositor_helper_guidance() {
     write_compositor_helper_approval "$dest_dir" "$approved" "$approval_source"
     if [[ "$approved" -eq 1 ]]; then
         echo "ℹ️  Helper approval recorded; no helper was installed or enabled automatically."
+        maybe_install_gnome_helper_host_prerequisite "$dest_dir"
     else
         echo "ℹ️  Helper approval not granted; recorded as declined and continuing without helper install/enable."
     fi
@@ -2228,11 +2229,26 @@ ensure_system_packages() {
     fi
 }
 
+venv_uses_system_site_packages() {
+    local target="$1"
+    local config_file="${target}/overlay_client/.venv/pyvenv.cfg"
+    if [[ ! -f "$config_file" ]]; then
+        return 1
+    fi
+    grep -Eiq '^include-system-site-packages *= *true$' "$config_file"
+}
+
 create_venv_and_install() {
     local target="$1"
+    local force_rebuild="${2:-0}"
+    local use_system_site_packages="${3:-0}"
     log_verbose "Ensuring overlay_client virtualenv inside '$target' (dry-run=${DRY_RUN})."
     if [[ "$DRY_RUN" == true ]]; then
-        echo "📝 [dry-run] Would ensure Python virtual environment at '$target/overlay_client/.venv' and install overlay_client requirements."
+        local dry_run_suffix=""
+        if (( use_system_site_packages )); then
+            dry_run_suffix=" with --system-site-packages"
+        fi
+        echo "📝 [dry-run] Would ensure Python virtual environment at '$target/overlay_client/.venv'${dry_run_suffix} and install overlay_client requirements."
         return
     fi
     if [[ ! -d "$target" ]]; then
@@ -2249,7 +2265,10 @@ create_venv_and_install() {
     local rebuild_requested=0
     if [[ -d overlay_client/.venv ]]; then
         echo "ℹ️  Existing Python virtual environment detected at overlay_client/.venv."
-        if prompt_yes_no_default_no "Rebuild the overlay_client virtual environment?"; then
+        if (( force_rebuild )); then
+            echo "ℹ️  Rebuilding overlay_client/.venv to use the approved GNOME helper prerequisites."
+            rebuild_requested=1
+        elif prompt_yes_no_default_no "Rebuild the overlay_client virtual environment?"; then
             rebuild_requested=1
         fi
     fi
@@ -2261,8 +2280,13 @@ create_venv_and_install() {
 
     if [[ ! -d overlay_client/.venv ]]; then
         echo "🐍 Creating Python virtual environment..."
-        log_command python3 -m venv overlay_client/.venv
-        python3 -m venv overlay_client/.venv --copies
+        if (( use_system_site_packages )); then
+            log_command python3 -m venv overlay_client/.venv --copies --system-site-packages
+            python3 -m venv overlay_client/.venv --copies --system-site-packages
+        else
+            log_command python3 -m venv overlay_client/.venv
+            python3 -m venv overlay_client/.venv --copies
+        fi
     fi
 
     # shellcheck disable=SC1091
@@ -2295,6 +2319,51 @@ create_venv_and_install() {
 
     popd >/dev/null
     log_verbose "overlay_client virtualenv ready at '$target/overlay_client/.venv'."
+}
+
+maybe_install_gnome_helper_host_prerequisite() {
+    local dest_dir="$1"
+    local session_stack
+    session_stack="$(detect_display_stack)"
+    if [[ "${PROFILE_ID:-}" != "debian" ]]; then
+        return
+    fi
+    if [[ "${COMPOSITOR_ID:-}" != "gnome-shell" ]]; then
+        return
+    fi
+    if [[ "${COMPOSITOR_HELPER_KIND:-}" != "gnome_shell_extension" ]]; then
+        return
+    fi
+    if [[ "$session_stack" != "wayland" ]]; then
+        return
+    fi
+
+    local needs_rebuild=1
+    if venv_uses_system_site_packages "$dest_dir"; then
+        needs_rebuild=0
+    fi
+
+    classify_package_statuses python3-gi
+    local -a action_packages=("${PACKAGES_TO_INSTALL[@]}" "${PACKAGES_TO_UPGRADE[@]}")
+    if ((${#action_packages[@]} == 0)) && (( ! needs_rebuild )); then
+        echo "✅ GNOME helper host prerequisites are already satisfied."
+        return
+    fi
+
+    local prompt_message="GNOME Wayland helper support needs the host package 'python3-gi' and a rebuild of overlay_client/.venv. Continue?"
+    if ! prompt_yes_no_default_no "$prompt_message"; then
+        echo "ℹ️  Skipped GNOME helper host prerequisite installation; the GNOME helper path will remain unavailable until the host package is installed and overlay_client/.venv is rebuilt."
+        return
+    fi
+
+    if ((${#action_packages[@]} > 0)); then
+        require_command sudo "sudo"
+        run_package_install "GNOME helper host prerequisites" "${action_packages[@]}"
+    else
+        echo "ℹ️  Host package 'python3-gi' is already present; rebuilding overlay_client/.venv for GNOME helper support."
+    fi
+
+    create_venv_and_install "$dest_dir" 1 1
 }
 
 copy_initial_install() {

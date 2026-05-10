@@ -380,3 +380,34 @@ echo "DONE=1"
     assert '"approved": false' in approval
     assert '"approval_source": "declined"' in approval
     assert '"helper_kind": "kwin_script"' in approval
+
+
+def test_gnome_helper_host_prerequisite_prompt_drives_python3_gi_and_system_site_rebuild() -> None:
+    env = os.environ.copy()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        installer_path = _write_trimmed_installer(tmpdir)
+        dest_dir = Path(tmpdir) / "plugins" / "EDMCModernOverlay"
+        (dest_dir / "overlay_client").mkdir(parents=True)
+        sudo_path = Path(tmpdir) / "sudo"
+        sudo_path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        sudo_path.chmod(0o755)
+        env["PATH"] = f"{tmpdir}:{env.get('PATH','')}"
+        script = f"""
+export MODERN_OVERLAY_INSTALLER_IMPORT=1
+source "{installer_path}"
+ASSUME_YES=true
+DRY_RUN=true
+PROFILE_ID="debian"
+PROFILE_LABEL="Debian / Ubuntu"
+PKG_UPDATE_CMD=(apt-get update)
+PKG_INSTALL_CMD=(apt-get install -y)
+COMPOSITOR_ID="gnome-shell"
+COMPOSITOR_HELPER_KIND="gnome_shell_extension"
+XDG_SESSION_TYPE=wayland
+maybe_install_gnome_helper_host_prerequisite "{dest_dir}"
+"""
+        output = _run_bash(script, env)
+
+    assert "GNOME Wayland helper support needs the host package 'python3-gi' and a rebuild of overlay_client/.venv. Continue?" in output
+    assert "python3-gi" in output
+    assert "--system-site-packages" in output

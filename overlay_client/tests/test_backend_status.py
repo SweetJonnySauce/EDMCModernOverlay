@@ -152,6 +152,63 @@ def test_backend_status_ui_helpers_label_plugin_hint_and_inactive_helpers():
     )
 
 
+def test_backend_status_ui_warning_distinguishes_incompatible_helper():
+    status = BackendSelectionStatus(
+        probe=_probe(),
+        selected_backend=BackendDescriptor(BackendFamily.NATIVE_WAYLAND, BackendInstance.GNOME_SHELL_WAYLAND),
+        classification=CapabilityClassification.TRUE_OVERLAY,
+        fallback_from=BackendDescriptor(BackendFamily.COMPOSITOR_HELPER, BackendInstance.GNOME_SHELL_WAYLAND),
+        fallback_reason=FallbackReason.INCOMPATIBLE_HELPER,
+        helper_states=(
+            HelperCapabilityState(
+                helper=HelperKind.GNOME_SHELL_EXTENSION,
+                required=True,
+                installed=True,
+                enabled=True,
+                approved=False,
+                version="stage2.3",
+                detail="protocol_version_mismatch:2",
+            ),
+        ),
+        shadow_mode=False,
+    )
+
+    report = build_status_report(status)
+
+    assert report["helper_states"] == ["gnome_shell_extension:required:incompatible:unapproved:stage2.3"]
+    assert report["helper_unavailable"] == ["gnome_shell_extension"]
+    assert report["warning_required"] is True
+    assert format_status_ui_warning(status) == (
+        "Warning: A required helper for compositor_helper / gnome_shell_wayland is present but incompatible."
+    )
+
+
+def test_backend_status_ui_warning_surfaces_missing_python_gi_prerequisite():
+    status = BackendSelectionStatus(
+        probe=_probe(),
+        selected_backend=BackendDescriptor(BackendFamily.NATIVE_WAYLAND, BackendInstance.GNOME_SHELL_WAYLAND),
+        classification=CapabilityClassification.TRUE_OVERLAY,
+        fallback_from=BackendDescriptor(BackendFamily.COMPOSITOR_HELPER, BackendInstance.GNOME_SHELL_WAYLAND),
+        fallback_reason=FallbackReason.MISSING_HELPER,
+        helper_states=(
+            HelperCapabilityState(
+                helper=HelperKind.GNOME_SHELL_EXTENSION,
+                required=True,
+                installed=False,
+                enabled=False,
+                approved=False,
+                detail="host_prerequisite_missing:python3-gi",
+            ),
+        ),
+        shadow_mode=False,
+    )
+
+    assert format_status_ui_warning(status) == (
+        "Warning: A required helper for compositor_helper / gnome_shell_wayland is not available. "
+        "Install host package 'python3-gi' and rebuild overlay_client/.venv for GNOME helper support."
+    )
+
+
 def test_backend_status_report_tracks_optional_missing_helpers_without_warning_noise():
     status = BackendSelectionStatus(
         probe=_probe(),

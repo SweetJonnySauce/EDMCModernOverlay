@@ -44,6 +44,7 @@ For this project, an environment qualifies as `true_overlay` only if it passes e
 - Failing any checklist item means the environment is not `true_overlay`.
 - An environment that mostly works but fails one or more checklist items should be classified as `degraded_overlay`.
 - An environment with no acceptable backend path should be classified as `unsupported`.
+- Fullscreen is not a universal requirement. The declared supported play mode may be fullscreen, borderless/windowed, or windowed depending on what the backend can actually prove, and `true_overlay` should be judged against that declared supported mode rather than assuming fullscreen by default.
 
 ### Tracking-specific notes
 

@@ -5,8 +5,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Mapping, Optional
 
-from overlay_client.backend.contracts import BackendBundle, BackendInstance
+from overlay_client.backend.contracts import BackendBundle, BackendFamily, BackendInstance
 from overlay_client.backend.probe import ProbeInputs, ProbeSource, collect_platform_probe
+from overlay_client.backend.probe_gnome import probe_gnome_shell_helper
 from overlay_client.backend.selector import BackendSelector
 from overlay_client.backend.status import BackendSelectionStatus
 
@@ -33,6 +34,19 @@ def create_bundle_tracker(
     return bundle.discovery.create_tracker(logger, title_hint=title_hint, monitor_provider=monitor_provider)
 
 
+def create_bundle_helper_runtime(
+    bundle: BackendBundle,
+    *,
+    session_token: str,
+    logger: logging.Logger,
+):
+    """Create a helper runtime from a bundle helper IPC backend, if one exists."""
+
+    if bundle.helper_ipc is None:
+        return None
+    return bundle.helper_ipc.create_runtime(session_token=session_token, logger=logger)
+
+
 _COMPAT_SELECTOR = BackendSelector(shadow_mode=False)
 
 
@@ -49,7 +63,8 @@ def derive_linux_backend_status(
 ) -> BackendSelectionStatus:
     """Derive a Linux backend status through the shared pure probe/selector path."""
 
-    probe = collect_platform_probe(
+    env_map = dict(env or {})
+    base_probe = collect_platform_probe(
         ProbeInputs(
             source=source,
             sys_platform="linux",
@@ -58,7 +73,25 @@ def derive_linux_backend_status(
             compositor=compositor,
             is_flatpak=flatpak,
             flatpak_app_id=flatpak_app_id,
-            env=dict(env or {}),
+            env=env_map,
+        )
+    )
+    gnome_helper_state = probe_gnome_shell_helper(
+        session_type=base_probe.session_type.value,
+        compositor=base_probe.compositor,
+        env=env_map,
+    )
+    probe = base_probe if gnome_helper_state is None else collect_platform_probe(
+        ProbeInputs(
+            source=source,
+            sys_platform="linux",
+            qt_platform_name=qt_platform_name,
+            session_type=base_probe.session_type.value,
+            compositor=base_probe.compositor,
+            is_flatpak=flatpak,
+            flatpak_app_id=flatpak_app_id,
+            helper_probe_states=(gnome_helper_state,),
+            env=env_map,
         )
     )
     return _COMPAT_SELECTOR.select(probe, manual_override=manual_override)
@@ -113,6 +146,12 @@ def resolve_legacy_linux_bundle(
 def resolve_linux_bundle_from_status(status: BackendSelectionStatus) -> BackendBundle:
     """Resolve the explicit Linux bundle chosen by the client-owned selector result."""
 
+    if status.selected_backend.instance is BackendInstance.GNOME_SHELL_WAYLAND:
+        from overlay_client.backend.bundles.gnome_shell_wayland import build_gnome_shell_wayland_bundle
+
+        return build_gnome_shell_wayland_bundle(
+            helper_enabled=status.selected_backend.family is BackendFamily.COMPOSITOR_HELPER,
+        )
     return _build_linux_bundle_for_instance(status.selected_backend.instance)
 
 
