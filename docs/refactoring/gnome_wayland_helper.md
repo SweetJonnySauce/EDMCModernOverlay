@@ -1141,6 +1141,7 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 ## Phase Details
 
 ### Phase 1: Status Truthfulness And Degraded Fallback
+- Status: Completed
 - Implements IQ1.
 - Corrects the current inconsistency where GNOME Wayland without a healthy helper can show `Mode: True overlay`.
 - Keeps selected backend identity and helper diagnostics visible while changing support classification to `degraded_overlay` when helper state is not `healthy`.
@@ -1184,6 +1185,7 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 - Unit/harness tests cover selector/status and status consumers touched by this phase.
 
 ### Phase 2: Visibility Terminology Rename
+- Status: Completed
 - Implements IQ3 and R-VN requirements.
 - Renames misleading `force_render` terminology to `keep_overlay_visible` before helper behavior depends on it.
 - Keeps behavior unchanged: this is a visibility/focus override, not a payload rendering control.
@@ -1225,6 +1227,7 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 - Tests prove behavior is unchanged and terminology is no longer render-focused.
 
 ### Phase 3: Extension Package Skeleton And Protocol Constants
+- Status: Completed
 - Implements the first IQ2 helper MVP stage.
 - Adds the inspectable source-directory helper package at `helpers/gnome_shell_extension/` without depending on it for production true-overlay claims.
 - Establishes metadata, UUID, shell-version entries, helper version, helper protocol, and manifest tests.
@@ -1267,6 +1270,7 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 - No user-visible `true_overlay` behavior depends on the skeleton.
 
 ### Phase 4: DBus Health/Version MVP And Status Object
+- Status: Completed
 - Implements the second IQ2 helper MVP stage.
 - Adds the minimal GNOME Shell extension runtime that owns the session-DBus service and exposes helper health/version/protocol/capabilities.
 - Adds client handshake, fail-closed validation, reconnect/stale handling, and the Q8 authoritative status object.
@@ -1324,6 +1328,7 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 - Incomplete helper code cannot enable `true_overlay` without Q10 validation.
 
 ### Phase 5: Installer Lifecycle And Post-Install Remediation
+- Status: Not Started
 - Implements Q6, Q7, and IQ4 installer authority decisions.
 - Installer detects GNOME Wayland and runs the Q6 helper install/enable flow with explicit user approval.
 - Post-install X11-to-GNOME-Wayland remediation is settings/status warning plus rerun-installer instruction, not in-settings install/uninstall buttons.
@@ -1347,6 +1352,7 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 - Tests prove approval/install/enabled/active/healthy states are distinct.
 
 ### Phase 6: Diagnostics, Collectors, And Debug Overlay Metrics
+- Status: Not Started
 - Implements Q8 across all required surfaces.
 - Renders one client-authoritative helper/backend status object into preferences, logs, EDMC/plugin bridge output, `utils/collect_overlay_debug_*`, and live debug overlay metrics.
 - Risks: status drift between UI/logs/collectors; debug output leaking too much host data; support output missing host facts when client is down.
@@ -1369,6 +1375,7 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 - Default diagnostics avoid broad process/window dumps per Q11.
 
 ### Phase 7: Helper-Backed Target Discovery And Coordinate Contract
+- Status: Not Started
 - Implements the third IQ2 helper MVP stage plus Q4/Q5 contracts.
 - Uses the helper as the GNOME Wayland target-discovery source only when active/version-compatible.
 - Emits Shell global logical geometry with explicit `frameRect`, `bufferRect`, `contentRect`, and decoration inset semantics.
@@ -1390,6 +1397,7 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 - Content/client rect alignment is explicit and test-covered for windowed and borderless fixtures.
 
 ### Phase 8: Shell-Mediated Presentation And Attachment
+- Status: Not Started
 - Implements the fourth IQ2 helper MVP stage and the core Q1 behavior.
 - Keeps the PyQt renderer first, while Shell-side mediation provides enough presentation/attachment control for true-overlay requirements.
 - Escalates rendering into the extension only if validation proves PyQt cannot satisfy chrome-free, stacking, click-through, and visibility requirements.
@@ -1412,6 +1420,7 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 - Rendering remains in PyQt unless a recorded validation failure requires moving specific responsibility into the extension.
 
 ### Phase 9: Release Validation, Documentation, And Support Claim Gate
+- Status: Not Started
 - Implements Q9, Q10, Q11 closeout and validates all earlier phases together.
 - Proves helper-active behavior on Ubuntu GNOME Wayland/GNOME Shell 46 first, with exact environment details recorded.
 - Updates user docs, troubleshooting, release notes, and privacy/security copy based on evidence.
@@ -1502,65 +1511,5 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 - Closed IQ6 on 2026-05-10: incomplete helper code may merge incrementally only behind degraded-by-default production behavior and/or `gnome_helper_experimental=false` by default; the flag is stored in overlay settings, appears in diagnostics, and never permits `true_overlay` without Q10 validation.
 - Closed IQ7 on 2026-05-10: added cleanup instructions for temporary research extensions and validation preflight requiring research UUIDs to be absent before production helper validation.
 - Reworked implementation phases on 2026-05-10: expanded from five broad phases to nine requirement-covered phases spanning status truthfulness, visibility rename, extension packaging, DBus health, installer lifecycle, diagnostics, target discovery, presentation/attachment, and release validation. Added a phase coverage matrix against all requirement groups.
-- Record one execution summary subsection per completed phase.
-- Record exact test commands and outcomes for each completed phase.
-
-### Phase 1 Execution Summary
-- Not started.
-
-### Tests Run For Phase 1
-- None yet.
-
-### Phase 2 Execution Summary
-- Not started.
-
-### Tests Run For Phase 2
-- None yet.
-
-### Phase 3 Execution Summary
-- Not started.
-
-### Tests Run For Phase 3
-- None yet.
-
-### Phase 4 Execution Summary
-- Completed on 2026-05-10.
-- Implemented the health-only GNOME Shell helper DBus service/object and matching Python helper-health validation contract.
-- Added DBus constants, helper-health states, fake transport error mapping, stale health handling, and manifest/source tests for the health-only extension scope.
-- Updated GNOME Wayland selector/status behavior so a present health-only helper still reports `degraded_overlay`; no Phase 4 path can report `true_overlay` before later target/presentation validation.
-
-### Tests Run For Phase 4
-- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_dbus_health.py tests/test_gnome_shell_extension_manifest.py overlay_client/tests/test_backend_selector.py overlay_client/tests/test_backend_status.py overlay_client/tests/test_helper_ipc_boundary.py -q` -> passed, `59 passed`.
-- `overlay_client/.venv/bin/python -m pytest tests/test_gnome_shell_extension_manifest.py overlay_client/tests/test_gnome_shell_helper_dbus_health.py -q` -> passed, `27 passed`.
-- `make check` -> passed; ruff and mypy passed, full pytest reported `882 passed, 21 skipped`.
-- `git diff --check` -> passed.
-
-### Phase 5 Execution Summary
-- Not started.
-
-### Tests Run For Phase 5
-- None yet.
-
-### Phase 6 Execution Summary
-- Not started.
-
-### Tests Run For Phase 6
-- None yet.
-
-### Phase 7 Execution Summary
-- Not started.
-
-### Tests Run For Phase 7
-- None yet.
-
-### Phase 8 Execution Summary
-- Not started.
-
-### Tests Run For Phase 8
-- None yet.
-
-### Phase 9 Execution Summary
-- Not started.
-
-### Tests Run For Phase 9
-- None yet.
+- Phase status, execution notes, and exact test commands now live only in each `## Phase Details` phase section. Do not add duplicate per-phase summaries in this execution log; duplicate summaries caused Phase 1-3 to drift after later commits.
+- When a phase is implemented, update that phase section only: set `Status: Completed`, mark every stage `Completed`, add/update `Execution Notes`, add/update `Tests Run`, then add one short execution-log bullet if historical context is useful.
