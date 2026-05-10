@@ -1,0 +1,20 @@
+{
+  "helper_kind": "gnome_shell_extension",
+  "helper_protocol": 3,
+  "helper_version_source": "version.__version__",
+  "added_contracts": [
+    "GetTargetState DBus method",
+    "target_state helper capability",
+    "GNOME Shell global logical target coordinate contract",
+    "Elite Dangerous target identity and ambiguity states",
+    "ApplyPresentation DBus method",
+    "presentation_state helper capability",
+    "Shell-mediated PyQt overlay presentation state contract"
+  ],
+  "protocol_bump_required_when": [
+    "DBus method names, signatures, or return payload semantics change",
+    "Helper signal names, signatures, event names, or payload semantics change",
+    "Required helper identity, capability, freshness, or session-token validation changes",
+    "Target geometry, presentation, or attachment contracts change incompatibly"
+  ]
+}

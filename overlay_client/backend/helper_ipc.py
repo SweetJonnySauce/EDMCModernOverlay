@@ -24,13 +24,23 @@ GNOME_SHELL_HELPER_DBUS_INTERFACE = "org.edmc.ModernOverlay.Helper"
 GNOME_SHELL_HELPER_DBUS_HELLO_METHOD = "Hello"
 GNOME_SHELL_HELPER_DBUS_HEALTH_METHOD = "GetHealth"
 GNOME_SHELL_HELPER_DBUS_TARGET_METHOD = "GetTargetState"
-GNOME_SHELL_HELPER_CAPABILITIES = ("hello", "health", "version", "protocol", "capabilities", "target_state")
+GNOME_SHELL_HELPER_DBUS_PRESENTATION_METHOD = "ApplyPresentation"
+GNOME_SHELL_HELPER_CAPABILITIES = (
+    "hello",
+    "health",
+    "version",
+    "protocol",
+    "capabilities",
+    "target_state",
+    "presentation_state",
+)
 GNOME_SHELL_HELPER_REQUIRED_CAPABILITIES = GNOME_SHELL_HELPER_CAPABILITIES
 GNOME_SHELL_HELPER_HEALTH_STALE_SECONDS = 10.0
 GNOME_SHELL_HELPER_TARGET_STALE_SECONDS = 2.0
+GNOME_SHELL_HELPER_PRESENTATION_STALE_SECONDS = 2.0
 GNOME_SHELL_HELPER_COORDINATE_SPACE = "gnome_shell_global_logical"
 HELPER_KIND = HelperKind.GNOME_SHELL_EXTENSION
-HELPER_PROTOCOL = 2
+HELPER_PROTOCOL = 3
 HELPER_VERSION = MODERN_OVERLAY_VERSION
 HELPER_PROTOCOL_VERSION = HELPER_PROTOCOL
 
@@ -76,6 +86,28 @@ class HelperTargetState(str, Enum):
     MALFORMED_PAYLOAD = "malformed_payload"
     HELPER_UNHEALTHY = "helper_unhealthy"
     GEOMETRY_INCOMPLETE = "geometry_incomplete"
+
+
+class HelperPresentationAction(str, Enum):
+    """Narrow presentation actions accepted by the GNOME Shell helper."""
+
+    ATTACH = "attach"
+    HIDE = "hide"
+    DEGRADE = "degrade"
+
+
+class HelperPresentationState(str, Enum):
+    """Fail-closed presentation states from the GNOME Shell helper."""
+
+    APPLIED = "presentation_applied"
+    HIDDEN = "presentation_hidden"
+    DEGRADED = "presentation_degraded"
+    UNSUPPORTED = "presentation_unsupported"
+    STALE = "presentation_stale"
+    MALFORMED_PAYLOAD = "malformed_payload"
+    HELPER_UNHEALTHY = "helper_unhealthy"
+    TARGET_UNAVAILABLE = "target_unavailable"
+    TARGET_HIDDEN = "target_hidden"
 
 
 class HelperBoundaryError(ValueError):
@@ -275,6 +307,137 @@ class HelperTargetStatus:
             "launcher_count": self.launcher_count,
             "detail": self.detail,
             "target": self.target.to_payload() if self.target is not None else None,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class HelperPresentationRequest:
+    """Client request for Shell-mediated presentation of the PyQt overlay."""
+
+    action: HelperPresentationAction
+    target_token: str = ""
+    coordinate_space: str = GNOME_SHELL_HELPER_COORDINATE_SPACE
+    content_rect: HelperRect | None = None
+    renderer: str = "pyqt"
+    standalone_mode: bool = False
+    overlay_title: str = "EDMC Modern Overlay"
+    overlay_wm_class: str = "EDMCModernOverlay"
+    require_placement: bool = True
+    require_chrome_free: bool = True
+    require_stacking: bool = True
+    require_click_through: bool = True
+    require_focus_safe: bool = True
+    degrade_reasons: tuple[str, ...] = field(default_factory=tuple)
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "action": self.action.value,
+            "target_token": self.target_token,
+            "coordinate_space": self.coordinate_space,
+            "content_rect": self.content_rect.to_payload() if self.content_rect is not None else None,
+            "renderer": self.renderer,
+            "standalone_mode": self.standalone_mode,
+            "overlay_title": self.overlay_title,
+            "overlay_wm_class": self.overlay_wm_class,
+            "click_through_expected": self.require_click_through,
+            "focus_safe_expected": self.require_focus_safe,
+            "required_gates": {
+                "placement": self.require_placement,
+                "chrome_free": self.require_chrome_free,
+                "stacking": self.require_stacking,
+                "click_through": self.require_click_through,
+                "focus_safe": self.require_focus_safe,
+            },
+            "degrade_reasons": list(self.degrade_reasons),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class HelperPresentationStatus:
+    """Validated presentation-state result from the GNOME Shell helper."""
+
+    state: HelperPresentationState
+    action: HelperPresentationAction = HelperPresentationAction.DEGRADE
+    helper_kind: HelperKind = HELPER_KIND
+    helper_version: str = ""
+    helper_protocol: int | None = None
+    coordinate_space: str = GNOME_SHELL_HELPER_COORDINATE_SPACE
+    target_token: str = ""
+    overlay_token: str = ""
+    requested_rect: HelperRect | None = None
+    applied_rect: HelperRect | None = None
+    renderer: str = "pyqt"
+    placement: bool = False
+    chrome_free: bool = False
+    stacking: bool = False
+    click_through: bool = False
+    focus_safe: bool = False
+    standalone_mode: bool = False
+    pyqt_renderer_preserved: bool = True
+    unsupported_features: tuple[str, ...] = field(default_factory=tuple)
+    degrade_reasons: tuple[str, ...] = field(default_factory=tuple)
+    sequence: int = 0
+    generated_at_monotonic_us: int = 0
+    generated_at_unix_ms: int = 0
+    observed_at_monotonic: float = 0.0
+    stale_after_seconds: float = GNOME_SHELL_HELPER_PRESENTATION_STALE_SECONDS
+    detail: str = ""
+
+    @property
+    def applied(self) -> bool:
+        return self.state is HelperPresentationState.APPLIED
+
+    @property
+    def true_overlay_ready(self) -> bool:
+        return (
+            self.applied
+            and self.action is HelperPresentationAction.ATTACH
+            and self.placement
+            and self.chrome_free
+            and self.stacking
+            and self.click_through
+            and self.focus_safe
+            and self.pyqt_renderer_preserved
+            and not self.standalone_mode
+            and not self.unsupported_features
+            and not self.degrade_reasons
+        )
+
+    def is_stale(self, now_monotonic: float) -> bool:
+        if self.observed_at_monotonic <= 0:
+            return False
+        return (float(now_monotonic) - self.observed_at_monotonic) > self.stale_after_seconds
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "state": self.state.value,
+            "applied": self.applied,
+            "true_overlay_ready": self.true_overlay_ready,
+            "action": self.action.value,
+            "helper_kind": self.helper_kind.value,
+            "helper_version": self.helper_version,
+            "helper_protocol": self.helper_protocol,
+            "coordinate_space": self.coordinate_space,
+            "target_token": self.target_token,
+            "overlay_token": self.overlay_token,
+            "requested_rect": self.requested_rect.to_payload() if self.requested_rect is not None else None,
+            "applied_rect": self.applied_rect.to_payload() if self.applied_rect is not None else None,
+            "renderer": self.renderer,
+            "placement": self.placement,
+            "chrome_free": self.chrome_free,
+            "stacking": self.stacking,
+            "click_through": self.click_through,
+            "focus_safe": self.focus_safe,
+            "standalone_mode": self.standalone_mode,
+            "pyqt_renderer_preserved": self.pyqt_renderer_preserved,
+            "unsupported_features": list(self.unsupported_features),
+            "degrade_reasons": list(self.degrade_reasons),
+            "sequence": self.sequence,
+            "generated_at_monotonic_us": self.generated_at_monotonic_us,
+            "generated_at_unix_ms": self.generated_at_unix_ms,
+            "observed_at_monotonic": self.observed_at_monotonic,
+            "stale_after_seconds": self.stale_after_seconds,
+            "detail": self.detail,
         }
 
 
@@ -781,6 +944,406 @@ def validate_gnome_shell_helper_target_payload(
     )
 
 
+def build_gnome_shell_helper_presentation_request(
+    target_status: HelperTargetStatus,
+    *,
+    standalone_mode: bool = False,
+    overlay_title: str = "EDMC Modern Overlay",
+    overlay_wm_class: str = "EDMCModernOverlay",
+) -> HelperPresentationRequest:
+    """Build a narrow presentation request from validated helper target state."""
+
+    if not target_status.found or target_status.target is None:
+        return HelperPresentationRequest(
+            action=HelperPresentationAction.DEGRADE,
+            standalone_mode=bool(standalone_mode),
+            overlay_title=overlay_title,
+            overlay_wm_class=overlay_wm_class,
+            degrade_reasons=(target_status.state.value,),
+        )
+    target = target_status.target
+    if target.minimized or not target.showing_on_workspace:
+        return HelperPresentationRequest(
+            action=HelperPresentationAction.HIDE,
+            target_token=target.target_token,
+            content_rect=target.content_rect,
+            standalone_mode=bool(standalone_mode),
+            overlay_title=overlay_title,
+            overlay_wm_class=overlay_wm_class,
+            degrade_reasons=("target_hidden",),
+        )
+    return HelperPresentationRequest(
+        action=HelperPresentationAction.ATTACH,
+        target_token=target.target_token,
+        content_rect=target.content_rect,
+        standalone_mode=bool(standalone_mode),
+        overlay_title=overlay_title,
+        overlay_wm_class=overlay_wm_class,
+    )
+
+
+def probe_gnome_shell_helper_presentation(
+    fetch_presentation: Callable[[HelperPresentationRequest], object],
+    *,
+    health_status: HelperHealthStatus,
+    target_status: HelperTargetStatus,
+    request: HelperPresentationRequest | None = None,
+    clock: Callable[[], float] = time.monotonic,
+    stale_after_seconds: float = GNOME_SHELL_HELPER_PRESENTATION_STALE_SECONDS,
+) -> HelperPresentationStatus:
+    """Fetch and validate helper presentation state for a target request."""
+
+    presentation_request = request or build_gnome_shell_helper_presentation_request(target_status)
+    if not health_status.healthy:
+        return _helper_presentation_status(
+            HelperPresentationState.HELPER_UNHEALTHY,
+            action=presentation_request.action,
+            helper_version=health_status.helper_version,
+            helper_protocol=health_status.helper_protocol,
+            target_token=presentation_request.target_token,
+            requested_rect=presentation_request.content_rect,
+            standalone_mode=presentation_request.standalone_mode,
+            degrade_reasons=(health_status.state.value,),
+            detail=health_status.state.value,
+        )
+    if presentation_request.action is HelperPresentationAction.ATTACH and not target_status.found:
+        return _helper_presentation_status(
+            HelperPresentationState.TARGET_UNAVAILABLE,
+            action=presentation_request.action,
+            helper_version=health_status.helper_version,
+            helper_protocol=health_status.helper_protocol,
+            target_token=presentation_request.target_token,
+            requested_rect=presentation_request.content_rect,
+            standalone_mode=presentation_request.standalone_mode,
+            degrade_reasons=(target_status.state.value,),
+            detail=target_status.state.value,
+        )
+    try:
+        raw_presentation = fetch_presentation(presentation_request)
+    except HelperDbusServiceMissing as exc:
+        return _helper_presentation_status(
+            HelperPresentationState.HELPER_UNHEALTHY,
+            action=presentation_request.action,
+            detail=str(exc),
+            degrade_reasons=("missing_service",),
+        )
+    except HelperDbusProbeError as exc:
+        return _helper_presentation_status(
+            HelperPresentationState.HELPER_UNHEALTHY,
+            action=presentation_request.action,
+            detail=str(exc),
+            degrade_reasons=("dbus_unreachable",),
+        )
+    except Exception as exc:  # pragma: no cover - defensive transport boundary
+        return _helper_presentation_status(
+            HelperPresentationState.HELPER_UNHEALTHY,
+            action=presentation_request.action,
+            detail=exc.__class__.__name__,
+            degrade_reasons=("transport_error",),
+        )
+
+    observed_at = float(clock())
+    return validate_gnome_shell_helper_presentation_payload(
+        raw_presentation,
+        health_status=health_status,
+        target_status=target_status,
+        request=presentation_request,
+        observed_at_monotonic=observed_at,
+        now_monotonic=observed_at,
+        stale_after_seconds=stale_after_seconds,
+    )
+
+
+def validate_gnome_shell_helper_presentation_payload(
+    raw_presentation: object,
+    *,
+    health_status: HelperHealthStatus,
+    target_status: HelperTargetStatus,
+    request: HelperPresentationRequest,
+    observed_at_monotonic: float,
+    now_monotonic: float | None = None,
+    expected_kind: HelperKind = HELPER_KIND,
+    expected_protocol: int = HELPER_PROTOCOL,
+    expected_coordinate_space: str = GNOME_SHELL_HELPER_COORDINATE_SPACE,
+    stale_after_seconds: float = GNOME_SHELL_HELPER_PRESENTATION_STALE_SECONDS,
+) -> HelperPresentationStatus:
+    """Validate a GNOME Shell helper presentation payload and fail closed."""
+
+    if not health_status.healthy:
+        return _helper_presentation_status(
+            HelperPresentationState.HELPER_UNHEALTHY,
+            action=request.action,
+            helper_version=health_status.helper_version,
+            helper_protocol=health_status.helper_protocol,
+            target_token=request.target_token,
+            requested_rect=request.content_rect,
+            standalone_mode=request.standalone_mode,
+            degrade_reasons=(health_status.state.value,),
+            detail=health_status.state.value,
+        )
+    if request.action is HelperPresentationAction.ATTACH and not target_status.found:
+        return _helper_presentation_status(
+            HelperPresentationState.TARGET_UNAVAILABLE,
+            action=request.action,
+            helper_version=health_status.helper_version,
+            helper_protocol=health_status.helper_protocol,
+            target_token=request.target_token,
+            requested_rect=request.content_rect,
+            standalone_mode=request.standalone_mode,
+            degrade_reasons=(target_status.state.value,),
+            detail=target_status.state.value,
+        )
+    if request.action is HelperPresentationAction.HIDE:
+        expected_target = request.target_token
+    else:
+        expected_target = target_status.target.target_token if target_status.target is not None else request.target_token
+
+    try:
+        payload = _coerce_json_mapping(raw_presentation, "helper presentation payload")
+    except HelperBoundaryError as exc:
+        return _helper_presentation_status(
+            HelperPresentationState.MALFORMED_PAYLOAD,
+            action=request.action,
+            target_token=request.target_token,
+            requested_rect=request.content_rect,
+            standalone_mode=request.standalone_mode,
+            detail=str(exc),
+        )
+
+    state_token = _payload_text(payload, "status").lower() or _payload_text(payload, "state").lower()
+    helper_kind_token = _payload_text(payload, "helper_kind").lower()
+    if not state_token or not helper_kind_token:
+        return _helper_presentation_status(
+            HelperPresentationState.MALFORMED_PAYLOAD,
+            action=request.action,
+            target_token=request.target_token,
+            requested_rect=request.content_rect,
+            standalone_mode=request.standalone_mode,
+            detail="missing status or helper_kind",
+        )
+    try:
+        helper_kind = HelperKind(helper_kind_token)
+    except ValueError:
+        return _helper_presentation_status(
+            HelperPresentationState.MALFORMED_PAYLOAD,
+            action=request.action,
+            target_token=request.target_token,
+            requested_rect=request.content_rect,
+            standalone_mode=request.standalone_mode,
+            detail=f"unexpected helper_kind={helper_kind_token}",
+        )
+    if helper_kind is not expected_kind:
+        return _helper_presentation_status(
+            HelperPresentationState.MALFORMED_PAYLOAD,
+            action=request.action,
+            helper_kind=helper_kind,
+            target_token=request.target_token,
+            requested_rect=request.content_rect,
+            standalone_mode=request.standalone_mode,
+            detail=f"expected helper_kind={expected_kind.value}",
+        )
+
+    helper_version = _payload_text(payload, "helper_version")
+    helper_protocol = _payload_int(payload, "helper_protocol")
+    if helper_protocol is None or int(helper_protocol) != int(expected_protocol):
+        return _helper_presentation_status(
+            HelperPresentationState.MALFORMED_PAYLOAD,
+            action=request.action,
+            helper_version=helper_version,
+            helper_protocol=helper_protocol,
+            target_token=request.target_token,
+            requested_rect=request.content_rect,
+            standalone_mode=request.standalone_mode,
+            detail=f"expected protocol={expected_protocol}",
+        )
+
+    coordinate_space = _payload_text(payload, "coordinate_space")
+    if coordinate_space != expected_coordinate_space:
+        return _helper_presentation_status(
+            HelperPresentationState.DEGRADED,
+            action=request.action,
+            helper_version=helper_version,
+            helper_protocol=helper_protocol,
+            coordinate_space=coordinate_space,
+            target_token=request.target_token,
+            requested_rect=request.content_rect,
+            standalone_mode=request.standalone_mode,
+            degrade_reasons=("coordinate_space_mismatch",),
+            detail=f"expected coordinate_space={expected_coordinate_space}",
+        )
+
+    observed_at = float(observed_at_monotonic)
+    now = observed_at if now_monotonic is None else float(now_monotonic)
+    generated_at_monotonic_us = _payload_int(payload, "generated_at_monotonic_us") or 0
+    generated_at_unix_ms = _payload_int(payload, "generated_at_unix_ms") or 0
+    sequence = _payload_int(payload, "sequence") or 0
+    if observed_at > 0 and (now - observed_at) > stale_after_seconds:
+        return _helper_presentation_status(
+            HelperPresentationState.STALE,
+            action=request.action,
+            helper_version=helper_version,
+            helper_protocol=helper_protocol,
+            coordinate_space=coordinate_space,
+            target_token=_payload_text(payload, "target_token") or request.target_token,
+            requested_rect=request.content_rect,
+            standalone_mode=request.standalone_mode,
+            sequence=sequence,
+            generated_at_monotonic_us=generated_at_monotonic_us,
+            generated_at_unix_ms=generated_at_unix_ms,
+            observed_at_monotonic=observed_at,
+            stale_after_seconds=stale_after_seconds,
+            degrade_reasons=("presentation_stale",),
+            detail="observation stale",
+        )
+
+    try:
+        presentation_state = HelperPresentationState(state_token)
+    except ValueError:
+        return _helper_presentation_status(
+            HelperPresentationState.MALFORMED_PAYLOAD,
+            action=request.action,
+            helper_version=helper_version,
+            helper_protocol=helper_protocol,
+            target_token=request.target_token,
+            requested_rect=request.content_rect,
+            standalone_mode=request.standalone_mode,
+            detail=f"unexpected presentation status={state_token}",
+        )
+
+    action_token = _payload_text(payload, "action").lower() or request.action.value
+    try:
+        action = HelperPresentationAction(action_token)
+    except ValueError:
+        return _helper_presentation_status(
+            HelperPresentationState.MALFORMED_PAYLOAD,
+            action=request.action,
+            helper_version=helper_version,
+            helper_protocol=helper_protocol,
+            target_token=request.target_token,
+            requested_rect=request.content_rect,
+            standalone_mode=request.standalone_mode,
+            detail=f"unexpected presentation action={action_token}",
+        )
+
+    target_token = _payload_text(payload, "target_token",) or request.target_token
+    if expected_target and target_token and target_token != expected_target:
+        return _helper_presentation_status(
+            HelperPresentationState.DEGRADED,
+            action=action,
+            helper_version=helper_version,
+            helper_protocol=helper_protocol,
+            coordinate_space=coordinate_space,
+            target_token=target_token,
+            requested_rect=request.content_rect,
+            standalone_mode=request.standalone_mode,
+            sequence=sequence,
+            generated_at_monotonic_us=generated_at_monotonic_us,
+            generated_at_unix_ms=generated_at_unix_ms,
+            observed_at_monotonic=observed_at,
+            stale_after_seconds=stale_after_seconds,
+            degrade_reasons=("target_token_mismatch",),
+            detail=f"expected target_token={expected_target}",
+        )
+
+    requested_rect = _payload_rect(payload.get("requestedRect", payload.get("requested_rect"))) or request.content_rect
+    applied_rect = _payload_rect(payload.get("appliedRect", payload.get("applied_rect")))
+    renderer = _payload_text(payload, "renderer") or request.renderer
+    unsupported_features = _payload_string_tuple(payload.get("unsupported_features", payload.get("unsupportedFeatures")))
+    degrade_reasons = _payload_string_tuple(payload.get("degrade_reasons", payload.get("degradeReasons")))
+    placement = _mapping_bool(payload, "placement")
+    chrome_free = _mapping_bool(payload, "chrome_free", "chromeFree")
+    stacking = _mapping_bool(payload, "stacking")
+    click_through = _mapping_bool(payload, "click_through", "clickThrough")
+    focus_safe = _mapping_bool(payload, "focus_safe", "focusSafe")
+    standalone_mode = _mapping_bool(payload, "standalone_mode", "standaloneMode") or request.standalone_mode
+    pyqt_renderer_preserved = renderer == "pyqt"
+
+    if presentation_state is HelperPresentationState.APPLIED:
+        missing_gate_reasons = _missing_presentation_gate_reasons(
+            request,
+            placement=placement,
+            chrome_free=chrome_free,
+            stacking=stacking,
+            click_through=click_through,
+            focus_safe=focus_safe,
+            renderer=renderer,
+            standalone_mode=standalone_mode,
+            applied_rect=applied_rect,
+        )
+        if action is not HelperPresentationAction.ATTACH:
+            missing_gate_reasons += ("action_not_attach",)
+        if missing_gate_reasons:
+            return _helper_presentation_status(
+                HelperPresentationState.DEGRADED,
+                action=action,
+                helper_version=helper_version,
+                helper_protocol=helper_protocol,
+                coordinate_space=coordinate_space,
+                target_token=target_token,
+                overlay_token=_payload_text(payload, "overlay_token",),
+                requested_rect=requested_rect,
+                applied_rect=applied_rect,
+                renderer=renderer,
+                placement=placement,
+                chrome_free=chrome_free,
+                stacking=stacking,
+                click_through=click_through,
+                focus_safe=focus_safe,
+                standalone_mode=standalone_mode,
+                pyqt_renderer_preserved=pyqt_renderer_preserved,
+                unsupported_features=unsupported_features,
+                degrade_reasons=tuple(dict.fromkeys(degrade_reasons + missing_gate_reasons)),
+                sequence=sequence,
+                generated_at_monotonic_us=generated_at_monotonic_us,
+                generated_at_unix_ms=generated_at_unix_ms,
+                observed_at_monotonic=observed_at,
+                stale_after_seconds=stale_after_seconds,
+                detail=_payload_text(payload, "detail"),
+            )
+
+    if presentation_state is HelperPresentationState.HIDDEN and action is not HelperPresentationAction.HIDE:
+        return _helper_presentation_status(
+            HelperPresentationState.TARGET_HIDDEN,
+            action=action,
+            helper_version=helper_version,
+            helper_protocol=helper_protocol,
+            coordinate_space=coordinate_space,
+            target_token=target_token,
+            requested_rect=requested_rect,
+            standalone_mode=standalone_mode,
+            degrade_reasons=("target_hidden",),
+            detail=_payload_text(payload, "detail"),
+        )
+
+    return _helper_presentation_status(
+        presentation_state,
+        action=action,
+        helper_version=helper_version,
+        helper_protocol=helper_protocol,
+        coordinate_space=coordinate_space,
+        target_token=target_token,
+        overlay_token=_payload_text(payload, "overlay_token",),
+        requested_rect=requested_rect,
+        applied_rect=applied_rect,
+        renderer=renderer,
+        placement=placement,
+        chrome_free=chrome_free,
+        stacking=stacking,
+        click_through=click_through,
+        focus_safe=focus_safe,
+        standalone_mode=standalone_mode,
+        pyqt_renderer_preserved=pyqt_renderer_preserved,
+        unsupported_features=unsupported_features,
+        degrade_reasons=degrade_reasons,
+        sequence=sequence,
+        generated_at_monotonic_us=generated_at_monotonic_us,
+        generated_at_unix_ms=generated_at_unix_ms,
+        observed_at_monotonic=observed_at,
+        stale_after_seconds=stale_after_seconds,
+        detail=_payload_text(payload, "detail"),
+    )
+
+
 def select_elite_dangerous_target(candidates: list[Mapping[str, object]]) -> dict[str, object]:
     """Select the Elite Dangerous client from Shell-visible window metadata."""
 
@@ -910,6 +1473,65 @@ def _helper_target_status(
         stale_after_seconds=stale_after_seconds,
         candidate_count=candidate_count,
         launcher_count=launcher_count,
+        detail=detail,
+    )
+
+
+def _helper_presentation_status(
+    state: HelperPresentationState,
+    *,
+    action: HelperPresentationAction = HelperPresentationAction.DEGRADE,
+    helper_kind: HelperKind = HELPER_KIND,
+    helper_version: str = "",
+    helper_protocol: int | None = None,
+    coordinate_space: str = GNOME_SHELL_HELPER_COORDINATE_SPACE,
+    target_token: str = "",
+    overlay_token: str = "",
+    requested_rect: HelperRect | None = None,
+    applied_rect: HelperRect | None = None,
+    renderer: str = "pyqt",
+    placement: bool = False,
+    chrome_free: bool = False,
+    stacking: bool = False,
+    click_through: bool = False,
+    focus_safe: bool = False,
+    standalone_mode: bool = False,
+    pyqt_renderer_preserved: bool = True,
+    unsupported_features: tuple[str, ...] = (),
+    degrade_reasons: tuple[str, ...] = (),
+    sequence: int = 0,
+    generated_at_monotonic_us: int = 0,
+    generated_at_unix_ms: int = 0,
+    observed_at_monotonic: float = 0.0,
+    stale_after_seconds: float = GNOME_SHELL_HELPER_PRESENTATION_STALE_SECONDS,
+    detail: str = "",
+) -> HelperPresentationStatus:
+    return HelperPresentationStatus(
+        state=state,
+        action=action,
+        helper_kind=helper_kind,
+        helper_version=helper_version,
+        helper_protocol=helper_protocol,
+        coordinate_space=coordinate_space,
+        target_token=target_token,
+        overlay_token=overlay_token,
+        requested_rect=requested_rect,
+        applied_rect=applied_rect,
+        renderer=renderer,
+        placement=placement,
+        chrome_free=chrome_free,
+        stacking=stacking,
+        click_through=click_through,
+        focus_safe=focus_safe,
+        standalone_mode=standalone_mode,
+        pyqt_renderer_preserved=pyqt_renderer_preserved,
+        unsupported_features=unsupported_features,
+        degrade_reasons=degrade_reasons,
+        sequence=sequence,
+        generated_at_monotonic_us=generated_at_monotonic_us,
+        generated_at_unix_ms=generated_at_unix_ms,
+        observed_at_monotonic=observed_at_monotonic,
+        stale_after_seconds=stale_after_seconds,
         detail=detail,
     )
 
@@ -1069,6 +1691,44 @@ def _payload_capabilities(value: object) -> tuple[str, ...]:
     if not isinstance(value, (list, tuple, set, frozenset)):
         return ()
     return tuple(sorted(str(item).strip() for item in value if str(item).strip()))
+
+
+def _payload_string_tuple(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        return (value.strip(),) if value.strip() else ()
+    if not isinstance(value, (list, tuple, set, frozenset)):
+        return ()
+    return tuple(str(item).strip() for item in value if str(item).strip())
+
+
+def _missing_presentation_gate_reasons(
+    request: HelperPresentationRequest,
+    *,
+    placement: bool,
+    chrome_free: bool,
+    stacking: bool,
+    click_through: bool,
+    focus_safe: bool,
+    renderer: str,
+    standalone_mode: bool,
+    applied_rect: HelperRect | None,
+) -> tuple[str, ...]:
+    reasons: list[str] = []
+    if request.require_placement and (not placement or applied_rect is None or not applied_rect.valid):
+        reasons.append("placement_unproven")
+    if request.require_chrome_free and not chrome_free:
+        reasons.append("chrome_free_unproven")
+    if request.require_stacking and not stacking:
+        reasons.append("stacking_unproven")
+    if request.require_click_through and not click_through:
+        reasons.append("click_through_unproven")
+    if request.require_focus_safe and not focus_safe:
+        reasons.append("focus_safe_unproven")
+    if renderer != "pyqt":
+        reasons.append("renderer_changed")
+    if standalone_mode:
+        reasons.append("standalone_mode_enabled")
+    return tuple(reasons)
 
 
 def _mapping_text(payload: Mapping[str, object], *keys: str) -> str:

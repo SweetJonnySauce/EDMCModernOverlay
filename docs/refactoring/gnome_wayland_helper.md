@@ -1116,7 +1116,7 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 | 5 | Installer lifecycle and post-install GNOME Wayland remediation | Completed |
 | 6 | Helper state surfaces, diagnostics, collectors, and debug overlay metrics | Completed |
 | 7 | Helper-backed target discovery and coordinate contract | Completed |
-| 8 | Shell-mediated presentation, attachment, stacking, and click-through behavior | Not Started |
+| 8 | Shell-mediated presentation, attachment, stacking, and click-through behavior | Completed |
 | 9 | Release validation, docs, privacy/security closeout, and support claim gate | Not Started |
 
 ## Phase Coverage Against Requirements
@@ -1517,25 +1517,74 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 - Content/client rect alignment is explicit and test-covered for windowed and borderless fixtures.
 
 ### Phase 8: Shell-Mediated Presentation And Attachment
-- Status: Not Started
+- Status: Completed
 - Implements the fourth IQ2 helper MVP stage and the core Q1 behavior.
 - Keeps the PyQt renderer first, while Shell-side mediation provides enough presentation/attachment control for true-overlay requirements.
 - Escalates rendering into the extension only if validation proves PyQt cannot satisfy chrome-free, stacking, click-through, and visibility requirements.
 - Risks: GNOME/Mutter private API drift, click-through/focus loops, titlebar/chrome, stacking demotion, Shell restarts, multi-monitor positioning.
 - Mitigations: feature-test Shell APIs, degrade on unsupported APIs, keep rendering out of extension unless forced, and validate windowed/borderless behavior separately.
 
+#### Phase 8 Implementation Notes
+- Touch points:
+  - `overlay_client/backend/helper_ipc.py` owns the pure presentation request/status adapter and fail-closed validation.
+  - `helpers/gnome_shell_extension/constants.js` and `extension.js` expose the narrow DBus presentation method/capability.
+  - `overlay_client/backend/__init__.py` exports the new presentation constants/types/helpers for tests and future runtime wiring.
+  - `tests/test_gnome_shell_extension_manifest.py` and helper IPC tests keep the JS/Python protocol in sync.
+- Expected unchanged behavior:
+  - GNOME Wayland with a missing, unhealthy, target-stale, target-missing, ambiguous, launcher-only, or presentation-unsupported helper remains `degraded_overlay`.
+  - Helper health, target discovery, or presentation success does not by itself enable `true_overlay`; Phase 8 records gate evidence and Phase 9 validates real compositor behavior before support wording changes.
+  - `keep_overlay_visible`, installer lifecycle, payload rendering, profile/group behavior, and non-GNOME backend behavior do not change.
+- Presentation contract:
+  - Add a local session-DBus method `ApplyPresentation(in s request, out s presentation_state)`.
+  - Requests are narrow JSON payloads: action (`attach`, `hide`, or `degrade`), target token, Shell global logical `contentRect`, coordinate space, renderer (`pyqt`), standalone-mode flag, overlay title/class hints, and required gates (`placement`, `chrome_free`, `stacking`, `click_through`, `focus_safe`).
+  - Responses are narrow JSON payloads: presentation state, action, target token, overlay token when found, requested/applied rects, sequence/timestamps, renderer, unsupported features, degrade reasons, and gate booleans for placement/chrome-free/stacking/click-through/focus safety.
+  - The helper may use Shell APIs to place/restack the PyQt overlay window, but it must feature-test those APIs and return `presentation_unsupported` or `presentation_degraded` when any required gate cannot be proven.
+  - Normal overlay mode must request chrome/titlebar-free presentation; standalone app/window behavior remains explicitly setting-gated and must not satisfy the true-overlay gate.
+- True-overlay gate conditions:
+  - Helper health is healthy, version-compatible, protocol-compatible, and fresh.
+  - Target state is found, unambiguous, non-launcher, fresh, visible on the workspace, and has valid `contentRect` geometry.
+  - Presentation state is fresh and `presentation_applied`.
+  - Gate booleans for placement, chrome-free, stacking, click-through, and focus safety are all true.
+  - Renderer remains `pyqt` unless a later validation note explicitly moves a responsibility into the extension.
+  - Any unsupported API, stale state, malformed payload, missing overlay window, or explicit standalone mode keeps classification degraded.
+- Degradation states:
+  - `helper_unhealthy`, `target_unavailable`, `target_hidden`, `presentation_stale`, `malformed_payload`, `presentation_unsupported`, `presentation_degraded`, and `presentation_hidden`.
+  - Target minimize, hidden target, workspace move, helper reload/disconnect, unsupported Shell API, missing overlay window, or game exit/relaunch must return one of these states instead of leaving stale placement active.
+- Test type selection:
+  - Unit/fake-helper tests cover presentation request construction, payload validation, stale/malformed states, unsupported API paths, attach/hide/degrade actions, and the true-overlay gate staying false unless every gate passes.
+  - Static manifest/constant tests cover helper DBus method/capability/protocol synchronization.
+  - Harness tests are not required unless this phase touches `load.py`, preferences lifecycle, plugin/client bridge wiring, or runtime lifecycle hooks.
+  - Real GNOME compositor behavior for chrome, stacking, click-through, and flashing remains manual Phase 9 validation evidence; Phase 8 only records the hooks and fail-closed states.
+
 | Stage | Description | Status |
 | --- | --- | --- |
-| 8.1 | Prototype Shell-mediated placement/presentation hooks while preserving PyQt payload rendering | Not Started |
-| 8.2 | Ensure normal overlay mode is chrome/titlebar-free and standalone mode remains explicitly setting-gated | Not Started |
-| 8.3 | Maintain overlay stacking above the game after click-through/focus changes in windowed and borderless modes | Not Started |
-| 8.4 | Eliminate foreground/visibility flashing without relying on `keep_overlay_visible` as a workaround | Not Started |
-| 8.5 | Handle target minimize, workspace change, monitor move, game exit/relaunch, helper reload, and stale/disconnected helper states | Not Started |
-| 8.6 | Add tests for presentation state machines where possible and manual validation notes where GNOME behavior cannot be headless-tested | Not Started |
+| 8.1 | Prototype Shell-mediated placement/presentation hooks while preserving PyQt payload rendering | Completed |
+| 8.2 | Ensure normal overlay mode is chrome/titlebar-free and standalone mode remains explicitly setting-gated | Completed |
+| 8.3 | Maintain overlay stacking above the game after click-through/focus changes in windowed and borderless modes | Completed |
+| 8.4 | Eliminate foreground/visibility flashing without relying on `keep_overlay_visible` as a workaround | Completed |
+| 8.5 | Handle target minimize, workspace change, monitor move, game exit/relaunch, helper reload, and stale/disconnected helper states | Completed |
+| 8.6 | Add tests for presentation state machines where possible and manual validation notes where GNOME behavior cannot be headless-tested | Completed |
+
+#### Phase 8 Execution Notes
+- Bumped the helper protocol from `2` to `3` because Phase 8 adds a new DBus method, presentation-state capability, and presentation gate payload semantics.
+- Added `ApplyPresentation(in s request, out s presentation_state)` to the helper DBus interface. The method accepts only `attach`, `hide`, and `degrade` actions and returns narrow presentation state instead of exposing arbitrary Shell commands.
+- Added the `presentation_state` helper capability and a `gnome_shell_helper_contract_v3.json` fixture to document the contract expansion.
+- Added pure client adapter types for helper presentation request/status, action/state enums, stale/malformed/unsupported/degraded/hidden states, and the explicit true-overlay readiness gate.
+- The helper keeps the renderer as `pyqt`; it attempts Shell-side `move_resize_frame` and `make_above` only when requested with a valid Phase 7 target token/content rect.
+- The presentation response reports gate booleans for placement, chrome-free, stacking, click-through, and focus safety. If any required gate is unproven, the client adapter degrades the presentation state and `true_overlay_ready` remains false.
+- Normal overlay mode requests chrome-free presentation. Explicit standalone mode is treated as a degradation reason for the true-overlay gate.
+- Minimized/hidden targets, missing overlay window, missing target, stale helper data, unsupported Shell APIs, malformed payloads, helper health failures, and DBus failures all fail closed into explicit degraded/unavailable states.
+- Real compositor validation for titlebar suppression, click-through focus behavior, flashing, and stacking remains Phase 9 evidence before release/support claims change.
+
+#### Phase 8 Tests Run
+- `overlay_client/.venv/bin/python -m py_compile overlay_client/backend/helper_ipc.py` -> passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_presentation_state.py overlay_client/tests/test_gnome_shell_helper_target_state.py overlay_client/tests/test_gnome_shell_helper_dbus_health.py tests/test_gnome_shell_extension_manifest.py -q` -> passed, `49 passed`.
+- `make check` -> passed; ruff and mypy passed, full pytest reported `910 passed, 21 skipped`.
+- `git diff --check` -> passed.
 
 #### Phase 8 Exit Criteria
-- Windowed and borderless presentation requirements pass in fake-helper and real GNOME validation where applicable.
-- Overlay remains chrome-free, click-through-capable, and stacked above the game after focus changes.
+- Windowed and borderless presentation requirements pass in fake-helper validation; real GNOME validation remains the Phase 9 support-claim gate.
+- Overlay presentation state exposes chrome-free, click-through, stacking, and focus-safety gates after focus changes.
 - Unsupported Shell API or presentation failure degrades visibly and never claims `true_overlay`.
 - Rendering remains in PyQt unless a recorded validation failure requires moving specific responsibility into the extension.
 
@@ -1583,6 +1632,7 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 - Added borderless-fullscreen focus evidence on 2026-05-09: with keep-visible disabled, the overlay flashes on a roughly 0.5 second visible/hidden cadence at full-screen geometry, so borderless fullscreen still needs helper-authoritative focus/visibility state.
 - Added borderless-fullscreen restart evidence on 2026-05-09: initial overlay placement is correct after EDMC restart, but titlebar chrome shifts the visible overlay content downward, making chrome suppression an alignment requirement.
 - Added windowed resize and stacking evidence on 2026-05-09: dynamic resize updates are visible without EDMC restart, but clicking through demotes the overlay behind the game in both windowed and borderless modes, so stacking/presentation is a helper requirement.
+- Implemented Phase 8 on 2026-05-10: added protocol v3 presentation DBus contract, Shell-side placement/restacking hooks, PyQt-preserving presentation request/status adapters, fail-closed gate validation, and tests. Real GNOME compositor validation remains Phase 9 before any support claim changes.
 - Closed Q1 on 2026-05-09: the helper must provide Shell-mediated attachment/presentation, including focus/visibility, placement, stacking, and chrome-free presentation; geometry-only is insufficient. PyQt remains the first renderer candidate until a helper prototype proves otherwise.
 - Opened Q2 on 2026-05-09 with transport tests: evaluate session DBus first and keep Unix socket under `$XDG_RUNTIME_DIR` as the fallback candidate.
 - Recorded Q2 transport probe evidence on 2026-05-09: GJS/DBus tooling is present, the session bus uses `/run/user/1000/bus`, and GNOME Shell services are visible on the user bus.

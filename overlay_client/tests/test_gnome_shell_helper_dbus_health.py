@@ -117,7 +117,13 @@ def test_validate_gnome_shell_helper_health_rejects_missing_capability() -> None
     )
 
     assert status.state is HelperHealthState.CAPABILITY_MISSING
-    assert status.missing_capabilities == ("version", "protocol", "capabilities", "target_state")
+    assert status.missing_capabilities == (
+        "version",
+        "protocol",
+        "capabilities",
+        "target_state",
+        "presentation_state",
+    )
 
 
 def test_validate_gnome_shell_helper_health_rejects_stale_observation() -> None:

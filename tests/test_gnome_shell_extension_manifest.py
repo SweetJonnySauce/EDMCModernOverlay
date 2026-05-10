@@ -10,6 +10,7 @@ from overlay_client.backend import (
     GNOME_SHELL_HELPER_DBUS_HELLO_METHOD,
     GNOME_SHELL_HELPER_DBUS_INTERFACE,
     GNOME_SHELL_HELPER_DBUS_OBJECT_PATH,
+    GNOME_SHELL_HELPER_DBUS_PRESENTATION_METHOD,
     GNOME_SHELL_HELPER_DBUS_SERVICE,
     GNOME_SHELL_HELPER_DBUS_TARGET_METHOD,
     GNOME_SHELL_HELPER_COORDINATE_SPACE,
@@ -22,7 +23,7 @@ from overlay_client.backend import (
 
 ROOT = Path(__file__).resolve().parent.parent
 HELPER_DIR = ROOT / "helpers" / "gnome_shell_extension"
-CONTRACT_FIXTURE = ROOT / "tests" / "fixtures" / "gnome_shell_helper_contract_v2.json"
+CONTRACT_FIXTURE = ROOT / "tests" / "fixtures" / "gnome_shell_helper_contract_v3.json"
 
 
 def _metadata() -> dict[str, object]:
@@ -69,6 +70,7 @@ def test_gnome_shell_extension_constants_match_client_contract() -> None:
     assert _js_constant("HELPER_DBUS_HELLO_METHOD") == GNOME_SHELL_HELPER_DBUS_HELLO_METHOD
     assert _js_constant("HELPER_DBUS_HEALTH_METHOD") == GNOME_SHELL_HELPER_DBUS_HEALTH_METHOD
     assert _js_constant("HELPER_DBUS_TARGET_METHOD") == GNOME_SHELL_HELPER_DBUS_TARGET_METHOD
+    assert _js_constant("HELPER_DBUS_PRESENTATION_METHOD") == GNOME_SHELL_HELPER_DBUS_PRESENTATION_METHOD
     assert _js_constant("HELPER_COORDINATE_SPACE") == GNOME_SHELL_HELPER_COORDINATE_SPACE
 
 
@@ -79,7 +81,7 @@ def test_gnome_shell_extension_capabilities_match_client_contract() -> None:
         assert f"'{capability}'" in source
 
 
-def test_extension_source_exposes_health_and_target_state_dbus_runtime() -> None:
+def test_extension_source_exposes_health_target_and_presentation_dbus_runtime() -> None:
     source = (HELPER_DIR / "extension.js").read_text(encoding="utf-8")
 
     assert "from './constants.js'" in source
@@ -91,8 +93,12 @@ def test_extension_source_exposes_health_and_target_state_dbus_runtime() -> None
     assert "HELPER_DBUS_HELLO_METHOD" in source
     assert "HELPER_DBUS_HEALTH_METHOD" in source
     assert "HELPER_DBUS_TARGET_METHOD" in source
+    assert "HELPER_DBUS_PRESENTATION_METHOD" in source
     assert "GetTargetState" in source
+    assert "ApplyPresentation" in source
     assert "get_window_actors" in source
+    assert "move_resize_frame" in source
+    assert "make_above" in source
     assert "global.display" in source
     assert "Meta.Window" not in source
 
@@ -104,6 +110,7 @@ def test_protocol_bump_fixture_tracks_contract_review_triggers() -> None:
     assert fixture["helper_protocol"] == HELPER_PROTOCOL
     assert fixture["helper_version_source"] == "version.__version__"
     assert "GetTargetState DBus method" in fixture["added_contracts"]
+    assert "ApplyPresentation DBus method" in fixture["added_contracts"]
     triggers = fixture["protocol_bump_required_when"]
     assert isinstance(triggers, list)
     assert len(triggers) >= 4

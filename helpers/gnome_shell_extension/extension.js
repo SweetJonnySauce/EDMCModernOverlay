@@ -10,6 +10,7 @@ import {
     HELPER_DBUS_HELLO_METHOD,
     HELPER_DBUS_INTERFACE,
     HELPER_DBUS_OBJECT_PATH,
+    HELPER_DBUS_PRESENTATION_METHOD,
     HELPER_DBUS_SERVICE,
     HELPER_DBUS_TARGET_METHOD,
     HELPER_KIND,
@@ -32,6 +33,10 @@ const HELPER_DBUS_XML = `
       <arg type="s" name="query" direction="in"/>
       <arg type="s" name="target_state" direction="out"/>
     </method>
+    <method name="${HELPER_DBUS_PRESENTATION_METHOD}">
+      <arg type="s" name="request" direction="in"/>
+      <arg type="s" name="presentation_state" direction="out"/>
+    </method>
   </interface>
 </node>`;
 
@@ -40,6 +45,7 @@ class HelperHealthService {
         this._startedAtUnixMs = Date.now();
         this._startedAtMonotonicUs = GLib.get_monotonic_time();
         this._targetSequence = 0;
+        this._presentationSequence = 0;
     }
 
     Hello(_client) {
@@ -86,12 +92,152 @@ class HelperHealthService {
         });
     }
 
+    ApplyPresentation(request) {
+        this._presentationSequence += 1;
+        const generatedAtUnixMs = Date.now();
+        const generatedAtMonotonicUs = GLib.get_monotonic_time();
+        const parsed = this._parseJsonObject(request);
+        if (!parsed.ok) {
+            return JSON.stringify(this._presentationPayload({
+                status: 'malformed_payload',
+                action: 'degrade',
+                generatedAtUnixMs,
+                generatedAtMonotonicUs,
+                detail: parsed.detail,
+                degradeReasons: ['malformed_payload'],
+            }));
+        }
+
+        const payload = parsed.value;
+        const action = this._requestString(payload, 'action') || 'degrade';
+        const targetToken = this._requestString(payload, 'target_token', 'targetToken');
+        const requestedRect = this._requestRect(payload, 'content_rect', 'contentRect');
+        const standaloneMode = this._requestBool(payload, 'standalone_mode', 'standaloneMode');
+        const base = {
+            action,
+            targetToken,
+            requestedRect,
+            standaloneMode,
+            generatedAtUnixMs,
+            generatedAtMonotonicUs,
+        };
+
+        if (action === 'hide') {
+            return JSON.stringify(this._presentationPayload({
+                ...base,
+                status: 'presentation_hidden',
+                detail: 'target hidden',
+                degradeReasons: ['target_hidden'],
+            }));
+        }
+        if (action === 'degrade') {
+            return JSON.stringify(this._presentationPayload({
+                ...base,
+                status: 'presentation_degraded',
+                detail: 'client requested degrade',
+                degradeReasons: this._requestStringList(payload, 'degrade_reasons', 'degradeReasons'),
+            }));
+        }
+        if (action !== 'attach') {
+            return JSON.stringify(this._presentationPayload({
+                ...base,
+                status: 'malformed_payload',
+                action: 'degrade',
+                detail: `unsupported action=${action}`,
+                degradeReasons: ['unsupported_action'],
+            }));
+        }
+        if (!targetToken || !this._rectIsValid(requestedRect)) {
+            return JSON.stringify(this._presentationPayload({
+                ...base,
+                status: 'malformed_payload',
+                action: 'degrade',
+                detail: 'attach requires target token and content rect',
+                degradeReasons: ['missing_target_or_rect'],
+            }));
+        }
+
+        const windows = this._enumerateWindowEntries();
+        const targetEntry = windows.find(entry => entry.payload.targetToken === targetToken);
+        if (!targetEntry || !this._isEliteClient(targetEntry.payload)) {
+            return JSON.stringify(this._presentationPayload({
+                ...base,
+                status: 'target_unavailable',
+                detail: 'target unavailable',
+                degradeReasons: ['target_unavailable'],
+            }));
+        }
+        if (targetEntry.payload.minimized || !targetEntry.payload.showingOnWorkspace) {
+            return JSON.stringify(this._presentationPayload({
+                ...base,
+                status: 'target_hidden',
+                detail: 'target hidden',
+                degradeReasons: ['target_hidden'],
+            }));
+        }
+
+        const overlayEntry = this._findOverlayWindow(windows, payload, targetToken);
+        if (!overlayEntry) {
+            return JSON.stringify(this._presentationPayload({
+                ...base,
+                status: 'presentation_degraded',
+                detail: 'overlay window not found',
+                degradeReasons: ['overlay_window_not_found'],
+            }));
+        }
+
+        const result = this._applyOverlayPresentation(overlayEntry.window, requestedRect);
+        const chromeFree = this._windowChromeFree(overlayEntry.payload);
+        const clickThrough = this._requestBool(payload, 'click_through_expected', 'clickThroughExpected');
+        const focusSafe = result.stacking && clickThrough;
+        const unsupportedFeatures = [...result.unsupportedFeatures];
+        const degradeReasons = [...result.degradeReasons];
+        if (!chromeFree) {
+            degradeReasons.push('chrome_free_unproven');
+        }
+        if (!clickThrough) {
+            degradeReasons.push('click_through_unproven');
+        }
+        if (!focusSafe) {
+            degradeReasons.push('focus_safe_unproven');
+        }
+        if (standaloneMode) {
+            degradeReasons.push('standalone_mode_enabled');
+        }
+        const status = degradeReasons.length || unsupportedFeatures.length
+            ? 'presentation_degraded'
+            : 'presentation_applied';
+
+        return JSON.stringify(this._presentationPayload({
+            ...base,
+            status,
+            overlayToken: overlayEntry.payload.targetToken,
+            appliedRect: result.appliedRect,
+            placement: result.placement,
+            chromeFree,
+            stacking: result.stacking,
+            clickThrough,
+            focusSafe,
+            standaloneMode,
+            unsupportedFeatures,
+            degradeReasons,
+            detail: status === 'presentation_applied' ? '' : 'required presentation gate unproven',
+        }));
+    }
+
     _enumerateWindows() {
+        return this._enumerateWindowEntries().map(entry => entry.payload);
+    }
+
+    _enumerateWindowEntries() {
         const tracker = Shell.WindowTracker.get_default();
         return global.get_window_actors()
             .map(actor => actor?.get_meta_window?.())
             .filter(window => window)
-            .map(window => this._windowPayload(window, tracker));
+            .map(window => ({
+                window,
+                payload: this._windowPayload(window, tracker),
+            }));
     }
 
     _windowPayload(window, tracker) {
@@ -301,6 +447,195 @@ class HelperHealthService {
         } catch (_error) {
             return '';
         }
+    }
+
+    _presentationPayload({
+        status,
+        action = 'degrade',
+        targetToken = '',
+        overlayToken = '',
+        requestedRect = null,
+        appliedRect = null,
+        renderer = 'pyqt',
+        placement = false,
+        chromeFree = false,
+        stacking = false,
+        clickThrough = false,
+        focusSafe = false,
+        standaloneMode = false,
+        unsupportedFeatures = [],
+        degradeReasons = [],
+        generatedAtUnixMs = Date.now(),
+        generatedAtMonotonicUs = GLib.get_monotonic_time(),
+        detail = '',
+    }) {
+        return {
+            status,
+            helper_kind: HELPER_KIND,
+            helper_version: HELPER_VERSION,
+            helper_protocol: HELPER_PROTOCOL,
+            coordinate_space: HELPER_COORDINATE_SPACE,
+            action,
+            target_token: targetToken,
+            overlay_token: overlayToken,
+            requested_rect: requestedRect,
+            applied_rect: appliedRect,
+            renderer,
+            placement,
+            chrome_free: chromeFree,
+            stacking,
+            click_through: clickThrough,
+            focus_safe: focusSafe,
+            standalone_mode: standaloneMode,
+            unsupported_features: unsupportedFeatures,
+            degrade_reasons: degradeReasons,
+            sequence: this._presentationSequence,
+            generated_at_unix_ms: generatedAtUnixMs,
+            generated_at_monotonic_us: generatedAtMonotonicUs,
+            detail,
+        };
+    }
+
+    _findOverlayWindow(entries, request, targetToken) {
+        const overlayTitle = this._requestString(request, 'overlay_title', 'overlayTitle') || 'EDMC Modern Overlay';
+        const overlayWmClass = this._requestString(request, 'overlay_wm_class', 'overlayWmClass') || 'EDMCModernOverlay';
+        const lowerTitle = overlayTitle.toLowerCase();
+        const lowerClass = overlayWmClass.toLowerCase();
+        return entries.find(entry => {
+            const payload = entry.payload;
+            if (!payload || payload.targetToken === targetToken) {
+                return false;
+            }
+            const title = String(payload.title || '').toLowerCase();
+            const wmClass = String(payload.wmClass || '').toLowerCase();
+            const wmClassInstance = String(payload.wmClassInstance || '').toLowerCase();
+            const appName = String(payload.appName || '').toLowerCase();
+            const appId = String(payload.appId || '').toLowerCase();
+            return title === lowerTitle ||
+                wmClass === lowerClass ||
+                wmClassInstance === lowerClass ||
+                appName === lowerTitle ||
+                appId === lowerClass;
+        }) || null;
+    }
+
+    _applyOverlayPresentation(window, requestedRect) {
+        const unsupportedFeatures = [];
+        const degradeReasons = [];
+        let placement = false;
+        let stacking = false;
+        let appliedRect = null;
+        try {
+            if (typeof window?.move_resize_frame === 'function') {
+                window.move_resize_frame(
+                    false,
+                    requestedRect.x,
+                    requestedRect.y,
+                    requestedRect.width,
+                    requestedRect.height,
+                );
+                placement = true;
+            } else if (typeof window?.move_frame === 'function') {
+                window.move_frame(false, requestedRect.x, requestedRect.y);
+                unsupportedFeatures.push('resize_frame');
+                degradeReasons.push('placement_size_unproven');
+            } else {
+                unsupportedFeatures.push('move_resize_frame');
+                degradeReasons.push('placement_unproven');
+            }
+        } catch (_error) {
+            placement = false;
+            degradeReasons.push('placement_error');
+        }
+        try {
+            if (typeof window?.make_above === 'function') {
+                window.make_above();
+                stacking = true;
+            } else {
+                unsupportedFeatures.push('make_above');
+                degradeReasons.push('stacking_unproven');
+            }
+        } catch (_error) {
+            stacking = false;
+            degradeReasons.push('stacking_error');
+        }
+        const frameRect = this._rectPayload(this._safeCall(window, 'get_frame_rect'));
+        if (frameRect && this._rectIsValid(frameRect)) {
+            appliedRect = frameRect;
+        } else if (placement) {
+            appliedRect = requestedRect;
+        }
+        return { placement, stacking, appliedRect, unsupportedFeatures, degradeReasons };
+    }
+
+    _windowChromeFree(payload) {
+        const insets = payload?.decorationInsets;
+        if (!insets) {
+            return false;
+        }
+        return Number(insets.left || 0) === 0 &&
+            Number(insets.top || 0) === 0 &&
+            Number(insets.right || 0) === 0 &&
+            Number(insets.bottom || 0) === 0;
+    }
+
+    _parseJsonObject(rawValue) {
+        try {
+            const parsed = JSON.parse(String(rawValue || '{}'));
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                return { ok: false, detail: 'request must be a JSON object' };
+            }
+            return { ok: true, value: parsed };
+        } catch (_error) {
+            return { ok: false, detail: 'request is not valid JSON' };
+        }
+    }
+
+    _requestString(payload, ...names) {
+        for (const name of names) {
+            const value = payload?.[name];
+            if (value !== null && value !== undefined) {
+                return String(value).trim();
+            }
+        }
+        return '';
+    }
+
+    _requestBool(payload, ...names) {
+        for (const name of names) {
+            const value = payload?.[name];
+            if (value === null || value === undefined) {
+                continue;
+            }
+            if (typeof value === 'string') {
+                return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+            }
+            return Boolean(value);
+        }
+        return false;
+    }
+
+    _requestStringList(payload, ...names) {
+        for (const name of names) {
+            const value = payload?.[name];
+            if (Array.isArray(value)) {
+                return value.map(item => String(item).trim()).filter(item => item);
+            }
+            if (typeof value === 'string' && value.trim()) {
+                return [value.trim()];
+            }
+        }
+        return [];
+    }
+
+    _requestRect(payload, ...names) {
+        for (const name of names) {
+            const rect = this._rectPayload(payload?.[name]);
+            if (rect && this._rectIsValid(rect)) {
+                return rect;
+            }
+        }
+        return null;
     }
 }
 
