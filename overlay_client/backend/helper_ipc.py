@@ -23,11 +23,14 @@ GNOME_SHELL_HELPER_DBUS_OBJECT_PATH = "/org/edmc/ModernOverlay/Helper"
 GNOME_SHELL_HELPER_DBUS_INTERFACE = "org.edmc.ModernOverlay.Helper"
 GNOME_SHELL_HELPER_DBUS_HELLO_METHOD = "Hello"
 GNOME_SHELL_HELPER_DBUS_HEALTH_METHOD = "GetHealth"
-GNOME_SHELL_HELPER_CAPABILITIES = ("hello", "health", "version", "protocol", "capabilities")
+GNOME_SHELL_HELPER_DBUS_TARGET_METHOD = "GetTargetState"
+GNOME_SHELL_HELPER_CAPABILITIES = ("hello", "health", "version", "protocol", "capabilities", "target_state")
 GNOME_SHELL_HELPER_REQUIRED_CAPABILITIES = GNOME_SHELL_HELPER_CAPABILITIES
 GNOME_SHELL_HELPER_HEALTH_STALE_SECONDS = 10.0
+GNOME_SHELL_HELPER_TARGET_STALE_SECONDS = 2.0
+GNOME_SHELL_HELPER_COORDINATE_SPACE = "gnome_shell_global_logical"
 HELPER_KIND = HelperKind.GNOME_SHELL_EXTENSION
-HELPER_PROTOCOL = 1
+HELPER_PROTOCOL = 2
 HELPER_VERSION = MODERN_OVERLAY_VERSION
 HELPER_PROTOCOL_VERSION = HELPER_PROTOCOL
 
@@ -60,6 +63,19 @@ class HelperHealthState(str, Enum):
     STALE = "stale"
     INACTIVE = "inactive"
     ERROR = "error"
+
+
+class HelperTargetState(str, Enum):
+    """Fail-closed target discovery states from the GNOME Shell helper."""
+
+    FOUND = "target_found"
+    NOT_FOUND = "target_not_found"
+    LAUNCHER_ONLY = "launcher_only"
+    AMBIGUOUS = "target_ambiguous"
+    STALE = "target_stale"
+    MALFORMED_PAYLOAD = "malformed_payload"
+    HELPER_UNHEALTHY = "helper_unhealthy"
+    GEOMETRY_INCOMPLETE = "geometry_incomplete"
 
 
 class HelperBoundaryError(ValueError):
@@ -119,6 +135,146 @@ class HelperHealthStatus:
             "stale_after_seconds": self.stale_after_seconds,
             "detail": self.detail,
             "raw_status": self.raw_status,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class HelperRect:
+    """Rectangle in the helper's named coordinate space."""
+
+    x: int
+    y: int
+    width: int
+    height: int
+
+    @property
+    def valid(self) -> bool:
+        return self.width > 0 and self.height > 0
+
+    def to_payload(self) -> dict[str, int]:
+        return {
+            "x": self.x,
+            "y": self.y,
+            "width": self.width,
+            "height": self.height,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class HelperDecorationInsets:
+    """Insets from frame rect to content rect in Shell logical coordinates."""
+
+    left: int = 0
+    top: int = 0
+    right: int = 0
+    bottom: int = 0
+
+    def to_payload(self) -> dict[str, int]:
+        return {
+            "left": self.left,
+            "top": self.top,
+            "right": self.right,
+            "bottom": self.bottom,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class HelperTargetWindow:
+    """Validated GNOME helper target window snapshot."""
+
+    target_token: str
+    title: str
+    wm_class: str = ""
+    wm_class_instance: str = ""
+    app_id: str = ""
+    app_name: str = ""
+    pid: int | None = None
+    window_type: int | None = None
+    frame_rect: HelperRect | None = None
+    buffer_rect: HelperRect | None = None
+    content_rect: HelperRect | None = None
+    decoration_insets: HelperDecorationInsets | None = None
+    monitor: int | None = None
+    output_name: str = ""
+    monitor_scale: float | None = None
+    has_focus: bool = False
+    showing_on_workspace: bool = False
+    minimized: bool = False
+    fullscreen: bool = False
+    workspace: str = ""
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "target_token": self.target_token,
+            "title": self.title,
+            "wm_class": self.wm_class,
+            "wm_class_instance": self.wm_class_instance,
+            "app_id": self.app_id,
+            "app_name": self.app_name,
+            "pid": self.pid,
+            "window_type": self.window_type,
+            "frame_rect": self.frame_rect.to_payload() if self.frame_rect is not None else None,
+            "buffer_rect": self.buffer_rect.to_payload() if self.buffer_rect is not None else None,
+            "content_rect": self.content_rect.to_payload() if self.content_rect is not None else None,
+            "decoration_insets": (
+                self.decoration_insets.to_payload() if self.decoration_insets is not None else None
+            ),
+            "monitor": self.monitor,
+            "output_name": self.output_name,
+            "monitor_scale": self.monitor_scale,
+            "has_focus": self.has_focus,
+            "showing_on_workspace": self.showing_on_workspace,
+            "minimized": self.minimized,
+            "fullscreen": self.fullscreen,
+            "workspace": self.workspace,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class HelperTargetStatus:
+    """Validated target-state result from the GNOME Shell helper."""
+
+    state: HelperTargetState
+    target: HelperTargetWindow | None = None
+    helper_kind: HelperKind = HELPER_KIND
+    helper_version: str = ""
+    helper_protocol: int | None = None
+    coordinate_space: str = GNOME_SHELL_HELPER_COORDINATE_SPACE
+    sequence: int = 0
+    generated_at_monotonic_us: int = 0
+    generated_at_unix_ms: int = 0
+    observed_at_monotonic: float = 0.0
+    stale_after_seconds: float = GNOME_SHELL_HELPER_TARGET_STALE_SECONDS
+    candidate_count: int = 0
+    launcher_count: int = 0
+    detail: str = ""
+
+    @property
+    def found(self) -> bool:
+        return self.state is HelperTargetState.FOUND and self.target is not None
+
+    def is_stale(self, now_monotonic: float) -> bool:
+        if self.observed_at_monotonic <= 0:
+            return False
+        return (float(now_monotonic) - self.observed_at_monotonic) > self.stale_after_seconds
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "state": self.state.value,
+            "found": self.found,
+            "helper_kind": self.helper_kind.value,
+            "helper_version": self.helper_version,
+            "helper_protocol": self.helper_protocol,
+            "coordinate_space": self.coordinate_space,
+            "sequence": self.sequence,
+            "generated_at_monotonic_us": self.generated_at_monotonic_us,
+            "generated_at_unix_ms": self.generated_at_unix_ms,
+            "observed_at_monotonic": self.observed_at_monotonic,
+            "stale_after_seconds": self.stale_after_seconds,
+            "candidate_count": self.candidate_count,
+            "launcher_count": self.launcher_count,
+            "detail": self.detail,
+            "target": self.target.to_payload() if self.target is not None else None,
         }
 
 
@@ -437,6 +593,226 @@ def validate_gnome_shell_helper_health_payload(
     )
 
 
+def probe_gnome_shell_helper_target(
+    fetch_target: Callable[[], object],
+    *,
+    health_status: HelperHealthStatus,
+    clock: Callable[[], float] = time.monotonic,
+    stale_after_seconds: float = GNOME_SHELL_HELPER_TARGET_STALE_SECONDS,
+) -> HelperTargetStatus:
+    """Fetch and validate the GNOME Shell helper target-state payload."""
+
+    if not health_status.healthy:
+        return _helper_target_status(
+            HelperTargetState.HELPER_UNHEALTHY,
+            helper_version=health_status.helper_version,
+            helper_protocol=health_status.helper_protocol,
+            detail=health_status.state.value,
+        )
+    try:
+        raw_target = fetch_target()
+    except HelperDbusServiceMissing as exc:
+        return _helper_target_status(HelperTargetState.HELPER_UNHEALTHY, detail=str(exc))
+    except HelperDbusProbeError as exc:
+        return _helper_target_status(HelperTargetState.HELPER_UNHEALTHY, detail=str(exc))
+    except Exception as exc:  # pragma: no cover - defensive transport boundary
+        return _helper_target_status(HelperTargetState.HELPER_UNHEALTHY, detail=exc.__class__.__name__)
+
+    observed_at = float(clock())
+    return validate_gnome_shell_helper_target_payload(
+        raw_target,
+        health_status=health_status,
+        observed_at_monotonic=observed_at,
+        now_monotonic=observed_at,
+        stale_after_seconds=stale_after_seconds,
+    )
+
+
+def validate_gnome_shell_helper_target_payload(
+    raw_target: object,
+    *,
+    health_status: HelperHealthStatus,
+    observed_at_monotonic: float,
+    now_monotonic: float | None = None,
+    expected_kind: HelperKind = HELPER_KIND,
+    expected_protocol: int = HELPER_PROTOCOL,
+    expected_coordinate_space: str = GNOME_SHELL_HELPER_COORDINATE_SPACE,
+    stale_after_seconds: float = GNOME_SHELL_HELPER_TARGET_STALE_SECONDS,
+) -> HelperTargetStatus:
+    """Validate a GNOME Shell helper target-state payload and fail closed."""
+
+    if not health_status.healthy:
+        return _helper_target_status(
+            HelperTargetState.HELPER_UNHEALTHY,
+            helper_version=health_status.helper_version,
+            helper_protocol=health_status.helper_protocol,
+            detail=health_status.state.value,
+        )
+
+    try:
+        payload = _coerce_json_mapping(raw_target, "helper target payload")
+    except HelperBoundaryError as exc:
+        return _helper_target_status(HelperTargetState.MALFORMED_PAYLOAD, detail=str(exc))
+
+    state_token = _payload_text(payload, "status").lower() or _payload_text(payload, "state").lower()
+    helper_kind_token = _payload_text(payload, "helper_kind").lower()
+    if not state_token or not helper_kind_token:
+        return _helper_target_status(HelperTargetState.MALFORMED_PAYLOAD, detail="missing status or helper_kind")
+    try:
+        helper_kind = HelperKind(helper_kind_token)
+    except ValueError:
+        return _helper_target_status(
+            HelperTargetState.MALFORMED_PAYLOAD,
+            detail=f"unexpected helper_kind={helper_kind_token}",
+        )
+    if helper_kind is not expected_kind:
+        return _helper_target_status(
+            HelperTargetState.MALFORMED_PAYLOAD,
+            helper_kind=helper_kind,
+            detail=f"expected helper_kind={expected_kind.value}",
+        )
+
+    helper_version = _payload_text(payload, "helper_version")
+    helper_protocol = _payload_int(payload, "helper_protocol")
+    if helper_protocol is None or int(helper_protocol) != int(expected_protocol):
+        return _helper_target_status(
+            HelperTargetState.MALFORMED_PAYLOAD,
+            helper_version=helper_version,
+            helper_protocol=helper_protocol,
+            detail=f"expected protocol={expected_protocol}",
+        )
+
+    coordinate_space = _payload_text(payload, "coordinate_space")
+    if coordinate_space != expected_coordinate_space:
+        return _helper_target_status(
+            HelperTargetState.GEOMETRY_INCOMPLETE,
+            helper_version=helper_version,
+            helper_protocol=helper_protocol,
+            coordinate_space=coordinate_space,
+            detail=f"expected coordinate_space={expected_coordinate_space}",
+        )
+
+    observed_at = float(observed_at_monotonic)
+    now = observed_at if now_monotonic is None else float(now_monotonic)
+    generated_at_monotonic_us = _payload_int(payload, "generated_at_monotonic_us") or 0
+    generated_at_unix_ms = _payload_int(payload, "generated_at_unix_ms") or 0
+    sequence = _payload_int(payload, "sequence") or 0
+    candidate_count = _payload_int(payload, "candidate_count") or 0
+    launcher_count = _payload_int(payload, "launcher_count") or 0
+    if observed_at > 0 and (now - observed_at) > stale_after_seconds:
+        return _helper_target_status(
+            HelperTargetState.STALE,
+            helper_version=helper_version,
+            helper_protocol=helper_protocol,
+            coordinate_space=coordinate_space,
+            sequence=sequence,
+            generated_at_monotonic_us=generated_at_monotonic_us,
+            generated_at_unix_ms=generated_at_unix_ms,
+            observed_at_monotonic=observed_at,
+            stale_after_seconds=stale_after_seconds,
+            candidate_count=candidate_count,
+            launcher_count=launcher_count,
+            detail="observation stale",
+        )
+
+    try:
+        target_state = HelperTargetState(state_token)
+    except ValueError:
+        return _helper_target_status(
+            HelperTargetState.MALFORMED_PAYLOAD,
+            helper_version=helper_version,
+            helper_protocol=helper_protocol,
+            detail=f"unexpected target status={state_token}",
+        )
+    if target_state is not HelperTargetState.FOUND:
+        return _helper_target_status(
+            target_state,
+            helper_version=helper_version,
+            helper_protocol=helper_protocol,
+            coordinate_space=coordinate_space,
+            sequence=sequence,
+            generated_at_monotonic_us=generated_at_monotonic_us,
+            generated_at_unix_ms=generated_at_unix_ms,
+            observed_at_monotonic=observed_at,
+            stale_after_seconds=stale_after_seconds,
+            candidate_count=candidate_count,
+            launcher_count=launcher_count,
+            detail=_payload_text(payload, "detail"),
+        )
+
+    raw_target_window = payload.get("target")
+    if not isinstance(raw_target_window, Mapping):
+        return _helper_target_status(
+            HelperTargetState.MALFORMED_PAYLOAD,
+            helper_version=helper_version,
+            helper_protocol=helper_protocol,
+            coordinate_space=coordinate_space,
+            detail="target_found requires target mapping",
+        )
+    target_window, geometry_error = _parse_helper_target_window(raw_target_window)
+    if geometry_error:
+        return _helper_target_status(
+            HelperTargetState.GEOMETRY_INCOMPLETE,
+            helper_version=helper_version,
+            helper_protocol=helper_protocol,
+            coordinate_space=coordinate_space,
+            sequence=sequence,
+            generated_at_monotonic_us=generated_at_monotonic_us,
+            generated_at_unix_ms=generated_at_unix_ms,
+            observed_at_monotonic=observed_at,
+            stale_after_seconds=stale_after_seconds,
+            candidate_count=candidate_count,
+            launcher_count=launcher_count,
+            detail=geometry_error,
+        )
+    return _helper_target_status(
+        HelperTargetState.FOUND,
+        target=target_window,
+        helper_version=helper_version,
+        helper_protocol=helper_protocol,
+        coordinate_space=coordinate_space,
+        sequence=sequence,
+        generated_at_monotonic_us=generated_at_monotonic_us,
+        generated_at_unix_ms=generated_at_unix_ms,
+        observed_at_monotonic=observed_at,
+        stale_after_seconds=stale_after_seconds,
+        candidate_count=candidate_count,
+        launcher_count=launcher_count,
+    )
+
+
+def select_elite_dangerous_target(candidates: list[Mapping[str, object]]) -> dict[str, object]:
+    """Select the Elite Dangerous client from Shell-visible window metadata."""
+
+    client_candidates: list[tuple[int, Mapping[str, object]]] = []
+    launcher_count = 0
+    for raw_candidate in candidates:
+        if not isinstance(raw_candidate, Mapping):
+            continue
+        if _is_launcher_candidate(raw_candidate):
+            launcher_count += 1
+            continue
+        if not _is_elite_client_candidate(raw_candidate):
+            continue
+        client_candidates.append((_target_candidate_score(raw_candidate), raw_candidate))
+
+    base: dict[str, object] = {
+        "coordinate_space": GNOME_SHELL_HELPER_COORDINATE_SPACE,
+        "candidate_count": len(client_candidates),
+        "launcher_count": launcher_count,
+    }
+    if not client_candidates:
+        base["status"] = HelperTargetState.LAUNCHER_ONLY.value if launcher_count else HelperTargetState.NOT_FOUND.value
+        return base
+    client_candidates.sort(key=lambda item: item[0], reverse=True)
+    if len(client_candidates) > 1 and client_candidates[0][0] == client_candidates[1][0]:
+        base["status"] = HelperTargetState.AMBIGUOUS.value
+        return base
+    base["status"] = HelperTargetState.FOUND.value
+    base["target"] = dict(client_candidates[0][1])
+    return base
+
+
 def _validate_endpoint(endpoint: HelperEndpointConfig, *, runtime_dir: str) -> HelperEndpointConfig:
     if endpoint.transport is HelperTransport.UNIX_SOCKET:
         address = str(endpoint.address or "").strip()
@@ -503,19 +879,173 @@ def _helper_health_status(
     )
 
 
-def _coerce_health_payload(raw_health: object) -> Mapping[str, object]:
-    raw = raw_health
+def _helper_target_status(
+    state: HelperTargetState,
+    *,
+    target: HelperTargetWindow | None = None,
+    helper_kind: HelperKind = HELPER_KIND,
+    helper_version: str = "",
+    helper_protocol: int | None = None,
+    coordinate_space: str = GNOME_SHELL_HELPER_COORDINATE_SPACE,
+    sequence: int = 0,
+    generated_at_monotonic_us: int = 0,
+    generated_at_unix_ms: int = 0,
+    observed_at_monotonic: float = 0.0,
+    stale_after_seconds: float = GNOME_SHELL_HELPER_TARGET_STALE_SECONDS,
+    candidate_count: int = 0,
+    launcher_count: int = 0,
+    detail: str = "",
+) -> HelperTargetStatus:
+    return HelperTargetStatus(
+        state=state,
+        target=target,
+        helper_kind=helper_kind,
+        helper_version=helper_version,
+        helper_protocol=helper_protocol,
+        coordinate_space=coordinate_space,
+        sequence=sequence,
+        generated_at_monotonic_us=generated_at_monotonic_us,
+        generated_at_unix_ms=generated_at_unix_ms,
+        observed_at_monotonic=observed_at_monotonic,
+        stale_after_seconds=stale_after_seconds,
+        candidate_count=candidate_count,
+        launcher_count=launcher_count,
+        detail=detail,
+    )
+
+
+def _parse_helper_target_window(payload: Mapping[str, object]) -> tuple[HelperTargetWindow | None, str]:
+    target_token = _mapping_text(payload, "target_token", "targetToken")
+    title = _mapping_text(payload, "title")
+    if not target_token:
+        return None, "target_token missing"
+    if not _title_matches_elite_dangerous(title):
+        return None, "target title does not match Elite Dangerous"
+
+    frame_rect = _payload_rect(payload.get("frameRect", payload.get("frame_rect")))
+    buffer_rect = _payload_rect(payload.get("bufferRect", payload.get("buffer_rect")))
+    content_rect = _payload_rect(payload.get("contentRect", payload.get("content_rect")))
+    decoration_insets = _payload_insets(payload.get("decorationInsets", payload.get("decoration_insets")))
+    if frame_rect is None or not frame_rect.valid:
+        return None, "frameRect missing or invalid"
+    if buffer_rect is None or not buffer_rect.valid:
+        return None, "bufferRect missing or invalid"
+    if content_rect is None or not content_rect.valid:
+        return None, "contentRect missing or invalid"
+    if decoration_insets is None:
+        return None, "decorationInsets missing or invalid"
+
+    return (
+        HelperTargetWindow(
+            target_token=target_token,
+            title=title,
+            wm_class=_mapping_text(payload, "wmClass", "wm_class"),
+            wm_class_instance=_mapping_text(payload, "wmClassInstance", "wm_class_instance"),
+            app_id=_mapping_text(payload, "appId", "app_id"),
+            app_name=_mapping_text(payload, "appName", "app_name"),
+            pid=_mapping_int(payload, "pid"),
+            window_type=_mapping_int(payload, "windowType", "window_type"),
+            frame_rect=frame_rect,
+            buffer_rect=buffer_rect,
+            content_rect=content_rect,
+            decoration_insets=decoration_insets,
+            monitor=_mapping_int(payload, "monitor"),
+            output_name=_mapping_text(payload, "outputName", "output_name"),
+            monitor_scale=_mapping_float(payload, "monitorScale", "monitor_scale"),
+            has_focus=_mapping_bool(payload, "hasFocus", "has_focus"),
+            showing_on_workspace=_mapping_bool(payload, "showingOnWorkspace", "showing_on_workspace"),
+            minimized=_mapping_bool(payload, "minimized"),
+            fullscreen=_mapping_bool(payload, "fullscreen"),
+            workspace=_mapping_text(payload, "workspace"),
+        ),
+        "",
+    )
+
+
+def _payload_rect(raw_rect: object) -> HelperRect | None:
+    if not isinstance(raw_rect, Mapping):
+        return None
+    x = _mapping_int(raw_rect, "x")
+    y = _mapping_int(raw_rect, "y")
+    width = _mapping_int(raw_rect, "width")
+    height = _mapping_int(raw_rect, "height")
+    if x is None or y is None or width is None or height is None:
+        return None
+    return HelperRect(x=x, y=y, width=width, height=height)
+
+
+def _payload_insets(raw_insets: object) -> HelperDecorationInsets | None:
+    if not isinstance(raw_insets, Mapping):
+        return None
+    left = _mapping_int(raw_insets, "left")
+    top = _mapping_int(raw_insets, "top")
+    right = _mapping_int(raw_insets, "right")
+    bottom = _mapping_int(raw_insets, "bottom")
+    if left is None or top is None or right is None or bottom is None:
+        return None
+    return HelperDecorationInsets(left=left, top=top, right=right, bottom=bottom)
+
+
+def _is_elite_client_candidate(candidate: Mapping[str, object]) -> bool:
+    title = _mapping_text(candidate, "title")
+    if not _title_matches_elite_dangerous(title):
+        return False
+    if _is_launcher_candidate(candidate):
+        return False
+    if _mapping_bool(candidate, "minimized"):
+        return False
+    rect = _payload_rect(candidate.get("frameRect", candidate.get("frame_rect")))
+    return rect is not None and rect.valid
+
+
+def _is_launcher_candidate(candidate: Mapping[str, object]) -> bool:
+    title = _mapping_text(candidate, "title").lower()
+    if any(token in title for token in ("launcher", "installer", "updater", "update")):
+        return "elite" in title
+    return False
+
+
+def _title_matches_elite_dangerous(title: str) -> bool:
+    lowered = title.strip().lower()
+    return "elite" in lowered and "dangerous" in lowered
+
+
+def _target_candidate_score(candidate: Mapping[str, object]) -> int:
+    score = 100
+    title = _mapping_text(candidate, "title").lower()
+    wm_class = _mapping_text(candidate, "wmClass", "wm_class").lower()
+    app_name = _mapping_text(candidate, "appName", "app_name").lower()
+    app_id = _mapping_text(candidate, "appId", "app_id").lower()
+    if "(client)" in title:
+        score += 20
+    if "steam_app_359320" in {wm_class, app_name, app_id}:
+        score += 10
+    if _mapping_bool(candidate, "showingOnWorkspace", "showing_on_workspace"):
+        score += 10
+    if _mapping_bool(candidate, "hasFocus", "has_focus"):
+        score += 5
+    if _mapping_int(candidate, "pid") is not None:
+        score += 1
+    return score
+
+
+def _coerce_json_mapping(raw_value: object, label: str) -> Mapping[str, object]:
+    raw = raw_value
     if isinstance(raw, (tuple, list)) and len(raw) == 1:
         raw = raw[0]
     if isinstance(raw, str):
         try:
             parsed = json.loads(raw)
         except json.JSONDecodeError as exc:
-            raise HelperBoundaryError("helper health payload is not valid JSON") from exc
+            raise HelperBoundaryError(f"{label} is not valid JSON") from exc
         raw = parsed
     if not isinstance(raw, Mapping):
-        raise HelperBoundaryError("helper health payload must be a mapping or JSON object string")
+        raise HelperBoundaryError(f"{label} must be a mapping or JSON object string")
     return raw
+
+
+def _coerce_health_payload(raw_health: object) -> Mapping[str, object]:
+    return _coerce_json_mapping(raw_health, "helper health payload")
 
 
 def _payload_text(payload: Mapping[str, object], key: str) -> str:
@@ -539,3 +1069,46 @@ def _payload_capabilities(value: object) -> tuple[str, ...]:
     if not isinstance(value, (list, tuple, set, frozenset)):
         return ()
     return tuple(sorted(str(item).strip() for item in value if str(item).strip()))
+
+
+def _mapping_text(payload: Mapping[str, object], *keys: str) -> str:
+    for key in keys:
+        value = payload.get(key)
+        if value is not None:
+            return str(value).strip()
+    return ""
+
+
+def _mapping_int(payload: Mapping[str, object], *keys: str) -> int | None:
+    for key in keys:
+        value = payload.get(key)
+        if value is None:
+            continue
+        try:
+            return int(str(value).strip())
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _mapping_float(payload: Mapping[str, object], *keys: str) -> float | None:
+    for key in keys:
+        value = payload.get(key)
+        if value is None:
+            continue
+        try:
+            return float(str(value).strip())
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _mapping_bool(payload: Mapping[str, object], *keys: str) -> bool:
+    for key in keys:
+        value = payload.get(key)
+        if value is None:
+            continue
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
+    return False

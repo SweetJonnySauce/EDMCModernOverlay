@@ -1115,7 +1115,7 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 | 4 | Session-DBus helper health/version MVP and client handshake/status object | Completed |
 | 5 | Installer lifecycle and post-install GNOME Wayland remediation | Completed |
 | 6 | Helper state surfaces, diagnostics, collectors, and debug overlay metrics | Completed |
-| 7 | Helper-backed target discovery and coordinate contract | Not Started |
+| 7 | Helper-backed target discovery and coordinate contract | Completed |
 | 8 | Shell-mediated presentation, attachment, stacking, and click-through behavior | Not Started |
 | 9 | Release validation, docs, privacy/security closeout, and support claim gate | Not Started |
 
@@ -1454,21 +1454,62 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 - Default diagnostics avoid broad process/window dumps per Q11.
 
 ### Phase 7: Helper-Backed Target Discovery And Coordinate Contract
-- Status: Not Started
+- Status: Completed
 - Implements the third IQ2 helper MVP stage plus Q4/Q5 contracts.
 - Uses the helper as the GNOME Wayland target-discovery source only when active/version-compatible.
 - Emits Shell global logical geometry with explicit `frameRect`, `bufferRect`, `contentRect`, and decoration inset semantics.
 - Risks: attaching to launcher or wrong window, geometry/content-rect mismatch, stale target tokens, launcher diversity beyond Steam.
 - Mitigations: weighted target identity, no broad process substring scans, target ambiguity states, fake-helper fixtures, and live GNOME probes.
 
+#### Phase 7 Implementation Notes
+- Touch points:
+  - `overlay_client/backend/helper_ipc.py` owns the pure target-state adapter and validation contract.
+  - `helpers/gnome_shell_extension/constants.js` and `extension.js` expose a minimal DBus target-state method and capability.
+  - `overlay_client/backend/__init__.py` exports the new constants/types/helpers for tests and later runtime wiring.
+  - Existing status/selector behavior remains degraded-by-default; Phase 7 target success is diagnostic evidence only until Phase 8/9 validation.
+- Expected unchanged behavior:
+  - GNOME Wayland with missing/unhealthy helper remains `degraded_overlay`.
+  - Healthy helper or found target does not enable `true_overlay`.
+  - No installer lifecycle, `keep_overlay_visible`, presentation, stacking, attachment, click-through, or release-claim behavior changes.
+- Target identity rules:
+  - A production target must have a Shell-visible title containing both `elite` and `dangerous`.
+  - Launcher/app/class metadata, including Steam `steam_app_359320`, is supporting evidence only and must not be required.
+  - Titles containing launcher/update/install terms are launcher candidates, not attach targets.
+  - No client candidates plus launcher candidates reports `launcher_only`; no candidates reports `target_not_found`.
+  - Multiple plausible client candidates with no unique winner reports `target_ambiguous`.
+  - Mock/test windows are not production matches unless a future explicit development flag allows them.
+- Coordinate and freshness contract:
+  - Payload coordinate space is `gnome_shell_global_logical`.
+  - A valid found target carries `target_token`, `sequence`, timestamp fields, `frameRect`, `bufferRect`, `contentRect`, `decorationInsets`, monitor/output metadata when available, focus/visibility/workspace/minimized/fullscreen state, and app/title metadata.
+  - `contentRect` is the overlay alignment rect. `frameRect`/`bufferRect` remain Shell evidence and are not used as proof of visible PyQt placement.
+  - Missing or malformed required geometry reports `geometry_incomplete`; stale observations report `target_stale`; helper health failures report `helper_unhealthy`.
+- Test type selection:
+  - Unit/fake-helper tests cover target selection, payload validation, stale/malformed states, launcher-only, ambiguity, and borderless/windowed geometry.
+  - Static manifest/constant tests cover helper DBus method/capability/protocol synchronization.
+  - Harness tests are not required because this phase does not touch `load.py`, preferences lifecycle, or plugin/client bridge lifecycle wiring.
+
 | Stage | Description | Status |
 | --- | --- | --- |
-| 7.1 | Implement helper target enumeration using Shell-visible title/class/app/window state with launcher-only and ambiguity rejection | Not Started |
-| 7.2 | Emit target state with stable target token, title/app metadata, focus/visibility/workspace/minimized/fullscreen, timestamp, and sequence | Not Started |
-| 7.3 | Emit geometry contract: Shell global logical `frameRect`, `bufferRect`, `contentRect`, decoration insets, monitor/output identity, and scale metadata when available | Not Started |
-| 7.4 | Add client adapter for helper target/geometry state without treating Qt `moveEvent` as proof of compositor-visible placement | Not Started |
-| 7.5 | Add fake-helper tests for found/not_found/launcher_only/ambiguous/stale target and borderless/windowed geometry cases | Not Started |
-| 7.6 | Record degraded behavior when helper cannot derive content rect or required geometry metadata | Not Started |
+| 7.1 | Implement helper target enumeration using Shell-visible title/class/app/window state with launcher-only and ambiguity rejection | Completed |
+| 7.2 | Emit target state with stable target token, title/app metadata, focus/visibility/workspace/minimized/fullscreen, timestamp, and sequence | Completed |
+| 7.3 | Emit geometry contract: Shell global logical `frameRect`, `bufferRect`, `contentRect`, decoration insets, monitor/output identity, and scale metadata when available | Completed |
+| 7.4 | Add client adapter for helper target/geometry state without treating Qt `moveEvent` as proof of compositor-visible placement | Completed |
+| 7.5 | Add fake-helper tests for found/not_found/launcher_only/ambiguous/stale target and borderless/windowed geometry cases | Completed |
+| 7.6 | Record degraded behavior when helper cannot derive content rect or required geometry metadata | Completed |
+
+#### Phase 7 Execution Notes
+- Bumped the helper protocol from `1` to `2` because Phase 7 adds a new DBus method, target-state capability, and target/geometry payload semantics.
+- Added `GetTargetState(in s query, out s target_state)` to the helper DBus interface. It reports target state only; it does not present, attach, restack, or move the overlay.
+- Added the `target_state` helper capability and a `gnome_shell_helper_contract_v2.json` fixture to document the contract expansion.
+- Added pure client adapter types for helper target status, target window metadata, Shell logical rects, decoration insets, and explicit stale/malformed/launcher-only/ambiguous/geometry-incomplete states.
+- The GNOME helper selects the Elite Dangerous client by mandatory title evidence and supporting metadata only. Steam `steam_app_359320` increases confidence but is not required.
+- Found-target validation requires `contentRect`; if the helper cannot derive it, the client reports `geometry_incomplete` instead of silently using `frameRect` or Qt `moveEvent`.
+
+#### Phase 7 Tests Run
+- `overlay_client/.venv/bin/python -m py_compile overlay_client/backend/helper_ipc.py` -> passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_target_state.py overlay_client/tests/test_gnome_shell_helper_dbus_health.py tests/test_gnome_shell_extension_manifest.py -q` -> passed, `35 passed`.
+- `git diff --check` -> passed.
+- `make check` -> passed; ruff and mypy passed, full pytest reported `896 passed, 21 skipped`.
 
 #### Phase 7 Exit Criteria
 - Helper can identify the real Elite Dangerous client and reject launcher-only/ambiguous states.
