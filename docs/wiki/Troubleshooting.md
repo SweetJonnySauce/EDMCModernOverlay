@@ -15,5 +15,38 @@ Below are some basic troubleshooting steps if you can't get the overlay to work.
 | I don't see the test overlay when triggered. | Make sure the game has focus after triggering the test overlay (i.e. alt-tab to the game). |
 | I still don't see the test overlay or any other plugin overlays in-game | Contact me for additional support and troubleshooting. |
 
+## GNOME Wayland helper checks
+
+On GNOME Wayland, the helper must be installed, enabled, active, reachable over the local session bus, and protocol-compatible before GNOME Wayland true-overlay behavior can be claimed. If the helper is missing or unhealthy, Modern Overlay should report `degraded_overlay`.
+
+Run these commands from a terminal:
+
+```bash
+gnome-shell --version
+printf 'session=%s desktop=%s\n' "$XDG_SESSION_TYPE" "$XDG_CURRENT_DESKTOP"
+gsettings get org.gnome.shell disable-user-extensions
+gnome-extensions info edmc-modern-overlay-helper@edmcmodernoverlay.github.io
+gdbus call --session \
+  --dest org.edmc.ModernOverlay.Helper \
+  --object-path /org/edmc/ModernOverlay/Helper \
+  --method org.edmc.ModernOverlay.Helper.GetHealth
+```
+
+Common results:
+- `Extension ... doesn't exist`: rerun the Linux installer while logged into GNOME Wayland and approve the helper install.
+- `disable-user-extensions` is `true`: GNOME user extensions are globally disabled. Re-enable them manually, then log out and back in.
+- `State` is not `ACTIVE`: log out and back in after install/enable. If it still is not active, rerun the installer or collect diagnostics.
+- DBus `ServiceUnknown`: the helper is not active or did not publish its local session DBus service.
+- Protocol/version mismatch: reinstall or update Modern Overlay so the plugin and helper versions match.
+
+If you originally installed Modern Overlay while using X11, switch to GNOME Wayland first, then rerun the Linux installer. The helper install path is intentionally installer-driven; in-settings helper install/uninstall buttons are deferred.
+
+For a support bundle on Linux, run:
+
+```bash
+utils/collect_overlay_debug_linux.sh
+```
+
+The default collector includes GNOME/session/helper facts and Modern Overlay status lines when available. It does not dump screenshots, broad process lists, command lines, or unrelated window titles by default.
 
 

@@ -9,6 +9,8 @@
 ### Maintenance
 - Set up @dwomble's test harness to do headless EDMC testing (copied from BGS-Tally). Fix [#207](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/207)
 - Backend status truthfulness: Wayland `xwayland_compat` is now reported as `degraded_overlay` instead of `true_overlay`; runtime behavior and explicit manual override semantics are unchanged.
+- GNOME Wayland helper groundwork is validation-gated. Missing, inactive, stale, or incompatible helper states remain `degraded_overlay`; GNOME Wayland `true_overlay` support must not be claimed until the full install, health, target, presentation, click-through, stacking, failure/recovery, and privacy/security validation matrix passes.
+- Added GNOME Wayland helper documentation for user-approved install/remediation, local-only session DBus behavior, privacy/security boundaries, and the unsupported exclusive fullscreen case.
 
 ### Bug Fixes
 - Fix [#183](https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/183) - Enabled checkbox on Overlay Controller is confusing.

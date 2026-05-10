@@ -153,7 +153,7 @@ You can toggle this via the EDMC preferences panel checkbox labeled "Keep overla
 
 ## Why does the overlay recommend borderless mode on Linux?
 
-When running under X11/Wayland the overlay lets the compositor manage its window so it can stay synced to Elite without tearing. Most compositors only vsync tool windows reliably when the game runs in borderless/fullscreen-windowed mode. If you launch Elite in exclusive fullscreen, the overlay still tracks the game window but the compositor may not present it smoothly. Switch Elite to borderless or enable compositor vsync (e.g. Picom `--vsync`) for the best experience.
+When running under X11/Wayland the overlay lets the compositor manage its window so it can stay synced to Elite without tearing. Most compositors only vsync tool windows reliably when the game runs in borderless/fullscreen-windowed mode. On GNOME Wayland, exclusive fullscreen is unsupported for overlay use. On other Linux compositor paths, exclusive fullscreen may track the game window but present poorly. Switch Elite to borderless or enable compositor vsync (e.g. Picom `--vsync`) for the best experience.
 
 ### Wayland Support
 
@@ -173,8 +173,12 @@ Modern Overlay now ships with compositor-aware helpers and multiple fallbacks. T
   ```
 - **KDE Plasma (KWin):** Set `force_xwayland` to **false** in `overlay_settings.json`. KWin—Plasma handles Wayland windows natively, and forcing XWayland can break input/stacking.
 
-- **XWayland mode:** On Wayland sessions the overlay forces itself to launch under XWayland for compatibility. Keep this path in mind on GNOME Shell (Wayland), where native layer-shell hooks are not yet available; the overlay behaves like it does on X11 and stays pinned above Elite.
+- **GNOME Shell (Wayland):** Modern Overlay includes a local GNOME Shell extension helper for GNOME Wayland attachment. Missing, inactive, stale, or protocol-incompatible helper states are reported as `degraded_overlay`; GNOME Wayland true-overlay support is validation-gated and must not be claimed unless every install, health, target, presentation, click-through, stacking, and recovery gate passes. Install or update the helper by rerunning the Linux installer while logged into GNOME Wayland, approve the helper action, then log out and back in before checking status.
+
+- **XWayland compatibility mode:** On Wayland sessions the overlay can still use XWayland compatibility/fallback behavior, but it is a degraded compatibility path, not a GNOME Wayland true-overlay claim.
   ```bash
   # Example for Debian/Ubuntu; xprop/xwininfo ship in x11-utils and swaymsg comes with sway.
   sudo apt install wmctrl x11-utils sway
   ```
+
+For GNOME Wayland overlay use, run Elite Dangerous in windowed or borderless fullscreen mode. Exclusive fullscreen is unsupported for this overlay path.

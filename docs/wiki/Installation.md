@@ -33,3 +33,33 @@ Download the latest `EDMCModernOverlay-linux-<version>.tar.gz` file from Assets 
 This will include `EDMCModernOverlay/`, `install_linux.sh`, the distro manifest `install_matrix.json`, and `checksums.txt` which is used to ensure file integrity of the downloaded archive file. Extract the archive and run `install_linux.sh` from the extracted directory via a terminal window.
 
 Run `./install_linux.sh -h` from the command line for more options.
+
+### GNOME Wayland helper
+
+On GNOME Wayland, Modern Overlay uses a local GNOME Shell extension helper for overlay attachment. The helper is installed only when the Linux installer detects a GNOME Wayland session and you approve the helper install.
+
+The helper install flow checks for:
+- a GNOME Shell Wayland session
+- a user DBus session bus
+- `gnome-extensions`
+- `gjs`
+- `gdbus`
+- the packaged helper source directory, `helpers/gnome_shell_extension/`
+
+When approved, the installer copies the helper source directory to:
+
+```bash
+~/.local/share/gnome-shell/extensions/edmc-modern-overlay-helper@edmcmodernoverlay.github.io/
+```
+
+The installer does not silently change GNOME's global user-extension setting. If user extensions are globally disabled, it prints the manual remediation command for you to run. After helper install, update, disable, or uninstall, log out and log back in before treating the helper state as final.
+
+If you installed Modern Overlay while using X11 and later switch to GNOME Wayland, rerun the Linux installer while logged into GNOME Wayland. The installer will detect the GNOME Wayland session and offer the helper install flow.
+
+Use this command after logging back in to check helper state:
+
+```bash
+./install_linux.sh --gnome-helper-action status
+```
+
+GNOME Wayland overlay use supports Elite Dangerous windowed and borderless fullscreen modes. Exclusive fullscreen is not a supported mode for the GNOME Wayland overlay path.

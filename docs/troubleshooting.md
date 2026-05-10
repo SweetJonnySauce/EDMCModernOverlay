@@ -30,6 +30,22 @@ Use these steps to gather diagnostics when the overlay misbehaves. EDMC’s own 
 - Overlay Controller log: `logs/EDMCModernOverlay/overlay_controller.log` (same directory as the client log). The controller writes a startup banner every time `!ovr` launches it and captures any uncaught exceptions or stack traces before it exits. Set EDMC to DEBUG (or use dev mode) so geometry/routing DEBUG logs are flushed to the file even before Tk initialises.
 - Debug flags live in `debug.json` in the plugin directory; Modern Overlay now auto-creates this file whenever EDMC logging is DEBUG (or dev mode is active) so users don’t need to craft it manually before capturing payloads. Developer-only overlay helpers (tracing, outlines, vertex markers) live in `dev_settings.json`, which is created/read only when dev mode is enabled so normal troubleshooting stays focused on capture/logging knobs.
 
+## GNOME Wayland helper diagnostics
+- GNOME Wayland requires the local helper extension to be installed, active, reachable over session DBus, and protocol-compatible before true-overlay behavior can be claimed. Missing or unhealthy helper states should stay `degraded_overlay`.
+- Check the current session:
+  ```bash
+  gnome-shell --version
+  printf 'session=%s desktop=%s\n' "$XDG_SESSION_TYPE" "$XDG_CURRENT_DESKTOP"
+  gsettings get org.gnome.shell disable-user-extensions
+  gnome-extensions info edmc-modern-overlay-helper@edmcmodernoverlay.github.io
+  gdbus call --session \
+    --dest org.edmc.ModernOverlay.Helper \
+    --object-path /org/edmc/ModernOverlay/Helper \
+    --method org.edmc.ModernOverlay.Helper.GetHealth
+  ```
+- If the helper is missing after you switched from X11 to GNOME Wayland, rerun the Linux installer while logged into GNOME Wayland, approve the helper install, then log out and back in before checking status.
+- Run `utils/collect_overlay_debug_linux.sh` for a support snapshot. The default collector reports session type, desktop, GNOME Shell version, helper UUID/path/discovery/enabled/state, global user-extension state, DBus health when available, and the latest Modern Overlay backend/helper status line when available. It avoids screenshots, broad process/window dumps, command lines, unrelated window titles, and sensitive environment dumps by default.
+
 ## Windows: Python auto-install (installer)
 - The Windows `.exe` installer can download and install Python automatically if no Python 3.10+ is found.
 - If Python is detected on `PATH`, it will be reused; otherwise the installer checks the default per-user install path.

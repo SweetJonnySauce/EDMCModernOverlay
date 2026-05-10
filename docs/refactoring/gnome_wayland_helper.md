@@ -1117,7 +1117,7 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 | 6 | Helper state surfaces, diagnostics, collectors, and debug overlay metrics | Completed |
 | 7 | Helper-backed target discovery and coordinate contract | Completed |
 | 8 | Shell-mediated presentation, attachment, stacking, and click-through behavior | Completed |
-| 9 | Release validation, docs, privacy/security closeout, and support claim gate | Not Started |
+| 9 | Release validation, docs, privacy/security closeout, and support claim gate | In Progress |
 
 ## Phase Coverage Against Requirements
 
@@ -1589,23 +1589,101 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 - Rendering remains in PyQt unless a recorded validation failure requires moving specific responsibility into the extension.
 
 ### Phase 9: Release Validation, Documentation, And Support Claim Gate
-- Status: Not Started
+- Status: In Progress
 - Implements Q9, Q10, Q11 closeout and validates all earlier phases together.
 - Proves helper-active behavior on Ubuntu GNOME Wayland/GNOME Shell 46 first, with exact environment details recorded.
 - Updates user docs, troubleshooting, release notes, and privacy/security copy based on evidence.
 - Risks: overclaiming GNOME version/distro support, missing multi-monitor/fractional-scaling edge cases, stale test extensions affecting results.
 - Mitigations: Q10 validation matrix, IQ7 cleanup preflight, explicit deferrals, and release wording that separates target from validated environments.
 
+#### Phase 9 Implementation Notes
+- Touch points:
+  - `docs/refactoring/gnome_wayland_helper.md` records validation commands, environment evidence, pass/fail/deferred outcomes, and final gate decision.
+  - User-facing docs to review/update: `docs/wiki/Installation.md`, `docs/wiki/Troubleshooting.md`, `docs/wiki/Network-Connections-Disclosure.md`, `docs/troubleshooting.md`, and release/support wording docs if present.
+  - Installer and diagnostic scripts are validation surfaces: `scripts/install_linux.sh`, `utils/collect_overlay_debug_linux.sh`, and `utils/collect_overlay_debug_windows.ps1`.
+  - Runtime/status surfaces are validation surfaces only unless evidence exposes a bug: preferences/settings, overlay logs, plugin bridge status, and live debug overlay metrics.
+- Expected unchanged behavior:
+  - Missing, unhealthy, inactive, stale, incompatible, target-missing, target-ambiguous, launcher-only, or presentation-unsupported helper states remain `degraded_overlay`.
+  - `keep_overlay_visible`, installer approval boundaries, source-directory helper install lifecycle, and PyQt payload rendering remain unchanged.
+  - No GNOME Wayland `true_overlay` support claim is allowed until every Q10 gate passes.
+- Validation environment to record:
+  - Date, distro/version, GNOME Shell version, session type, desktop, monitor layout, scale factors, EDMC install mode, plugin version, helper version, helper protocol, helper UUID path, helper enabled/state, DBus health result, and `gnome_helper_experimental` value.
+  - Screenshots are intentionally omitted by default per Q11 unless separately approved.
+- IQ7 cleanup/preflight:
+  - Confirm temporary research UUIDs are absent: `edmc-modern-overlay-dbus-smoke@local.test` and `edmc-modern-overlay-window-probe@local.test`.
+  - If present, remove them only with explicit user approval and record the exact command/outcome.
+  - Confirm only the production helper UUID `edmc-modern-overlay-helper@edmcmodernoverlay.github.io` is used for validation.
+- Pass/fail criteria:
+  - `PASS` means the exact requirement was observed in the named environment with command/log/manual evidence.
+  - `FAIL` means the requirement was tested and did not hold; record exact symptom and block `true_overlay` claim.
+  - `DEFERRED` means the test was not run or the environment was unavailable; record why and block broad `true_overlay` claim unless release wording explicitly narrows support.
+  - `NOT_APPLICABLE` means the requirement does not apply to the current platform/session and must state why.
+- Privacy/security review checklist:
+  - Helper exposes no arbitrary command execution and no network listener.
+  - Helper IPC stays on the local user session bus.
+  - Default logs/collectors do not dump screenshots, broad process lists, command lines, sensitive environment variables, unrelated window titles, or broad Shell/window dumps.
+  - User-facing docs explain that the extension observes limited window metadata for overlay attachment only and does not capture screen contents, keyboard/mouse input, game data, or network traffic.
+- Test type selection:
+  - Manual GNOME validation is required for compositor behavior: chrome/titlebar suppression, stacking, click-through, flashing, windowed follow, and borderless follow.
+  - Shell/script tests cover installer and collector behavior if changed.
+  - Unit tests cover pure documentation/status/helper contract changes if changed.
+  - Harness tests are required only if `load.py`, preferences lifecycle, plugin/client bridge wiring, or lifecycle hooks are touched.
+
 | Stage | Description | Status |
 | --- | --- | --- |
-| 9.1 | Run IQ7 cleanup preflight and record GNOME Shell version, distro/session, monitor layout, scaling, EDMC install mode, helper version, and protocol | Not Started |
-| 9.2 | Run Q10 install/lifecycle validation: install, update, disable, uninstall, rerun-installer remediation, logout/login, health/protocol verification | Not Started |
-| 9.3 | Run Q10 backend/status validation across preferences, logs, collectors, and debug overlay metrics | Not Started |
-| 9.4 | Run Q10 windowed overlay validation: identity, content alignment, move, resize, chrome-free, click-through, stacking | Not Started |
-| 9.5 | Run Q10 borderless fullscreen validation: identity, viewport alignment, chrome-free, no flashing, click-through, stacking | Not Started |
-| 9.6 | Run Q10 failure/recovery validation for disabled/global-disabled/DBus/protocol/game-not-found/launcher-only/ambiguous states | Not Started |
-| 9.7 | Run Q10 privacy/security review and EDMC compliance review for installer/preferences/helper surfaces | Not Started |
-| 9.8 | Update docs/wiki/troubleshooting/release notes with support wording, privacy copy, install/remediation instructions, and any deferrals | Not Started |
+| 9.1 | Run IQ7 cleanup preflight and record GNOME Shell version, distro/session, monitor layout, scaling, EDMC install mode, helper version, and protocol | Completed |
+| 9.2 | Run Q10 install/lifecycle validation: install, update, disable, uninstall, rerun-installer remediation, logout/login, health/protocol verification | Deferred |
+| 9.3 | Run Q10 backend/status validation across preferences, logs, collectors, and debug overlay metrics | Deferred |
+| 9.4 | Run Q10 windowed overlay validation: identity, content alignment, move, resize, chrome-free, click-through, stacking | Deferred |
+| 9.5 | Run Q10 borderless fullscreen validation: identity, viewport alignment, chrome-free, no flashing, click-through, stacking | Deferred |
+| 9.6 | Run Q10 failure/recovery validation for disabled/global-disabled/DBus/protocol/game-not-found/launcher-only/ambiguous states | Deferred |
+| 9.7 | Run Q10 privacy/security review and EDMC compliance review for installer/preferences/helper surfaces | Completed |
+| 9.8 | Update docs/wiki/troubleshooting/release notes with support wording, privacy copy, install/remediation instructions, and any deferrals | Completed |
+
+#### Phase 9 Preflight Evidence
+- Validation date: 2026-05-10.
+- Distro/session: Ubuntu 24.04.4 LTS (`VERSION_CODENAME=noble`), `XDG_SESSION_TYPE=wayland`, `XDG_CURRENT_DESKTOP=ubuntu:GNOME`, `DESKTOP_SESSION=ubuntu-wayland`, `WAYLAND_DISPLAY=wayland-0`.
+- GNOME Shell: `gnome-shell --version` -> `GNOME Shell 46.0`.
+- Session bus: `DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus`; `busctl --user --no-pager list` confirmed `org.freedesktop.DBus` and GNOME Shell services are present. Broad bus output was not copied into this plan to avoid unrelated process/service dumps.
+- Monitor layout: `xrandr --listmonitors` -> two monitors, primary `DP-2` at `3440x1440+0+0` and `HDMI-1` at `3440x1440+3440+0`.
+- Scaling: `gsettings get org.gnome.desktop.interface scaling-factor` -> `uint32 1`; `gsettings get org.gnome.desktop.interface text-scaling-factor` -> `1.0`.
+- Plugin/helper package versions: `version.py` reports plugin version `1.0.0`; `helpers/gnome_shell_extension/metadata.json` uses UUID `edmc-modern-overlay-helper@edmcmodernoverlay.github.io`, metadata version `3`, and shell versions `46`, `47`, `48`, `49`, and `50`.
+- Required helper tools were present: `gnome-extensions`, `gjs`, `gdbus`, `busctl`, and `dbus-monitor`.
+- Global GNOME user extensions: `gsettings get org.gnome.shell disable-user-extensions` -> `false`.
+- IQ7 cleanup: stale research extension `edmc-modern-overlay-window-probe@local.test` was present at preflight. With user approval, it was disabled and its user-local extension directory was removed. Follow-up checks showed no known research helper UUIDs installed, and enabled GNOME extensions no longer included the research UUIDs.
+- Production helper state: `gnome-extensions info edmc-modern-overlay-helper@edmcmodernoverlay.github.io` reported that the extension does not exist, and `gdbus call --session --dest org.edmc.ModernOverlay.Helper --object-path /org/edmc/ModernOverlay/Helper --method org.edmc.ModernOverlay.Helper.GetHealth` returned `org.freedesktop.DBus.Error.ServiceUnknown`.
+
+#### Phase 9 Validation Status
+
+| Gate | Outcome | Evidence / Reason |
+| --- | --- | --- |
+| IQ7 cleanup preflight | PASS | Research UUIDs were removed and are absent after cleanup. |
+| Environment record | PASS | Ubuntu 24.04.4, GNOME Shell 46.0, GNOME Wayland, two 3440x1440 monitors, scale factor 1. |
+| Helper package metadata | PASS | Packaged helper metadata is present with the production UUID, GNOME Shell 46-50 entries, and metadata version 3. |
+| Helper installed/active/DBus health | DEFERRED | Production helper is not installed in the live GNOME session; DBus health returns `ServiceUnknown`. |
+| Install/update/disable/uninstall lifecycle | DEFERRED | Requires user-approved helper install/update/uninstall plus logout/login before final verification. This cannot be completed inside one uninterrupted coding turn. |
+| X11-install then GNOME Wayland rerun-installer remediation | DEFERRED | Requires an installer run from an X11 session, switching to GNOME Wayland, rerunning installer, logout/login, and status verification. |
+| Preferences/logs/collectors/debug-overlay status agreement | DEFERRED | Missing-helper host state is observable, but full agreement across live preferences and debug overlay requires EDMC/client runtime plus the installed helper lifecycle. |
+| Windowed overlay behavior | DEFERRED | Requires installed/active helper, Elite Dangerous running windowed, and manual compositor validation. |
+| Borderless fullscreen overlay behavior | DEFERRED | Requires installed/active helper, Elite Dangerous running borderless fullscreen, and manual compositor validation. |
+| Failure/recovery states | DEFERRED | Requires installed helper and controlled disable/global-disable/DBus/protocol/target-state scenarios. |
+| Privacy/security checklist | PASS | Static review found no arbitrary command execution or network listener in the helper package. Preflight avoided screenshots, broad process/window dumps, command-line dumps, and unrelated window-title dumps. User-facing docs now explain the local-only helper and limited window metadata. |
+
+#### Phase 9 Support Claim Decision
+GNOME Wayland `true_overlay` must remain blocked for this validation pass. The current live environment proves the helper package exists in the repo and the host session has the required GNOME/DBus tooling, but the production helper is not installed or healthy. Lifecycle, status agreement, windowed behavior, borderless behavior, and failure/recovery gates are deferred until a user-approved install/logout-login/manual validation cycle is completed.
+
+#### Phase 9 Execution Notes
+- Updated support wording in `docs/wiki/Installation.md`, `docs/wiki/Troubleshooting.md`, `docs/wiki/Network-Connections-Disclosure.md`, `docs/troubleshooting.md`, `docs/FAQ.md`, and `RELEASE_NOTES.md`.
+- Documentation now states that GNOME Wayland helper install/update is user-approved, source-directory based, user-local, and requires logout/login before final verification.
+- Documentation now states that users who installed under X11 and later switch to GNOME Wayland should rerun the Linux installer while logged into GNOME Wayland.
+- Documentation now states that GNOME Wayland exclusive fullscreen is unsupported for overlay use; users must use windowed or borderless fullscreen.
+- Documentation now states that the helper is local-only, uses the local session DBus service, observes limited window metadata for overlay attachment, and does not capture screenshots, screen contents, keyboard/mouse input, game data, or network traffic.
+- Static privacy/security review covered `helpers/gnome_shell_extension/extension.js`, `helpers/gnome_shell_extension/constants.js`, `overlay_client/backend/helper_ipc.py`, `utils/collect_overlay_debug_linux.sh`, `utils/collect_overlay_debug_windows.ps1`, and `scripts/install_linux.sh`. The helper package exposes a narrow DBus interface and does not use process spawning, command execution, network sockets, screenshot capture, or broad diagnostic output. The Shell helper internally enumerates Shell windows only to select the Elite target/overlay windows and does not return a broad window dump by default.
+
+#### Phase 9 Tests Run
+- `git diff --check` -> passed.
+- `bash -n utils/collect_overlay_debug_linux.sh` -> passed.
+- `make check` -> passed; ruff passed, mypy passed, full pytest reported `910 passed, 21 skipped`.
 
 #### Phase 9 Exit Criteria
 - Q10 validation matrix has recorded pass/fail/deferred outcomes.
@@ -1633,6 +1711,7 @@ The implementation plan is intentionally broader than five phases. Each phase ha
 - Added borderless-fullscreen restart evidence on 2026-05-09: initial overlay placement is correct after EDMC restart, but titlebar chrome shifts the visible overlay content downward, making chrome suppression an alignment requirement.
 - Added windowed resize and stacking evidence on 2026-05-09: dynamic resize updates are visible without EDMC restart, but clicking through demotes the overlay behind the game in both windowed and borderless modes, so stacking/presentation is a helper requirement.
 - Implemented Phase 8 on 2026-05-10: added protocol v3 presentation DBus contract, Shell-side placement/restacking hooks, PyQt-preserving presentation request/status adapters, fail-closed gate validation, and tests. Real GNOME compositor validation remains Phase 9 before any support claim changes.
+- Started Phase 9 on 2026-05-10: completed IQ7 cleanup/preflight, documented the live Ubuntu GNOME Wayland/GNOME Shell 46 environment, confirmed the production helper is not installed/healthy, updated support/privacy/install docs, and kept GNOME Wayland `true_overlay` blocked with lifecycle/compositor gates deferred.
 - Closed Q1 on 2026-05-09: the helper must provide Shell-mediated attachment/presentation, including focus/visibility, placement, stacking, and chrome-free presentation; geometry-only is insufficient. PyQt remains the first renderer candidate until a helper prototype proves otherwise.
 - Opened Q2 on 2026-05-09 with transport tests: evaluate session DBus first and keep Unix socket under `$XDG_RUNTIME_DIR` as the fallback candidate.
 - Recorded Q2 transport probe evidence on 2026-05-09: GJS/DBus tooling is present, the session bus uses `/run/user/1000/bus`, and GNOME Shell services are visible on the user bus.
