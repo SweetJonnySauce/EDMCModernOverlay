@@ -5,6 +5,15 @@
 - VS Code launch configurations exist for the overlay client and the standalone broadcast server harness.
 - Plugin-side logs route through EDMC when `config.log` is present; otherwise they fall back to stdout. The overlay client writes to `logs/EDMCModernOverlay/overlay_client.log`.
 - Background tasks run on daemon threads so EDMC can exit cleanly even if the overlay client is still doing work.
+- When developing the GNOME Wayland helper from a source checkout, use `scripts/dev_gnome_helper.sh` instead of rerunning the full Linux installer. It copies `helpers/gnome_shell_extension/` to the user-local GNOME Shell extension path, enables/disables the fixed helper UUID, and prints the next verification step:
+  ```bash
+  scripts/dev_gnome_helper.sh install
+  scripts/dev_gnome_helper.sh enable
+  scripts/dev_gnome_helper.sh status
+  scripts/dev_gnome_helper.sh update
+  scripts/dev_gnome_helper.sh uninstall
+  ```
+  The script does not use `sudo` and does not change `org.gnome.shell disable-user-extensions`; if GNOME user extensions are globally disabled, it prints the manual remediation command. Install/update/uninstall still require a logout/login before final trust. Enabling an already discovered helper can be trusted immediately when GNOME reports `ACTIVE` and DBus health responds. When launched from a Snap-confined terminal such as the VS Code snap, it uses `SNAP_REAL_HOME` or the account home directory so the helper installs under the real `~/.local/share/gnome-shell/extensions/` path instead of the snap-private data directory.
 - When testing the window-follow path, toggle the developer debug overlay (Shift+F10 by default) to inspect monitor, overlay, and font metrics. The status label now only reports the connection banner and window position so it never changes the overlay geometry.
 - Other plugins can detect Modern Overlay (and the version they are talking to) via `MODERN_OVERLAY_IDENTITY`, which is exported from `EDMCOverlay.edmcoverlay`. Because `edmcoverlay.py` re-exports that module, consumers can simply `import edmcoverlay` and inspect `edmcoverlay.MODERN_OVERLAY_IDENTITY` for `{"plugin": "EDMCModernOverlay", "version": "<semver>"}`. Gate Modern Overlay-specific behaviour behind that check instead of probing files on disk.
 - Example detection helper:

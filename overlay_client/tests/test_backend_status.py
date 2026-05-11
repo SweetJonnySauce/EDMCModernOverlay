@@ -192,6 +192,39 @@ def test_backend_status_downgrades_gnome_true_overlay_payload_when_required_help
     )
 
 
+def test_backend_status_surfaces_installed_gnome_helper_dbus_failure_without_reinstall_advice():
+    payload = {
+        "selected_backend": {"family": "native_wayland", "instance": "gnome_shell_wayland"},
+        "classification": "degraded_overlay",
+        "fallback_from": {"family": "compositor_helper", "instance": "gnome_shell_wayland"},
+        "fallback_reason": "missing_helper",
+        "shadow_mode": False,
+        "helper_states": [
+            {
+                "helper": "gnome_shell_extension",
+                "required": True,
+                "installed": True,
+                "enabled": False,
+                "approved": False,
+                "detail": "health_state=dbus_unreachable",
+            }
+        ],
+        "review_required": False,
+        "review_reasons": [],
+    }
+
+    report = build_status_report(payload)
+
+    assert report["helper_details"][0]["state"] == "dbus_unreachable"
+    assert format_status_ui_summary(payload) == (
+        "Backend: GNOME Wayland | Mode: Degraded overlay | Source: Live runtime | "
+        "Helper: GNOME Shell extension DBus unreachable"
+    )
+    warning = format_status_ui_warning(payload)
+    assert "Required helper is installed but not healthy: GNOME Shell extension DBus unreachable." in warning
+    assert "Re-run the Linux installer" not in warning
+
+
 def test_backend_status_downgrades_gnome_true_overlay_until_validation_gate_passes():
     payload = {
         "selected_backend": {"family": "compositor_helper", "instance": "gnome_shell_wayland"},

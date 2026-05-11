@@ -145,7 +145,7 @@ def build_status_report(status: BackendSelectionStatus | Mapping[str, object]) -
                 detail=state.detail,
                 capabilities=(),
                 protocol="",
-                state="",
+                state=_helper_state_from_detail(state.detail, available=state.available),
                 healthy=None,
             )
             for state in subject.helper_states
@@ -221,7 +221,11 @@ def build_status_report(status: BackendSelectionStatus | Mapping[str, object]) -
                     detail=str(raw_state.get("detail") or ""),
                     capabilities=_string_list(raw_state.get("capabilities")),
                     protocol=raw_state.get("protocol", raw_state.get("helper_protocol", "")),
-                    state=str(raw_state.get("state") or ""),
+                    state=_helper_state_from_detail(
+                        str(raw_state.get("detail") or ""),
+                        available=available,
+                        explicit_state=str(raw_state.get("state") or ""),
+                    ),
                     healthy=raw_state.get("healthy"),
                 )
             )
@@ -349,8 +353,11 @@ def format_status_ui_warning(status: BackendSelectionStatus | Mapping[str, objec
         fallback_from=fallback_from,
         manual_override=manual_override,
     )
+    installed_helper_diagnostic = _ui_installed_helper_diagnostic(report)
     if fallback_message:
-        if fallback_reason == FallbackReason.MANUAL_OVERRIDE.value and manual_override:
+        if fallback_reason == FallbackReason.MISSING_HELPER.value and installed_helper_diagnostic:
+            warning_reasons.append(installed_helper_diagnostic)
+        elif fallback_reason == FallbackReason.MANUAL_OVERRIDE.value and manual_override:
             info_reasons.append(fallback_message)
         else:
             warning_reasons.append(fallback_message)
@@ -516,7 +523,7 @@ def _ui_helper_summary(report: Mapping[str, object]) -> str:
         if available:
             state = "available"
         elif required:
-            state = "inactive"
+            state = _ui_helper_state_label(str(raw_detail.get("state") or "inactive"))
         else:
             state = "optional inactive"
         labels.append(f"{helper} {state}")
@@ -566,11 +573,69 @@ def _ui_helper_label(value: str) -> str:
     return labels.get(value, value or "unknown helper")
 
 
+def _ui_helper_state_label(value: str) -> str:
+    labels = {
+        "inactive": "inactive",
+        "missing_service": "DBus service missing",
+        "dbus_unreachable": "DBus unreachable",
+        "malformed_payload": "malformed health payload",
+        "helper_kind_mismatch": "wrong helper kind",
+        "version_incompatible": "version incompatible",
+        "protocol_incompatible": "protocol incompatible",
+        "capability_missing": "missing required capability",
+        "stale": "stale",
+        "error": "error",
+        "healthy": "available",
+    }
+    token = str(value or "").strip().lower()
+    return labels.get(token, token.replace("_", " ") if token else "inactive")
+
+
+def _ui_installed_helper_diagnostic(report: Mapping[str, object]) -> str:
+    details = report.get("helper_details")
+    if not isinstance(details, list):
+        return ""
+    messages: list[str] = []
+    for raw_detail in details:
+        if not isinstance(raw_detail, Mapping):
+            continue
+        if not bool(raw_detail.get("required")) or bool(raw_detail.get("available")):
+            continue
+        if not bool(raw_detail.get("installed")):
+            continue
+        detail_text = str(raw_detail.get("detail") or "")
+        if "health_state=" not in detail_text:
+            continue
+        helper = _ui_helper_label(str(raw_detail.get("helper") or ""))
+        state = _ui_helper_state_label(str(raw_detail.get("state") or ""))
+        messages.append(f"{helper} {state}")
+    if not messages:
+        return ""
+    return "Required helper is installed but not healthy: " + ", ".join(messages) + "."
+
+
 def _token_value(value: object) -> str:
     text = str(value or "").strip()
     if not text:
         return "none"
     return text.replace(" / ", "/").replace(" ", "_")
+
+
+def _helper_state_from_detail(
+    detail: str,
+    *,
+    available: bool,
+    explicit_state: str = "",
+) -> str:
+    explicit = str(explicit_state or "").strip()
+    if explicit:
+        return explicit
+    for token in str(detail or "").replace(";", " ").split():
+        if token.startswith("health_state="):
+            value = token.split("=", 1)[1].strip()
+            if value:
+                return value
+    return "healthy" if available else "inactive"
 
 
 def _format_helper_summary(

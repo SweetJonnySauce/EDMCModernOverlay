@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 CLIENT_DIR = Path(__file__).resolve().parent
 ROOT_DIR = CLIENT_DIR.parent
 
-from PyQt6.QtGui import QPainter
+from PyQt6.QtGui import QGuiApplication, QPainter
 from PyQt6.QtWidgets import QWidget
 
 from overlay_client.payload_model import PayloadModel  # type: ignore
@@ -71,6 +71,9 @@ from overlay_client.follow_surface import FollowSurfaceMixin  # type: ignore  # 
 from overlay_client.control_surface import ControlSurfaceMixin  # type: ignore  # noqa: E402
 from overlay_client.interaction_surface import InteractionSurfaceMixin  # type: ignore  # noqa: E402
 from overlay_client.setup_surface import SetupSurfaceMixin  # type: ignore  # noqa: E402
+from overlay_client.backend import ProbeSource  # type: ignore  # noqa: E402
+from overlay_client.backend.status import format_status_report_line  # type: ignore  # noqa: E402
+from overlay_client.platform_context import _backend_status_signature, _client_backend_status  # type: ignore  # noqa: E402
 
 _LOGGER_NAME = "EDMC.ModernOverlay.Client"
 _CLIENT_LOGGER = logging.getLogger(_LOGGER_NAME)
@@ -681,6 +684,26 @@ class OverlayWindow(SetupSurfaceMixin, InteractionSurfaceMixin, QWidget, RenderS
         return self._platform_controller.monitors()
 
     def current_backend_status(self):
+        try:
+            status = _client_backend_status(
+                self._platform_context,
+                source=ProbeSource.RUNTIME_UPDATE,
+                qt_platform_name=(QGuiApplication.platformName() or "").lower(),
+                env=os.environ,
+            )
+            signature = _backend_status_signature(status)
+            if signature != getattr(self, "_last_client_backend_status_signature", None):
+                _CLIENT_LOGGER.debug(
+                    "Client backend status refreshed: %s",
+                    format_status_report_line(status),
+                )
+                self._client_backend_status = status
+                self._last_client_backend_status_signature = signature
+                platform_controller = getattr(self, "_platform_controller", None)
+                if platform_controller is not None:
+                    platform_controller.update_backend_status(status)
+        except Exception as exc:
+            _CLIENT_LOGGER.debug("Client backend status refresh failed: %s", exc, exc_info=exc)
         return self._client_backend_status
 
     def send_current_backend_status(self, request_id: str) -> bool:

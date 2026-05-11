@@ -41,7 +41,15 @@ except Exception:  # pragma: no cover - lightweight stub path
     )
     sys.modules["PyQt6.QtCore"] = qtcore
 
-from overlay_client.backend import BackendInstance, CapabilityClassification, ProbeSource
+from overlay_client.backend import (
+    BackendFamily,
+    BackendInstance,
+    CapabilityClassification,
+    GNOME_SHELL_HELPER_CAPABILITIES,
+    HelperDbusServiceMissing,
+    ProbeSource,
+)
+from overlay_client import platform_context as platform_context_module
 from overlay_client.platform_context import _backend_status_signature, _client_backend_status, _initial_platform_context
 from overlay_client.platform_integration import PlatformContext
 
@@ -49,6 +57,16 @@ from overlay_client.platform_integration import PlatformContext
 class _Initial:
     def __init__(self, manual_backend_override: str = "") -> None:
         self.manual_backend_override = manual_backend_override
+
+
+def _healthy_gnome_helper_payload() -> dict[str, object]:
+    return {
+        "status": "healthy",
+        "helper_kind": "gnome_shell_extension",
+        "helper_version": "1.0.0",
+        "helper_protocol": 3,
+        "capabilities": list(GNOME_SHELL_HELPER_CAPABILITIES),
+    }
 
 
 def test_initial_platform_context_prefers_env(monkeypatch):
@@ -89,6 +107,85 @@ def test_client_backend_status_prefers_local_runtime_over_plugin_hint(monkeypatc
     assert status.fallback_reason is not None
     assert status.fallback_reason.value == "missing_helper"
     assert status.notes[0] == "client_selector_result"
+
+
+def test_client_backend_status_marks_gnome_helper_available_when_dbus_health_is_healthy():
+    context = PlatformContext(session_type="wayland", compositor="gnome-shell")
+
+    status = _client_backend_status(
+        context,
+        source=ProbeSource.RUNTIME_UPDATE,
+        qt_platform_name="wayland",
+        env={
+            "XDG_SESSION_TYPE": "wayland",
+            "XDG_CURRENT_DESKTOP": "GNOME",
+            "DBUS_SESSION_BUS_ADDRESS": "unix:path=/tmp/fake-session-bus",
+        },
+        sys_platform_name="linux",
+        fetch_gnome_helper_health=_healthy_gnome_helper_payload,
+    )
+
+    assert status.selected_backend.family is BackendFamily.COMPOSITOR_HELPER
+    assert status.selected_backend.instance is BackendInstance.GNOME_SHELL_WAYLAND
+    assert status.classification is CapabilityClassification.DEGRADED_OVERLAY
+    assert status.fallback_reason is None
+    assert status.helper_states[0].available is True
+    assert status.helper_states[0].version == "1.0.0"
+    assert status.helper_states[0].detail == "health_state=healthy"
+    assert "helper_health:healthy" in status.notes
+
+
+def test_client_backend_status_keeps_gnome_helper_missing_when_dbus_service_is_missing():
+    context = PlatformContext(session_type="wayland", compositor="gnome-shell")
+
+    def missing_helper() -> object:
+        raise HelperDbusServiceMissing("missing helper service")
+
+    status = _client_backend_status(
+        context,
+        source=ProbeSource.RUNTIME_UPDATE,
+        qt_platform_name="wayland",
+        env={
+            "XDG_SESSION_TYPE": "wayland",
+            "XDG_CURRENT_DESKTOP": "GNOME",
+            "DBUS_SESSION_BUS_ADDRESS": "unix:path=/tmp/fake-session-bus",
+        },
+        sys_platform_name="linux",
+        fetch_gnome_helper_health=missing_helper,
+    )
+
+    assert status.selected_backend.family is BackendFamily.NATIVE_WAYLAND
+    assert status.selected_backend.instance is BackendInstance.GNOME_SHELL_WAYLAND
+    assert status.classification is CapabilityClassification.DEGRADED_OVERLAY
+    assert status.fallback_reason is not None
+    assert status.fallback_reason.value == "missing_helper"
+    assert status.helper_states[0].available is False
+    assert status.helper_states[0].detail == "health_state=missing_service"
+    assert "helper_health:missing_service" in status.notes
+
+
+def test_gdbus_health_fetch_uses_runtime_bus_address_when_env_missing(monkeypatch, tmp_path):
+    captured = {}
+
+    class _Result:
+        returncode = 0
+        stdout = "('{\"status\":\"healthy\"}',)\n"
+        stderr = ""
+
+    def fake_run(_command, **kwargs):
+        captured.update(kwargs)
+        return _Result()
+
+    monkeypatch.delenv("DBUS_SESSION_BUS_ADDRESS", raising=False)
+    monkeypatch.setattr(platform_context_module.subprocess, "run", fake_run)
+
+    payload = platform_context_module._fetch_gnome_helper_health_via_gdbus(
+        {"XDG_RUNTIME_DIR": str(tmp_path / "runtime")}
+    )
+
+    assert payload == "('{\"status\":\"healthy\"}',)"
+    assert captured["env"]["XDG_RUNTIME_DIR"] == str(tmp_path / "runtime")
+    assert captured["env"]["DBUS_SESSION_BUS_ADDRESS"] == f"unix:path={tmp_path / 'runtime'}/bus"
 
 
 def test_client_backend_status_uses_plugin_hint_as_fallback_when_runtime_unknown():
