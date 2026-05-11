@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import time
 from dataclasses import dataclass, field
@@ -1659,7 +1660,16 @@ def _coerce_json_mapping(raw_value: object, label: str) -> Mapping[str, object]:
         try:
             parsed = json.loads(raw)
         except json.JSONDecodeError as exc:
-            raise HelperBoundaryError(f"{label} is not valid JSON") from exc
+            try:
+                literal = ast.literal_eval(raw)
+            except (SyntaxError, ValueError) as literal_exc:
+                raise HelperBoundaryError(f"{label} is not valid JSON") from literal_exc
+            if not isinstance(literal, (tuple, list)) or len(literal) != 1 or not isinstance(literal[0], str):
+                raise HelperBoundaryError(f"{label} is not valid JSON") from exc
+            try:
+                parsed = json.loads(literal[0])
+            except json.JSONDecodeError as literal_json_exc:
+                raise HelperBoundaryError(f"{label} is not valid JSON") from literal_json_exc
         raw = parsed
     if not isinstance(raw, Mapping):
         raise HelperBoundaryError(f"{label} must be a mapping or JSON object string")

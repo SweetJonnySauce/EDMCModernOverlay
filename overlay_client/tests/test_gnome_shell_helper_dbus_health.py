@@ -63,6 +63,16 @@ def test_validate_gnome_shell_helper_health_accepts_single_value_dbus_tuple() ->
     assert status.state is HelperHealthState.HEALTHY
 
 
+def test_validate_gnome_shell_helper_health_accepts_gdbus_tuple_output_string() -> None:
+    status = validate_gnome_shell_helper_health_payload(
+        f"('{json.dumps(_health_payload())}',)",
+        observed_at_monotonic=100.0,
+        now_monotonic=100.0,
+    )
+
+    assert status.state is HelperHealthState.HEALTHY
+
+
 @pytest.mark.parametrize("raw_health", ["not-json", ["unexpected", "tuple"], 123, {"status": "healthy"}])
 def test_validate_gnome_shell_helper_health_rejects_malformed_payloads(raw_health: object) -> None:
     status = validate_gnome_shell_helper_health_payload(

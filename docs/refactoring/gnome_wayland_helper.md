@@ -1634,6 +1634,7 @@ The implementation plan is intentionally broader than five phases. Each phase ha
   - Expected unchanged behavior: healthy helper evidence may change the helper label from inactive to available, but GNOME Wayland still remains `degraded_overlay` until Q10 support gates pass.
   - Test type selection for this follow-up: unit tests for runtime backend-status helper-health wiring and targeted backend status tests; no installer/presentation tests because those paths are not changed.
   - 2026-05-11 follow-up: `install_linux.sh` does not perform any special Shell registration beyond source-directory copy, `gnome-extensions enable`, and helper DBus health. `helper_approval.json` remains consent metadata only. Client runtime probing now supplies an explicit session-bus address to `gdbus` when only `XDG_RUNTIME_DIR` is available, and user-facing status distinguishes installed-but-unhealthy helper states such as `dbus_unreachable` from install/discovery failures.
+  - 2026-05-11 malformed-payload follow-up: live `gdbus` returns a textual single-value tuple such as `('{"status":"healthy",...}',)`, not a raw JSON object string. The helper health validator now accepts this exact `gdbus` output shape and still rejects non-JSON/non-mapping payloads.
 
 | Stage | Description | Status |
 | --- | --- | --- |
@@ -1691,10 +1692,11 @@ GNOME Wayland `true_overlay` must remain blocked for this validation pass. The c
 - `bash -n scripts/dev_gnome_helper.sh` -> passed.
 - `overlay_client/.venv/bin/python -m pytest tests/test_dev_gnome_helper_script.py -q` -> passed, `10 passed`.
 - `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_platform_context.py overlay_client/tests/test_backend_status.py -q` -> passed, `19 passed`.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_dbus_health.py overlay_client/tests/test_platform_context.py overlay_client/tests/test_backend_status.py -q` -> passed, `40 passed`.
 - `overlay_client/.venv/bin/python -m ruff check overlay_client/platform_context.py overlay_client/overlay_client.py overlay_client/backend/status.py overlay_client/tests/test_platform_context.py overlay_client/tests/test_backend_status.py` -> passed.
 - `git diff --check` -> passed.
 - `bash -n utils/collect_overlay_debug_linux.sh` -> passed.
-- `make check` -> passed; ruff passed, mypy passed, full pytest reported `924 passed, 21 skipped`.
+- `make check` -> passed; ruff passed, mypy passed, full pytest reported `925 passed, 21 skipped`.
 
 #### Phase 9 Exit Criteria
 - Q10 validation matrix has recorded pass/fail/deferred outcomes.
