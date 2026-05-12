@@ -3,16 +3,58 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Mapping, Optional
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Callable, Mapping, Optional
 
-from overlay_client.backend.contracts import BackendBundle, BackendInstance
+from overlay_client.backend.contracts import BackendBundle, BackendInstance, HelperKind
+from overlay_client.backend.presentation_policy import BackendPresentationVisibilitySnapshot
 from overlay_client.backend.probe import ProbeInputs, ProbeSource, collect_platform_probe
 from overlay_client.backend.selector import BackendSelector
 from overlay_client.backend.status import BackendSelectionStatus
 
 if TYPE_CHECKING:
+    from overlay_client.backend.bundles._gnome_shell_helper_presentation import GnomeHelperPresentationCycleResult
     from overlay_client.platform_integration import PlatformContext
     from overlay_client.window_tracking import MonitorProvider, WindowTracker
+
+
+@dataclass(frozen=True, slots=True)
+class BackendPresentationCycleResult:
+    """Backend-facing runtime presentation result for generic follow consumers."""
+
+    should_show_overlay: bool
+    scale_size: tuple[int, int] | None = None
+    prime_rect: tuple[int, int, int, int] | None = None
+    prime_rect_source: str = "unavailable"
+    diagnostics: Mapping[str, object] = field(default_factory=dict)
+    visibility_snapshot: BackendPresentationVisibilitySnapshot = field(default_factory=BackendPresentationVisibilitySnapshot)
+    log_prefix: str = "Backend presentation"
+
+    def diagnostic_signature(self) -> tuple[object, ...]:
+        """Return a stable signature suitable for log de-duplication."""
+
+        payload = self.diagnostics
+        return (
+            payload.get("helper_health"),
+            payload.get("target_state"),
+            payload.get("target_token"),
+            payload.get("target_sequence"),
+            payload.get("target_monitor"),
+            payload.get("target_output_name"),
+            str(payload.get("target_monitor_rect")),
+            str(payload.get("target_frame_rect")),
+            payload.get("rect_source"),
+            str(payload.get("requested_rect")),
+            payload.get("presentation_state"),
+            str(payload.get("applied_rect")),
+            payload.get("rect_match"),
+            str(payload.get("rect_delta")),
+            str(self.prime_rect),
+            self.prime_rect_source,
+            tuple(payload.get("presentation_reasons") or ()),
+            tuple(payload.get("retry_reasons") or ()),
+            payload.get("legacy_geometry_policy"),
+        )
 
 
 def create_bundle_integration(bundle: BackendBundle, widget, logger: logging.Logger, context: "PlatformContext"):
@@ -176,7 +218,165 @@ def uses_transient_parent(bundle: BackendBundle) -> bool:
     return bundle.capabilities.requires_transient_parent
 
 
+def requires_focus_safe_overlay_flags(status: Optional[BackendSelectionStatus]) -> bool:
+    """Return whether the selected backend needs non-focus-stealing overlay window flags."""
+
+    return _gnome_shell_helper_presentation_available(status)
+
+
 def platform_label_for_bundle(bundle: BackendBundle) -> str:
     """Return the current human-readable platform label for a bundle-backed runtime path."""
 
     return bundle.capabilities.platform_label
+
+
+GnomePresentationCycleRunner = Callable[..., "GnomeHelperPresentationCycleResult"]
+
+
+def run_backend_presentation_cycle(
+    status: Optional[BackendSelectionStatus],
+    *,
+    standalone_mode: bool = False,
+    gnome_runner: GnomePresentationCycleRunner | None = None,
+) -> BackendPresentationCycleResult | None:
+    """Run a backend-owned runtime presentation cycle when the selected backend exposes one."""
+
+    if not _gnome_shell_helper_presentation_available(status):
+        return None
+    runner = gnome_runner or _gnome_shell_helper_presentation_runner()
+    return _backend_result_from_gnome_helper_result(runner(standalone_mode=standalone_mode))
+
+
+def _gnome_shell_helper_presentation_available(status: Optional[BackendSelectionStatus]) -> bool:
+    selected_backend = getattr(status, "selected_backend", None)
+    if getattr(selected_backend, "instance", None) is not BackendInstance.GNOME_SHELL_WAYLAND:
+        return False
+    for helper_state in getattr(status, "helper_states", ()):
+        if getattr(helper_state, "helper", None) is HelperKind.GNOME_SHELL_EXTENSION and helper_state.available:
+            return True
+    return False
+
+
+def _gnome_shell_helper_presentation_runner() -> GnomePresentationCycleRunner:
+    from overlay_client.backend.bundles._gnome_shell_helper_presentation import run_gnome_shell_helper_presentation_cycle
+
+    return run_gnome_shell_helper_presentation_cycle
+
+
+def _backend_result_from_gnome_helper_result(
+    result: "GnomeHelperPresentationCycleResult",
+) -> BackendPresentationCycleResult:
+    return BackendPresentationCycleResult(
+        should_show_overlay=bool(result.should_show_overlay and result.presentation_status is not None),
+        scale_size=_scale_size_from_gnome_helper_result(result),
+        prime_rect=_prime_rect_from_gnome_helper_result(result),
+        prime_rect_source=_prime_rect_source_from_gnome_helper_result(result),
+        diagnostics=_diagnostics_from_gnome_helper_result(result),
+        visibility_snapshot=_visibility_snapshot_from_gnome_helper_result(result),
+        log_prefix="GNOME helper presentation",
+    )
+
+
+def _diagnostics_from_gnome_helper_result(
+    result: "GnomeHelperPresentationCycleResult",
+) -> dict[str, object]:
+    payload = dict(result.to_log_payload())
+    target = result.target_status.target if result.target_status is not None else None
+    payload.update(
+        {
+            "prime_rect": _prime_rect_payload_from_gnome_helper_result(result),
+            "prime_rect_source": _prime_rect_source_from_gnome_helper_result(result),
+            "target_available": bool(result.target_found),
+            "target_has_focus": bool(target.has_focus) if target is not None else False,
+            "target_showing_on_workspace": bool(target.showing_on_workspace) if target is not None else False,
+            "target_minimized": bool(target.minimized) if target is not None else False,
+            "presentation_available": result.presentation_status is not None,
+            "presentation_attachable": bool(result.should_show_overlay and result.presentation_status is not None),
+            "overlay_window_found": bool(
+                result.presentation_status is not None and result.presentation_status.overlay_token
+            ),
+            "presentation_rect_match": bool(
+                result.presentation_status is not None and result.presentation_status.rect_match
+            ),
+        }
+    )
+    return payload
+
+
+def _visibility_snapshot_from_gnome_helper_result(
+    result: "GnomeHelperPresentationCycleResult",
+) -> BackendPresentationVisibilitySnapshot:
+    target = result.target_status.target if result.target_status is not None else None
+    return BackendPresentationVisibilitySnapshot(
+        target_available=bool(result.target_found),
+        target_has_focus=bool(target.has_focus) if target is not None else False,
+        target_showing_on_workspace=bool(target.showing_on_workspace) if target is not None else False,
+        target_minimized=bool(target.minimized) if target is not None else False,
+        presentation_available=result.presentation_status is not None,
+        presentation_attachable=bool(result.should_show_overlay and result.presentation_status is not None),
+        overlay_window_found=bool(result.presentation_status is not None and result.presentation_status.overlay_token),
+        presentation_rect_match=bool(result.presentation_status is not None and result.presentation_status.rect_match),
+    )
+
+
+def _scale_size_from_gnome_helper_result(
+    result: "GnomeHelperPresentationCycleResult",
+) -> tuple[int, int] | None:
+    rect = None
+    if result.presentation_status is not None and result.presentation_status.applied_rect is not None:
+        rect = result.presentation_status.applied_rect
+    elif result.request is not None:
+        rect = result.request.content_rect
+    if rect is None or not rect.valid:
+        return None
+    return (rect.width, rect.height)
+
+
+def _prime_rect_from_gnome_helper_result(
+    result: "GnomeHelperPresentationCycleResult",
+) -> tuple[int, int, int, int] | None:
+    rect = None
+    if (
+        result.presentation_status is not None
+        and result.presentation_status.rect_match
+        and result.presentation_status.applied_rect is not None
+    ):
+        rect = result.presentation_status.applied_rect
+    elif result.request is not None:
+        rect = result.request.content_rect
+    elif result.presentation_status is not None:
+        rect = result.presentation_status.requested_rect
+    if rect is None or not rect.valid:
+        return None
+    return (rect.x, rect.y, rect.width, rect.height)
+
+
+def _prime_rect_payload_from_gnome_helper_result(
+    result: "GnomeHelperPresentationCycleResult",
+) -> dict[str, int] | None:
+    rect = _prime_rect_from_gnome_helper_result(result)
+    if rect is None:
+        return None
+    x, y, width, height = rect
+    return {"x": x, "y": y, "width": width, "height": height}
+
+
+def _prime_rect_source_from_gnome_helper_result(
+    result: "GnomeHelperPresentationCycleResult",
+) -> str:
+    if (
+        result.presentation_status is not None
+        and result.presentation_status.rect_match
+        and result.presentation_status.applied_rect is not None
+        and result.presentation_status.applied_rect.valid
+    ):
+        return "applied_rect"
+    if result.request is not None and result.request.content_rect is not None and result.request.content_rect.valid:
+        return "requested_rect"
+    if (
+        result.presentation_status is not None
+        and result.presentation_status.requested_rect is not None
+        and result.presentation_status.requested_rect.valid
+    ):
+        return "requested_rect"
+    return "unavailable"

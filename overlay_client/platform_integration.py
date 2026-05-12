@@ -15,6 +15,7 @@ from overlay_client.backend.consumers import (
     ensure_linux_backend_status,
     is_wayland_bundle,
     platform_label_for_bundle,
+    requires_focus_safe_overlay_flags as backend_requires_focus_safe_overlay_flags,
     resolve_linux_bundle_from_status,
     uses_transient_parent,
 )
@@ -134,6 +135,11 @@ class PlatformController:
         if not sys.platform.startswith("linux"):
             return False
         return uses_transient_parent(self._current_linux_bundle())
+
+    def requires_focus_safe_overlay_flags(self) -> bool:
+        if not sys.platform.startswith("linux"):
+            return False
+        return backend_requires_focus_safe_overlay_flags(self._current_linux_status())
 
     def platform_label(self) -> str:
         """Return a human-readable platform label for status messages."""

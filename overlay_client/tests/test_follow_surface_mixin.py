@@ -1,5 +1,19 @@
 import pytest
 
+from overlay_client.backend import (
+    BackendDescriptor,
+    BackendFamily,
+    BackendInstance,
+    CapabilityClassification,
+    HelperCapabilityState,
+    HelperKind,
+    PlatformProbeResult,
+)
+from overlay_client.backend.consumers import BackendPresentationCycleResult
+from overlay_client.backend.presentation_policy import (
+    BackendPresentationVisibilitySnapshot,
+    BackendPresentationVisibilityState,
+)
 from overlay_client.follow_surface import FollowSurfaceMixin
 from overlay_client.window_tracking import WindowState
 
@@ -43,6 +57,16 @@ class _StubWindowHandle:
         self.transient_parents.append(parent)
 
 
+class _StubLabel:
+    def __init__(self) -> None:
+        self.visible = True
+        self.calls: list[bool] = []
+
+    def setVisible(self, visible: bool) -> None:
+        self.visible = bool(visible)
+        self.calls.append(self.visible)
+
+
 class _StubFollowController:
     def __init__(self) -> None:
         self.wm_override = None
@@ -50,6 +74,7 @@ class _StubFollowController:
         self.start_called = 0
         self.stop_called = 0
         self.suspend_called = []
+        self.refresh_called = 0
         self._enabled = False
         self.last_poll_attempted = False
         self.last_state_missing = False
@@ -71,6 +96,7 @@ class _StubFollowController:
         self.suspend_called.append(delay)
 
     def refresh(self):
+        self.refresh_called += 1
         return None
 
     def record_override(self, rect, tracker, reason, classification) -> None:
@@ -94,9 +120,13 @@ class _StubVisibilityHelper:
     def update_visibility(self, show, is_visible_fn, show_fn, hide_fn, raise_fn, apply_drag_state_fn, format_scale_debug_fn):
         self.calls.append(show)
         if show:
-            show_fn()
+            if not is_visible_fn():
+                show_fn()
+                raise_fn()
+                apply_drag_state_fn()
         else:
-            hide_fn()
+            if is_visible_fn():
+                hide_fn()
         return {"show": show}
 
 
@@ -124,18 +154,32 @@ class _FollowSurfaceStub(FollowSurfaceMixin):
         self._last_geometry_log = None
         self._last_follow_state = None
         self._last_visibility_state = None
+        self._last_backend_presentation = None
+        self._last_backend_presentation_log = None
+        self._backend_presentation_visibility_state = BackendPresentationVisibilityState()
+        self._backend_presentation_content_suppressed = False
         self._last_screen_name = None
         self._transient_parent_window = None
         self._transient_parent_id = None
+        self._visible = False
+        self._geometry_calls = []
+        self._event_order = []
+        self._update_calls = 0
+        self.message_label = _StubLabel()
 
-        self._interaction_controller = type(
-            "StubInteraction",
-            (),
-            {
-                "set_click_through": lambda *args, **kwargs: None,
-                "restore_drag_interactivity": lambda *args, **kwargs: None,
-            },
-        )()
+        owner = self
+
+        class _StubInteraction:
+            def set_click_through(self, *args, **kwargs) -> None:
+                return None
+
+            def restore_drag_interactivity(self, *args, **kwargs) -> None:
+                return None
+
+            def prepare_window_flags_for_click_through(self, *args, **kwargs) -> None:
+                owner._event_order.append("prepareWindowFlags")
+
+        self._interaction_controller = _StubInteraction()
         self._follow_controller = _StubFollowController()
         self._window_controller = type(
             "StubWindowController",
@@ -158,6 +202,7 @@ class _FollowSurfaceStub(FollowSurfaceMixin):
                 "is_wayland_backend": lambda self=None: False,
             },
         )()
+        self._client_backend_status = _backend_status(helper_available=False)
 
     # Qt shell shims
     def windowHandle(self):
@@ -168,20 +213,27 @@ class _FollowSurfaceStub(FollowSurfaceMixin):
     def frameGeometry(self):
         return _StubFrame()
 
-    def setGeometry(self, *_args, **_kwargs) -> None:
-        return None
+    def setGeometry(self, rect, *_args, **_kwargs) -> None:
+        self._geometry_calls.append((rect.x(), rect.y(), rect.width(), rect.height()))
+        self._event_order.append("setGeometry")
 
     def raise_(self) -> None:
         return None
 
     def isVisible(self) -> bool:
-        return False
+        return self._visible
 
     def show(self) -> None:
-        return None
+        self._visible = True
+        self._event_order.append("show")
 
     def hide(self) -> None:
-        return None
+        self._visible = False
+        self._event_order.append("hide")
+
+    def update(self) -> None:
+        self._update_calls += 1
+        self._event_order.append("update")
 
     def _current_physical_size(self):
         return (100.0, 50.0)
@@ -218,6 +270,86 @@ class _FollowSurfaceStub(FollowSurfaceMixin):
         return None
 
 
+def _backend_status(*, helper_available: bool):
+    return type(
+        "Status",
+        (),
+        {
+            "selected_backend": BackendDescriptor(BackendFamily.NATIVE_WAYLAND, BackendInstance.GNOME_SHELL_WAYLAND),
+            "classification": CapabilityClassification.DEGRADED_OVERLAY,
+            "probe": PlatformProbeResult(),
+            "helper_states": (
+                HelperCapabilityState(
+                    helper=HelperKind.GNOME_SHELL_EXTENSION,
+                    required=True,
+                    installed=helper_available,
+                    enabled=helper_available,
+                    approved=helper_available,
+                ),
+            ),
+        },
+    )()
+
+
+def _fake_backend_presentation_result(
+    *,
+    target_has_focus: bool = True,
+    target_showing_on_workspace: bool = True,
+    target_minimized: bool = False,
+    presentation_attachable: bool = True,
+    overlay_window_found: bool = True,
+    presentation_rect_match: bool = True,
+    prime_rect: tuple[int, int, int, int] | None = (10, 20, 300, 200),
+) -> BackendPresentationCycleResult:
+    return BackendPresentationCycleResult(
+        should_show_overlay=True,
+        scale_size=(300, 200),
+        prime_rect=prime_rect,
+        prime_rect_source="requested_rect" if prime_rect is not None else "unavailable",
+        visibility_snapshot=BackendPresentationVisibilitySnapshot(
+            target_available=True,
+            target_has_focus=target_has_focus,
+            target_showing_on_workspace=target_showing_on_workspace,
+            target_minimized=target_minimized,
+            presentation_available=True,
+            presentation_attachable=presentation_attachable,
+            overlay_window_found=overlay_window_found,
+            presentation_rect_match=presentation_rect_match,
+        ),
+        diagnostics={
+            "helper_health": "healthy",
+            "target_state": "target_found",
+            "target_token": "meta:21",
+            "target_sequence": 3,
+            "rect_source": "content_rect",
+            "requested_rect": {"x": 10, "y": 20, "width": 300, "height": 200},
+            "presentation_state": "presentation_applied",
+            "applied_rect": {"x": 10, "y": 20, "width": 300, "height": 200},
+            "rect_match": True,
+            "rect_delta": [0, 0, 0, 0],
+            "presentation_reasons": [],
+            "attempts": 1,
+            "retry_reasons": [],
+            "legacy_geometry_policy": "ignored_helper_source_of_truth",
+            "target_available": True,
+            "target_has_focus": target_has_focus,
+            "target_showing_on_workspace": target_showing_on_workspace,
+            "target_minimized": target_minimized,
+            "presentation_available": True,
+            "presentation_attachable": presentation_attachable,
+            "overlay_window_found": overlay_window_found,
+            "presentation_rect_match": presentation_rect_match,
+            "prime_rect": (
+                {"x": prime_rect[0], "y": prime_rect[1], "width": prime_rect[2], "height": prime_rect[3]}
+                if prime_rect is not None
+                else None
+            ),
+            "prime_rect_source": "requested_rect" if prime_rect is not None else "unavailable",
+        },
+        log_prefix="GNOME helper presentation",
+    )
+
+
 def test_resolve_and_apply_geometry_updates_last_geometry_log():
     stub = _FollowSurfaceStub()
     tracker = (1, 2, 3, 4)
@@ -227,6 +359,199 @@ def test_resolve_and_apply_geometry_updates_last_geometry_log():
 
     assert result == desired
     assert stub._last_geometry_log == desired
+
+
+def test_refresh_follow_geometry_uses_gnome_helper_presentation_and_skips_legacy_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _FollowSurfaceStub()
+    stub._client_backend_status = _backend_status(helper_available=True)
+    result = _fake_backend_presentation_result()
+    calls: list[bool] = []
+
+    def fake_cycle(_status, *, standalone_mode: bool = False):
+        calls.append(standalone_mode)
+        return result
+
+    monkeypatch.setattr("overlay_client.follow_surface.run_backend_presentation_cycle", fake_cycle)
+
+    stub._refresh_follow_geometry()
+
+    assert calls == [False]
+    assert stub._follow_controller.refresh_called == 0
+    assert stub._last_backend_presentation is result
+    assert stub._visibility_helper.calls == [True]
+
+
+def test_refresh_follow_geometry_primes_backend_rect_before_showing_hidden_overlay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _FollowSurfaceStub()
+    result = _fake_backend_presentation_result(prime_rect=(431, 167, 1440, 997))
+
+    monkeypatch.setattr("overlay_client.follow_surface.run_backend_presentation_cycle", lambda *_args, **_kwargs: result)
+    monkeypatch.setattr("overlay_client.follow_surface.time.monotonic", lambda: 20.0)
+
+    stub._refresh_follow_geometry()
+
+    assert stub._geometry_calls == [(431, 167, 1440, 997)]
+    assert stub._event_order[:3] == ["prepareWindowFlags", "setGeometry", "show"]
+    assert stub._backend_presentation_visibility_state.remap_warmup_active is True
+
+
+def test_refresh_follow_geometry_warmup_keeps_visible_after_remap_focus_flip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _FollowSurfaceStub()
+    results = iter(
+        (
+            _fake_backend_presentation_result(
+                target_has_focus=True,
+                overlay_window_found=False,
+                presentation_rect_match=False,
+                prime_rect=(431, 167, 1440, 997),
+            ),
+            _fake_backend_presentation_result(
+                target_has_focus=False,
+                overlay_window_found=True,
+                presentation_rect_match=False,
+                prime_rect=(431, 167, 1440, 997),
+            ),
+        )
+    )
+    ticks = iter((20.0, 20.5))
+
+    monkeypatch.setattr("overlay_client.follow_surface.run_backend_presentation_cycle", lambda *_args, **_kwargs: next(results))
+    monkeypatch.setattr("overlay_client.follow_surface.time.monotonic", lambda: next(ticks))
+
+    stub._refresh_follow_geometry()
+    stub._refresh_follow_geometry()
+
+    assert stub._visibility_helper.calls == [True, True]
+    assert stub._visible is True
+    assert stub._backend_presentation_visibility_state.remap_warmup_active is True
+    assert stub._backend_presentation_visibility_state.remap_warmup_samples == 1
+    assert stub._backend_presentation_visibility_state.focus_loss_samples == 0
+
+
+def test_refresh_follow_geometry_debounces_backend_presentation_focus_loss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _FollowSurfaceStub()
+    stub._visible = True
+    result = _fake_backend_presentation_result(target_has_focus=False)
+
+    monkeypatch.setattr("overlay_client.follow_surface.run_backend_presentation_cycle", lambda *_args, **_kwargs: result)
+    monkeypatch.setattr("overlay_client.follow_surface.time.monotonic", lambda: 10.0)
+
+    stub._refresh_follow_geometry()
+    stub._refresh_follow_geometry()
+
+    assert stub._follow_controller.refresh_called == 0
+    assert stub._visibility_helper.calls == [True, True]
+    assert stub._backend_presentation_visibility_state.focus_loss_samples == 2
+
+
+def test_refresh_follow_geometry_suppresses_content_without_hiding_after_soft_focus_loss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _FollowSurfaceStub()
+    stub._visible = True
+    stub._backend_presentation_visibility_state = BackendPresentationVisibilityState(
+        focus_loss_samples=1,
+        focus_lost_since_monotonic=10.0,
+    )
+    result = _fake_backend_presentation_result(target_has_focus=False)
+
+    monkeypatch.setattr("overlay_client.follow_surface.run_backend_presentation_cycle", lambda *_args, **_kwargs: result)
+    monkeypatch.setattr("overlay_client.follow_surface.time.monotonic", lambda: 11.1)
+
+    stub._refresh_follow_geometry()
+
+    assert stub._visible is True
+    assert "hide" not in stub._event_order
+    assert "show" not in stub._event_order
+    assert stub._backend_presentation_content_suppressed is True
+    assert stub.message_label.visible is False
+    assert stub._update_calls == 1
+    assert stub._visibility_helper.calls == [True]
+    assert stub._backend_presentation_visibility_state.focus_loss_samples == 2
+
+
+def test_refresh_follow_geometry_restores_suppressed_content_without_remap_on_focus_return(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _FollowSurfaceStub()
+    stub._visible = True
+    stub._backend_presentation_content_suppressed = True
+    stub.message_label.visible = False
+    stub._backend_presentation_visibility_state = BackendPresentationVisibilityState(
+        focus_loss_samples=2,
+        focus_lost_since_monotonic=10.0,
+    )
+    result = _fake_backend_presentation_result(target_has_focus=True)
+
+    monkeypatch.setattr("overlay_client.follow_surface.run_backend_presentation_cycle", lambda *_args, **_kwargs: result)
+    monkeypatch.setattr("overlay_client.follow_surface.time.monotonic", lambda: 12.0)
+
+    stub._refresh_follow_geometry()
+
+    assert stub._visible is True
+    assert "hide" not in stub._event_order
+    assert "show" not in stub._event_order
+    assert stub._backend_presentation_content_suppressed is False
+    assert stub.message_label.visible is True
+    assert stub._update_calls == 1
+    assert stub._backend_presentation_visibility_state == BackendPresentationVisibilityState()
+
+
+def test_refresh_follow_geometry_hard_hides_and_restores_content_for_target_minimized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _FollowSurfaceStub()
+    stub._visible = True
+    stub._backend_presentation_content_suppressed = True
+    stub.message_label.visible = False
+    stub._backend_presentation_visibility_state = BackendPresentationVisibilityState(
+        focus_loss_samples=2,
+        focus_lost_since_monotonic=10.0,
+    )
+    result = _fake_backend_presentation_result(target_has_focus=False, target_minimized=True)
+
+    monkeypatch.setattr("overlay_client.follow_surface.run_backend_presentation_cycle", lambda *_args, **_kwargs: result)
+    monkeypatch.setattr("overlay_client.follow_surface.time.monotonic", lambda: 12.0)
+
+    stub._refresh_follow_geometry()
+
+    assert stub._visible is False
+    assert "hide" in stub._event_order
+    assert stub._backend_presentation_content_suppressed is False
+    assert stub.message_label.visible is True
+    assert stub._backend_presentation_visibility_state == BackendPresentationVisibilityState()
+
+
+def test_refresh_follow_geometry_keeps_backend_presentation_visible_when_setting_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _FollowSurfaceStub()
+    stub._keep_overlay_visible = True
+    result = _fake_backend_presentation_result(target_has_focus=False)
+
+    monkeypatch.setattr("overlay_client.follow_surface.run_backend_presentation_cycle", lambda *_args, **_kwargs: result)
+
+    stub._refresh_follow_geometry()
+    stub._refresh_follow_geometry()
+
+    assert stub._follow_controller.refresh_called == 0
+    assert stub._visibility_helper.calls == [True, True]
+
+
+def test_refresh_follow_geometry_uses_legacy_path_when_gnome_helper_is_not_available() -> None:
+    stub = _FollowSurfaceStub()
+
+    stub._refresh_follow_geometry()
+
+    assert stub._follow_controller.refresh_called == 1
 
 
 def test_normalise_tracker_geometry_updates_logs(monkeypatch: pytest.MonkeyPatch):

@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 CLIENT_DIR = Path(__file__).resolve().parent
 ROOT_DIR = CLIENT_DIR.parent
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QGuiApplication, QPainter
 from PyQt6.QtWidgets import QWidget
 
@@ -614,6 +615,15 @@ class OverlayWindow(SetupSurfaceMixin, InteractionSurfaceMixin, QWidget, RenderS
 
     def paintEvent(self, event) -> None:  # type: ignore[override]
         painter = QPainter(self)
+        if getattr(self, "_backend_presentation_content_suppressed", False):
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+            painter.fillRect(self.rect(), Qt.GlobalColor.transparent)
+            painter.end()
+            stats = getattr(self, "_paint_stats", None)
+            if isinstance(stats, dict):
+                stats["paint_count"] = stats.get("paint_count", 0) + 1
+            super().paintEvent(event)
+            return
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         self._paint_overlay(painter)
         painter.end()

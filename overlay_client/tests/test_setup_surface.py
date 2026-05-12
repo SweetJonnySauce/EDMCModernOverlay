@@ -27,6 +27,7 @@ def test_setup_surface_initialises_defaults(qt_app):
         assert window._text_cache_generation == 0
         assert window._repaint_timer.interval() == window._REPAINT_DEBOUNCE_MS
         assert window._legacy_timer.isActive()
+        assert window._backend_presentation_content_suppressed is False
     finally:
         window._legacy_timer.stop()
         window._modifier_timer.stop()
@@ -66,6 +67,25 @@ def test_paint_event_calls_mixin(monkeypatch, qt_app):
         window.paintEvent(event)
 
         assert captured and captured[0] is not None
+    finally:
+        window._legacy_timer.stop()
+        window._modifier_timer.stop()
+        window._tracking_timer.stop()
+        window.close()
+
+
+@pytest.mark.pyqt_required
+def test_paint_event_skips_overlay_paint_when_backend_content_suppressed(monkeypatch, qt_app):
+    window = OverlayWindow(InitialClientSettings(), DebugConfig())
+    try:
+        captured = []
+        window._backend_presentation_content_suppressed = True
+        monkeypatch.setattr(window, "_paint_overlay", lambda painter: captured.append(painter))
+        event = QPaintEvent(window.rect())
+
+        window.paintEvent(event)
+
+        assert captured == []
     finally:
         window._legacy_timer.stop()
         window._modifier_timer.stop()

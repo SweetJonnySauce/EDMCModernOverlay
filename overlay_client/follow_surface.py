@@ -3,12 +3,18 @@ from __future__ import annotations
 
 import logging
 import sys
+import time
 from typing import Optional, Tuple
 
 from PyQt6.QtCore import Qt, QRect, QSize
 from PyQt6.QtGui import QGuiApplication, QWindow, QScreen
 from PyQt6.QtWidgets import QApplication
 
+from overlay_client.backend.consumers import BackendPresentationCycleResult, run_backend_presentation_cycle
+from overlay_client.backend.presentation_policy import (
+    BackendPresentationVisibilityDecision,
+    decide_backend_presentation_visibility,
+)
 from overlay_client.follow_geometry import (
     ScreenInfo,
     _apply_aspect_guard,
@@ -114,6 +120,8 @@ class FollowSurfaceMixin:
         self._follow_controller.suspend(delay)
 
     def _refresh_follow_geometry(self) -> None:
+        if self._refresh_backend_presentation():
+            return
         state = self._follow_controller.refresh()
         if state is None:
             if self._follow_controller.last_poll_attempted and self._follow_controller.last_state_missing:
@@ -121,6 +129,173 @@ class FollowSurfaceMixin:
             return
         self._last_tracker_state = self._follow_controller.last_tracker_state
         self._apply_follow_state(state)
+
+    def _refresh_backend_presentation(self) -> bool:
+        try:
+            result = run_backend_presentation_cycle(getattr(self, "_client_backend_status", None), standalone_mode=False)
+        except Exception as exc:  # pragma: no cover - defensive runtime guard
+            _CLIENT_LOGGER.warning("Backend presentation cycle failed: %s", exc)
+            return True
+        if result is None:
+            return False
+        currently_visible = self.isVisible()
+        self._last_backend_presentation = result
+        decision = decide_backend_presentation_visibility(
+            result.visibility_snapshot,
+            keep_overlay_visible=bool(getattr(self, "_keep_overlay_visible", False)),
+            previous=getattr(self, "_backend_presentation_visibility_state", None),
+            now_monotonic=time.monotonic(),
+            currently_visible=currently_visible,
+        )
+        self._backend_presentation_visibility_state = decision.state
+        self._log_backend_presentation_result(result, decision)
+        self._update_backend_presentation_visibility(decision, result)
+        if decision.show and result.scale_size is not None:
+            self._update_auto_legacy_scale(*result.scale_size)
+        return True
+
+    def _update_backend_presentation_visibility(
+        self,
+        decision: BackendPresentationVisibilityDecision,
+        result: BackendPresentationCycleResult,
+    ) -> None:
+        def _apply_helper_click_through() -> None:
+            self._platform_controller.apply_click_through(True)
+
+        def _hide_backend_surface() -> None:
+            self._set_backend_presentation_content_suppressed(False, reason=decision.reason)
+            self.hide()
+
+        def _show_with_backend_prime() -> None:
+            self._set_backend_presentation_content_suppressed(decision.content_suppressed, reason=decision.reason)
+            self._interaction_controller.prepare_window_flags_for_click_through(
+                True,
+                reason="backend_presentation_pre_show",
+            )
+            self._prime_backend_presentation_map_geometry(result)
+            self.show()
+
+        new_state = self._visibility_helper.update_visibility(
+            decision.show,
+            is_visible_fn=lambda: self.isVisible(),
+            show_fn=_show_with_backend_prime,
+            hide_fn=_hide_backend_surface,
+            raise_fn=lambda: None,
+            apply_drag_state_fn=_apply_helper_click_through,
+            format_scale_debug_fn=self.format_scale_debug,
+        )
+        if decision.show:
+            self._set_backend_presentation_content_suppressed(decision.content_suppressed, reason=decision.reason)
+        self._last_visibility_state = new_state
+
+    def _set_backend_presentation_content_suppressed(self, suppressed: bool, *, reason: str) -> None:
+        next_value = bool(suppressed)
+        current_value = bool(getattr(self, "_backend_presentation_content_suppressed", False))
+        if current_value == next_value:
+            return
+        self._backend_presentation_content_suppressed = next_value
+        child = getattr(self, "message_label", None)
+        if child is not None:
+            try:
+                child.setVisible(not next_value)
+            except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+                _CLIENT_LOGGER.debug("Failed to update backend presentation message visibility: %s", exc)
+        update_fn = getattr(self, "update", None)
+        if callable(update_fn):
+            try:
+                update_fn()
+            except (RuntimeError, TypeError, ValueError) as exc:
+                _CLIENT_LOGGER.debug("Failed to repaint backend presentation suppression state: %s", exc)
+        _CLIENT_LOGGER.debug(
+            "Backend presentation content %s (reason=%s); %s",
+            "suppressed" if next_value else "restored",
+            reason or "unspecified",
+            self.format_scale_debug(),
+        )
+
+    def _prime_backend_presentation_map_geometry(self, result: BackendPresentationCycleResult) -> None:
+        rect = result.prime_rect
+        if rect is None:
+            return
+        try:
+            x, y, width, height = (int(rect[0]), int(rect[1]), int(rect[2]), int(rect[3]))
+        except (TypeError, ValueError, IndexError):
+            return
+        if width <= 0 or height <= 0:
+            return
+        target = (x, y, width, height)
+        self._last_set_geometry = target
+        self.setGeometry(QRect(*target))
+        _CLIENT_LOGGER.debug(
+            "%s: primed Qt map geometry rect=%s source=%s; map hygiene only, not placement proof; %s",
+            result.log_prefix,
+            target,
+            result.prime_rect_source,
+            self.format_scale_debug(),
+        )
+
+    def _log_backend_presentation_result(
+        self,
+        result: BackendPresentationCycleResult,
+        decision: BackendPresentationVisibilityDecision,
+    ) -> None:
+        payload = result.diagnostics
+        signature = result.diagnostic_signature() + (
+            decision.show,
+            decision.reason,
+            decision.state.focus_loss_samples,
+            decision.state.remap_warmup_active,
+            decision.state.remap_warmup_samples,
+            decision.remap_warmup_status,
+            decision.surface_action,
+            decision.content_visible,
+        )
+        if signature == getattr(self, "_last_backend_presentation_log", None):
+            return
+        self._last_backend_presentation_log = signature
+        _CLIENT_LOGGER.debug(
+            "%s: health=%s target=%s token=%s seq=%s target_monitor=%s output=%s monitor_rect=%s frame_rect=%s rect_source=%s "
+            "requested=%s applied=%s prime=%s prime_source=%s delta=%s rect_match=%s state=%s reasons=%s attempts=%s retries=%s "
+            "visibility=%s visibility_reason=%s surface_action=%s content_visible=%s keep_overlay_visible=%s target_focus=%s target_workspace=%s "
+            "target_minimized=%s focus_loss_samples=%s focus_loss_elapsed=%.3fs remap_warmup=%s "
+            "remap_warmup_samples=%s remap_warmup_elapsed=%.3fs overlay_window_found=%s legacy_geometry=%s; %s",
+            result.log_prefix,
+            payload["helper_health"],
+            payload["target_state"],
+            payload["target_token"],
+            payload["target_sequence"],
+            payload.get("target_monitor"),
+            payload.get("target_output_name"),
+            payload.get("target_monitor_rect"),
+            payload.get("target_frame_rect"),
+            payload["rect_source"],
+            payload["requested_rect"],
+            payload["applied_rect"],
+            payload.get("prime_rect"),
+            payload.get("prime_rect_source"),
+            payload["rect_delta"],
+            payload["rect_match"],
+            payload["presentation_state"],
+            payload["presentation_reasons"],
+            payload["attempts"],
+            payload["retry_reasons"],
+            "visible" if decision.show else "hidden",
+            decision.reason,
+            decision.surface_action,
+            decision.content_visible,
+            bool(getattr(self, "_keep_overlay_visible", False)),
+            payload.get("target_has_focus"),
+            payload.get("target_showing_on_workspace"),
+            payload.get("target_minimized"),
+            decision.state.focus_loss_samples,
+            decision.focus_loss_elapsed_seconds,
+            decision.remap_warmup_status,
+            decision.state.remap_warmup_samples,
+            decision.remap_warmup_elapsed_seconds,
+            payload.get("overlay_window_found"),
+            payload["legacy_geometry_policy"],
+            self.format_scale_debug(),
+        )
 
     def _convert_native_rect_to_qt(
         self,

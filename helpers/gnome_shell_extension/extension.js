@@ -40,12 +40,21 @@ const HELPER_DBUS_XML = `
   </interface>
 </node>`;
 
+const DISPLAY_CONFIG_DBUS_SERVICE = 'org.gnome.Mutter.DisplayConfig';
+const DISPLAY_CONFIG_DBUS_OBJECT_PATH = '/org/gnome/Mutter/DisplayConfig';
+const DISPLAY_CONFIG_DBUS_INTERFACE = 'org.gnome.Mutter.DisplayConfig';
+const DISPLAY_CONFIG_GET_CURRENT_STATE_METHOD = 'GetCurrentState';
+const DISPLAY_CONFIG_MONITOR_CACHE_TTL_US = 1000000;
+const DISPLAY_CONFIG_DBUS_TIMEOUT_MS = 250;
+
 class HelperHealthService {
     constructor() {
         this._startedAtUnixMs = Date.now();
         this._startedAtMonotonicUs = GLib.get_monotonic_time();
         this._targetSequence = 0;
         this._presentationSequence = 0;
+        this._displayConfigMonitorCache = null;
+        this._displayConfigMonitorCacheExpiresUs = 0;
     }
 
     Hello(_client) {
@@ -245,6 +254,9 @@ class HelperHealthService {
         const frameRect = this._rectPayload(this._safeCall(window, 'get_frame_rect'));
         const bufferRect = this._rectPayload(this._safeCall(window, 'get_buffer_rect'));
         const contentRect = this._contentRectPayload(window, frameRect, bufferRect);
+        const monitor = this._safeCall(window, 'get_monitor');
+        const monitorInfo = this._monitorForIndex(monitor);
+        const monitorRect = this._rectPayload(monitorInfo);
         return {
             targetToken: this._targetToken(window),
             title: String(this._safeCall(window, 'get_title') || ''),
@@ -258,9 +270,10 @@ class HelperHealthService {
             bufferRect,
             contentRect,
             decorationInsets: this._decorationInsets(frameRect, contentRect),
-            monitor: this._safeCall(window, 'get_monitor'),
-            outputName: this._outputName(this._safeCall(window, 'get_monitor')),
-            monitorScale: this._monitorScale(this._safeCall(window, 'get_monitor')),
+            monitor,
+            outputName: this._monitorOutputName(monitorInfo),
+            monitorRect,
+            monitorScale: this._monitorScale(monitorInfo),
             hasFocus: Boolean(window?.has_focus?.()),
             showingOnWorkspace: Boolean(window?.showing_on_its_workspace?.()),
             minimized: Boolean(window?.minimized),
@@ -418,23 +431,180 @@ class HelperHealthService {
         }
     }
 
-    _outputName(monitorIndex) {
-        const monitor = this._monitorForIndex(monitorIndex);
+    _monitorOutputName(monitor) {
         return String(monitor?.connector || monitor?.get_connector?.() || '');
     }
 
-    _monitorScale(monitorIndex) {
-        const monitor = this._monitorForIndex(monitorIndex);
-        const scale = monitor?.scale_factor || monitor?.get_scale_factor?.();
-        return scale === undefined ? null : scale;
+    _monitorScale(monitor) {
+        const scale = monitor?.scale_factor ?? monitor?.scale ?? monitor?.get_scale_factor?.();
+        const numericScale = Number(scale);
+        return Number.isFinite(numericScale) && numericScale > 0 ? numericScale : null;
     }
 
     _monitorForIndex(monitorIndex) {
+        const index = this._normaliseMonitorIndex(monitorIndex);
+        if (index === null) {
+            return null;
+        }
+        return this._displayConfigMonitorForIndex(index) || this._legacyMonitorForIndex(index);
+    }
+
+    _normaliseMonitorIndex(monitorIndex) {
+        const index = Number(monitorIndex);
+        return Number.isInteger(index) && index >= 0 ? index : null;
+    }
+
+    _displayConfigMonitorForIndex(monitorIndex) {
+        const monitors = this._displayConfigMonitors();
+        return monitors[monitorIndex] || null;
+    }
+
+    _displayConfigMonitors() {
+        const now = GLib.get_monotonic_time();
+        if (this._displayConfigMonitorCache && now < this._displayConfigMonitorCacheExpiresUs) {
+            return this._displayConfigMonitorCache;
+        }
+        const monitors = this._fetchDisplayConfigMonitors();
+        this._displayConfigMonitorCache = monitors;
+        this._displayConfigMonitorCacheExpiresUs = now + DISPLAY_CONFIG_MONITOR_CACHE_TTL_US;
+        return monitors;
+    }
+
+    _fetchDisplayConfigMonitors() {
         try {
-            if (monitorIndex === null || monitorIndex === undefined || !global.display?.get_monitor_geometry) {
+            const state = Gio.DBus.session.call_sync(
+                DISPLAY_CONFIG_DBUS_SERVICE,
+                DISPLAY_CONFIG_DBUS_OBJECT_PATH,
+                DISPLAY_CONFIG_DBUS_INTERFACE,
+                DISPLAY_CONFIG_GET_CURRENT_STATE_METHOD,
+                null,
+                null,
+                Gio.DBusCallFlags.NONE,
+                DISPLAY_CONFIG_DBUS_TIMEOUT_MS,
+                null
+            );
+            return this._parseDisplayConfigMonitors(this._deepUnpack(state));
+        } catch (_error) {
+            return [];
+        }
+    }
+
+    _parseDisplayConfigMonitors(state) {
+        const physicalMonitors = this._deepUnpack(state?.[1]);
+        const logicalMonitors = this._deepUnpack(state?.[2]);
+        if (!Array.isArray(physicalMonitors) || !Array.isArray(logicalMonitors)) {
+            return [];
+        }
+        const physicalModes = this._displayConfigPhysicalModes(physicalMonitors);
+        return logicalMonitors.map(logicalMonitor =>
+            this._displayConfigLogicalMonitor(logicalMonitor, physicalModes)
+        );
+    }
+
+    _displayConfigPhysicalModes(physicalMonitors) {
+        const modes = new Map();
+        for (const physicalMonitor of physicalMonitors) {
+            const monitorSpec = this._deepUnpack(physicalMonitor?.[0]);
+            const connector = String(monitorSpec?.[0] || '');
+            const currentMode = this._currentDisplayConfigMode(physicalMonitor?.[1]);
+            if (connector && currentMode) {
+                modes.set(connector, currentMode);
+            }
+        }
+        return modes;
+    }
+
+    _currentDisplayConfigMode(modes) {
+        const unpackedModes = this._deepUnpack(modes);
+        if (!Array.isArray(unpackedModes)) {
+            return null;
+        }
+        for (const mode of unpackedModes) {
+            const properties = this._deepUnpack(mode?.[6]);
+            if (!this._variantBool(properties?.['is-current'])) {
+                continue;
+            }
+            const width = Number(mode?.[1]);
+            const height = Number(mode?.[2]);
+            if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
+                return { width, height };
+            }
+        }
+        return null;
+    }
+
+    _displayConfigLogicalMonitor(logicalMonitor, physicalModes) {
+        const monitor = this._deepUnpack(logicalMonitor);
+        const x = Number(monitor?.[0]);
+        const y = Number(monitor?.[1]);
+        const scale = this._normaliseScale(monitor?.[2]);
+        const transform = Number(monitor?.[3] ?? 0);
+        const monitorSpecs = this._deepUnpack(monitor?.[5]);
+        const firstSpec = this._deepUnpack(Array.isArray(monitorSpecs) ? monitorSpecs[0] : null);
+        const connector = String(firstSpec?.[0] || '');
+        const mode = physicalModes.get(connector);
+        if (!mode || !Number.isFinite(x) || !Number.isFinite(y)) {
+            return null;
+        }
+
+        let width = mode.width;
+        let height = mode.height;
+        if (this._transformRotatesMonitor(transform)) {
+            [width, height] = [height, width];
+        }
+        width = Math.round(width / scale);
+        height = Math.round(height / scale);
+        if (width <= 0 || height <= 0) {
+            return null;
+        }
+        return {
+            x,
+            y,
+            width,
+            height,
+            connector,
+            scale_factor: scale,
+        };
+    }
+
+    _normaliseScale(scale) {
+        const numericScale = Number(scale);
+        return Number.isFinite(numericScale) && numericScale > 0 ? numericScale : 1;
+    }
+
+    _transformRotatesMonitor(transform) {
+        return transform === 1 || transform === 3 || transform === 5 || transform === 7;
+    }
+
+    _variantBool(value) {
+        return Boolean(this._deepUnpack(value));
+    }
+
+    _deepUnpack(value) {
+        try {
+            return value && typeof value.deepUnpack === 'function' ? value.deepUnpack() : value;
+        } catch (_error) {
+            return value;
+        }
+    }
+
+    _legacyMonitorForIndex(monitorIndex) {
+        try {
+            if (!global.display?.get_monitor_geometry) {
                 return null;
             }
-            return global.display.get_monitor_geometry(monitorIndex);
+            const geometry = global.display.get_monitor_geometry(monitorIndex);
+            if (!geometry) {
+                return null;
+            }
+            const scale = global.display?.get_monitor_scale?.(monitorIndex);
+            return {
+                x: Number(geometry.x),
+                y: Number(geometry.y),
+                width: Number(geometry.width),
+                height: Number(geometry.height),
+                scale_factor: scale,
+            };
         } catch (_error) {
             return null;
         }

@@ -32,6 +32,7 @@ except Exception:  # pragma: no cover - lightweight stub path
                     "WindowStaysOnTopHint": 1,
                     "Tool": 2,
                     "FramelessWindowHint": 4,
+                    "WindowDoesNotAcceptFocus": 8,
                     "WindowTransparentForInput": object(),
                 },
             ),

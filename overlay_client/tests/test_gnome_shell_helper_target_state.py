@@ -3,12 +3,15 @@ import json
 from overlay_client.backend import (
     GNOME_SHELL_HELPER_CAPABILITIES,
     GNOME_SHELL_HELPER_COORDINATE_SPACE,
+    GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK,
     HELPER_KIND,
     HELPER_PROTOCOL,
     HELPER_VERSION,
+    HelperRect,
     HelperHealthState,
     HelperTargetState,
     probe_gnome_shell_helper_target,
+    resolve_gnome_shell_helper_target_rect,
     select_elite_dangerous_target,
     validate_gnome_shell_helper_health_payload,
     validate_gnome_shell_helper_target_payload,
@@ -47,6 +50,7 @@ def _target_window(**overrides: object) -> dict[str, object]:
         "decorationInsets": {"left": 0, "top": 0, "right": 0, "bottom": 0},
         "monitor": 0,
         "outputName": "DP-2",
+        "monitorRect": {"x": 0, "y": 0, "width": 3440, "height": 1440},
         "monitorScale": 1.0,
         "hasFocus": True,
         "showingOnWorkspace": True,
@@ -92,6 +96,8 @@ def test_validate_gnome_shell_helper_target_accepts_borderless_geometry() -> Non
     assert status.launcher_count == 1
     assert status.target is not None
     assert status.target.target_token == "meta:21"
+    assert status.target.monitor_rect == HelperRect(x=0, y=0, width=3440, height=1440)
+    assert status.target.to_payload()["monitor_rect"] == {"x": 0, "y": 0, "width": 3440, "height": 1440}
     assert status.target.content_rect is not None
     assert status.target.content_rect.to_payload() == {"x": 0, "y": 0, "width": 3440, "height": 1440}
     assert status.target.decoration_insets is not None
@@ -124,9 +130,10 @@ def test_validate_gnome_shell_helper_target_accepts_windowed_content_rect_and_in
     assert status.target.decoration_insets.top == 37
 
 
-def test_validate_gnome_shell_helper_target_rejects_geometry_without_content_rect() -> None:
+def test_validate_gnome_shell_helper_target_accepts_geometry_without_content_rect_for_frame_fallback() -> None:
     target = _target_window()
     target.pop("contentRect")
+    target.pop("decorationInsets")
 
     status = validate_gnome_shell_helper_target_payload(
         _target_payload(target=target),
@@ -134,10 +141,16 @@ def test_validate_gnome_shell_helper_target_rejects_geometry_without_content_rec
         observed_at_monotonic=200.0,
         now_monotonic=200.0,
     )
+    resolution = resolve_gnome_shell_helper_target_rect(status)
 
-    assert status.state is HelperTargetState.GEOMETRY_INCOMPLETE
-    assert status.found is False
-    assert status.detail == "contentRect missing or invalid"
+    assert status.state is HelperTargetState.FOUND
+    assert status.found is True
+    assert status.target is not None
+    assert status.target.content_rect is None
+    assert status.target.decoration_insets is None
+    assert resolution.resolved is True
+    assert resolution.source == GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK
+    assert resolution.degrade_reasons == (GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK,)
 
 
 def test_validate_gnome_shell_helper_target_reports_not_found_launcher_only_and_ambiguous() -> None:

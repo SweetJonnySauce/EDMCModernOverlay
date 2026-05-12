@@ -8,8 +8,9 @@ from overlay_client.backend.contracts import (
     OperatingSystem,
     PlatformProbeResult,
     SessionType,
+    HelperKind,
 )
-from overlay_client.backend.status import BackendSelectionStatus
+from overlay_client.backend.status import BackendSelectionStatus, HelperCapabilityState
 from overlay_client.platform_integration import PlatformContext, PlatformController
 
 
@@ -32,7 +33,14 @@ class _FakeIntegration:
         return []
 
 
-def _status(instance: BackendInstance, *, family: BackendFamily, session_type: SessionType, compositor: str) -> BackendSelectionStatus:
+def _status(
+    instance: BackendInstance,
+    *,
+    family: BackendFamily,
+    session_type: SessionType,
+    compositor: str,
+    helper_available: bool = False,
+) -> BackendSelectionStatus:
     return BackendSelectionStatus(
         probe=PlatformProbeResult(
             operating_system=OperatingSystem.LINUX,
@@ -42,6 +50,15 @@ def _status(instance: BackendInstance, *, family: BackendFamily, session_type: S
         ),
         selected_backend=BackendDescriptor(family, instance),
         classification=CapabilityClassification.TRUE_OVERLAY,
+        helper_states=(
+            HelperCapabilityState(
+                helper=HelperKind.GNOME_SHELL_EXTENSION,
+                required=True,
+                installed=helper_available,
+                enabled=helper_available,
+                approved=helper_available,
+            ),
+        ),
     )
 
 
@@ -141,3 +158,44 @@ def test_platform_controller_rebuilds_integration_when_backend_status_changes(mo
     assert integrations[1]._window == "window-handle"
     assert integrations[1].updated_contexts == []
     assert controller.is_wayland_backend() is True
+
+
+def test_platform_controller_exposes_focus_safe_overlay_flag_policy(monkeypatch):
+    created = []
+
+    def _factory(bundle, widget, logger, context):
+        del widget, logger, context
+        created.append(bundle.descriptor.instance)
+        return _FakeIntegration(bundle.descriptor.instance.value)
+
+    monkeypatch.setattr("overlay_client.platform_integration.sys.platform", "linux")
+    monkeypatch.setattr("overlay_client.platform_integration.QGuiApplication.platformName", lambda: "wayland")
+    monkeypatch.setattr("overlay_client.platform_integration.create_bundle_integration", _factory)
+
+    controller = PlatformController(
+        object(),
+        logging.getLogger("test.platform_controller.focus_safe_flags"),
+        PlatformContext(session_type="wayland", compositor="gnome-shell"),
+        backend_status=_status(
+            BackendInstance.GNOME_SHELL_WAYLAND,
+            family=BackendFamily.NATIVE_WAYLAND,
+            session_type=SessionType.WAYLAND,
+            compositor="gnome-shell",
+            helper_available=True,
+        ),
+    )
+
+    assert created == [BackendInstance.GNOME_SHELL_WAYLAND]
+    assert controller.requires_focus_safe_overlay_flags() is True
+
+    controller.update_backend_status(
+        _status(
+            BackendInstance.KWIN_WAYLAND,
+            family=BackendFamily.NATIVE_WAYLAND,
+            session_type=SessionType.WAYLAND,
+            compositor="kwin",
+            helper_available=False,
+        )
+    )
+
+    assert controller.requires_focus_safe_overlay_flags() is False

@@ -5,6 +5,10 @@ import pytest
 from overlay_client.backend import (
     GNOME_SHELL_HELPER_CAPABILITIES,
     GNOME_SHELL_HELPER_COORDINATE_SPACE,
+    GNOME_SHELL_HELPER_RECT_REASON_FRAME_FALLBACK_CLAMPED,
+    GNOME_SHELL_HELPER_RECT_REASON_FRAME_FALLBACK_OUTSIDE_MONITOR,
+    GNOME_SHELL_HELPER_RECT_SOURCE_CONTENT,
+    GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK,
     HELPER_KIND,
     HELPER_PROTOCOL,
     HELPER_VERSION,
@@ -54,6 +58,7 @@ def _target_window(**overrides: object) -> dict[str, object]:
         "decorationInsets": {"left": 0, "top": 37, "right": 0, "bottom": 0},
         "monitor": 0,
         "outputName": "DP-2",
+        "monitorRect": {"x": 0, "y": 0, "width": 3440, "height": 1440},
         "monitorScale": 1.0,
         "hasFocus": True,
         "showingOnWorkspace": True,
@@ -130,6 +135,7 @@ def test_build_presentation_request_uses_target_content_rect_and_pyqt_renderer()
     assert request.target_token == "meta:21"
     assert request.renderer == "pyqt"
     assert request.content_rect == HelperRect(x=1080, y=253, width=1280, height=960)
+    assert request.rect_source == GNOME_SHELL_HELPER_RECT_SOURCE_CONTENT
     assert request.standalone_mode is False
     assert request.require_chrome_free is True
     assert request.require_click_through is True
@@ -143,6 +149,115 @@ def test_build_presentation_request_hides_when_target_is_not_on_workspace() -> N
 
     assert request.action is HelperPresentationAction.HIDE
     assert request.degrade_reasons == ("target_hidden",)
+
+
+def test_build_presentation_request_uses_frame_rect_fallback_when_content_rect_is_missing() -> None:
+    target_window = _target_window(contentRect=None, decorationInsets=None)
+    target = _target_status(target=target_window)
+
+    request = build_gnome_shell_helper_presentation_request(target)
+
+    assert request.action is HelperPresentationAction.ATTACH
+    assert request.content_rect == HelperRect(x=1080, y=216, width=1280, height=997)
+    assert request.rect_source == GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK
+    assert request.degrade_reasons == (GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK,)
+
+
+def test_build_presentation_request_keeps_content_rect_preferred_even_outside_monitor() -> None:
+    target = _target_status(
+        target=_target_window(
+            contentRect={"x": 1080, "y": 253, "width": 1280, "height": 1600},
+            monitorRect={"x": 0, "y": 0, "width": 3440, "height": 1440},
+        )
+    )
+
+    request = build_gnome_shell_helper_presentation_request(target)
+
+    assert request.action is HelperPresentationAction.ATTACH
+    assert request.content_rect == HelperRect(x=1080, y=253, width=1280, height=1600)
+    assert request.rect_source == GNOME_SHELL_HELPER_RECT_SOURCE_CONTENT
+    assert request.degrade_reasons == ()
+
+
+def test_build_presentation_request_clamps_frame_rect_fallback_to_monitor_bounds() -> None:
+    target = _target_status(
+        target=_target_window(
+            frameRect={"x": 760, "y": 29, "width": 1920, "height": 1477},
+            bufferRect={"x": 746, "y": 17, "width": 1948, "height": 1506},
+            contentRect=None,
+            decorationInsets=None,
+            monitorRect={"x": 0, "y": 0, "width": 3440, "height": 1440},
+        )
+    )
+
+    request = build_gnome_shell_helper_presentation_request(target)
+
+    assert request.action is HelperPresentationAction.ATTACH
+    assert request.content_rect == HelperRect(x=760, y=29, width=1920, height=1411)
+    assert request.rect_source == GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK
+    assert request.degrade_reasons == (
+        GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK,
+        GNOME_SHELL_HELPER_RECT_REASON_FRAME_FALLBACK_CLAMPED,
+    )
+
+
+def test_build_presentation_request_clamps_frame_rect_fallback_on_non_primary_monitor() -> None:
+    target = _target_status(
+        target=_target_window(
+            frameRect={"x": 3600, "y": 29, "width": 1920, "height": 1477},
+            bufferRect={"x": 3586, "y": 17, "width": 1948, "height": 1506},
+            contentRect=None,
+            decorationInsets=None,
+            monitor=1,
+            outputName="HDMI-1",
+            monitorRect={"x": 3440, "y": 0, "width": 3440, "height": 1440},
+        )
+    )
+
+    request = build_gnome_shell_helper_presentation_request(target)
+
+    assert request.action is HelperPresentationAction.ATTACH
+    assert request.content_rect == HelperRect(x=3600, y=29, width=1920, height=1411)
+    assert request.rect_source == GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK
+    assert request.degrade_reasons == (
+        GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK,
+        GNOME_SHELL_HELPER_RECT_REASON_FRAME_FALLBACK_CLAMPED,
+    )
+
+
+def test_build_presentation_request_degrades_when_frame_fallback_misses_monitor() -> None:
+    target = _target_status(
+        target=_target_window(
+            frameRect={"x": 3600, "y": 100, "width": 200, "height": 200},
+            bufferRect={"x": 3600, "y": 100, "width": 200, "height": 200},
+            contentRect=None,
+            decorationInsets=None,
+            monitorRect={"x": 0, "y": 0, "width": 3440, "height": 1440},
+        )
+    )
+
+    request = build_gnome_shell_helper_presentation_request(target)
+
+    assert request.action is HelperPresentationAction.DEGRADE
+    assert request.content_rect is None
+    assert request.rect_source == GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK
+    assert request.degrade_reasons == (
+        GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK,
+        GNOME_SHELL_HELPER_RECT_REASON_FRAME_FALLBACK_OUTSIDE_MONITOR,
+    )
+
+
+def test_build_presentation_request_uses_frame_rect_fallback_when_monitor_rect_is_missing() -> None:
+    target_window = _target_window(contentRect=None, decorationInsets=None)
+    target_window.pop("monitorRect")
+    target = _target_status(target=target_window)
+
+    request = build_gnome_shell_helper_presentation_request(target)
+
+    assert request.action is HelperPresentationAction.ATTACH
+    assert request.content_rect == HelperRect(x=1080, y=216, width=1280, height=997)
+    assert request.rect_source == GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK
+    assert request.degrade_reasons == (GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK,)
 
 
 def test_build_presentation_request_degrades_when_target_is_not_found() -> None:
@@ -175,6 +290,8 @@ def test_validate_presentation_accepts_applied_state_only_when_all_gates_pass() 
 
     assert status.state is HelperPresentationState.APPLIED
     assert status.applied is True
+    assert status.rect_match is True
+    assert status.rect_delta == (0, 0, 0, 0)
     assert status.true_overlay_ready is True
     assert status.pyqt_renderer_preserved is True
 
@@ -189,6 +306,7 @@ def test_validate_presentation_accepts_applied_state_only_when_all_gates_pass() 
         ({"renderer": "gnome_shell"}, "renderer_changed"),
         ({"standalone_mode": True}, "standalone_mode_enabled"),
         ({"applied_rect": None}, "placement_unproven"),
+        ({"applied_rect": {"x": 1084, "y": 253, "width": 1280, "height": 960}}, "applied_rect_mismatch"),
     ],
 )
 def test_validate_presentation_degrades_when_required_gate_is_unproven(
@@ -210,6 +328,48 @@ def test_validate_presentation_degrades_when_required_gate_is_unproven(
     assert status.state is HelperPresentationState.DEGRADED
     assert status.true_overlay_ready is False
     assert reason in status.degrade_reasons
+
+
+def test_validate_presentation_accepts_applied_rect_within_tolerance() -> None:
+    target = _target_status()
+    request = build_gnome_shell_helper_presentation_request(target)
+
+    status = validate_gnome_shell_helper_presentation_payload(
+        _presentation_payload(applied_rect={"x": 1082, "y": 251, "width": 1281, "height": 958}),
+        health_status=_health_status(),
+        target_status=target,
+        request=request,
+        observed_at_monotonic=210.0,
+        now_monotonic=210.0,
+    )
+
+    assert status.state is HelperPresentationState.APPLIED
+    assert status.rect_match is True
+    assert status.rect_delta == (2, -2, 1, -2)
+    assert status.true_overlay_ready is True
+
+
+def test_validate_presentation_degrades_frame_rect_fallback_even_when_applied_rect_matches() -> None:
+    target = _target_status(target=_target_window(contentRect=None, decorationInsets=None))
+    request = build_gnome_shell_helper_presentation_request(target)
+
+    status = validate_gnome_shell_helper_presentation_payload(
+        _presentation_payload(
+            requested_rect={"x": 1080, "y": 216, "width": 1280, "height": 997},
+            applied_rect={"x": 1080, "y": 216, "width": 1280, "height": 997},
+        ),
+        health_status=_health_status(),
+        target_status=target,
+        request=request,
+        observed_at_monotonic=210.0,
+        now_monotonic=210.0,
+    )
+
+    assert status.state is HelperPresentationState.DEGRADED
+    assert status.rect_source == GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK
+    assert status.rect_match is True
+    assert GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK in status.degrade_reasons
+    assert status.true_overlay_ready is False
 
 
 def test_validate_presentation_reports_unsupported_and_target_unavailable() -> None:

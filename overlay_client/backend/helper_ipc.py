@@ -39,7 +39,13 @@ GNOME_SHELL_HELPER_REQUIRED_CAPABILITIES = GNOME_SHELL_HELPER_CAPABILITIES
 GNOME_SHELL_HELPER_HEALTH_STALE_SECONDS = 10.0
 GNOME_SHELL_HELPER_TARGET_STALE_SECONDS = 2.0
 GNOME_SHELL_HELPER_PRESENTATION_STALE_SECONDS = 2.0
+GNOME_SHELL_HELPER_PRESENTATION_RECT_TOLERANCE = 2
 GNOME_SHELL_HELPER_COORDINATE_SPACE = "gnome_shell_global_logical"
+GNOME_SHELL_HELPER_RECT_SOURCE_CONTENT = "content_rect"
+GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK = "frame_rect_fallback"
+GNOME_SHELL_HELPER_RECT_SOURCE_UNAVAILABLE = "unavailable"
+GNOME_SHELL_HELPER_RECT_REASON_FRAME_FALLBACK_CLAMPED = "frame_rect_clamped_to_monitor"
+GNOME_SHELL_HELPER_RECT_REASON_FRAME_FALLBACK_OUTSIDE_MONITOR = "frame_rect_outside_monitor"
 HELPER_KIND = HelperKind.GNOME_SHELL_EXTENSION
 HELPER_PROTOCOL = 3
 HELPER_VERSION = MODERN_OVERLAY_VERSION
@@ -229,6 +235,7 @@ class HelperTargetWindow:
     decoration_insets: HelperDecorationInsets | None = None
     monitor: int | None = None
     output_name: str = ""
+    monitor_rect: HelperRect | None = None
     monitor_scale: float | None = None
     has_focus: bool = False
     showing_on_workspace: bool = False
@@ -254,6 +261,7 @@ class HelperTargetWindow:
             ),
             "monitor": self.monitor,
             "output_name": self.output_name,
+            "monitor_rect": self.monitor_rect.to_payload() if self.monitor_rect is not None else None,
             "monitor_scale": self.monitor_scale,
             "has_focus": self.has_focus,
             "showing_on_workspace": self.showing_on_workspace,
@@ -319,6 +327,8 @@ class HelperPresentationRequest:
     target_token: str = ""
     coordinate_space: str = GNOME_SHELL_HELPER_COORDINATE_SPACE
     content_rect: HelperRect | None = None
+    rect_source: str = GNOME_SHELL_HELPER_RECT_SOURCE_CONTENT
+    rect_tolerance: int = GNOME_SHELL_HELPER_PRESENTATION_RECT_TOLERANCE
     renderer: str = "pyqt"
     standalone_mode: bool = False
     overlay_title: str = "EDMC Modern Overlay"
@@ -336,6 +346,8 @@ class HelperPresentationRequest:
             "target_token": self.target_token,
             "coordinate_space": self.coordinate_space,
             "content_rect": self.content_rect.to_payload() if self.content_rect is not None else None,
+            "rect_source": self.rect_source,
+            "rect_tolerance": self.rect_tolerance,
             "renderer": self.renderer,
             "standalone_mode": self.standalone_mode,
             "overlay_title": self.overlay_title,
@@ -365,8 +377,11 @@ class HelperPresentationStatus:
     coordinate_space: str = GNOME_SHELL_HELPER_COORDINATE_SPACE
     target_token: str = ""
     overlay_token: str = ""
+    rect_source: str = GNOME_SHELL_HELPER_RECT_SOURCE_UNAVAILABLE
     requested_rect: HelperRect | None = None
     applied_rect: HelperRect | None = None
+    rect_match: bool = False
+    rect_delta: tuple[int, int, int, int] = (0, 0, 0, 0)
     renderer: str = "pyqt"
     placement: bool = False
     chrome_free: bool = False
@@ -394,6 +409,7 @@ class HelperPresentationStatus:
             self.applied
             and self.action is HelperPresentationAction.ATTACH
             and self.placement
+            and self.rect_match
             and self.chrome_free
             and self.stacking
             and self.click_through
@@ -421,8 +437,11 @@ class HelperPresentationStatus:
             "coordinate_space": self.coordinate_space,
             "target_token": self.target_token,
             "overlay_token": self.overlay_token,
+            "rect_source": self.rect_source,
             "requested_rect": self.requested_rect.to_payload() if self.requested_rect is not None else None,
             "applied_rect": self.applied_rect.to_payload() if self.applied_rect is not None else None,
+            "rect_match": self.rect_match,
+            "rect_delta": list(self.rect_delta),
             "renderer": self.renderer,
             "placement": self.placement,
             "chrome_free": self.chrome_free,
@@ -439,6 +458,31 @@ class HelperPresentationStatus:
             "observed_at_monotonic": self.observed_at_monotonic,
             "stale_after_seconds": self.stale_after_seconds,
             "detail": self.detail,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class HelperTargetRectResolution:
+    """Resolved presentation rect and provenance for a helper target."""
+
+    rect: HelperRect | None
+    source: str
+    degrade_reasons: tuple[str, ...] = field(default_factory=tuple)
+
+    @property
+    def resolved(self) -> bool:
+        return self.rect is not None and self.rect.valid
+
+    @property
+    def uses_frame_fallback(self) -> bool:
+        return self.source == GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "rect": self.rect.to_payload() if self.rect is not None else None,
+            "source": self.source,
+            "degrade_reasons": list(self.degrade_reasons),
+            "resolved": self.resolved,
         }
 
 
@@ -963,24 +1007,97 @@ def build_gnome_shell_helper_presentation_request(
             degrade_reasons=(target_status.state.value,),
         )
     target = target_status.target
+    rect_resolution = resolve_gnome_shell_helper_target_rect(target_status)
+    if not rect_resolution.resolved:
+        return HelperPresentationRequest(
+            action=HelperPresentationAction.DEGRADE,
+            target_token=target.target_token,
+            standalone_mode=bool(standalone_mode),
+            overlay_title=overlay_title,
+            overlay_wm_class=overlay_wm_class,
+            rect_source=rect_resolution.source,
+            degrade_reasons=rect_resolution.degrade_reasons or ("geometry_incomplete",),
+        )
     if target.minimized or not target.showing_on_workspace:
         return HelperPresentationRequest(
             action=HelperPresentationAction.HIDE,
             target_token=target.target_token,
-            content_rect=target.content_rect,
+            content_rect=rect_resolution.rect,
+            rect_source=rect_resolution.source,
             standalone_mode=bool(standalone_mode),
             overlay_title=overlay_title,
             overlay_wm_class=overlay_wm_class,
-            degrade_reasons=("target_hidden",),
+            degrade_reasons=tuple(dict.fromkeys(("target_hidden",) + rect_resolution.degrade_reasons)),
         )
     return HelperPresentationRequest(
         action=HelperPresentationAction.ATTACH,
         target_token=target.target_token,
-        content_rect=target.content_rect,
+        content_rect=rect_resolution.rect,
+        rect_source=rect_resolution.source,
         standalone_mode=bool(standalone_mode),
         overlay_title=overlay_title,
         overlay_wm_class=overlay_wm_class,
+        degrade_reasons=rect_resolution.degrade_reasons,
     )
+
+
+def resolve_gnome_shell_helper_target_rect(target_status: HelperTargetStatus) -> HelperTargetRectResolution:
+    """Choose the rect the helper should use for presentation and report provenance."""
+
+    if not target_status.found or target_status.target is None:
+        return HelperTargetRectResolution(
+            rect=None,
+            source=GNOME_SHELL_HELPER_RECT_SOURCE_UNAVAILABLE,
+            degrade_reasons=(target_status.state.value,),
+        )
+    target = target_status.target
+    if target.content_rect is not None and target.content_rect.valid:
+        return HelperTargetRectResolution(
+            rect=target.content_rect,
+            source=GNOME_SHELL_HELPER_RECT_SOURCE_CONTENT,
+        )
+    if target.frame_rect is not None and target.frame_rect.valid:
+        if target.monitor_rect is not None and target.monitor_rect.valid:
+            clamped_rect = _intersect_helper_rects(target.frame_rect, target.monitor_rect)
+            if clamped_rect is None:
+                return HelperTargetRectResolution(
+                    rect=None,
+                    source=GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK,
+                    degrade_reasons=(
+                        GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK,
+                        GNOME_SHELL_HELPER_RECT_REASON_FRAME_FALLBACK_OUTSIDE_MONITOR,
+                    ),
+                )
+            degrade_reasons = [GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK]
+            if clamped_rect != target.frame_rect:
+                degrade_reasons.append(GNOME_SHELL_HELPER_RECT_REASON_FRAME_FALLBACK_CLAMPED)
+            return HelperTargetRectResolution(
+                rect=clamped_rect,
+                source=GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK,
+                degrade_reasons=tuple(degrade_reasons),
+            )
+        return HelperTargetRectResolution(
+            rect=target.frame_rect,
+            source=GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK,
+            degrade_reasons=(GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK,),
+        )
+    return HelperTargetRectResolution(
+        rect=None,
+        source=GNOME_SHELL_HELPER_RECT_SOURCE_UNAVAILABLE,
+        degrade_reasons=("geometry_incomplete",),
+    )
+
+
+def _intersect_helper_rects(frame_rect: HelperRect, monitor_rect: HelperRect) -> HelperRect | None:
+    left = max(frame_rect.x, monitor_rect.x)
+    top = max(frame_rect.y, monitor_rect.y)
+    right = min(frame_rect.x + frame_rect.width, monitor_rect.x + monitor_rect.width)
+    bottom = min(frame_rect.y + frame_rect.height, monitor_rect.y + monitor_rect.height)
+    width = right - left
+    height = bottom - top
+    if width <= 0 or height <= 0:
+        return None
+    return HelperRect(x=left, y=top, width=width, height=height)
 
 
 def probe_gnome_shell_helper_presentation(
@@ -1246,8 +1363,11 @@ def validate_gnome_shell_helper_presentation_payload(
             detail=f"expected target_token={expected_target}",
         )
 
+    rect_source = _payload_text(payload, "rect_source") or request.rect_source
     requested_rect = _payload_rect(payload.get("requestedRect", payload.get("requested_rect"))) or request.content_rect
     applied_rect = _payload_rect(payload.get("appliedRect", payload.get("applied_rect")))
+    rect_delta = _rect_delta(requested_rect, applied_rect)
+    rect_match = _rect_matches(requested_rect, applied_rect, tolerance=request.rect_tolerance)
     renderer = _payload_text(payload, "renderer") or request.renderer
     unsupported_features = _payload_string_tuple(payload.get("unsupported_features", payload.get("unsupportedFeatures")))
     degrade_reasons = _payload_string_tuple(payload.get("degrade_reasons", payload.get("degradeReasons")))
@@ -1271,6 +1391,7 @@ def validate_gnome_shell_helper_presentation_payload(
             standalone_mode=standalone_mode,
             applied_rect=applied_rect,
         )
+        missing_gate_reasons = tuple(dict.fromkeys(request.degrade_reasons + missing_gate_reasons))
         if action is not HelperPresentationAction.ATTACH:
             missing_gate_reasons += ("action_not_attach",)
         if missing_gate_reasons:
@@ -1282,8 +1403,11 @@ def validate_gnome_shell_helper_presentation_payload(
                 coordinate_space=coordinate_space,
                 target_token=target_token,
                 overlay_token=_payload_text(payload, "overlay_token",),
+                rect_source=rect_source,
                 requested_rect=requested_rect,
                 applied_rect=applied_rect,
+                rect_match=rect_match,
+                rect_delta=rect_delta,
                 renderer=renderer,
                 placement=placement,
                 chrome_free=chrome_free,
@@ -1324,8 +1448,11 @@ def validate_gnome_shell_helper_presentation_payload(
         coordinate_space=coordinate_space,
         target_token=target_token,
         overlay_token=_payload_text(payload, "overlay_token",),
+        rect_source=rect_source,
         requested_rect=requested_rect,
         applied_rect=applied_rect,
+        rect_match=rect_match,
+        rect_delta=rect_delta,
         renderer=renderer,
         placement=placement,
         chrome_free=chrome_free,
@@ -1488,8 +1615,11 @@ def _helper_presentation_status(
     coordinate_space: str = GNOME_SHELL_HELPER_COORDINATE_SPACE,
     target_token: str = "",
     overlay_token: str = "",
+    rect_source: str = GNOME_SHELL_HELPER_RECT_SOURCE_UNAVAILABLE,
     requested_rect: HelperRect | None = None,
     applied_rect: HelperRect | None = None,
+    rect_match: bool = False,
+    rect_delta: tuple[int, int, int, int] = (0, 0, 0, 0),
     renderer: str = "pyqt",
     placement: bool = False,
     chrome_free: bool = False,
@@ -1516,8 +1646,11 @@ def _helper_presentation_status(
         coordinate_space=coordinate_space,
         target_token=target_token,
         overlay_token=overlay_token,
+        rect_source=rect_source,
         requested_rect=requested_rect,
         applied_rect=applied_rect,
+        rect_match=rect_match,
+        rect_delta=rect_delta,
         renderer=renderer,
         placement=placement,
         chrome_free=chrome_free,
@@ -1549,14 +1682,15 @@ def _parse_helper_target_window(payload: Mapping[str, object]) -> tuple[HelperTa
     buffer_rect = _payload_rect(payload.get("bufferRect", payload.get("buffer_rect")))
     content_rect = _payload_rect(payload.get("contentRect", payload.get("content_rect")))
     decoration_insets = _payload_insets(payload.get("decorationInsets", payload.get("decoration_insets")))
+    monitor_rect = _payload_rect(payload.get("monitorRect", payload.get("monitor_rect")))
     if frame_rect is None or not frame_rect.valid:
         return None, "frameRect missing or invalid"
     if buffer_rect is None or not buffer_rect.valid:
         return None, "bufferRect missing or invalid"
-    if content_rect is None or not content_rect.valid:
-        return None, "contentRect missing or invalid"
-    if decoration_insets is None:
-        return None, "decorationInsets missing or invalid"
+    if content_rect is not None and not content_rect.valid:
+        content_rect = None
+    if monitor_rect is not None and not monitor_rect.valid:
+        monitor_rect = None
 
     return (
         HelperTargetWindow(
@@ -1574,6 +1708,7 @@ def _parse_helper_target_window(payload: Mapping[str, object]) -> tuple[HelperTa
             decoration_insets=decoration_insets,
             monitor=_mapping_int(payload, "monitor"),
             output_name=_mapping_text(payload, "outputName", "output_name"),
+            monitor_rect=monitor_rect,
             monitor_scale=_mapping_float(payload, "monitorScale", "monitor_scale"),
             has_focus=_mapping_bool(payload, "hasFocus", "has_focus"),
             showing_on_workspace=_mapping_bool(payload, "showingOnWorkspace", "showing_on_workspace"),
@@ -1726,6 +1861,12 @@ def _missing_presentation_gate_reasons(
     reasons: list[str] = []
     if request.require_placement and (not placement or applied_rect is None or not applied_rect.valid):
         reasons.append("placement_unproven")
+    elif request.require_placement and not _rect_matches(
+        request.content_rect,
+        applied_rect,
+        tolerance=request.rect_tolerance,
+    ):
+        reasons.append("applied_rect_mismatch")
     if request.require_chrome_free and not chrome_free:
         reasons.append("chrome_free_unproven")
     if request.require_stacking and not stacking:
@@ -1739,6 +1880,24 @@ def _missing_presentation_gate_reasons(
     if standalone_mode:
         reasons.append("standalone_mode_enabled")
     return tuple(reasons)
+
+
+def _rect_delta(left: HelperRect | None, right: HelperRect | None) -> tuple[int, int, int, int]:
+    if left is None or right is None:
+        return (0, 0, 0, 0)
+    return (
+        int(right.x) - int(left.x),
+        int(right.y) - int(left.y),
+        int(right.width) - int(left.width),
+        int(right.height) - int(left.height),
+    )
+
+
+def _rect_matches(left: HelperRect | None, right: HelperRect | None, *, tolerance: int) -> bool:
+    if left is None or right is None or not left.valid or not right.valid:
+        return False
+    allowed = max(0, int(tolerance))
+    return all(abs(delta) <= allowed for delta in _rect_delta(left, right))
 
 
 def _mapping_text(payload: Mapping[str, object], *keys: str) -> str:

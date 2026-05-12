@@ -7,7 +7,13 @@ from PyQt6.QtCore import Qt
 from overlay_client.interaction_controller import InteractionController
 
 
-def _build_controller(monkeypatch, *, is_wayland: bool = False, transparent_input_supported: bool = True):
+def _build_controller(
+    monkeypatch,
+    *,
+    is_wayland: bool = False,
+    transparent_input_supported: bool = True,
+    requires_focus_safe_flags: bool = False,
+):
     calls = types.SimpleNamespace(
         widget_attrs=[],
         children_attrs=[],
@@ -25,6 +31,7 @@ def _build_controller(monkeypatch, *, is_wayland: bool = False, transparent_inpu
     window_obj = object()
     controller = InteractionController(
         is_wayland_fn=lambda: is_wayland,
+        requires_focus_safe_flags_fn=lambda: requires_focus_safe_flags,
         log_fn=lambda msg, *args: calls.logs.append((msg, args)),
         prepare_window_fn=lambda window: calls.prepared.append(window),
         apply_click_through_fn=lambda flag: calls.applied.append(flag),
@@ -51,6 +58,7 @@ def test_click_through_applies_flags_and_is_idempotent(monkeypatch):
     assert (Qt.WindowType.WindowStaysOnTopHint, True) in calls.window_flags
     assert (Qt.WindowType.FramelessWindowHint, True) in calls.window_flags
     assert (Qt.WindowType.Tool, True) in calls.window_flags
+    assert not any(flag == Qt.WindowType.WindowDoesNotAcceptFocus for flag, _enabled in calls.window_flags)
     assert calls.prepared == [window_obj]
     assert calls.applied == [True]
     assert calls.set_transparent == [True]
@@ -72,6 +80,45 @@ def test_click_through_applies_flags_and_is_idempotent(monkeypatch):
     controller.set_click_through(False)
     assert calls.applied[-1] is False
     assert calls.children_attrs[-1] is False
+
+
+def test_prepare_window_flags_applies_focus_safe_hint_before_show(monkeypatch):
+    controller, calls, _ = _build_controller(
+        monkeypatch,
+        is_wayland=True,
+        requires_focus_safe_flags=True,
+    )
+
+    controller.prepare_window_flags_for_click_through(True, reason="backend_presentation_pre_show")
+
+    assert calls.widget_attrs == [(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)]
+    assert calls.children_attrs == [True]
+    assert (Qt.WindowType.WindowStaysOnTopHint, True) in calls.window_flags
+    assert (Qt.WindowType.FramelessWindowHint, True) in calls.window_flags
+    assert (Qt.WindowType.Tool, False) in calls.window_flags
+    assert (Qt.WindowType.WindowDoesNotAcceptFocus, True) in calls.window_flags
+    assert calls.prepared == []
+    assert calls.applied == []
+    assert calls.set_transparent == []
+    assert calls.ensured == 0
+    assert calls.raised == 0
+    assert calls.logs[-1][1][1] == "backend_presentation_pre_show"
+    assert calls.logs[-1][1][2] == "applied"
+
+
+def test_click_through_applies_focus_safe_hint_for_gnome_helper_policy(monkeypatch):
+    controller, calls, _ = _build_controller(
+        monkeypatch,
+        is_wayland=True,
+        requires_focus_safe_flags=True,
+    )
+
+    controller.set_click_through(True, reason="gnome_helper")
+
+    assert (Qt.WindowType.Tool, False) in calls.window_flags
+    assert (Qt.WindowType.WindowDoesNotAcceptFocus, True) in calls.window_flags
+    assert calls.logs[-1][1][1] == "gnome_helper"
+    assert calls.logs[-1][1][3] == "applied"
 
 
 def test_reapply_current(monkeypatch):

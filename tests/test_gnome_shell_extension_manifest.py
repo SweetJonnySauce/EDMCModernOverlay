@@ -103,6 +103,22 @@ def test_extension_source_exposes_health_target_and_presentation_dbus_runtime() 
     assert "Meta.Window" not in source
 
 
+def test_extension_source_uses_displayconfig_monitor_inventory_with_legacy_fallback() -> None:
+    source = (HELPER_DIR / "extension.js").read_text(encoding="utf-8")
+
+    assert "org.gnome.Mutter.DisplayConfig" in source
+    assert "GetCurrentState" in source
+    assert "Gio.DBus.session.call_sync" in source
+    assert "DISPLAY_CONFIG_MONITOR_CACHE_TTL_US" in source
+    assert "_displayConfigMonitorForIndex" in source
+    assert "_parseDisplayConfigMonitors" in source
+    assert "_legacyMonitorForIndex" in source
+    assert "global.display.get_monitor_geometry" in source
+    assert "monitorRect" in source
+    assert "outputName" in source
+    assert "monitorScale" in source
+
+
 def test_protocol_bump_fixture_tracks_contract_review_triggers() -> None:
     fixture = json.loads(CONTRACT_FIXTURE.read_text(encoding="utf-8"))
 

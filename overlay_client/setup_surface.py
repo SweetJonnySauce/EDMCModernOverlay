@@ -18,6 +18,7 @@ from overlay_client.client_config import InitialClientSettings
 from overlay_client.controller_mode import ControllerModeProfile, ControllerModeTracker, ModeProfile
 from overlay_client.data_client import OverlayDataClient
 from overlay_client.backend import ProbeSource
+from overlay_client.backend.presentation_policy import BackendPresentationVisibilityState
 from overlay_client.backend.status import format_status_report_line
 from overlay_client.debug_config import DEBUG_CONFIG_ENABLED, DebugConfig
 from overlay_client.debug_cycle_overlay import CycleOverlayView, DebugOverlayView
@@ -151,6 +152,10 @@ class SetupSurfaceMixin:
         )
         self._last_client_backend_status_signature = _backend_status_signature(self._client_backend_status)
         self._last_backend_mismatch_signature: Optional[Tuple[str, str, str, str, bool]] = None
+        self._last_backend_presentation = None
+        self._last_backend_presentation_log = None
+        self._backend_presentation_visibility_state = BackendPresentationVisibilityState()
+        self._backend_presentation_content_suppressed: bool = False
         self._platform_controller = PlatformController(
             self,
             _CLIENT_LOGGER,
@@ -170,6 +175,7 @@ class SetupSurfaceMixin:
         self._visibility_helper = VisibilityHelper(log_fn=_CLIENT_LOGGER.debug)
         self._interaction_controller = InteractionController(
             is_wayland_fn=lambda: self._platform_controller.is_wayland_backend(),
+            requires_focus_safe_flags_fn=lambda: self._platform_controller.requires_focus_safe_overlay_flags(),
             log_fn=_CLIENT_LOGGER.debug,
             prepare_window_fn=lambda window: self._platform_controller.prepare_window(window),
             apply_click_through_fn=lambda transparent: self._platform_controller.apply_click_through(transparent),

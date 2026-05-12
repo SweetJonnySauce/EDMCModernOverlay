@@ -42,6 +42,7 @@ except Exception:  # pragma: no cover - lightweight stub path
                     "WindowStaysOnTopHint": 1,
                     "Tool": 2,
                     "FramelessWindowHint": 4,
+                    "WindowDoesNotAcceptFocus": 8,
                     "WindowTransparentForInput": object(),
                 },
             ),
@@ -62,13 +63,16 @@ from overlay_client.backend.bundles import (
 )
 from overlay_client.backend.bundles import _wayland_common
 from overlay_client.backend.consumers import (
+    BackendPresentationCycleResult,
     create_bundle_integration,
     create_bundle_tracker,
     derive_linux_backend_status,
     is_wayland_bundle,
     platform_label_for_bundle,
+    requires_focus_safe_overlay_flags,
     resolve_linux_bundle_from_status,
     resolve_tracker_fallback_bundle,
+    run_backend_presentation_cycle,
     uses_transient_parent,
 )
 from overlay_client.backend.contracts import (
@@ -78,11 +82,19 @@ from overlay_client.backend.contracts import (
     BackendFamily,
     BackendInstance,
     CapabilityClassification,
+    HelperKind,
     OperatingSystem,
     PlatformProbeResult,
     SessionType,
 )
-from overlay_client.backend.status import BackendSelectionStatus
+from overlay_client.backend.helper_ipc import (
+    HelperPresentationAction,
+    HelperPresentationRequest,
+    HelperPresentationState,
+    HelperPresentationStatus,
+    HelperRect,
+)
+from overlay_client.backend.status import BackendSelectionStatus, HelperCapabilityState
 from overlay_client.platform_integration import PlatformContext
 
 
@@ -348,6 +360,239 @@ def test_consumer_helper_allows_missing_tracker_for_generic_wayland_bundle():
     tracker = create_bundle_tracker(bundle, logger, title_hint="elite", monitor_provider=lambda: [])
 
     assert tracker is None
+
+
+class _FakeGnomePresentationResult:
+    def __init__(self) -> None:
+        rect = HelperRect(10, 20, 300, 200)
+        self.request = HelperPresentationRequest(
+            action=HelperPresentationAction.ATTACH,
+            target_token="meta:21",
+            content_rect=rect,
+        )
+        self.presentation_status = HelperPresentationStatus(
+            state=HelperPresentationState.APPLIED,
+            action=HelperPresentationAction.ATTACH,
+            target_token="meta:21",
+            overlay_token="meta:99",
+            requested_rect=rect,
+            applied_rect=rect,
+            rect_match=True,
+            placement=True,
+            chrome_free=True,
+            stacking=True,
+            click_through=True,
+            focus_safe=True,
+        )
+        self.should_show_overlay = True
+        self.target_found = True
+        self.target_status = type(
+            "TargetStatus",
+            (),
+            {
+                "target": type(
+                    "Target",
+                    (),
+                    {
+                        "has_focus": True,
+                        "showing_on_workspace": True,
+                        "minimized": False,
+                    },
+                )()
+            },
+        )()
+
+    def to_log_payload(self) -> dict[str, object]:
+        return {
+            "helper_health": "healthy",
+            "target_state": "target_found",
+            "target_token": "meta:21",
+            "target_sequence": 3,
+            "rect_source": "content_rect",
+            "requested_rect": {"x": 10, "y": 20, "width": 300, "height": 200},
+            "presentation_state": "presentation_applied",
+            "applied_rect": {"x": 10, "y": 20, "width": 300, "height": 200},
+            "rect_match": True,
+            "rect_delta": [0, 0, 0, 0],
+            "presentation_reasons": [],
+            "attempts": 1,
+            "retry_reasons": [],
+            "legacy_geometry_policy": "ignored_helper_source_of_truth",
+        }
+
+
+def test_backend_presentation_cycle_wraps_gnome_helper_result_when_helper_available():
+    status = BackendSelectionStatus(
+        probe=PlatformProbeResult(
+            operating_system=OperatingSystem.LINUX,
+            session_type=SessionType.WAYLAND,
+            qt_platform_name="wayland",
+            compositor="gnome-shell",
+        ),
+        selected_backend=BackendDescriptor(
+            BackendFamily.NATIVE_WAYLAND,
+            BackendInstance.GNOME_SHELL_WAYLAND,
+        ),
+        classification=CapabilityClassification.DEGRADED_OVERLAY,
+        helper_states=(
+            HelperCapabilityState(
+                helper=HelperKind.GNOME_SHELL_EXTENSION,
+                required=True,
+                installed=True,
+                enabled=True,
+                approved=True,
+            ),
+        ),
+    )
+    calls: list[bool] = []
+
+    def fake_runner(*, standalone_mode: bool = False) -> _FakeGnomePresentationResult:
+        calls.append(standalone_mode)
+        return _FakeGnomePresentationResult()
+
+    result = run_backend_presentation_cycle(status, standalone_mode=False, gnome_runner=fake_runner)
+
+    assert isinstance(result, BackendPresentationCycleResult)
+    assert calls == [False]
+    assert result.should_show_overlay is True
+    assert result.scale_size == (300, 200)
+    assert result.prime_rect == (10, 20, 300, 200)
+    assert result.prime_rect_source == "applied_rect"
+    assert result.diagnostics["prime_rect"] == {"x": 10, "y": 20, "width": 300, "height": 200}
+    assert result.diagnostics["prime_rect_source"] == "applied_rect"
+    assert result.diagnostics["target_token"] == "meta:21"
+    assert result.visibility_snapshot.target_available is True
+    assert result.visibility_snapshot.target_has_focus is True
+    assert result.visibility_snapshot.target_showing_on_workspace is True
+    assert result.visibility_snapshot.presentation_attachable is True
+    assert result.visibility_snapshot.overlay_window_found is True
+    assert result.visibility_snapshot.presentation_rect_match is True
+
+
+def test_focus_safe_overlay_flags_are_required_for_available_gnome_helper():
+    status = BackendSelectionStatus(
+        probe=PlatformProbeResult(
+            operating_system=OperatingSystem.LINUX,
+            session_type=SessionType.WAYLAND,
+            qt_platform_name="wayland",
+            compositor="gnome-shell",
+        ),
+        selected_backend=BackendDescriptor(
+            BackendFamily.NATIVE_WAYLAND,
+            BackendInstance.GNOME_SHELL_WAYLAND,
+        ),
+        classification=CapabilityClassification.DEGRADED_OVERLAY,
+        helper_states=(
+            HelperCapabilityState(
+                helper=HelperKind.GNOME_SHELL_EXTENSION,
+                required=True,
+                installed=True,
+                enabled=True,
+                approved=True,
+            ),
+        ),
+    )
+
+    assert requires_focus_safe_overlay_flags(status) is True
+
+
+def test_focus_safe_overlay_flags_are_not_required_without_available_gnome_helper():
+    status = BackendSelectionStatus(
+        probe=PlatformProbeResult(
+            operating_system=OperatingSystem.LINUX,
+            session_type=SessionType.WAYLAND,
+            qt_platform_name="wayland",
+            compositor="gnome-shell",
+        ),
+        selected_backend=BackendDescriptor(
+            BackendFamily.NATIVE_WAYLAND,
+            BackendInstance.GNOME_SHELL_WAYLAND,
+        ),
+        classification=CapabilityClassification.DEGRADED_OVERLAY,
+        helper_states=(
+            HelperCapabilityState(
+                helper=HelperKind.GNOME_SHELL_EXTENSION,
+                required=True,
+                installed=True,
+                enabled=False,
+                approved=True,
+            ),
+        ),
+    )
+
+    assert requires_focus_safe_overlay_flags(status) is False
+    assert requires_focus_safe_overlay_flags(None) is False
+
+
+def test_backend_presentation_cycle_prime_rect_falls_back_to_requested_rect_on_mismatch():
+    status = BackendSelectionStatus(
+        probe=PlatformProbeResult(
+            operating_system=OperatingSystem.LINUX,
+            session_type=SessionType.WAYLAND,
+            qt_platform_name="wayland",
+            compositor="gnome-shell",
+        ),
+        selected_backend=BackendDescriptor(
+            BackendFamily.NATIVE_WAYLAND,
+            BackendInstance.GNOME_SHELL_WAYLAND,
+        ),
+        classification=CapabilityClassification.DEGRADED_OVERLAY,
+        helper_states=(
+            HelperCapabilityState(
+                helper=HelperKind.GNOME_SHELL_EXTENSION,
+                required=True,
+                installed=True,
+                enabled=True,
+                approved=True,
+            ),
+        ),
+    )
+    requested = HelperRect(431, 167, 1440, 997)
+    applied = HelperRect(0, 29, 46, 173)
+    fake_result = _FakeGnomePresentationResult()
+    fake_result.request = HelperPresentationRequest(
+        action=HelperPresentationAction.ATTACH,
+        target_token="meta:21",
+        content_rect=requested,
+    )
+    fake_result.presentation_status = HelperPresentationStatus(
+        state=HelperPresentationState.DEGRADED,
+        action=HelperPresentationAction.ATTACH,
+        target_token="meta:21",
+        overlay_token="meta:99",
+        requested_rect=requested,
+        applied_rect=applied,
+        rect_match=False,
+        degrade_reasons=("applied_rect_mismatch",),
+    )
+
+    result = run_backend_presentation_cycle(status, gnome_runner=lambda **_: fake_result)
+
+    assert result is not None
+    assert result.prime_rect == (431, 167, 1440, 997)
+    assert result.prime_rect_source == "requested_rect"
+    assert result.visibility_snapshot.overlay_window_found is True
+    assert result.visibility_snapshot.presentation_rect_match is False
+
+
+def test_backend_presentation_cycle_returns_none_for_non_gnome_backend():
+    status = BackendSelectionStatus(
+        probe=PlatformProbeResult(
+            operating_system=OperatingSystem.LINUX,
+            session_type=SessionType.WAYLAND,
+            qt_platform_name="wayland",
+            compositor="kwin",
+        ),
+        selected_backend=BackendDescriptor(
+            BackendFamily.NATIVE_WAYLAND,
+            BackendInstance.KWIN_WAYLAND,
+        ),
+        classification=CapabilityClassification.DEGRADED_OVERLAY,
+    )
+
+    result = run_backend_presentation_cycle(status, gnome_runner=lambda **_: _FakeGnomePresentationResult())
+
+    assert result is None
 
 
 def test_derive_linux_backend_status_preserves_xwayland_compat_identity_for_wayland_xcb_path():

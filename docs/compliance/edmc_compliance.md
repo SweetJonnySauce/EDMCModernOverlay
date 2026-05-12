@@ -49,6 +49,12 @@ These are EDMC best practices. Evaluate the code to make sure it's adhering to t
 - Validate dependency handling: venv for bundled packages, copied dependencies when needed, and debug HTTP routing via `config.debug_senders`.
 - Monitor EDMC releases/discussions: subscribe to `EDCD/EDMarketConnector` GitHub Releases and Discussions; check weekly and before shipping a plugin release, logging any plugin-impacting changes here.
   - PRs must tick the compliance items in `.github/pull_request_template.md`.
+- Check the `fix219` backend architecture boundary for overlay-client runtime work:
+  - Generic follow/runtime surfaces such as `overlay_client/follow_surface.py`, `overlay_client/setup_surface.py`, and `overlay_client/platform_integration.py` must not import compositor-specific helper/presentation implementations directly.
+  - Generic follow/runtime surfaces must not dispatch compositor-specific presentation behavior by checking raw backend/helper enums such as `BackendInstance.GNOME_SHELL_WAYLAND` or `HelperKind.GNOME_SHELL_EXTENSION`.
+  - Compositor-specific runtime presentation, attachment, input policy, and helper-mediated behavior must be owned by backend bundle/consumer modules under `overlay_client/backend/`.
+  - Backend helper message validation may remain in `overlay_client/backend/helper_ipc.py`; diagnostic, installer, and status surfaces may mention helpers when they are not making runtime presentation/follow decisions.
+  - For GNOME helper work, run the project boundary/static tests when available, and manually inspect imports if those tests are missing.
 
 ## How to pass: Stay aligned with EDMC core
 Use this evidence checklist for each release when deciding the `Stay aligned with EDMC core` status.
