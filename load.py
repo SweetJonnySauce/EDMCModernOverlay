@@ -3416,6 +3416,15 @@ class _PluginRuntime:
             return repr(payload)
 
     def _log_payload(self, payload: Mapping[str, Any]) -> None:
+        logger = self._payload_logger if self._payload_log_handler is not None else LOGGER
+        if not _edmc_debug_logging_active():
+            return
+        self._load_payload_debug_config()
+        if not self._payload_logging_enabled:
+            return
+        plugin_name, payload_id = self._plugin_name_for_payload(payload)
+        if self._payload_filter_excludes and plugin_name and plugin_name.lower() in self._payload_filter_excludes:
+            return
         event: Optional[str] = None
         if isinstance(payload, Mapping):
             raw_event = payload.get("event")
@@ -3425,13 +3434,6 @@ class _PluginRuntime:
             serialised = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         except (TypeError, ValueError):
             serialised = repr(payload)
-        logger = self._payload_logger if self._payload_log_handler is not None else LOGGER
-        self._load_payload_debug_config()
-        if not self._payload_logging_enabled or not _diagnostic_logging_enabled():
-            return
-        plugin_name, payload_id = self._plugin_name_for_payload(payload)
-        if self._payload_filter_excludes and plugin_name and plugin_name.lower() in self._payload_filter_excludes:
-            return
         log_method = logger.debug
         if event:
             if plugin_name:

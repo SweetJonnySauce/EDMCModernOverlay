@@ -400,18 +400,24 @@ class _PrefStub:
         self.save_calls += 1
 
 
-def test_log_payload_skips_when_not_diagnostic(monkeypatch, tmp_path):
+def _runtime_with_payload_logger(tmp_path: Path, logger_suffix: str):
     runtime = _runtime_for_debug_json(tmp_path)
     runtime._preferences = SimpleNamespace(log_payloads=True)
-    test_logger = logging.getLogger("EDMCModernOverlay.payloads.test.gated")
+    test_logger = logging.getLogger(f"EDMCModernOverlay.payloads.test.{logger_suffix}")
     test_logger.handlers.clear()
     test_logger.setLevel(logging.DEBUG)
     handler = _ListHandler()
     test_logger.addHandler(handler)
     runtime._payload_log_handler = handler
     runtime._payload_logger = test_logger
+    return runtime, test_logger, handler
+
+
+def test_log_payload_skips_when_edmc_not_debug_even_with_diagnostic_override(monkeypatch, tmp_path):
+    runtime, test_logger, handler = _runtime_with_payload_logger(tmp_path, "edmc_not_debug")
     monkeypatch.setattr(load._PluginRuntime, "_configure_payload_logger", lambda self: None)
-    monkeypatch.setattr(load, "_diagnostic_logging_enabled", lambda: False)
+    monkeypatch.setattr(load, "_diagnostic_logging_enabled", lambda: True)
+    monkeypatch.setattr(load, "_edmc_debug_logging_active", lambda: False)
     runtime._payload_logging_enabled = True
     runtime._log_payload({"event": "TestEvent"})
     assert handler.records == []
@@ -419,18 +425,41 @@ def test_log_payload_skips_when_not_diagnostic(monkeypatch, tmp_path):
 
 
 def test_log_payload_uses_debug_level(monkeypatch, tmp_path):
-    runtime = _runtime_for_debug_json(tmp_path)
-    runtime._preferences = SimpleNamespace(log_payloads=True)
-    test_logger = logging.getLogger("EDMCModernOverlay.payloads.test.debug")
-    test_logger.handlers.clear()
-    test_logger.setLevel(logging.DEBUG)
-    handler = _ListHandler()
-    test_logger.addHandler(handler)
-    runtime._payload_log_handler = handler
-    runtime._payload_logger = test_logger
+    runtime, test_logger, handler = _runtime_with_payload_logger(tmp_path, "debug")
     monkeypatch.setattr(load._PluginRuntime, "_configure_payload_logger", lambda self: None)
-    monkeypatch.setattr(load, "_diagnostic_logging_enabled", lambda: True)
+    monkeypatch.setattr(load._PluginRuntime, "_load_payload_debug_config", lambda self: None)
+    monkeypatch.setattr(load, "_edmc_debug_logging_active", lambda: True)
     runtime._payload_logging_enabled = True
     runtime._log_payload({"event": "TestEvent"})
     assert any("Overlay payload" in rec.getMessage() and rec.levelno == logging.DEBUG for rec in handler.records)
+    test_logger.removeHandler(handler)
+
+
+def test_log_payload_does_not_serialize_when_edmc_not_debug(monkeypatch, tmp_path):
+    runtime, test_logger, handler = _runtime_with_payload_logger(tmp_path, "no_serialise")
+    monkeypatch.setattr(load, "_edmc_debug_logging_active", lambda: False)
+    runtime._payload_logging_enabled = True
+
+    def fail_json_dumps(*_args, **_kwargs):
+        raise AssertionError("payload should not be serialised when EDMC is not DEBUG")
+
+    monkeypatch.setattr(load.json, "dumps", fail_json_dumps)
+    runtime._log_payload({"event": "TestEvent"})
+    assert handler.records == []
+    test_logger.removeHandler(handler)
+
+
+def test_log_payload_excluded_plugin_does_not_serialize(monkeypatch, tmp_path):
+    runtime, test_logger, handler = _runtime_with_payload_logger(tmp_path, "excluded")
+    monkeypatch.setattr(load._PluginRuntime, "_load_payload_debug_config", lambda self: None)
+    monkeypatch.setattr(load, "_edmc_debug_logging_active", lambda: True)
+    runtime._payload_logging_enabled = True
+    runtime._payload_filter_excludes = {"alpha"}
+
+    def fail_json_dumps(*_args, **_kwargs):
+        raise AssertionError("excluded payload should not be serialised")
+
+    monkeypatch.setattr(load.json, "dumps", fail_json_dumps)
+    runtime._log_payload({"event": "TestEvent", "plugin": "Alpha"})
+    assert handler.records == []
     test_logger.removeHandler(handler)

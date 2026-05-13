@@ -307,7 +307,7 @@ Record:
 | 6A | Mapped suppression for GNOME helper-mode focus loss | No-Flash Manual Validation Passed; Workspace Deferred |
 | 6B | Frame fallback monitor-bounds clamp | Manual Monitor-Bounds Passed; 6A Recheck Passed |
 | 7 | Manual validation matrix and true-overlay gate review | In Progress |
-| 8 | Performance stabilization addendum for GNOME helper presentation churn | Off Baseline Captured; Manual Validation Pending |
+| 8 | Performance stabilization addendum for GNOME helper presentation churn | Latest Baseline Captured; Manual Validation Pending; Payload Gate Headless Tests Passed |
 
 ## Phase Details
 
@@ -1121,14 +1121,28 @@ Expected pass for `true_overlay` eligibility: target payload exposes valid `cont
 - Do not add producer-specific behavior for `BGS-Tally`; treat it as a generic high-frequency payload producer case.
 - Keep support diagnostics available through explicit dev/debug settings.
 
+#### Phase 8 Payload Logging Gate Addendum
+- Narrow addendum started on 2026-05-13 after the presentation-churn implementation: gate overlay payload body logs behind the EDMC effective log level.
+- Locked decisions:
+- Payload body logging requires both the existing payload logging preference/debug config and EDMC `DEBUG` logging.
+- Dev override alone must not enable payload body logging.
+- Existing defaults remain unchanged.
+- Scope is only payload body logging and avoiding payload serialization when logs will not emit.
+- Out of scope: payload delivery, payload shape, BGS-Tally behavior, spam detection, presentation logs, generic payload dedupe, GNOME helper presentation behavior, and support-status wording.
+- Touch point: `load.py` `_PluginRuntime._log_payload`.
+- Expected implementation: return before payload serialization unless `_edmc_debug_logging_active()` is true; when EDMC is `DEBUG`, call `_load_payload_debug_config()`, require `_payload_logging_enabled`, keep plugin exclusions before serialization, and preserve the existing emitted log format when logging is allowed.
+- Test type selection: unit tests are sufficient because the change is pure logging-gate behavior with injected helper functions and logger handlers. No manual GNOME validation is required because presentation/runtime placement behavior is not touched.
+- Targeted tests planned: EDMC non-DEBUG suppresses payload body logs even when diagnostics/dev override is active; EDMC DEBUG plus enabled payload logging emits at DEBUG; non-DEBUG avoids payload serialization; excluded plugin payloads avoid serialization/logging.
+
 | Stage | Description | Status |
 | --- | --- | --- |
-| 8.1 | Add performance instrumentation and baseline commands for EDMC, overlay client, GNOME Shell, helper cycle counts, skipped cycles, and presentation apply volume | Pre/Post Baselines Captured |
+| 8.1 | Add performance instrumentation and baseline commands for EDMC, overlay client, GNOME Shell, helper cycle counts, skipped cycles, and presentation apply volume | Pre/Post/Off/Latest Baselines Captured |
 | 8.2 | Add backend-owned presentation signature/freshness model and tests for safe no-op `ApplyPresentation` suppression | Headless Tests Passed |
 | 8.3 | Cache helper health compatibility checks with bounded freshness, jitter, and tests | Headless Tests Passed |
 | 8.4 | Add suppressed-state polling/throttling that keeps hard target changes fast and tests the policy | Headless Tests Passed |
 | 8.5 | Add GNOME Shell extension no-op guards for unchanged move/resize/raise work | Headless Tests Passed |
 | 8.6 | Run targeted presentation performance validation plus Phase 7 regression checks and record before/after evidence | Off Baseline Captured; Manual GNOME Validation Pending |
+| 8.7 | Gate payload body logging behind EDMC DEBUG and avoid serialization when logs will not emit | Headless Tests Passed |
 
 #### Phase 8 Implementation Plan
 - Touch points started on 2026-05-13: `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py` for backend-owned presentation signature, freshness windows, suppressed-state target polling throttle, and helper health cache; `overlay_client/backend/consumers.py` and `overlay_client/follow_surface.py` only for backend-owned previous visibility-action wiring; `helpers/gnome_shell_extension/extension.js` for the Shell-side unchanged-frame no-op guard.
@@ -1235,14 +1249,79 @@ pidstat -p 3533 -dur 1 10
 - Result: ten-second GNOME Shell average with EDMC/overlay/helper off was `12.20%` CPU, RSS about `630531 KB`, no read/write IO, and no major faults. The GNOME Shell off-baseline was higher than the immediately prior overlay-on `pidstat` sample (`8.70%`), so the current GNOME Shell CPU is dominated by broader desktop/game activity and short-window sampling noise rather than the overlay alone.
 - Interpretation: shutting down EDMC and removing the helper eliminates the overlay client and helper service, but it does not make the desktop idle. Elite, Firefox RDD, OneDrive, GNOME Shell, Steam, and VS Code remain substantial active consumers. Use this as a control point: Phase 8 reduced overlay presentation work, but process-level GNOME Shell CPU is not a reliable single metric while the rest of the desktop load remains this high.
 
+#### Phase 8 Baseline Comparison Table
+| Capture | State | Host process snapshot | 10s `pidstat` average | Presentation cadence | Interpretation |
+| --- | --- | --- | --- | --- | --- |
+| 2026-05-13 ~20:22 UTC | Pre-Phase 8, EDMC/overlay/helper on | Elite `312%`, Firefox RDD `89.1%`, OneDrive `59.1%`, Firefox `18.4%`, GNOME Shell `9.9%`, EDMC `9.1%`, overlay client `3.6%` | GNOME Shell `6.40%`, EDMC `7.40%`, overlay client `3.00%`; low IO | `183` sequence intervals over `91.5s`, about `2.0` presentation cycles/sec while stably mapped-suppressed | Confirms CPU/event-loop/compositor churn with repeated no-op presentation work. |
+| 2026-05-13 ~21:03-21:08 UTC | Post Phase 8 presentation changes, EDMC/overlay/helper on | Elite `336%`, Firefox RDD `79.6%`, OneDrive `55.2%`, Firefox `17.1%`, GNOME Shell `9.5%`, EDMC `9.4%`, overlay client `3.2%` | GNOME Shell `8.70%`, EDMC `7.80%`, overlay client `2.80%`; low IO | `248` diagnostics, `194` skipped (`78%`), `54` apply attempts over about `123.2s`; target polls about `0.78`/sec, apply attempts about `0.44`/sec | Backend no-op suppression and suppressed polling throttle are active; process CPU remains noisy under heavy desktop/game load. |
+| 2026-05-13 ~21:13 UTC | EDMC shut down, helper uninstalled | EDMC, overlay client, and helper absent; Elite `337%`, Firefox RDD `78.9%`, OneDrive `54.9%`, Firefox `17.0%`, GNOME Shell `9.4%` | GNOME Shell only: `12.20%`; no IO | Not applicable | Control point shows the desktop is not idle without the overlay; GNOME Shell CPU alone is not a clean overlay metric. |
+| 2026-05-13 ~21:35 UTC | Latest sample after Phase 8 presentation changes and payload logging gate, EDMC/overlay/helper on | Elite `339%`, Firefox RDD `75.1%`, OneDrive `53.6%`, Firefox `16.6%`, EDMC `12.4%`, GNOME Shell `9.5%`, overlay client `3.6%`; helper health `healthy`, protocol `3` | GNOME Shell `5.20%`, EDMC `9.20%`, overlay client `3.40%`; RSS about `635684 KB`, `213616 KB`, and `91862 KB`; write IO `0.00`, `17.60`, and `2.40 kB/s` respectively | Last `500` log lines: `309` diagnostics over about `154.0s`, `239` skipped (`77%`), `183` suppressed-throttle skips, `56` fresh-matching skips, `70` apply attempts; apply attempts about `0.45`/sec | Current runtime still has reduced apply volume. Payload logging gate does not change presentation cadence; EDMC CPU remains variable under active game/desktop load. |
+
+#### Phase 8 Latest Baseline Capture
+- Captured on 2026-05-13 at roughly 21:35 UTC after the Phase 8 presentation-churn implementation and the payload logging DEBUG gate were present in the working tree. EDMC, overlay client, and the GNOME Shell helper were running.
+- Initial sandboxed process sampling saw only the sandbox PID namespace and was discarded. The usable host process sampling was rerun outside the sandbox.
+- Command:
+```bash
+pgrep -af "EDMarketConnector|overlay_client|org.edmc.ModernOverlay|gnome-shell"
+```
+- Result: GNOME Shell PID `3533`, EDMC PID `172685`, and overlay client PID `172721` were running. The helper is hosted inside GNOME Shell rather than a separate process.
+- Command:
+```bash
+gdbus call --session --dest org.edmc.ModernOverlay.Helper --object-path /org/edmc/ModernOverlay/Helper --method org.edmc.ModernOverlay.Helper.GetHealth
+```
+- Result: helper returned `status=healthy`, `helper_kind=gnome_shell_extension`, `helper_version=1.0.0`, `helper_protocol=3`, and the expected health/target/presentation capabilities.
+- Command:
+```bash
+ps -eo pid,ppid,stat,pcpu,pmem,rss,comm,args --sort=-pcpu | head -n 40
+```
+- Result: top host consumers included Elite Dangerous at `339%` CPU, Firefox RDD at `75.1%`, OneDrive at `53.6%`, Firefox at `16.6%`, EDMC at `12.4%`, GNOME Shell at `9.5%`, and overlay client at `3.6%`.
+- Command:
+```bash
+pidstat -p 3533,172685,172721 -dur 1 10
+```
+- Result: ten-second average was GNOME Shell `5.20%` CPU, EDMC `9.20%` CPU, and overlay client `3.40%` CPU. RSS was roughly `635684 KB` for GNOME Shell, `213616 KB` for EDMC, and `91862 KB` for the overlay client. Average write IO stayed low: GNOME Shell `0.00 kB/s`, EDMC `17.60 kB/s`, and overlay client `2.40 kB/s`, with no major faults.
+- Command:
+```bash
+tail -n 500 /home/jon/edmc-logs/EDMCModernOverlay/overlay_client.log | perl -ne '
+if (/GNOME helper presentation/) {
+    $total++;
+    $skipped++ if /presentation_skipped=True/;
+    $throttle++ if /skip_reason=suppressed_poll_throttle/;
+    $fresh++ if /skip_reason=fresh_matching_presentation/;
+    $applies++ if /attempts=1/;
+    if (!$first) { $first = substr($_, 0, 23); /seq=(\d+)/ and $firstseq = $1; }
+    $last = substr($_, 0, 23); /seq=(\d+)/ and $lastseq = $1;
+}
+END { print "total=$total skipped=$skipped throttle=$throttle fresh=$fresh attempts1=$applies first=$first firstseq=$firstseq last=$last lastseq=$lastseq\n"; }
+'
+```
+- Result: `total=309 skipped=239 throttle=183 fresh=56 attempts1=70 first=2026-05-13 21:33:01.984 firstseq=11 last=2026-05-13 21:35:35.967 lastseq=136`.
+- Interpretation: the runtime still emits presentation diagnostics at roughly the existing timer cadence, but `239/309` recent diagnostics were no-op skipped and only `70/309` had `attempts=1`. Across about `154s`, apply attempts ran at about `0.45`/sec, close to the earlier post-Phase 8 sample and far below the pre-Phase 8 steady `2.0` presentation cycles/sec. The payload logging gate is not expected to alter presentation cadence; it reduces payload body logging and serialization cost when EDMC is not at `DEBUG`.
+
 #### Phase 8 Execution Summary
 - Stage 8.2: Completed for headless coverage. Added backend-owned `GnomeHelperPresentationSignature` and runtime state that suppresses `ApplyPresentation` only when the target token, selected requested rect after clamp, monitor rect, rect source, previous visibility action, target focus/workspace/minimized/fullscreen flags, overlay title/class, renderer, tolerance, required gates, standalone mode, and expected degradation reasons are unchanged. Suppression requires a fresh matching prior presentation and does not apply after applied-rect mismatch, unexpected degradation, unsupported features, stale status, missing target, hidden target, or request changes.
 - Stage 8.3: Completed for headless coverage. Healthy compatible helper status is cached for `5.0s` plus bounded jitter up to `0.5s`; explicit unhealthy/error results clear presentation state and fail closed. This does not replace the current `gdbus` transport.
 - Stage 8.4: Completed for headless coverage. Stable `mapped_suppressed` state throttles redundant target polling to about `1.5s` only while the previous matching presentation remains fresh; focus return, rect changes, monitor changes, target changes, and stale status still force the normal target/presentation path.
 - Stage 8.5: Completed for headless coverage. The GNOME Shell extension now reads the current overlay frame and skips redundant `move_resize_frame(...)` when it already matches the requested rect within `rect_tolerance`. `make_above()` remains in place because stacking proof is not yet cheap or explicit.
 - Stage 8.6: Headless regression passed. Manual GNOME performance validation remains pending after helper reinstall/reload and EDMC restart. Support wording remains degraded/experimental; `frame_rect_fallback` still blocks `true_overlay`.
+- Stage 8.7: Completed for headless coverage. `_PluginRuntime._log_payload` now requires EDMC `DEBUG` via `_edmc_debug_logging_active()` before payload body logging can emit. The existing payload logging preference/debug config remains an additional enable switch, but dev override alone no longer unlocks payload body logs. Payload and legacy raw serialization now happens only after the EDMC DEBUG gate, payload logging enablement, and plugin-exclusion checks pass. Existing payload delivery, payload shape, spam detection, presentation logs, GNOME helper behavior, BGS-Tally behavior, generic dedupe, and support wording were not changed.
 
 #### Tests Run For Phase 8
+- Command:
+```bash
+python3 -m py_compile load.py tests/test_logging_and_version_helper.py
+```
+- Result: passed.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest tests/test_logging_and_version_helper.py -k log_payload
+```
+- Result: passed; `4 passed`, `30 deselected`.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest tests/test_logging_and_version_helper.py
+```
+- Result: passed; `34 passed`.
 - Command:
 ```bash
 python3 -m py_compile overlay_client/backend/bundles/_gnome_shell_helper_presentation.py overlay_client/backend/consumers.py overlay_client/follow_surface.py
@@ -1262,7 +1341,7 @@ overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_pres
 ```bash
 make check
 ```
-- Result: passed. Ruff passed, mypy passed, and `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest` passed with `981 passed`, `21 skipped`.
+- Result: passed. Ruff passed, mypy passed, and `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest` passed with `983 passed`, `21 skipped`.
 
 #### Phase 8 Manual GNOME Validation Pending
 - Reinstall/reload the GNOME Shell helper extension and restart EDMC so the extension no-op guard and backend cadence changes are both live.
