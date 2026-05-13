@@ -307,7 +307,7 @@ Record:
 | 6A | Mapped suppression for GNOME helper-mode focus loss | No-Flash Manual Validation Passed; Workspace Deferred |
 | 6B | Frame fallback monitor-bounds clamp | Manual Monitor-Bounds Passed; 6A Recheck Passed |
 | 7 | Manual validation matrix and true-overlay gate review | In Progress |
-| 8 | Performance stabilization addendum for GNOME helper presentation churn | Phase 8.9 Headless Tests Passed; Manual Validation Pending |
+| 8 | Performance stabilization addendum for GNOME helper presentation churn | Phase 8.9 Manual Pause Validation Passed; Broader GNOME Regression Pending |
 
 ## Phase Details
 
@@ -1145,7 +1145,7 @@ Expected pass for `true_overlay` eligibility: target payload exposes valid `cont
 | 8.6 | Run targeted presentation performance validation plus Phase 7 regression checks and record before/after evidence | Off Baseline Captured; Manual GNOME Validation Pending |
 | 8.7 | Gate payload body logging behind EDMC DEBUG and avoid serialization when logs will not emit | Headless Tests Passed |
 | 8.8 | Replace timed fresh-window `ApplyPresentation` refreshes with event-driven apply after a matching successful signature | Headless Tests Passed |
-| 8.9 | Remove remaining stable-state target-poll and Shell monitor-lookup pauses | Headless Tests Passed; Manual Validation Pending |
+| 8.9 | Remove remaining stable-state target-poll and Shell monitor-lookup pauses | Manual Pause Validation Passed |
 
 #### Phase 8 Implementation Plan
 - Touch points started on 2026-05-13: `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py` for backend-owned presentation signature, freshness windows, suppressed-state target polling throttle, and helper health cache; `overlay_client/backend/consumers.py` and `overlay_client/follow_surface.py` only for backend-owned previous visibility-action wiring; `helpers/gnome_shell_extension/extension.js` for the Shell-side unchanged-frame no-op guard.
@@ -1402,7 +1402,14 @@ for i in $(seq 1 20); do
 done
 ```
 - Result: all `20` direct `GetTargetState` calls completed in `8-10 ms` after rerunning outside the sandbox DBus restriction.
-- Interpretation: the recurring `~250 ms` DisplayConfig stalls observed before Phase 8.9 did not reproduce after the helper restart. This supports the hot-path monitor-lookup fix. Manual user observation is still needed to confirm whether the visible two-second screen pauses are gone.
+- Interpretation: the recurring `~250 ms` DisplayConfig stalls observed before Phase 8.9 did not reproduce after the helper restart. This supports the hot-path monitor-lookup fix.
+
+#### Phase 8.9 Manual Pause Validation
+- Recorded on 2026-05-13 after the Phase 8.9 backend and Shell helper changes were running.
+- User observation: system performance issues appear to have gone away.
+- Result: passed for the Phase 8.9 pause/performance target. The prior user-visible screen pause every few seconds was no longer observed after the stable target-poll throttle fix and the hot-path DisplayConfig avoidance.
+- Supporting evidence: the fresh Phase 8.9 baseline showed `198/200` stable presentation diagnostics skipped, `126/200` cycles target-poll-throttled, only `2/200` real `ApplyPresentation` attempts, and direct `GetTargetState` timing at `8-10 ms` for all `20` calls.
+- Residual scope: this validates the performance/pause fix only. It does not change support wording, does not claim `true_overlay`, and does not close broader Phase 7/Phase 8 GNOME behavior checks such as move/resize, click-through, focus return, target loss/reacquire, and 1440-height clamp regression rechecks.
 
 #### Phase 8 Pause Evidence And Event-Driven Apply Follow-Up
 - User reported on 2026-05-13 that the GNOME helper path still causes screen pauses every few seconds.
@@ -1430,7 +1437,7 @@ done
 - Stage 8.6: Headless regression passed. Manual GNOME performance validation remains pending after helper reinstall/reload and EDMC restart. Support wording remains degraded/experimental; `frame_rect_fallback` still blocks `true_overlay`.
 - Stage 8.7: Completed for headless coverage. `_PluginRuntime._log_payload` now requires EDMC `DEBUG` via `_edmc_debug_logging_active()` before payload body logging can emit. The existing payload logging preference/debug config remains an additional enable switch, but dev override alone no longer unlocks payload body logs. Payload and legacy raw serialization now happens only after the EDMC DEBUG gate, payload logging enablement, and plugin-exclusion checks pass. Existing payload delivery, payload shape, spam detection, presentation logs, GNOME helper behavior, BGS-Tally behavior, generic dedupe, and support wording were not changed.
 - Stage 8.8: Completed for headless coverage. The backend no-op apply policy now skips `ApplyPresentation` indefinitely for an unchanged signature after a previous matching successful apply; elapsed time beyond the old `1.0s` focused and `2.0s` suppressed windows no longer forces a compositor-facing reapply. Target polling throttle/freshness behavior remains in place for stable `mapped_suppressed` polling, health refresh alone does not cause reapply, and hard signature changes or previous applied-rect mismatch still force apply. Manual GNOME validation remains pending to confirm the every-few-seconds pause is gone or materially reduced.
-- Stage 8.9: Completed for headless coverage. Stable `mapped_suppressed` target-poll throttling now depends on the next target-poll deadline and a previous matching successful presentation, not the old short presentation freshness/stale window. This prevents elapsed time beyond the old `2s` window from forcing `GetTargetState` on every follow tick. The GNOME Shell helper now prefers local legacy monitor geometry before falling back to synchronous DisplayConfig lookup, so the `GetTargetState` hot path should avoid recurring `250 ms` DisplayConfig stalls when GNOME exposes monitor geometry locally. Added and documented `./scripts/dev_gnome_helper.sh reload` for manual helper lifecycle validation; `install_linux.sh` intentionally has no reload action.
+- Stage 8.9: Completed for headless and manual pause validation. Stable `mapped_suppressed` target-poll throttling now depends on the next target-poll deadline and a previous matching successful presentation, not the old short presentation freshness/stale window. This prevents elapsed time beyond the old `2s` window from forcing `GetTargetState` on every follow tick. The GNOME Shell helper now prefers local legacy monitor geometry before falling back to synchronous DisplayConfig lookup, so the `GetTargetState` hot path should avoid recurring `250 ms` DisplayConfig stalls when GNOME exposes monitor geometry locally. Added and documented `./scripts/dev_gnome_helper.sh reload` for manual helper lifecycle validation; `install_linux.sh` intentionally has no reload action. User reported on 2026-05-13 that the system performance issues appear to have gone away.
 
 #### Tests Run For Phase 8
 - Command:
@@ -1514,14 +1521,13 @@ make check
 ```
 - Result: passed. Ruff passed, mypy passed, and `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest` passed with `991 passed`, `21 skipped`.
 
-#### Phase 8 Manual GNOME Validation Pending
+#### Phase 8 Remaining Manual GNOME Validation
 - Reinstall/reload the GNOME Shell helper extension and restart EDMC so the extension monitor-lookup change and backend cadence changes are both live. Use `./scripts/dev_gnome_helper.sh reload` manually; this command is documented but was not run during headless validation.
 - Repeat the Phase 8 validation commands during stable focused/visible and stable `mapped_suppressed` states.
 - Expected log evidence: repeated stable cycles should show `presentation_skipped=True` with `skip_reason=fresh_matching_presentation` or `skip_reason=suppressed_poll_throttle`, reduced `attempts=1` apply volume, and unchanged requested/applied rect behavior for moves, resizes, focus return, target loss/reacquire, and 1440-height monitor clamp.
 - Phase 8.8-specific evidence: in stable focused and stable `mapped_suppressed` states, unchanged signatures should no longer show periodic real `attempts=1` applies after the old `1.0s`/`2.0s` windows. `target_poll_skipped=True` may still appear during suppressed throttling, and `skip_reason=fresh_matching_presentation` should appear after target polls confirm the unchanged signature.
-- Phase 8.9-specific evidence: stable `mapped_suppressed` logs should show `target_poll_skipped=True` between bounded target polls, and direct `GetTargetState` timing should no longer show recurring `~250 ms` calls when the helper source has been reloaded.
+- Phase 8.9-specific pause validation passed on 2026-05-13: user reported that the system performance issues appear to have gone away. Keep checking for regression during the broader GNOME behavior pass.
 - Confirm Phase 7 windowed behavior still holds: no wrong-monitor movement, click-through still works while visible and mapped-suppressed, focus loss/return still has no hide/remap flash, and `frame_rect_fallback` remains degraded.
-- Confirm the screen pauses every few seconds are gone or materially reduced.
 
 ## Execution Log
 - Plan created on 2026-05-11.
