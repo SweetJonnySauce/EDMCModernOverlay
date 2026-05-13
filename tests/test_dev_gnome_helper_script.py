@@ -142,6 +142,40 @@ def test_dev_gnome_helper_uninstall_removes_only_helper_directory(tmp_path: Path
     assert f"disable {HELPER_UUID}" in log_path.read_text(encoding="utf-8")
 
 
+def test_dev_gnome_helper_reload_reinstalls_enables_and_reports_status(tmp_path: Path) -> None:
+    env, log_path = _fake_env(tmp_path)
+    base_dir = Path(env["XDG_DATA_HOME"]) / "gnome-shell" / "extensions"
+    helper_dir = base_dir / HELPER_UUID
+    helper_dir.mkdir(parents=True)
+    (helper_dir / "metadata.json").write_text('{"old": true}', encoding="utf-8")
+    (helper_dir / "stale.js").write_text("// stale\n", encoding="utf-8")
+    expected_metadata = (REPO_ROOT / "helpers" / "gnome_shell_extension" / "metadata.json").read_text(
+        encoding="utf-8"
+    )
+
+    result = subprocess.run(
+        ["bash", str(SCRIPT), "reload", "--yes"],
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (helper_dir / "metadata.json").read_text(encoding="utf-8") == expected_metadata
+    assert (helper_dir / "extension.js").is_file()
+    assert not (helper_dir / "stale.js").exists()
+    extension_log = log_path.read_text(encoding="utf-8")
+    assert f"disable {HELPER_UUID}" in extension_log
+    assert f"enable {HELPER_UUID}" in extension_log
+    assert "GNOME helper files removed" in result.stdout
+    assert "GNOME helper files copied" in result.stdout
+    assert "GNOME helper enable requested" in result.stdout
+    assert "DBus health:" in result.stdout
+
+
 def test_dev_gnome_helper_status_reports_missing_helper(tmp_path: Path) -> None:
     env, _log_path = _fake_env(tmp_path)
     result = subprocess.run(

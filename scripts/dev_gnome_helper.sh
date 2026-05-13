@@ -24,7 +24,7 @@ NO_ENABLE=false
 
 usage() {
     cat <<'EOF'
-Usage: dev_gnome_helper.sh <install|update|enable|disable|uninstall|status> [options]
+Usage: dev_gnome_helper.sh <install|update|reload|enable|disable|uninstall|status> [options]
 
 Install or remove the EDMC Modern Overlay GNOME Shell helper from a source
 checkout for local development.
@@ -32,6 +32,7 @@ checkout for local development.
 Actions:
   install       Copy helper source to the user-local GNOME extension path and enable it.
   update        Same as install; clean-replaces the installed helper directory first.
+  reload        Disable, remove, reinstall, enable, and print status.
   enable        Enable an already installed/discovered helper extension.
   disable       Disable the helper extension, but leave files installed.
   uninstall     Disable the helper extension and remove only the helper UUID directory.
@@ -77,7 +78,7 @@ parse_args() {
     local action_seen=false
     while (($# > 0)); do
         case "$1" in
-            install|update|enable|disable|uninstall|status)
+            install|update|reload|enable|disable|uninstall|status)
                 if [[ "$action_seen" == true ]]; then
                     die "multiple actions supplied"
                 fi
@@ -529,11 +530,52 @@ run_uninstall() {
     print_logout_required "uninstall"
 }
 
+run_reload() {
+    check_session_for_mutation
+    check_install_prerequisites
+    local target
+    target="$(install_dir)"
+    if ! prompt_yes_no_default_no "Reload GNOME Shell helper by disabling, removing, reinstalling, enabling, and reporting status at '$target'?"; then
+        info "GNOME helper reload declined."
+        return
+    fi
+
+    disable_extension
+    info "GNOME helper disable requested."
+    if [[ -d "$target" ]]; then
+        safe_remove_install_dir
+        info "GNOME helper files removed from $target"
+    else
+        info "GNOME helper files were not installed at $target"
+    fi
+
+    copy_source_to_install_dir
+    info "GNOME helper files copied to $target"
+
+    if global_user_extensions_disabled; then
+        print_global_disabled_remediation
+        print_logout_required "reload"
+        run_status
+        return
+    fi
+
+    if enable_extension; then
+        info "GNOME helper enable requested."
+    else
+        warn "gnome-extensions enable failed; run status for details"
+    fi
+    print_logout_required "reload"
+    run_status
+}
+
 main() {
     parse_args "$@"
     case "$ACTION" in
         install|update)
             run_install_or_update "$ACTION"
+            ;;
+        reload)
+            run_reload
             ;;
         enable)
             run_enable

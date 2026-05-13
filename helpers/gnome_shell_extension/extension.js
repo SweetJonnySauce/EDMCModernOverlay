@@ -458,7 +458,7 @@ class HelperHealthService {
         if (index === null) {
             return null;
         }
-        return this._displayConfigMonitorForIndex(index) || this._legacyMonitorForIndex(index);
+        return this._legacyMonitorForIndex(index) || this._displayConfigMonitorForIndex(index);
     }
 
     _normaliseMonitorIndex(monitorIndex) {

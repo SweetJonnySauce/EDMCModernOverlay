@@ -62,4 +62,12 @@ Use this command after logging back in to check helper state:
 ./install_linux.sh --gnome-helper-action status
 ```
 
+When testing a helper source change from a source checkout, use the development helper `reload` action to run the helper lifecycle in one command: uninstall the existing user-local helper, install the packaged helper source, request enablement, and print helper status:
+
+```bash
+./scripts/dev_gnome_helper.sh reload
+```
+
+The development reload action does not replace GNOME's session reload requirement. After helper install, update, reload, disable, or uninstall, log out and log back in before treating the helper state as final.
+
 GNOME Wayland overlay use supports Elite Dangerous windowed and borderless fullscreen modes. Exclusive fullscreen is not a supported mode for the GNOME Wayland overlay path.

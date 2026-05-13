@@ -113,6 +113,7 @@ def test_extension_source_uses_displayconfig_monitor_inventory_with_legacy_fallb
     assert "_displayConfigMonitorForIndex" in source
     assert "_parseDisplayConfigMonitors" in source
     assert "_legacyMonitorForIndex" in source
+    assert "return this._legacyMonitorForIndex(index) || this._displayConfigMonitorForIndex(index);" in source
     assert "global.display.get_monitor_geometry" in source
     assert "monitorRect" in source
     assert "outputName" in source

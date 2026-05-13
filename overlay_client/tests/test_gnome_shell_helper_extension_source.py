@@ -16,6 +16,7 @@ def test_extension_uses_display_config_monitor_inventory_with_legacy_fallback() 
     assert "org.gnome.Mutter.DisplayConfig" in source
     assert "GetCurrentState" in source
     assert "_legacyMonitorForIndex" in source
+    assert "return this._legacyMonitorForIndex(index) || this._displayConfigMonitorForIndex(index);" in source
 
 
 def test_extension_skips_redundant_move_resize_when_frame_already_matches() -> None:

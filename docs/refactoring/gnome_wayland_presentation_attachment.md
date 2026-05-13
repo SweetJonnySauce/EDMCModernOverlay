@@ -307,7 +307,7 @@ Record:
 | 6A | Mapped suppression for GNOME helper-mode focus loss | No-Flash Manual Validation Passed; Workspace Deferred |
 | 6B | Frame fallback monitor-bounds clamp | Manual Monitor-Bounds Passed; 6A Recheck Passed |
 | 7 | Manual validation matrix and true-overlay gate review | In Progress |
-| 8 | Performance stabilization addendum for GNOME helper presentation churn | Latest Baseline Captured; Manual Validation Pending; Payload Gate Headless Tests Passed |
+| 8 | Performance stabilization addendum for GNOME helper presentation churn | Phase 8.9 Headless Tests Passed; Manual Validation Pending |
 
 ## Phase Details
 
@@ -1096,17 +1096,18 @@ Expected pass for `true_overlay` eligibility: target payload exposes valid `cont
 - Phase 8 decisions locked on 2026-05-13:
 - Implement presentation churn first; defer payload logging until after presentation churn is fixed.
 - The no-op presentation signature must include `targetToken`, selected requested rect after clamp, `monitorRect`, rect source, visibility action, target focus/workspace/minimized/fullscreen flags, overlay identity, and relevant presentation options.
-- Use a fresh successful applied presentation window of about `1.0s` while focused/visible and about `2.0s` while mapped-suppressed, unless tests show these values are too coarse.
+- Superseded for compositor apply decisions on 2026-05-13: the original fresh successful applied presentation window of about `1.0s` while focused/visible and about `2.0s` while mapped-suppressed must not force timed `ApplyPresentation` refreshes. Keep freshness windows only where they are useful for target-poll confidence or other non-compositor work. Actual `ApplyPresentation` should be event-driven after a matching successful apply.
 - Cache healthy compatible helper status for about `5s`, with small jitter where practical so repeated clients do not line up health probes.
 - Keep suppressed-state polling slower, around `1-2s`, while still detecting focus return and hard target changes promptly.
 - Start Shell-side no-op work by skipping redundant `move_resize_frame(...)`; keep `make_above()` unless stacking can be proven cheaply.
 - Do not replace `gdbus` subprocesses with a persistent DBus client in this phase. Dedupe, cache, and throttle first.
 
 #### Phase 8 Target Behavior
-- Do not call `ApplyPresentation` when the helper target token, selected requested rect, monitor rect, visibility action, focus/workspace/minimized state, overlay identity, and relevant presentation options are unchanged and the last applied presentation is still fresh and matching.
+- Do not call `ApplyPresentation` when the helper target token, selected requested rect, monitor rect, visibility action, focus/workspace/minimized state, overlay identity, and relevant presentation options are unchanged and the last applied presentation was matching. The no-op decision must not expire solely because a short freshness window elapsed.
+- Use fresh/stale windows for health checks, target polling confidence, and bounded failure handling, not as a reason to periodically re-enter GNOME Shell presentation for an unchanged successful signature.
 - Do not run helper health through `gdbus` on every presentation cycle. Cache healthy compatible helper status for about `5s` with small jitter where practical, while still failing closed on explicit command errors and startup/unavailable states.
 - Slow down soft-focus suppressed polling where safe. In `mapped_suppressed` with a valid target and matching last presentation, poll enough to detect focus return and target changes but avoid repeated no-op compositor writes.
-- Keep hard states fast: helper unavailable, target missing, target token changes, target minimized/hidden/off-workspace, monitor rect changes, requested rect changes, stale presentation, unsupported presentation, and applied-rect mismatch must bypass no-op suppression and retry through the existing bounded path.
+- Keep hard states fast: helper unavailable, target missing, target token changes, target minimized/hidden/off-workspace, monitor rect changes, requested rect changes, unsupported presentation, and applied-rect mismatch must bypass no-op suppression and retry through the existing bounded path.
 - In the GNOME Shell extension, skip `move_resize_frame(...)` when the overlay frame already matches the requested rect within the existing tolerance, and skip `make_above()` when the helper can prove the overlay is already correctly stacked. If stacking cannot be proven cheaply, prefer keeping the raise but no-op the move/resize first.
 - Preserve Phase 6B monitor clamp exactly: over-tall `frame_rect_fallback` still clamps to `monitorRect`, emits `frame_rect_clamped_to_monitor` only when changed, and remains degraded.
 - Preserve Phase 6A mapped suppression: focus loss with `keep_overlay_visible=false` suppresses content without unmapping/remapping for soft focus loss.
@@ -1143,6 +1144,8 @@ Expected pass for `true_overlay` eligibility: target payload exposes valid `cont
 | 8.5 | Add GNOME Shell extension no-op guards for unchanged move/resize/raise work | Headless Tests Passed |
 | 8.6 | Run targeted presentation performance validation plus Phase 7 regression checks and record before/after evidence | Off Baseline Captured; Manual GNOME Validation Pending |
 | 8.7 | Gate payload body logging behind EDMC DEBUG and avoid serialization when logs will not emit | Headless Tests Passed |
+| 8.8 | Replace timed fresh-window `ApplyPresentation` refreshes with event-driven apply after a matching successful signature | Headless Tests Passed |
+| 8.9 | Remove remaining stable-state target-poll and Shell monitor-lookup pauses | Headless Tests Passed; Manual Validation Pending |
 
 #### Phase 8 Implementation Plan
 - Touch points started on 2026-05-13: `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py` for backend-owned presentation signature, freshness windows, suppressed-state target polling throttle, and helper health cache; `overlay_client/backend/consumers.py` and `overlay_client/follow_surface.py` only for backend-owned previous visibility-action wiring; `helpers/gnome_shell_extension/extension.js` for the Shell-side unchanged-frame no-op guard.
@@ -1255,7 +1258,9 @@ pidstat -p 3533 -dur 1 10
 | 2026-05-13 ~20:22 UTC | Pre-Phase 8, EDMC/overlay/helper on | Elite `312%`, Firefox RDD `89.1%`, OneDrive `59.1%`, Firefox `18.4%`, GNOME Shell `9.9%`, EDMC `9.1%`, overlay client `3.6%` | GNOME Shell `6.40%`, EDMC `7.40%`, overlay client `3.00%`; low IO | `183` sequence intervals over `91.5s`, about `2.0` presentation cycles/sec while stably mapped-suppressed | Confirms CPU/event-loop/compositor churn with repeated no-op presentation work. |
 | 2026-05-13 ~21:03-21:08 UTC | Post Phase 8 presentation changes, EDMC/overlay/helper on | Elite `336%`, Firefox RDD `79.6%`, OneDrive `55.2%`, Firefox `17.1%`, GNOME Shell `9.5%`, EDMC `9.4%`, overlay client `3.2%` | GNOME Shell `8.70%`, EDMC `7.80%`, overlay client `2.80%`; low IO | `248` diagnostics, `194` skipped (`78%`), `54` apply attempts over about `123.2s`; target polls about `0.78`/sec, apply attempts about `0.44`/sec | Backend no-op suppression and suppressed polling throttle are active; process CPU remains noisy under heavy desktop/game load. |
 | 2026-05-13 ~21:13 UTC | EDMC shut down, helper uninstalled | EDMC, overlay client, and helper absent; Elite `337%`, Firefox RDD `78.9%`, OneDrive `54.9%`, Firefox `17.0%`, GNOME Shell `9.4%` | GNOME Shell only: `12.20%`; no IO | Not applicable | Control point shows the desktop is not idle without the overlay; GNOME Shell CPU alone is not a clean overlay metric. |
-| 2026-05-13 ~21:35 UTC | Latest sample after Phase 8 presentation changes and payload logging gate, EDMC/overlay/helper on | Elite `339%`, Firefox RDD `75.1%`, OneDrive `53.6%`, Firefox `16.6%`, EDMC `12.4%`, GNOME Shell `9.5%`, overlay client `3.6%`; helper health `healthy`, protocol `3` | GNOME Shell `5.20%`, EDMC `9.20%`, overlay client `3.40%`; RSS about `635684 KB`, `213616 KB`, and `91862 KB`; write IO `0.00`, `17.60`, and `2.40 kB/s` respectively | Last `500` log lines: `309` diagnostics over about `154.0s`, `239` skipped (`77%`), `183` suppressed-throttle skips, `56` fresh-matching skips, `70` apply attempts; apply attempts about `0.45`/sec | Current runtime still has reduced apply volume. Payload logging gate does not change presentation cadence; EDMC CPU remains variable under active game/desktop load. |
+| 2026-05-13 ~21:35 UTC | Latest sample after Phase 8 presentation changes and payload logging gate, EDMC/overlay/helper on | Elite `339%`, Firefox RDD `75.1%`, OneDrive `53.6%`, Firefox `16.6%`, EDMC `12.4%`, GNOME Shell `9.5%`, overlay client `3.6%`; helper health `healthy`, protocol `3` | GNOME Shell `5.20%`, EDMC `9.20%`, overlay client `3.40%`; RSS about `635684 KB`, `213616 KB`, and `91862 KB`; write IO `0.00`, `17.60`, and `2.40 kB/s` respectively | Last `500` log lines: `309` diagnostics over about `154.0s`, `239` skipped (`77%`), `183` suppressed-throttle skips, `56` fresh-matching skips, `70` apply attempts; apply attempts about `0.45`/sec | Current runtime still has reduced apply volume, but timed fresh-window expiry still permits periodic real `ApplyPresentation` calls. User-visible pauses every few seconds make this the next Phase 8 fix. |
+| 2026-05-13 ~21:53-21:54 UTC | Post Phase 8.8 event-driven apply, EDMC/overlay/helper on, stable mapped-suppressed | Elite `337%`, Firefox RDD `72.2%`, OneDrive `56.1%`, EDMC `16.5%`, Firefox `16.2%`, GNOME Shell `9.4%`, overlay client `3.9%`; helper health `healthy`, protocol `3` | GNOME Shell `11.30%`, EDMC `8.80%`, overlay client `3.30%`; RSS about `635662 KB`, `215560 KB`, and `92140 KB`; write IO `0.00`, `0.00`, and `2.00 kB/s` respectively | Matching presentation lines after restart: `71` diagnostics over about `35.0s`, `71` skipped (`100%`), `0` apply attempts; diagnostics about `2.0`/sec, apply attempts `0.0`/sec | Phase 8.8 event-driven apply is active: unchanged stable suppressed cycles no longer re-enter `ApplyPresentation`. CPU remains noisy under heavy desktop/game load, and target polling/log cadence remains separate follow-up evidence. |
+| 2026-05-13 ~22:13-22:15 UTC | Post Phase 8.9, EDMC/overlay/helper on, stable mapped-suppressed | Elite `326%`, OneDrive `28.0%`, VS Code utility `16.6%`, Firefox `12.1%`, EDMC `11.3%`, GNOME Shell `9.0%`, overlay client `3.4%`; helper health `healthy`, protocol `3`, helper recently restarted | GNOME Shell `9.80%`, EDMC `8.60%`, overlay client `3.20%`; RSS about `449582 KB`, `214556 KB`, and `92200 KB`; write IO `0.00`, `0.00`, and `2.40 kB/s` respectively | Last `200` lines: `200` diagnostics over about `99.5s`, `198` skipped (`99%`), `126` target-poll-throttle skips, `72` fresh-matching skips, `2` apply attempts; direct `GetTargetState` probe: `20/20` calls were `8-10 ms` | Phase 8.9 behavior is present: stable suppressed cycles now skip target polling between bounded polls, and the DisplayConfig `~250 ms` timing spikes are gone in the direct helper probe. |
 
 #### Phase 8 Latest Baseline Capture
 - Captured on 2026-05-13 at roughly 21:35 UTC after the Phase 8 presentation-churn implementation and the payload logging DEBUG gate were present in the working tree. EDMC, overlay client, and the GNOME Shell helper were running.
@@ -1298,15 +1303,151 @@ END { print "total=$total skipped=$skipped throttle=$throttle fresh=$fresh attem
 - Result: `total=309 skipped=239 throttle=183 fresh=56 attempts1=70 first=2026-05-13 21:33:01.984 firstseq=11 last=2026-05-13 21:35:35.967 lastseq=136`.
 - Interpretation: the runtime still emits presentation diagnostics at roughly the existing timer cadence, but `239/309` recent diagnostics were no-op skipped and only `70/309` had `attempts=1`. Across about `154s`, apply attempts ran at about `0.45`/sec, close to the earlier post-Phase 8 sample and far below the pre-Phase 8 steady `2.0` presentation cycles/sec. The payload logging gate is not expected to alter presentation cadence; it reduces payload body logging and serialization cost when EDMC is not at `DEBUG`.
 
+#### Phase 8.8 Event-Driven Apply Baseline Capture
+- Captured on 2026-05-13 at roughly 21:53-21:54 UTC after the Phase 8.8 backend change was running. EDMC had restarted since the previous sample. EDMC PID was `193762`, overlay client PID was `193787`, and GNOME Shell PID remained `3533`.
+- Command:
+```bash
+gdbus call --session --dest org.edmc.ModernOverlay.Helper --object-path /org/edmc/ModernOverlay/Helper --method org.edmc.ModernOverlay.Helper.GetHealth
+```
+- Result: helper returned `status=healthy`, `helper_kind=gnome_shell_extension`, `helper_version=1.0.0`, `helper_protocol=3`, and the expected health/target/presentation capabilities.
+- Command:
+```bash
+ps -eo pid,ppid,stat,pcpu,pmem,rss,comm,args --sort=-pcpu | head -n 40
+```
+- Result: top host consumers included Elite Dangerous at `337%` CPU, Firefox RDD at `72.2%`, OneDrive at `56.1%`, EDMC at `16.5%`, Firefox at `16.2%`, GNOME Shell at `9.4%`, and overlay client at `3.9%`. The one-shot `ps` command itself briefly appeared near the top and is ignored as measurement overhead.
+- Command:
+```bash
+pidstat -p 3533,193762,193787 -dur 1 10
+```
+- Result: ten-second average was GNOME Shell `11.30%` CPU, EDMC `8.80%` CPU, and overlay client `3.30%` CPU. RSS was roughly `635662 KB` for GNOME Shell, `215560 KB` for EDMC, and `92140 KB` for the overlay client. Average write IO was GNOME Shell `0.00 kB/s`, EDMC `0.00 kB/s`, and overlay client `2.00 kB/s`, with no major faults.
+- Command:
+```bash
+rg "GNOME helper presentation" /home/jon/edmc-logs/EDMCModernOverlay/overlay_client.log | tail -n 500 | perl -ne '
+$total++;
+$skipped++ if /presentation_skipped=True/;
+$throttle++ if /skip_reason=suppressed_poll_throttle/;
+$fresh++ if /skip_reason=fresh_matching_presentation/;
+$applies++ if /attempts=1/;
+if (!$first) { $first = substr($_, 0, 23); /seq=(\d+)/ and $firstseq = $1; }
+$last = substr($_, 0, 23); /seq=(\d+)/ and $lastseq = $1;
+END { print "total=$total skipped=$skipped throttle=$throttle fresh=$fresh attempts1=$applies first=$first firstseq=$firstseq last=$last lastseq=$lastseq\n"; }
+'
+```
+- Result: `total=71 skipped=71 throttle=0 fresh=71 attempts1=0 first=2026-05-13 21:53:29.475 firstseq=1087 last=2026-05-13 21:54:04.475 lastseq=1157`.
+- Interpretation: Phase 8.8 event-driven apply is active. In this stable mapped-suppressed sample, every matching presentation diagnostic skipped compositor apply with `skip_reason=fresh_matching_presentation`, and there were no real `ApplyPresentation` attempts after the successful attach. The diagnostic cadence remains about `2.0`/sec and target polling/log cadence remains separate from compositor apply volume.
+
+#### Phase 8.9 Remaining Pause Evidence
+- User reported after Phase 8.8 that the system still pauses about every `2s`; the pause is not perceived as a `500 ms` cadence.
+- Live log summary captured on 2026-05-13 after Phase 8.8:
+```bash
+rg "GNOME helper presentation" /home/jon/edmc-logs/EDMCModernOverlay/overlay_client.log | tail -n 200 | perl -ne '...'
+```
+- Result: `total=200 presentation_skipped=198 target_poll_skipped=0 target_poll_not_skipped=200 throttle=0 fresh=198 attempts1=2 first=2026-05-13 21:54:37.475 firstseq=1223 last=2026-05-13 21:56:16.976 lastseq=1422`.
+- Interpretation: Phase 8.8 eliminated most real `ApplyPresentation` calls, but every stable presentation cycle still fetched fresh target state from GNOME Shell. The suppressed-state target-poll throttle is effectively disabled after the old freshness window because `_should_skip_suppressed_target_poll(...)` still depends on `_cached_presentation_is_fresh_and_matching(...)`.
+- Direct helper timing probe:
+```bash
+for i in $(seq 1 20); do
+  start=$(date +%s%3N)
+  gdbus call --session --dest org.edmc.ModernOverlay.Helper --object-path /org/edmc/ModernOverlay/Helper --method org.edmc.ModernOverlay.Helper.GetTargetState '{}' >/dev/null
+  end=$(date +%s%3N)
+  printf '%02d %dms\n' "$i" "$((end-start))"
+  sleep 0.2
+done
+```
+- Result: most calls were `8-13 ms`, but calls `1`, `5`, `9`, `13`, and `17` took about `228-262 ms`.
+- Interpretation: the recurring `~250 ms` stalls match `DISPLAY_CONFIG_DBUS_TIMEOUT_MS = 250` in the GNOME Shell extension. `GetTargetState` enumerates windows and calls `_monitorForIndex(...)`; the hot path currently prefers `_displayConfigMonitorForIndex(...)`, which performs a synchronous `Gio.DBus.session.call_sync(...)` to `org.gnome.Mutter.DisplayConfig.GetCurrentState` when its `1s` monitor cache expires, then falls back to legacy monitor geometry on failure. Running that synchronous DBus call from the Shell extension hot path can block GNOME Shell long enough to be visible as a desktop pause.
+- Direct helper health calls were mostly `8-10 ms`, with occasional unrelated spikes, so the health cache is not the primary remaining pause source.
+- Phase 8.9 target fix:
+- Backend: make stable `mapped_suppressed` target-poll throttle independent of the old presentation freshness window. It should require a previous matching successful presentation, unchanged cached request/target state, and no hard-change signal, but elapsed time beyond the old `2s` presentation freshness window must not force `GetTargetState` on every follow tick.
+- Shell helper: remove synchronous DisplayConfig lookup from the hot `GetTargetState` path where legacy monitor geometry is available. Prefer `global.display.get_monitor_geometry(...)`/`get_monitor_scale(...)` for target-state `monitorRect` and use DisplayConfig only as a cold fallback or longer-lived/asynchronous diagnostic source for connector metadata.
+- Helper lifecycle script: add a `reload` action to `./scripts/dev_gnome_helper.sh`, not `install_linux.sh`. The development reload action disables/removes/reinstalls/enables the helper and prints status for manual validation. It is documented but must not be executed automatically.
+- Expected validation after Phase 8.9: stable suppressed logs should show `target_poll_skipped=True` between bounded target polls, direct `GetTargetState` timing should no longer show recurring `~250 ms` stalls, and user-visible pauses should disappear or be materially reduced.
+
+#### Phase 8.9 Fresh Baseline Capture
+- Captured on 2026-05-13 at roughly 22:13-22:15 UTC after the Phase 8.9 backend and Shell helper changes were running. EDMC PID was `225457`, overlay client PID was `225492`, and GNOME Shell PID was `219361`.
+- Command:
+```bash
+pgrep -af "EDMarketConnector|overlay_client|org.edmc.ModernOverlay|gnome-shell"
+```
+- Result: GNOME Shell, EDMC, and overlay client were running with PIDs `219361`, `225457`, and `225492`.
+- Command:
+```bash
+gdbus call --session --dest org.edmc.ModernOverlay.Helper --object-path /org/edmc/ModernOverlay/Helper --method org.edmc.ModernOverlay.Helper.GetHealth
+```
+- Result: helper returned `status=healthy`, UUID `edmc-modern-overlay-helper@edmcmodernoverlay.github.io`, helper protocol `3`, and the expected health/target/presentation capabilities. `started_at_unix_ms=1778710231981` showed the helper had recently restarted.
+- Command:
+```bash
+ps -eo pid,ppid,stat,pcpu,pmem,rss,comm,args --sort=-pcpu
+```
+- Result: top host consumers included Elite Dangerous at `326%` CPU, OneDrive at `28.0%`, VS Code utility process at `16.6%`, Firefox at `12.1%`, EDMC at `11.3%`, GNOME Shell at `9.0%`, and overlay client at `3.4%`. The one-shot `ps` command itself briefly appeared near the top and is ignored as measurement overhead.
+- Command:
+```bash
+pidstat -p 219361,225457,225492 -dur 1 10
+```
+- Result: ten-second average was GNOME Shell `9.80%` CPU, EDMC `8.60%` CPU, and overlay client `3.20%` CPU. RSS was roughly `449582 KB` for GNOME Shell, `214556 KB` for EDMC, and `92200 KB` for the overlay client. Average write IO was GNOME Shell `0.00 kB/s`, EDMC `0.00 kB/s`, and overlay client `2.40 kB/s`, with no major faults.
+- Command:
+```bash
+rg "GNOME helper presentation" /home/jon/edmc-logs/EDMCModernOverlay/overlay_client.log | tail -n 200 | perl -ne '...'
+```
+- Result: `total=200 skipped=198 target_poll_skipped=126 target_poll_not_skipped=74 throttle=126 fresh=72 attempts1=2 first=2026-05-13 22:13:34.974 firstseq=13 last=2026-05-13 22:15:14.472 lastseq=106`.
+- Interpretation: over about `99.5s` of stable `mapped_suppressed` logs, `99%` of diagnostics skipped presentation apply, `126/200` cycles skipped target polling under `suppressed_poll_throttle`, and only `2/200` lines had real `attempts=1`. The log tail overlapped direct helper timing probes, so helper `seq` advancement is not used as a pure runtime target-poll rate here.
+- Command:
+```bash
+for i in $(seq 1 20); do
+  start=$(date +%s%3N)
+  gdbus call --session --dest org.edmc.ModernOverlay.Helper --object-path /org/edmc/ModernOverlay/Helper --method org.edmc.ModernOverlay.Helper.GetTargetState '{}' >/dev/null
+  end=$(date +%s%3N)
+  printf '%02d %dms\n' "$i" "$((end-start))"
+  sleep 0.2
+done
+```
+- Result: all `20` direct `GetTargetState` calls completed in `8-10 ms` after rerunning outside the sandbox DBus restriction.
+- Interpretation: the recurring `~250 ms` DisplayConfig stalls observed before Phase 8.9 did not reproduce after the helper restart. This supports the hot-path monitor-lookup fix. Manual user observation is still needed to confirm whether the visible two-second screen pauses are gone.
+
+#### Phase 8 Pause Evidence And Event-Driven Apply Follow-Up
+- User reported on 2026-05-13 that the GNOME helper path still causes screen pauses every few seconds.
+- Runtime evidence from recent stable `mapped_suppressed` logs shows that the first Phase 8 no-op suppression works between real applies, but the backend still intentionally re-enters `ApplyPresentation` when the short successful-presentation freshness window expires.
+- Representative stable suppressed evidence:
+- `2026-05-13 21:36:45.236 UTC`: `attempts=1`, `presentation_skipped=False`, unchanged target `meta:27`, unchanged requested/applied `{'x': 920, 'y': 246, 'width': 1600, 'height': 937}`.
+- `2026-05-13 21:36:45.466 UTC` through `21:36:46.473 UTC`: skipped cycles with `skip_reason=suppressed_poll_throttle`.
+- `2026-05-13 21:36:47.226 UTC`: skipped with `skip_reason=fresh_matching_presentation`.
+- `2026-05-13 21:36:47.488 UTC`: real `attempts=1` apply for the same target and rect.
+- The pattern repeats at roughly multi-second intervals, including real applies around `21:36:50.232`, `21:36:51.994`, `21:38:14.490`, `21:38:17.236`, and `21:38:18.985`, while the target signature remains stable and matching.
+- Diagnosis: the remaining compositor-visible churn is no longer the original 500 ms apply loop, but the timed freshness expiry still forces periodic `ApplyPresentation` calls into GNOME Shell. That cadence matches the user-visible pauses every few seconds.
+- Phase 8.8 decision: after a successful matching `ApplyPresentation`, unchanged target polls should skip presentation indefinitely until a hard-change or failure condition occurs. Freshness windows may still bound target-poll throttling or health-cache behavior, but they must not by themselves force a compositor-facing reapply.
+- Required hard-change bypasses remain: helper unavailable/error, target missing, target token changes, requested rect changes, monitor rect changes, visibility action changes, focus/workspace/minimized/fullscreen changes, overlay identity/options changes, unsupported/degraded presentation beyond expected `frame_rect_fallback`, and any previous applied-rect mismatch.
+- Implementation touch point for Phase 8.8: `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py` no-op policy and its unit tests in `overlay_client/tests/test_gnome_helper_presentation_runtime.py`.
+- Expected test updates for Phase 8.8: remove or rewrite tests that expect focused/suppressed freshness expiry alone to force a new apply; add tests proving unchanged matching signatures continue skipping after the old `1.0s`/`2.0s` windows; keep tests proving real hard changes still bypass the no-op path.
+- Implementation touch points started on 2026-05-13: `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py` and `overlay_client/tests/test_gnome_helper_presentation_runtime.py`.
+- Test type selection for Phase 8.8: unit tests are required and sufficient for the no-op policy because the behavior is pure/deterministic with injected helper fetchers and clocks. Follow/backend consumer tests are not expected unless result shape or generic runtime wiring changes.
+- Helper restart detection note: existing parsed `HelperHealthStatus` exposes compatible version/protocol/capabilities and observed time, but not helper UUID or start timestamp. Phase 8.8 will rely on existing fail-closed cache clearing for helper health failure, protocol incompatibility, version incompatibility, or missing capabilities. Same-version helper restart is not detectable from the current parsed boundary and will remain documented rather than inferred.
+
 #### Phase 8 Execution Summary
 - Stage 8.2: Completed for headless coverage. Added backend-owned `GnomeHelperPresentationSignature` and runtime state that suppresses `ApplyPresentation` only when the target token, selected requested rect after clamp, monitor rect, rect source, previous visibility action, target focus/workspace/minimized/fullscreen flags, overlay title/class, renderer, tolerance, required gates, standalone mode, and expected degradation reasons are unchanged. Suppression requires a fresh matching prior presentation and does not apply after applied-rect mismatch, unexpected degradation, unsupported features, stale status, missing target, hidden target, or request changes.
 - Stage 8.3: Completed for headless coverage. Healthy compatible helper status is cached for `5.0s` plus bounded jitter up to `0.5s`; explicit unhealthy/error results clear presentation state and fail closed. This does not replace the current `gdbus` transport.
-- Stage 8.4: Completed for headless coverage. Stable `mapped_suppressed` state throttles redundant target polling to about `1.5s` only while the previous matching presentation remains fresh; focus return, rect changes, monitor changes, target changes, and stale status still force the normal target/presentation path.
+- Stage 8.4: Completed for headless coverage. Stable `mapped_suppressed` state introduced redundant target-poll throttling to about `1.5s`; Phase 8.9 later removed its dependency on the old short presentation freshness window. Focus return, rect changes, monitor changes, target changes, and invalid presentation state still force the normal target/presentation path.
 - Stage 8.5: Completed for headless coverage. The GNOME Shell extension now reads the current overlay frame and skips redundant `move_resize_frame(...)` when it already matches the requested rect within `rect_tolerance`. `make_above()` remains in place because stacking proof is not yet cheap or explicit.
 - Stage 8.6: Headless regression passed. Manual GNOME performance validation remains pending after helper reinstall/reload and EDMC restart. Support wording remains degraded/experimental; `frame_rect_fallback` still blocks `true_overlay`.
 - Stage 8.7: Completed for headless coverage. `_PluginRuntime._log_payload` now requires EDMC `DEBUG` via `_edmc_debug_logging_active()` before payload body logging can emit. The existing payload logging preference/debug config remains an additional enable switch, but dev override alone no longer unlocks payload body logs. Payload and legacy raw serialization now happens only after the EDMC DEBUG gate, payload logging enablement, and plugin-exclusion checks pass. Existing payload delivery, payload shape, spam detection, presentation logs, GNOME helper behavior, BGS-Tally behavior, generic dedupe, and support wording were not changed.
+- Stage 8.8: Completed for headless coverage. The backend no-op apply policy now skips `ApplyPresentation` indefinitely for an unchanged signature after a previous matching successful apply; elapsed time beyond the old `1.0s` focused and `2.0s` suppressed windows no longer forces a compositor-facing reapply. Target polling throttle/freshness behavior remains in place for stable `mapped_suppressed` polling, health refresh alone does not cause reapply, and hard signature changes or previous applied-rect mismatch still force apply. Manual GNOME validation remains pending to confirm the every-few-seconds pause is gone or materially reduced.
+- Stage 8.9: Completed for headless coverage. Stable `mapped_suppressed` target-poll throttling now depends on the next target-poll deadline and a previous matching successful presentation, not the old short presentation freshness/stale window. This prevents elapsed time beyond the old `2s` window from forcing `GetTargetState` on every follow tick. The GNOME Shell helper now prefers local legacy monitor geometry before falling back to synchronous DisplayConfig lookup, so the `GetTargetState` hot path should avoid recurring `250 ms` DisplayConfig stalls when GNOME exposes monitor geometry locally. Added and documented `./scripts/dev_gnome_helper.sh reload` for manual helper lifecycle validation; `install_linux.sh` intentionally has no reload action.
 
 #### Tests Run For Phase 8
+- Command:
+```bash
+python3 -m py_compile overlay_client/backend/bundles/_gnome_shell_helper_presentation.py overlay_client/tests/test_gnome_helper_presentation_runtime.py
+```
+- Result: passed.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_helper_presentation_runtime.py
+```
+- Result: passed; `16 passed`.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_presentation_policy.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_follow_surface_mixin.py overlay_client/tests/test_backend_architecture_boundary.py overlay_client/tests/test_gnome_shell_helper_target_state.py overlay_client/tests/test_gnome_shell_helper_presentation_state.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_interaction_controller.py overlay_client/tests/test_platform_controller_backend_status.py overlay_client/tests/test_setup_surface.py tests/test_gnome_shell_extension_manifest.py overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed; `124 passed`, `4 skipped`. Skips were the existing PyQt-marked setup tests without `PYQT_TESTS=1` in this targeted headless command.
 - Command:
 ```bash
 python3 -m py_compile load.py tests/test_logging_and_version_helper.py
@@ -1341,13 +1482,46 @@ overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_pres
 ```bash
 make check
 ```
-- Result: passed. Ruff passed, mypy passed, and `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest` passed with `983 passed`, `21 skipped`.
+- Result: passed. Ruff passed, mypy passed, and `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest` passed with `990 passed`, `21 skipped`.
+- Command:
+```bash
+python3 -m py_compile overlay_client/backend/bundles/_gnome_shell_helper_presentation.py overlay_client/tests/test_gnome_helper_presentation_runtime.py tests/test_dev_gnome_helper_script.py
+```
+- Result: passed.
+- Command:
+```bash
+bash -n scripts/dev_gnome_helper.sh scripts/install_linux.sh
+```
+- Result: passed.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_helper_presentation_runtime.py
+```
+- Result: passed; `16 passed`.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest tests/test_dev_gnome_helper_script.py overlay_client/tests/test_gnome_shell_helper_extension_source.py tests/test_gnome_shell_extension_manifest.py
+```
+- Result: passed; `22 passed`.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_presentation_policy.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_follow_surface_mixin.py overlay_client/tests/test_backend_architecture_boundary.py overlay_client/tests/test_gnome_shell_helper_target_state.py overlay_client/tests/test_gnome_shell_helper_presentation_state.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_interaction_controller.py overlay_client/tests/test_platform_controller_backend_status.py overlay_client/tests/test_setup_surface.py tests/test_gnome_shell_extension_manifest.py overlay_client/tests/test_gnome_shell_helper_extension_source.py tests/test_dev_gnome_helper_script.py
+```
+- Result: passed; `135 passed`, `4 skipped`. Skips were the existing PyQt-marked setup tests without `PYQT_TESTS=1` in this targeted headless command.
+- Command:
+```bash
+make check
+```
+- Result: passed. Ruff passed, mypy passed, and `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest` passed with `991 passed`, `21 skipped`.
 
 #### Phase 8 Manual GNOME Validation Pending
-- Reinstall/reload the GNOME Shell helper extension and restart EDMC so the extension no-op guard and backend cadence changes are both live.
+- Reinstall/reload the GNOME Shell helper extension and restart EDMC so the extension monitor-lookup change and backend cadence changes are both live. Use `./scripts/dev_gnome_helper.sh reload` manually; this command is documented but was not run during headless validation.
 - Repeat the Phase 8 validation commands during stable focused/visible and stable `mapped_suppressed` states.
 - Expected log evidence: repeated stable cycles should show `presentation_skipped=True` with `skip_reason=fresh_matching_presentation` or `skip_reason=suppressed_poll_throttle`, reduced `attempts=1` apply volume, and unchanged requested/applied rect behavior for moves, resizes, focus return, target loss/reacquire, and 1440-height monitor clamp.
+- Phase 8.8-specific evidence: in stable focused and stable `mapped_suppressed` states, unchanged signatures should no longer show periodic real `attempts=1` applies after the old `1.0s`/`2.0s` windows. `target_poll_skipped=True` may still appear during suppressed throttling, and `skip_reason=fresh_matching_presentation` should appear after target polls confirm the unchanged signature.
+- Phase 8.9-specific evidence: stable `mapped_suppressed` logs should show `target_poll_skipped=True` between bounded target polls, and direct `GetTargetState` timing should no longer show recurring `~250 ms` calls when the helper source has been reloaded.
 - Confirm Phase 7 windowed behavior still holds: no wrong-monitor movement, click-through still works while visible and mapped-suppressed, focus loss/return still has no hide/remap flash, and `frame_rect_fallback` remains degraded.
+- Confirm the screen pauses every few seconds are gone or materially reduced.
 
 ## Execution Log
 - Plan created on 2026-05-11.

@@ -255,8 +255,6 @@ def run_gnome_shell_helper_presentation_cycle(
             state,
             signature,
             request,
-            previous_surface_action=previous_surface_action,
-            now_monotonic=now,
         ):
             state.last_target_status = target_status
             state.last_request = request
@@ -400,11 +398,9 @@ def _should_skip_suppressed_target_poll(
         return False
     if state.last_target_status is None or state.last_request is None or state.last_presentation_status is None:
         return False
-    return _cached_presentation_is_fresh_and_matching(
+    return _cached_presentation_is_matching_success(
         state,
         request=state.last_request,
-        previous_surface_action=previous_surface_action,
-        now_monotonic=now_monotonic,
     )
 
 
@@ -412,38 +408,24 @@ def _should_skip_presentation_apply(
     state: GnomeHelperPresentationRuntimeState,
     signature: GnomeHelperPresentationSignature | None,
     request: HelperPresentationRequest,
-    *,
-    previous_surface_action: str,
-    now_monotonic: float,
 ) -> bool:
     if signature is None or state.last_signature != signature:
         return False
-    return _cached_presentation_is_fresh_and_matching(
+    return _cached_presentation_is_matching_success(
         state,
         request=request,
-        previous_surface_action=previous_surface_action,
-        now_monotonic=now_monotonic,
     )
 
 
-def _cached_presentation_is_fresh_and_matching(
+def _cached_presentation_is_matching_success(
     state: GnomeHelperPresentationRuntimeState,
     *,
     request: HelperPresentationRequest,
-    previous_surface_action: str,
-    now_monotonic: float,
 ) -> bool:
+    if state.last_success_at <= 0:
+        return False
     status = state.last_presentation_status
     if status is None:
-        return False
-    if status.is_stale(now_monotonic):
-        return False
-    fresh_seconds = (
-        GNOME_HELPER_PRESENTATION_SUPPRESSED_FRESH_SECONDS
-        if previous_surface_action == GNOME_HELPER_SURFACE_ACTION_MAPPED_SUPPRESSED
-        else GNOME_HELPER_PRESENTATION_FOCUSED_FRESH_SECONDS
-    )
-    if state.last_success_at <= 0 or (now_monotonic - state.last_success_at) > fresh_seconds:
         return False
     return _presentation_status_is_matching_success(status, request)
 

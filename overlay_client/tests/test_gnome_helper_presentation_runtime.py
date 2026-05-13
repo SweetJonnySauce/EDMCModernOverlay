@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 import types
 
+import pytest
+
 try:  # pragma: no cover - exercised when PyQt6 is present
     from PyQt6 import QtGui as _QtGui  # noqa: F401
 except Exception:  # pragma: no cover - lightweight stub path
@@ -308,10 +310,16 @@ def test_presentation_cycle_does_not_skip_after_applied_rect_mismatch() -> None:
     assert len(presentation_calls) == 2
 
 
-def test_presentation_cycle_focused_freshness_expires_after_one_second() -> None:
+def test_presentation_cycle_focused_same_signature_skips_after_old_freshness_window() -> None:
     clock = _Clock()
     state = GnomeHelperPresentationRuntimeState()
+    target_calls = 0
     presentation_calls: list[HelperPresentationRequest] = []
+
+    def fetch_target() -> dict[str, object]:
+        nonlocal target_calls
+        target_calls += 1
+        return _target_payload()
 
     def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
         presentation_calls.append(request)
@@ -319,27 +327,30 @@ def test_presentation_cycle_focused_freshness_expires_after_one_second() -> None
 
     run_gnome_shell_helper_presentation_cycle(
         fetch_health=_health_payload,
-        fetch_target=_target_payload,
+        fetch_target=fetch_target,
         fetch_presentation=fetch_presentation,
         clock=clock,
         runtime_state=state,
         health_cache_jitter_seconds=lambda: 0.0,
     )
-    clock.now += 1.1
+    clock.now += 12.0
     result = run_gnome_shell_helper_presentation_cycle(
         fetch_health=_health_payload,
-        fetch_target=_target_payload,
+        fetch_target=fetch_target,
         fetch_presentation=fetch_presentation,
         clock=clock,
         runtime_state=state,
         health_cache_jitter_seconds=lambda: 0.0,
     )
 
-    assert result.presentation_skipped is False
-    assert len(presentation_calls) == 2
+    assert result.presentation_skipped is True
+    assert result.presentation_skip_reason == "fresh_matching_presentation"
+    assert result.target_poll_skipped is False
+    assert target_calls == 2
+    assert len(presentation_calls) == 1
 
 
-def test_presentation_cycle_suppressed_freshness_and_target_poll_throttle() -> None:
+def test_presentation_cycle_suppressed_target_poll_throttles_without_timed_reapply() -> None:
     clock = _Clock()
     state = GnomeHelperPresentationRuntimeState()
     target_calls = 0
@@ -393,21 +404,117 @@ def test_presentation_cycle_suppressed_freshness_and_target_poll_throttle() -> N
     assert target_calls == 2
     assert len(presentation_calls) == 1
 
+    clock.now += 0.9
+    after_old_suppressed_window = run_gnome_shell_helper_presentation_cycle(
+        previous_surface_action="mapped_suppressed",
+        fetch_health=_health_payload,
+        fetch_target=fetch_target,
+        fetch_presentation=fetch_presentation,
+        clock=clock,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+    )
+
+    assert after_old_suppressed_window.presentation_skipped is True
+    assert after_old_suppressed_window.presentation_skip_reason == "suppressed_poll_throttle"
+    assert after_old_suppressed_window.target_poll_skipped is True
+    assert target_calls == 2
+    assert len(presentation_calls) == 1
+
+    clock.now += 1.0
+    after_next_poll_interval = run_gnome_shell_helper_presentation_cycle(
+        previous_surface_action="mapped_suppressed",
+        fetch_health=_health_payload,
+        fetch_target=fetch_target,
+        fetch_presentation=fetch_presentation,
+        clock=clock,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+    )
+
+    assert after_next_poll_interval.presentation_skipped is True
+    assert after_next_poll_interval.presentation_skip_reason == "fresh_matching_presentation"
+    assert after_next_poll_interval.target_poll_skipped is False
+    assert target_calls == 3
+    assert len(presentation_calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("target_overrides", "first_surface_action", "second_surface_action"),
+    [
+        ({"targetToken": "meta:22"}, "", ""),
+        ({"monitorRect": {"x": 3440, "y": 0, "width": 3440, "height": 1440}}, "", ""),
+        ({"hasFocus": False}, "", ""),
+        ({"showingOnWorkspace": False}, "", ""),
+        ({"minimized": True}, "", ""),
+        ({"fullscreen": True}, "", ""),
+        ({}, "", "mapped_suppressed"),
+    ],
+)
+def test_presentation_cycle_hard_signature_changes_force_apply(
+    target_overrides: dict[str, object],
+    first_surface_action: str,
+    second_surface_action: str,
+) -> None:
+    clock = _Clock()
+    state = GnomeHelperPresentationRuntimeState()
+    target_payloads = [
+        _target_payload(),
+        _target_payload(_target_window(**target_overrides)),
+    ]
+    presentation_calls: list[HelperPresentationRequest] = []
+
+    def fetch_target() -> dict[str, object]:
+        return target_payloads.pop(0)
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        presentation_calls.append(request)
+        return _presentation_payload(request)
+
+    run_gnome_shell_helper_presentation_cycle(
+        previous_surface_action=first_surface_action,
+        fetch_health=_health_payload,
+        fetch_target=fetch_target,
+        fetch_presentation=fetch_presentation,
+        clock=clock,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+    )
+    clock.now += 12.0
+    result = run_gnome_shell_helper_presentation_cycle(
+        previous_surface_action=second_surface_action,
+        fetch_health=_health_payload,
+        fetch_target=fetch_target,
+        fetch_presentation=fetch_presentation,
+        clock=clock,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+    )
+
+    assert result.presentation_skipped is False
+    assert result.attempts == 1
+    assert len(presentation_calls) == 2
+
 
 def test_presentation_cycle_health_cache_hits_then_expires_with_bounded_jitter() -> None:
     clock = _Clock()
     state = GnomeHelperPresentationRuntimeState()
     health_calls = 0
+    presentation_calls: list[HelperPresentationRequest] = []
 
     def fetch_health() -> dict[str, object]:
         nonlocal health_calls
         health_calls += 1
         return _health_payload()
 
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        presentation_calls.append(request)
+        return _presentation_payload(request)
+
     run_gnome_shell_helper_presentation_cycle(
         fetch_health=fetch_health,
         fetch_target=_target_payload,
-        fetch_presentation=_presentation_payload,
+        fetch_presentation=fetch_presentation,
         clock=clock,
         runtime_state=state,
         health_cache_jitter_seconds=lambda: 99.0,
@@ -417,7 +524,7 @@ def test_presentation_cycle_health_cache_hits_then_expires_with_bounded_jitter()
     cached = run_gnome_shell_helper_presentation_cycle(
         fetch_health=fetch_health,
         fetch_target=_target_payload,
-        fetch_presentation=_presentation_payload,
+        fetch_presentation=fetch_presentation,
         clock=clock,
         runtime_state=state,
         health_cache_jitter_seconds=lambda: 0.0,
@@ -426,7 +533,7 @@ def test_presentation_cycle_health_cache_hits_then_expires_with_bounded_jitter()
     expired = run_gnome_shell_helper_presentation_cycle(
         fetch_health=fetch_health,
         fetch_target=_target_payload,
-        fetch_presentation=_presentation_payload,
+        fetch_presentation=fetch_presentation,
         clock=clock,
         runtime_state=state,
         health_cache_jitter_seconds=lambda: 0.0,
@@ -434,7 +541,10 @@ def test_presentation_cycle_health_cache_hits_then_expires_with_bounded_jitter()
 
     assert cached.health_cache_hit is True
     assert expired.health_cache_hit is False
+    assert expired.presentation_skipped is True
+    assert expired.presentation_skip_reason == "fresh_matching_presentation"
     assert health_calls == 2
+    assert len(presentation_calls) == 1
 
 
 def test_presentation_cycle_unhealthy_refresh_fails_closed_after_health_cache_expiry() -> None:
