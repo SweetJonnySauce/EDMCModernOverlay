@@ -121,6 +121,7 @@ class HelperHealthService {
         const action = this._requestString(payload, 'action') || 'degrade';
         const targetToken = this._requestString(payload, 'target_token', 'targetToken');
         const requestedRect = this._requestRect(payload, 'content_rect', 'contentRect');
+        const rectTolerance = this._requestInt(payload, 2, 'rect_tolerance', 'rectTolerance');
         const standaloneMode = this._requestBool(payload, 'standalone_mode', 'standaloneMode');
         const base = {
             action,
@@ -195,7 +196,7 @@ class HelperHealthService {
             }));
         }
 
-        const result = this._applyOverlayPresentation(overlayEntry.window, requestedRect);
+        const result = this._applyOverlayPresentation(overlayEntry.window, requestedRect, rectTolerance);
         const chromeFree = this._windowChromeFree(overlayEntry.payload);
         const clickThrough = this._requestBool(payload, 'click_through_expected', 'clickThroughExpected');
         const focusSafe = result.stacking && clickThrough;
@@ -418,6 +419,17 @@ class HelperHealthService {
             left.y === right.y &&
             left.width === right.width &&
             left.height === right.height;
+    }
+
+    _rectsMatchWithinTolerance(left, right, tolerance = 0) {
+        if (!this._rectIsValid(left) || !this._rectIsValid(right)) {
+            return false;
+        }
+        const allowed = Math.max(0, Number(tolerance) || 0);
+        return Math.abs(left.x - right.x) <= allowed &&
+            Math.abs(left.y - right.y) <= allowed &&
+            Math.abs(left.width - right.width) <= allowed &&
+            Math.abs(left.height - right.height) <= allowed;
     }
 
     _safeCall(object, methodName) {
@@ -689,14 +701,22 @@ class HelperHealthService {
         }) || null;
     }
 
-    _applyOverlayPresentation(window, requestedRect) {
+    _applyOverlayPresentation(window, requestedRect, rectTolerance = 2) {
         const unsupportedFeatures = [];
         const degradeReasons = [];
         let placement = false;
         let stacking = false;
         let appliedRect = null;
+        const currentFrameRect = this._rectPayload(this._safeCall(window, 'get_frame_rect'));
         try {
-            if (typeof window?.move_resize_frame === 'function') {
+            if (
+                currentFrameRect &&
+                this._rectIsValid(currentFrameRect) &&
+                this._rectsMatchWithinTolerance(currentFrameRect, requestedRect, rectTolerance)
+            ) {
+                placement = true;
+                appliedRect = currentFrameRect;
+            } else if (typeof window?.move_resize_frame === 'function') {
                 window.move_resize_frame(
                     false,
                     requestedRect.x,
@@ -733,7 +753,7 @@ class HelperHealthService {
         if (frameRect && this._rectIsValid(frameRect)) {
             appliedRect = frameRect;
         } else if (placement) {
-            appliedRect = requestedRect;
+            appliedRect = appliedRect || requestedRect;
         }
         return { placement, stacking, appliedRect, unsupportedFeatures, degradeReasons };
     }
@@ -783,6 +803,20 @@ class HelperHealthService {
             return Boolean(value);
         }
         return false;
+    }
+
+    _requestInt(payload, fallback, ...names) {
+        for (const name of names) {
+            const value = payload?.[name];
+            if (value === null || value === undefined) {
+                continue;
+            }
+            const parsed = Number.parseInt(String(value), 10);
+            if (Number.isFinite(parsed)) {
+                return parsed;
+            }
+        }
+        return fallback;
     }
 
     _requestStringList(payload, ...names) {

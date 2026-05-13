@@ -307,6 +307,7 @@ Record:
 | 6A | Mapped suppression for GNOME helper-mode focus loss | No-Flash Manual Validation Passed; Workspace Deferred |
 | 6B | Frame fallback monitor-bounds clamp | Manual Monitor-Bounds Passed; 6A Recheck Passed |
 | 7 | Manual validation matrix and true-overlay gate review | In Progress |
+| 8 | Performance stabilization addendum for GNOME helper presentation churn | Off Baseline Captured; Manual Validation Pending |
 
 ## Phase Details
 
@@ -1072,6 +1073,202 @@ Expected pass for `true_overlay` eligibility: target payload exposes valid `cont
 - Stage 7.1 item 5, focus loss suppresses content without hide/remap flash: Passed on 2026-05-12. With `keep_overlay_visible=false`, focus loss transitioned from `focus_loss_debouncing` to `visibility_reason=focus_lost_suppressed`, `surface_action=mapped_suppressed`, and `content_visible=False` while keeping `visibility=visible`, `overlay_window_found=True`, `rect_match=True`, and `remap_warmup=inactive`. Runtime logged `Backend presentation content suppressed (reason=focus_lost_suppressed)`. No `Overlay visibility set to hidden` or `primed Qt map geometry` appeared in the supplied evidence.
 - Stage 7.1 item 6, focus return restores content without remap flash: Passed on 2026-05-12. Returning focus from the suppressed state changed runtime logs to `visibility_reason=target_focused`, `surface_action=mapped_visible`, `content_visible=True`, and `target_focus=True`, with `focus_loss_samples=0`, `focus_loss_elapsed=0.000s`, `remap_warmup=inactive`, `overlay_window_found=True`, and `rect_match=True`. Runtime logged `Backend presentation content restored (reason=target_focused)`. No `Overlay visibility set to visible` from hidden state, no `primed Qt map geometry`, and no remap flash evidence appeared in the supplied logs.
 - Stage 7.1 item 7, click-through works while visible: Passed on 2026-05-12. User confirmed Elite received click input through an overlay-covered area while runtime logs showed the overlay visible and attached with `visibility_reason=target_focused`, `surface_action=mapped_visible`, `content_visible=True`, `target_focus=True`, `overlay_window_found=True`, `remap_warmup=inactive`, and matching requested/applied rects. No hide/remap evidence appeared in the supplied logs. `rect_source=frame_rect_fallback` and degraded reasons remain expected and continue to block `true_overlay`.
+
+### Phase 8: Performance Stabilization Addendum
+- Reduce GNOME helper-mode CPU/compositor overhead without changing the validated attachment, no-flash, click-through, monitor-clamp, or degraded-support behavior from Phases 4-7.
+- Treat this phase as a behavior-preserving performance fix, not a support-status upgrade. `frame_rect_fallback` still blocks `true_overlay`.
+- Primary fix area: the backend-owned GNOME helper presentation cycle currently runs every 500 ms, spawns external `gdbus` subprocesses for health/target/presentation, and asks GNOME Shell to move/resize/raise the overlay even when the target rect and presentation state are unchanged.
+- Payload logging and high-frequency payload bursts are explicitly out of scope for Phase 8 implementation. They remain a later follow-up after presentation churn is fixed.
+- Investigation summary from 2026-05-13:
+- Host process sampling showed the load spread across EDMC, the overlay client, and GNOME Shell rather than one obvious pegged process. Representative samples: EDMC `python3` around `8-12%` CPU, overlay client around `3-4%`, and GNOME Shell around `10%`.
+- `pidstat -p <edmc>,<overlay>,<gnome-shell> -dur 1 5` showed low IO and no major memory pressure, so the visible slowdown is primarily CPU/event-loop/compositor work.
+- Runtime logs showed the GNOME helper presentation loop continuing while the overlay was `mapped_suppressed` with `content_visible=False`.
+- `helpers/gnome_shell_extension/extension.js` currently applies `move_resize_frame(...)` and `make_above()` for each `ApplyPresentation` call.
+- Payload logs also showed bursty third-party payload activity, but that is deferred so Phase 8 stays focused on compositor-facing presentation churn.
+- Risks: throttling the helper loop too aggressively could make move/resize/focus reacquire feel laggy; suppressing redundant presentation too broadly could miss a real target change.
+- Mitigations: use explicit signatures and bounded stale windows, keep hard target-loss states fast, add dev-mode diagnostics for skipped presentation work, and validate with the same Phase 7 manual matrix after performance changes.
+- Test type selection:
+- Unit tests for pure presentation-signature/dedupe decisions, health-cache freshness, jitter behavior, and throttling cadence.
+- Harness or mixin tests if follow/setup timer wiring or backend consumer result contracts change.
+- Static/source tests for GNOME Shell extension no-op behavior if implemented by source inspection.
+- Manual GNOME validation for compositor-visible responsiveness, CPU sampling, move/resize latency, focus loss/return, click-through, and 1440-height monitor clamp.
+- `make check` for any code/test changes.
+- Phase 8 decisions locked on 2026-05-13:
+- Implement presentation churn first; defer payload logging until after presentation churn is fixed.
+- The no-op presentation signature must include `targetToken`, selected requested rect after clamp, `monitorRect`, rect source, visibility action, target focus/workspace/minimized/fullscreen flags, overlay identity, and relevant presentation options.
+- Use a fresh successful applied presentation window of about `1.0s` while focused/visible and about `2.0s` while mapped-suppressed, unless tests show these values are too coarse.
+- Cache healthy compatible helper status for about `5s`, with small jitter where practical so repeated clients do not line up health probes.
+- Keep suppressed-state polling slower, around `1-2s`, while still detecting focus return and hard target changes promptly.
+- Start Shell-side no-op work by skipping redundant `move_resize_frame(...)`; keep `make_above()` unless stacking can be proven cheaply.
+- Do not replace `gdbus` subprocesses with a persistent DBus client in this phase. Dedupe, cache, and throttle first.
+
+#### Phase 8 Target Behavior
+- Do not call `ApplyPresentation` when the helper target token, selected requested rect, monitor rect, visibility action, focus/workspace/minimized state, overlay identity, and relevant presentation options are unchanged and the last applied presentation is still fresh and matching.
+- Do not run helper health through `gdbus` on every presentation cycle. Cache healthy compatible helper status for about `5s` with small jitter where practical, while still failing closed on explicit command errors and startup/unavailable states.
+- Slow down soft-focus suppressed polling where safe. In `mapped_suppressed` with a valid target and matching last presentation, poll enough to detect focus return and target changes but avoid repeated no-op compositor writes.
+- Keep hard states fast: helper unavailable, target missing, target token changes, target minimized/hidden/off-workspace, monitor rect changes, requested rect changes, stale presentation, unsupported presentation, and applied-rect mismatch must bypass no-op suppression and retry through the existing bounded path.
+- In the GNOME Shell extension, skip `move_resize_frame(...)` when the overlay frame already matches the requested rect within the existing tolerance, and skip `make_above()` when the helper can prove the overlay is already correctly stacked. If stacking cannot be proven cheaply, prefer keeping the raise but no-op the move/resize first.
+- Preserve Phase 6B monitor clamp exactly: over-tall `frame_rect_fallback` still clamps to `monitorRect`, emits `frame_rect_clamped_to_monitor` only when changed, and remains degraded.
+- Preserve Phase 6A mapped suppression: focus loss with `keep_overlay_visible=false` suppresses content without unmapping/remapping for soft focus loss.
+- Preserve fix219 boundaries: generic follow/runtime code must consume backend-owned presentation interfaces and must not import GNOME helper runtime modules, check raw GNOME backend/helper enums, or reason about helper protocol actions.
+
+#### Deferred Payload/Logging Follow-Up
+- Payload logging is not in Phase 8 implementation scope.
+- Decisions already agreed for the later payload/logging follow-up:
+- Default payload logging should be off in release/non-dev mode.
+- Disabled payload logging should gate before expensive serialization.
+- Start with diagnostic spam summaries and logging suppression rather than changing valid payload delivery semantics.
+- Do not add producer-specific behavior for `BGS-Tally`; treat it as a generic high-frequency payload producer case.
+- Keep support diagnostics available through explicit dev/debug settings.
+
+| Stage | Description | Status |
+| --- | --- | --- |
+| 8.1 | Add performance instrumentation and baseline commands for EDMC, overlay client, GNOME Shell, helper cycle counts, skipped cycles, and presentation apply volume | Pre/Post Baselines Captured |
+| 8.2 | Add backend-owned presentation signature/freshness model and tests for safe no-op `ApplyPresentation` suppression | Headless Tests Passed |
+| 8.3 | Cache helper health compatibility checks with bounded freshness, jitter, and tests | Headless Tests Passed |
+| 8.4 | Add suppressed-state polling/throttling that keeps hard target changes fast and tests the policy | Headless Tests Passed |
+| 8.5 | Add GNOME Shell extension no-op guards for unchanged move/resize/raise work | Headless Tests Passed |
+| 8.6 | Run targeted presentation performance validation plus Phase 7 regression checks and record before/after evidence | Off Baseline Captured; Manual GNOME Validation Pending |
+
+#### Phase 8 Implementation Plan
+- Touch points started on 2026-05-13: `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py` for backend-owned presentation signature, freshness windows, suppressed-state target polling throttle, and helper health cache; `overlay_client/backend/consumers.py` and `overlay_client/follow_surface.py` only for backend-owned previous visibility-action wiring; `helpers/gnome_shell_extension/extension.js` for the Shell-side unchanged-frame no-op guard.
+- Expected unchanged behavior: PyQt rendering remains default; GNOME helper mode remains the target/presentation source of truth; `contentRect` stays preferred; `frame_rect_fallback` remains degraded and still blocks `true_overlay`; Phase 6A mapped suppression and Phase 6B monitor clamp remain intact; generic follow/runtime code continues to consume backend-owned interfaces without GNOME helper imports or helper-protocol checks.
+- Test type selection: unit tests for presentation signature equality/inequality, freshness windows, hard-change bypasses, no-op suppression, suppressed polling throttle, and helper health cache freshness/jitter; follow/backend consumer tests only for the backend-owned visibility-action wiring contract; static/source tests for the GNOME Shell extension no-op guard because no JS runtime seam exists in the test suite; manual GNOME validation remains required for CPU/cadence and Phase 7 compositor-visible behavior.
+- Targeted test commands planned before `make check`: `python -m pytest overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_follow_surface_mixin.py overlay_client/tests/test_gnome_shell_helper_extension_source.py`, plus existing Phase 6A/6B/backend-boundary slices if not covered by the targeted files.
+
+#### Phase 8 Validation Commands
+Capture a baseline before coding and repeat after each performance milestone:
+```bash
+ps -eo pid,ppid,stat,pcpu,pmem,rss,comm,args --sort=-pcpu | head -n 30
+```
+
+```bash
+pidstat -p <edmc_pid>,<overlay_client_pid>,<gnome_shell_pid> -dur 1 10
+```
+
+```bash
+tail -f /home/jon/edmc-logs/EDMCModernOverlay/overlay_client.log \
+  | grep --line-buffered -E "GNOME helper presentation|presentation_skipped|ApplyPresentation|mapped_suppressed|target_focused|applied_rect_mismatch|frame_rect_clamped_to_monitor"
+```
+
+Expected pass after Phase 8:
+- Stable attached/focused windowed mode produces far fewer `ApplyPresentation` calls than the 500 ms timer cadence.
+- Stable `mapped_suppressed` focus-loss state does not repeatedly move/resize/raise the overlay.
+- Move, resize, focus return, target token changes, game exit/relaunch, and 1440-height monitor clamp still react promptly.
+- GNOME Shell and overlay client CPU drop measurably during stable attached and stable suppressed states.
+- Phase 7 windowed checks that already passed still pass.
+
+#### Phase 8 Baseline Capture
+- Captured on 2026-05-13 at roughly 20:22-20:23 UTC before Phase 8 code changes.
+- Command:
+```bash
+ps -eo pid,ppid,stat,pcpu,pmem,rss,comm,args --sort=-pcpu | head -n 40
+```
+- Result: top host consumers included Elite Dangerous at `312%` CPU, Firefox RDD at `89.1%`, OneDrive at `59.1%`, Firefox at `18.4%`, GNOME Shell PID `3533` at `9.9%`, EDMC PID `44195` at `9.1%`, and overlay client PID `44230` at `3.6%`. This confirms the desktop is already under heavy load, with overlay-related cost spread across EDMC, overlay client, and GNOME Shell.
+- Command:
+```bash
+pidstat -p 3533,44195,44230 -dur 1 5
+```
+- Result: five-second clean target average was GNOME Shell `6.40%` CPU, EDMC `7.40%` CPU, and overlay client `3.00%` CPU. RSS was roughly `575414 KB` for GNOME Shell, `215428 KB` for EDMC, and `93396 KB` for the overlay client. Average write IO was low: EDMC `14.40 kB/s`, overlay client `1.60 kB/s`, GNOME Shell `0.00 kB/s`. No major faults or read IO were observed. This supports the CPU/event-loop/compositor-work diagnosis rather than memory pressure or disk IO.
+- Command:
+```bash
+tail -n 120 /home/jon/edmc-logs/EDMCModernOverlay/overlay_client.log
+```
+- Result: recent runtime logs showed stable suppressed presentation work with `visibility_reason=focus_lost_suppressed`, `surface_action=mapped_suppressed`, `content_visible=False`, `target_focus=False`, `rect_match=True`, `attempts=1`, and `retries=[]`. The target was unchanged at `token=meta:27` with `requested` and `applied` both `{'x': 920, 'y': 246, 'width': 1600, 'height': 937}` and `state=presentation_degraded` due to `frame_rect_fallback`.
+- Presentation cadence baseline: helper presentation sequence advanced from `seq=3603` at `2026-05-13 20:21:08.988 UTC` to `seq=3786` at `2026-05-13 20:22:40.487 UTC`, which is `183` intervals over about `91.5s`, or roughly `2.0` presentation cycles per second while the overlay was already stably mapped-suppressed and matching. Phase 8 should reduce this steady-state no-op presentation work.
+
+#### Phase 8 Fresh Baseline Capture
+- Redone on 2026-05-13 at roughly 21:03-21:08 UTC after the Phase 8 backend implementation was running. Runtime logs showed the Phase 8 backend skip diagnostics active. This sample does not separately prove the GNOME Shell extension no-op guard was reloaded; helper reinstall/reload remains part of manual validation.
+- Command:
+```bash
+ps -eo pid,ppid,stat,pcpu,pmem,rss,comm,args --sort=-pcpu | head -n 40
+```
+- Result: top host consumers still included Elite Dangerous at `336%` CPU, Firefox RDD at `79.6%`, OneDrive at `55.2%`, Firefox at `17.1%`, GNOME Shell PID `3533` at `9.5%`, EDMC PID `146092` at `9.4%`, and overlay client PID `146118` at `3.2%`. The one-shot `ps` command itself briefly appeared at the top and is ignored as measurement overhead. The desktop is still under heavy non-overlay load, so process-level CPU is noisy.
+- Command:
+```bash
+pidstat -p 3533,146092,146118 -dur 1 10
+```
+- Result: ten-second average was GNOME Shell `8.70%` CPU, EDMC `7.80%` CPU, and overlay client `2.80%` CPU. RSS was roughly `636674 KB` for GNOME Shell, `213228 KB` for EDMC, and `92180 KB` for the overlay client. Average write IO stayed low: EDMC `14.00 kB/s`, overlay client `2.80 kB/s`, GNOME Shell `0.00 kB/s`, with no major faults. This remains a CPU/event-loop/compositor-work profile, not disk or memory pressure.
+- Command:
+```bash
+perl -ne '
+if (/GNOME helper presentation/) {
+    $total++;
+    $skipped++ if /presentation_skipped=True/;
+    $throttle++ if /skip_reason=suppressed_poll_throttle/;
+    $fresh++ if /skip_reason=fresh_matching_presentation/;
+    $applies++ if /attempts=1/;
+    if (!$first) { $first = substr($_, 0, 23); /seq=(\d+)/ and $firstseq = $1; }
+    $last = substr($_, 0, 23); /seq=(\d+)/ and $lastseq = $1;
+}
+END { print "total=$total skipped=$skipped throttle=$throttle fresh=$fresh attempts1=$applies first=$first firstseq=$firstseq last=$last lastseq=$lastseq\n"; }
+' /home/jon/edmc-logs/EDMCModernOverlay/overlay_client.log
+```
+- Result for the fresh log window: `total=248 skipped=194 throttle=151 fresh=43 attempts1=54 first=2026-05-13 21:03:11.726 firstseq=177 last=2026-05-13 21:05:14.966 lastseq=273`.
+- Interpretation: the runtime still emits a GNOME helper presentation diagnostic about every 500 ms, but most cycles no longer perform presentation work. `194/248` cycles were skipped (`78%`), `151/248` skipped target polling under `suppressed_poll_throttle`, and only `54/248` had `attempts=1`. Across about `123.2s`, target-state sequence advanced by `96`, or roughly `0.78` target polls/sec, and `ApplyPresentation` attempts ran at roughly `0.44`/sec. The pre-Phase 8 steady suppressed baseline was about `2.0` presentation cycles/sec with no no-op suppression, so the compositor/DBus apply volume is substantially lower even though debug log cadence remains unchanged.
+- Evidence quality: this validates that backend-owned no-op suppression and suppressed-state polling throttle are active. It does not close Phase 8 manual validation by itself because user-visible responsiveness, move/resize latency, focus return, click-through, 1440-height monitor clamp, and helper-side no-op reload still need manual GNOME confirmation.
+
+#### Phase 8 EDMC/Helper Off Baseline Capture
+- Captured on 2026-05-13 at roughly 21:13 UTC after the user uninstalled the GNOME helper and shut down EDMC. This is an environment baseline for comparison against EDMC/overlay-on samples, not a Phase 8 behavior validation.
+- Command:
+```bash
+pgrep -af "EDMarketConnector|overlay_client|org.edmc.ModernOverlay|gnome-shell"
+```
+- Result: only GNOME Shell/session processes and the VS Code workspace path matched. No `EDMarketConnector.py`, no `overlay_client.overlay_client`, and no `org.edmc.ModernOverlay.Helper` process/service owner appeared in the host process search.
+- Command:
+```bash
+gdbus call --session \
+  --dest org.edmc.ModernOverlay.Helper \
+  --object-path /org/edmc/ModernOverlay/Helper \
+  --method org.edmc.ModernOverlay.Helper.GetHealth
+```
+- Result: `GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name org.edmc.ModernOverlay.Helper was not provided by any .service files`, confirming the helper DBus service was unavailable.
+- Command:
+```bash
+ps -eo pid,ppid,stat,pcpu,pmem,rss,comm,args --sort=-pcpu | head -n 40
+```
+- Result: top host consumers still included Elite Dangerous at `337%` CPU, Firefox RDD at `78.9%`, OneDrive at `54.9%`, Firefox at `17.0%`, GNOME Shell PID `3533` at `9.4%`, VS Code-related processes, Steam helpers, and GNOME System Monitor. EDMC and the overlay client were absent from the top process list. The one-shot `ps` command itself briefly appeared at the top and is ignored as measurement overhead.
+- Command:
+```bash
+pidstat -p 3533 -dur 1 10
+```
+- Result: ten-second GNOME Shell average with EDMC/overlay/helper off was `12.20%` CPU, RSS about `630531 KB`, no read/write IO, and no major faults. The GNOME Shell off-baseline was higher than the immediately prior overlay-on `pidstat` sample (`8.70%`), so the current GNOME Shell CPU is dominated by broader desktop/game activity and short-window sampling noise rather than the overlay alone.
+- Interpretation: shutting down EDMC and removing the helper eliminates the overlay client and helper service, but it does not make the desktop idle. Elite, Firefox RDD, OneDrive, GNOME Shell, Steam, and VS Code remain substantial active consumers. Use this as a control point: Phase 8 reduced overlay presentation work, but process-level GNOME Shell CPU is not a reliable single metric while the rest of the desktop load remains this high.
+
+#### Phase 8 Execution Summary
+- Stage 8.2: Completed for headless coverage. Added backend-owned `GnomeHelperPresentationSignature` and runtime state that suppresses `ApplyPresentation` only when the target token, selected requested rect after clamp, monitor rect, rect source, previous visibility action, target focus/workspace/minimized/fullscreen flags, overlay title/class, renderer, tolerance, required gates, standalone mode, and expected degradation reasons are unchanged. Suppression requires a fresh matching prior presentation and does not apply after applied-rect mismatch, unexpected degradation, unsupported features, stale status, missing target, hidden target, or request changes.
+- Stage 8.3: Completed for headless coverage. Healthy compatible helper status is cached for `5.0s` plus bounded jitter up to `0.5s`; explicit unhealthy/error results clear presentation state and fail closed. This does not replace the current `gdbus` transport.
+- Stage 8.4: Completed for headless coverage. Stable `mapped_suppressed` state throttles redundant target polling to about `1.5s` only while the previous matching presentation remains fresh; focus return, rect changes, monitor changes, target changes, and stale status still force the normal target/presentation path.
+- Stage 8.5: Completed for headless coverage. The GNOME Shell extension now reads the current overlay frame and skips redundant `move_resize_frame(...)` when it already matches the requested rect within `rect_tolerance`. `make_above()` remains in place because stacking proof is not yet cheap or explicit.
+- Stage 8.6: Headless regression passed. Manual GNOME performance validation remains pending after helper reinstall/reload and EDMC restart. Support wording remains degraded/experimental; `frame_rect_fallback` still blocks `true_overlay`.
+
+#### Tests Run For Phase 8
+- Command:
+```bash
+python3 -m py_compile overlay_client/backend/bundles/_gnome_shell_helper_presentation.py overlay_client/backend/consumers.py overlay_client/follow_surface.py
+```
+- Result: passed.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_follow_surface_mixin.py overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed; `52 passed`.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_presentation_policy.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_follow_surface_mixin.py overlay_client/tests/test_backend_architecture_boundary.py overlay_client/tests/test_gnome_shell_helper_target_state.py overlay_client/tests/test_gnome_shell_helper_presentation_state.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_interaction_controller.py overlay_client/tests/test_platform_controller_backend_status.py overlay_client/tests/test_setup_surface.py tests/test_gnome_shell_extension_manifest.py overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed; `117 passed`, `4 skipped`. Skips were the existing PyQt-marked setup tests without `PYQT_TESTS=1` in this targeted headless command.
+- Command:
+```bash
+make check
+```
+- Result: passed. Ruff passed, mypy passed, and `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest` passed with `981 passed`, `21 skipped`.
+
+#### Phase 8 Manual GNOME Validation Pending
+- Reinstall/reload the GNOME Shell helper extension and restart EDMC so the extension no-op guard and backend cadence changes are both live.
+- Repeat the Phase 8 validation commands during stable focused/visible and stable `mapped_suppressed` states.
+- Expected log evidence: repeated stable cycles should show `presentation_skipped=True` with `skip_reason=fresh_matching_presentation` or `skip_reason=suppressed_poll_throttle`, reduced `attempts=1` apply volume, and unchanged requested/applied rect behavior for moves, resizes, focus return, target loss/reacquire, and 1440-height monitor clamp.
+- Confirm Phase 7 windowed behavior still holds: no wrong-monitor movement, click-through still works while visible and mapped-suppressed, focus loss/return still has no hide/remap flash, and `frame_rect_fallback` remains degraded.
 
 ## Execution Log
 - Plan created on 2026-05-11.

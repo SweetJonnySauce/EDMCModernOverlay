@@ -132,7 +132,11 @@ class FollowSurfaceMixin:
 
     def _refresh_backend_presentation(self) -> bool:
         try:
-            result = run_backend_presentation_cycle(getattr(self, "_client_backend_status", None), standalone_mode=False)
+            result = run_backend_presentation_cycle(
+                getattr(self, "_client_backend_status", None),
+                standalone_mode=False,
+                previous_surface_action=str(getattr(self, "_last_backend_presentation_surface_action", "")),
+            )
         except Exception as exc:  # pragma: no cover - defensive runtime guard
             _CLIENT_LOGGER.warning("Backend presentation cycle failed: %s", exc)
             return True
@@ -148,6 +152,7 @@ class FollowSurfaceMixin:
             currently_visible=currently_visible,
         )
         self._backend_presentation_visibility_state = decision.state
+        self._last_backend_presentation_surface_action = decision.surface_action
         self._log_backend_presentation_result(result, decision)
         self._update_backend_presentation_visibility(decision, result)
         if decision.show and result.scale_size is not None:
@@ -256,6 +261,7 @@ class FollowSurfaceMixin:
         _CLIENT_LOGGER.debug(
             "%s: health=%s target=%s token=%s seq=%s target_monitor=%s output=%s monitor_rect=%s frame_rect=%s rect_source=%s "
             "requested=%s applied=%s prime=%s prime_source=%s delta=%s rect_match=%s state=%s reasons=%s attempts=%s retries=%s "
+            "presentation_skipped=%s skip_reason=%s target_poll_skipped=%s "
             "visibility=%s visibility_reason=%s surface_action=%s content_visible=%s keep_overlay_visible=%s target_focus=%s target_workspace=%s "
             "target_minimized=%s focus_loss_samples=%s focus_loss_elapsed=%.3fs remap_warmup=%s "
             "remap_warmup_samples=%s remap_warmup_elapsed=%.3fs overlay_window_found=%s legacy_geometry=%s; %s",
@@ -279,6 +285,9 @@ class FollowSurfaceMixin:
             payload["presentation_reasons"],
             payload["attempts"],
             payload["retry_reasons"],
+            payload.get("presentation_skipped"),
+            payload.get("presentation_skip_reason"),
+            payload.get("target_poll_skipped"),
             "visible" if decision.show else "hidden",
             decision.reason,
             decision.surface_action,

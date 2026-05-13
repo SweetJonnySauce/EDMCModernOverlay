@@ -16,12 +16,16 @@ from overlay_client.backend import (
     GNOME_SHELL_HELPER_DBUS_PRESENTATION_METHOD,
     GNOME_SHELL_HELPER_DBUS_SERVICE,
     GNOME_SHELL_HELPER_DBUS_TARGET_METHOD,
+    GNOME_SHELL_HELPER_RECT_REASON_FRAME_FALLBACK_CLAMPED,
+    GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK,
     HelperDbusProbeError,
     HelperDbusServiceMissing,
     HelperHealthStatus,
+    HelperPresentationAction,
     HelperPresentationRequest,
     HelperPresentationState,
     HelperPresentationStatus,
+    HelperRect,
     HelperTargetStatus,
     build_gnome_shell_helper_presentation_request,
     probe_gnome_shell_helper_health,
@@ -32,6 +36,61 @@ from overlay_client.backend import (
 GNOME_HELPER_PRESENTATION_MAX_ATTEMPTS = 2
 GNOME_HELPER_PRESENTATION_DBUS_TIMEOUT_SECONDS = 0.75
 GNOME_HELPER_LEGACY_GEOMETRY_IGNORED = "ignored_helper_source_of_truth"
+GNOME_HELPER_PRESENTATION_FOCUSED_FRESH_SECONDS = 1.0
+GNOME_HELPER_PRESENTATION_SUPPRESSED_FRESH_SECONDS = 2.0
+GNOME_HELPER_HEALTH_CACHE_SECONDS = 5.0
+GNOME_HELPER_HEALTH_CACHE_JITTER_SECONDS = 0.5
+GNOME_HELPER_SUPPRESSED_TARGET_POLL_SECONDS = 1.5
+GNOME_HELPER_SURFACE_ACTION_MAPPED_SUPPRESSED = "mapped_suppressed"
+GNOME_HELPER_EXPECTED_DEGRADE_REASONS = frozenset(
+    (
+        GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK,
+        GNOME_SHELL_HELPER_RECT_REASON_FRAME_FALLBACK_CLAMPED,
+    )
+)
+
+
+@dataclass(frozen=True, slots=True)
+class GnomeHelperPresentationSignature:
+    """Backend-owned no-op key for a helper presentation request."""
+
+    target_token: str
+    requested_rect: tuple[int, int, int, int] | None
+    monitor_rect: tuple[int, int, int, int] | None
+    rect_source: str
+    visibility_action: str
+    target_has_focus: bool
+    target_showing_on_workspace: bool
+    target_minimized: bool
+    target_fullscreen: bool
+    overlay_title: str
+    overlay_wm_class: str
+    standalone_mode: bool
+    renderer: str
+    rect_tolerance: int
+    require_placement: bool
+    require_chrome_free: bool
+    require_stacking: bool
+    require_click_through: bool
+    require_focus_safe: bool
+    request_degrade_reasons: tuple[str, ...]
+
+
+@dataclass(slots=True)
+class GnomeHelperPresentationRuntimeState:
+    """Mutable GNOME helper presentation cache owned by the backend bundle."""
+
+    cached_health_status: HelperHealthStatus | None = None
+    health_cache_expires_at: float = 0.0
+    last_target_status: HelperTargetStatus | None = None
+    last_request: HelperPresentationRequest | None = None
+    last_presentation_status: HelperPresentationStatus | None = None
+    last_signature: GnomeHelperPresentationSignature | None = None
+    last_success_at: float = 0.0
+    next_suppressed_target_poll_at: float = 0.0
+
+
+_DEFAULT_PRESENTATION_RUNTIME_STATE = GnomeHelperPresentationRuntimeState()
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +104,10 @@ class GnomeHelperPresentationCycleResult:
     attempts: int = 0
     retry_reasons: tuple[str, ...] = field(default_factory=tuple)
     legacy_geometry_policy: str = GNOME_HELPER_LEGACY_GEOMETRY_IGNORED
+    presentation_skipped: bool = False
+    presentation_skip_reason: str = ""
+    target_poll_skipped: bool = False
+    health_cache_hit: bool = False
 
     @property
     def helper_healthy(self) -> bool:
@@ -105,27 +168,67 @@ class GnomeHelperPresentationCycleResult:
             "attempts": self.attempts,
             "retry_reasons": list(self.retry_reasons),
             "legacy_geometry_policy": self.legacy_geometry_policy,
+            "presentation_skipped": self.presentation_skipped,
+            "presentation_skip_reason": self.presentation_skip_reason,
+            "target_poll_skipped": self.target_poll_skipped,
+            "health_cache_hit": self.health_cache_hit,
         }
 
 
 def run_gnome_shell_helper_presentation_cycle(
     *,
     standalone_mode: bool = False,
+    previous_surface_action: str = "",
     fetch_health: Callable[[], object] | None = None,
     fetch_target: Callable[[], object] | None = None,
     fetch_presentation: Callable[[HelperPresentationRequest], object] | None = None,
     clock: Callable[[], float] = time.monotonic,
     max_attempts: int = GNOME_HELPER_PRESENTATION_MAX_ATTEMPTS,
+    runtime_state: GnomeHelperPresentationRuntimeState | None = None,
+    health_cache_jitter_seconds: Callable[[], float] | None = None,
 ) -> GnomeHelperPresentationCycleResult:
     """Fetch target state and apply bounded Shell-mediated presentation."""
 
     health_fetcher = fetch_health or fetch_gnome_shell_helper_health_via_gdbus
     target_fetcher = fetch_target or fetch_gnome_shell_helper_target_via_gdbus
     presentation_fetcher = fetch_presentation or fetch_gnome_shell_helper_presentation_via_gdbus
+    state = _runtime_state_for_call(
+        runtime_state,
+        fetch_health=fetch_health,
+        fetch_target=fetch_target,
+        fetch_presentation=fetch_presentation,
+    )
+    now = float(clock())
 
-    health_status = probe_gnome_shell_helper_health(health_fetcher, clock=clock)
+    health_status, health_cache_hit = _health_status_with_cache(
+        state,
+        health_fetcher,
+        now_monotonic=now,
+        clock=clock,
+        health_cache_jitter_seconds=health_cache_jitter_seconds,
+    )
     if not health_status.healthy:
-        return GnomeHelperPresentationCycleResult(health_status=health_status)
+        _clear_presentation_cache(state)
+        return GnomeHelperPresentationCycleResult(
+            health_status=health_status,
+            health_cache_hit=health_cache_hit,
+        )
+
+    if _should_skip_suppressed_target_poll(
+        state,
+        previous_surface_action=previous_surface_action,
+        now_monotonic=now,
+    ):
+        return GnomeHelperPresentationCycleResult(
+            health_status=health_status,
+            target_status=state.last_target_status,
+            request=state.last_request,
+            presentation_status=state.last_presentation_status,
+            presentation_skipped=True,
+            presentation_skip_reason="suppressed_poll_throttle",
+            target_poll_skipped=True,
+            health_cache_hit=health_cache_hit,
+        )
 
     attempts_allowed = max(1, int(max_attempts))
     target_status: HelperTargetStatus | None = None
@@ -143,6 +246,31 @@ def run_gnome_shell_helper_presentation_cycle(
             target_status,
             standalone_mode=standalone_mode,
         )
+        signature = _presentation_signature(
+            target_status,
+            request,
+            previous_surface_action=previous_surface_action,
+        )
+        if attempt == 1 and _should_skip_presentation_apply(
+            state,
+            signature,
+            request,
+            previous_surface_action=previous_surface_action,
+            now_monotonic=now,
+        ):
+            state.last_target_status = target_status
+            state.last_request = request
+            if previous_surface_action == GNOME_HELPER_SURFACE_ACTION_MAPPED_SUPPRESSED:
+                state.next_suppressed_target_poll_at = now + GNOME_HELPER_SUPPRESSED_TARGET_POLL_SECONDS
+            return GnomeHelperPresentationCycleResult(
+                health_status=health_status,
+                target_status=target_status,
+                request=request,
+                presentation_status=state.last_presentation_status,
+                presentation_skipped=True,
+                presentation_skip_reason="fresh_matching_presentation",
+                health_cache_hit=health_cache_hit,
+            )
         presentation_status = probe_gnome_shell_helper_presentation(
             presentation_fetcher,
             health_status=health_status,
@@ -156,6 +284,14 @@ def run_gnome_shell_helper_presentation_cycle(
             continue
         break
 
+    _update_presentation_cache(
+        state,
+        target_status=target_status,
+        request=request,
+        presentation_status=presentation_status,
+        previous_surface_action=previous_surface_action,
+        now_monotonic=now,
+    )
     return GnomeHelperPresentationCycleResult(
         health_status=health_status,
         target_status=target_status,
@@ -163,6 +299,7 @@ def run_gnome_shell_helper_presentation_cycle(
         presentation_status=presentation_status,
         attempts=attempts,
         retry_reasons=tuple(retry_reasons),
+        health_cache_hit=health_cache_hit,
     )
 
 
@@ -190,6 +327,244 @@ def _should_retry_presentation(status: HelperPresentationStatus) -> bool:
         status.state is HelperPresentationState.DEGRADED
         and "applied_rect_mismatch" in status.degrade_reasons
     )
+
+
+def _runtime_state_for_call(
+    runtime_state: GnomeHelperPresentationRuntimeState | None,
+    *,
+    fetch_health: Callable[[], object] | None,
+    fetch_target: Callable[[], object] | None,
+    fetch_presentation: Callable[[HelperPresentationRequest], object] | None,
+) -> GnomeHelperPresentationRuntimeState:
+    if runtime_state is not None:
+        return runtime_state
+    if fetch_health is None and fetch_target is None and fetch_presentation is None:
+        return _DEFAULT_PRESENTATION_RUNTIME_STATE
+    return GnomeHelperPresentationRuntimeState()
+
+
+def _health_status_with_cache(
+    state: GnomeHelperPresentationRuntimeState,
+    health_fetcher: Callable[[], object],
+    *,
+    now_monotonic: float,
+    clock: Callable[[], float],
+    health_cache_jitter_seconds: Callable[[], float] | None,
+) -> tuple[HelperHealthStatus, bool]:
+    cached = state.cached_health_status
+    if (
+        cached is not None
+        and cached.healthy
+        and now_monotonic < state.health_cache_expires_at
+        and not cached.is_stale(now_monotonic)
+    ):
+        return cached, True
+
+    health_status = probe_gnome_shell_helper_health(health_fetcher, clock=clock)
+    if health_status.healthy:
+        state.cached_health_status = health_status
+        state.health_cache_expires_at = now_monotonic + GNOME_HELPER_HEALTH_CACHE_SECONDS + _bounded_health_jitter(
+            health_cache_jitter_seconds,
+        )
+    else:
+        state.cached_health_status = None
+        state.health_cache_expires_at = 0.0
+    return health_status, False
+
+
+def _bounded_health_jitter(health_cache_jitter_seconds: Callable[[], float] | None) -> float:
+    try:
+        raw_value = (
+            float(health_cache_jitter_seconds())
+            if health_cache_jitter_seconds is not None
+            else _default_health_cache_jitter_seconds()
+        )
+    except (TypeError, ValueError):
+        raw_value = 0.0
+    return min(max(raw_value, 0.0), GNOME_HELPER_HEALTH_CACHE_JITTER_SECONDS)
+
+
+def _default_health_cache_jitter_seconds() -> float:
+    return ((os.getpid() % 1000) / 1000.0) * GNOME_HELPER_HEALTH_CACHE_JITTER_SECONDS
+
+
+def _should_skip_suppressed_target_poll(
+    state: GnomeHelperPresentationRuntimeState,
+    *,
+    previous_surface_action: str,
+    now_monotonic: float,
+) -> bool:
+    if previous_surface_action != GNOME_HELPER_SURFACE_ACTION_MAPPED_SUPPRESSED:
+        return False
+    if now_monotonic >= state.next_suppressed_target_poll_at:
+        return False
+    if state.last_target_status is None or state.last_request is None or state.last_presentation_status is None:
+        return False
+    return _cached_presentation_is_fresh_and_matching(
+        state,
+        request=state.last_request,
+        previous_surface_action=previous_surface_action,
+        now_monotonic=now_monotonic,
+    )
+
+
+def _should_skip_presentation_apply(
+    state: GnomeHelperPresentationRuntimeState,
+    signature: GnomeHelperPresentationSignature | None,
+    request: HelperPresentationRequest,
+    *,
+    previous_surface_action: str,
+    now_monotonic: float,
+) -> bool:
+    if signature is None or state.last_signature != signature:
+        return False
+    return _cached_presentation_is_fresh_and_matching(
+        state,
+        request=request,
+        previous_surface_action=previous_surface_action,
+        now_monotonic=now_monotonic,
+    )
+
+
+def _cached_presentation_is_fresh_and_matching(
+    state: GnomeHelperPresentationRuntimeState,
+    *,
+    request: HelperPresentationRequest,
+    previous_surface_action: str,
+    now_monotonic: float,
+) -> bool:
+    status = state.last_presentation_status
+    if status is None:
+        return False
+    if status.is_stale(now_monotonic):
+        return False
+    fresh_seconds = (
+        GNOME_HELPER_PRESENTATION_SUPPRESSED_FRESH_SECONDS
+        if previous_surface_action == GNOME_HELPER_SURFACE_ACTION_MAPPED_SUPPRESSED
+        else GNOME_HELPER_PRESENTATION_FOCUSED_FRESH_SECONDS
+    )
+    if state.last_success_at <= 0 or (now_monotonic - state.last_success_at) > fresh_seconds:
+        return False
+    return _presentation_status_is_matching_success(status, request)
+
+
+def _update_presentation_cache(
+    state: GnomeHelperPresentationRuntimeState,
+    *,
+    target_status: HelperTargetStatus | None,
+    request: HelperPresentationRequest | None,
+    presentation_status: HelperPresentationStatus | None,
+    previous_surface_action: str,
+    now_monotonic: float,
+) -> None:
+    state.last_target_status = target_status
+    state.last_request = request
+    state.last_presentation_status = presentation_status
+    signature = (
+        _presentation_signature(target_status, request, previous_surface_action=previous_surface_action)
+        if target_status is not None and request is not None
+        else None
+    )
+    if request is not None and presentation_status is not None and _presentation_status_is_matching_success(
+        presentation_status,
+        request,
+    ):
+        state.last_signature = signature
+        state.last_success_at = now_monotonic
+        if previous_surface_action == GNOME_HELPER_SURFACE_ACTION_MAPPED_SUPPRESSED:
+            state.next_suppressed_target_poll_at = now_monotonic + GNOME_HELPER_SUPPRESSED_TARGET_POLL_SECONDS
+        else:
+            state.next_suppressed_target_poll_at = 0.0
+        return
+    state.last_signature = None
+    state.last_success_at = 0.0
+    state.next_suppressed_target_poll_at = 0.0
+
+
+def _clear_presentation_cache(state: GnomeHelperPresentationRuntimeState) -> None:
+    state.last_target_status = None
+    state.last_request = None
+    state.last_presentation_status = None
+    state.last_signature = None
+    state.last_success_at = 0.0
+    state.next_suppressed_target_poll_at = 0.0
+
+
+def _presentation_status_is_matching_success(
+    status: HelperPresentationStatus,
+    request: HelperPresentationRequest,
+) -> bool:
+    if request.action is not HelperPresentationAction.ATTACH:
+        return False
+    if status.action is not HelperPresentationAction.ATTACH:
+        return False
+    if status.target_token != request.target_token:
+        return False
+    if status.requested_rect != request.content_rect:
+        return False
+    if not status.rect_match or status.applied_rect is None or not status.applied_rect.valid:
+        return False
+    if status.unsupported_features:
+        return False
+    if not (
+        status.placement
+        and status.chrome_free
+        and status.stacking
+        and status.click_through
+        and status.focus_safe
+        and status.pyqt_renderer_preserved
+    ):
+        return False
+    expected_reasons = set(request.degrade_reasons)
+    if not expected_reasons.issubset(GNOME_HELPER_EXPECTED_DEGRADE_REASONS):
+        return False
+    unexpected_reasons = set(status.degrade_reasons) - expected_reasons
+    if unexpected_reasons:
+        return False
+    if status.state is HelperPresentationState.APPLIED:
+        return not status.degrade_reasons
+    return status.state is HelperPresentationState.DEGRADED and bool(expected_reasons)
+
+
+def _presentation_signature(
+    target_status: HelperTargetStatus | None,
+    request: HelperPresentationRequest | None,
+    *,
+    previous_surface_action: str,
+) -> GnomeHelperPresentationSignature | None:
+    if target_status is None or request is None:
+        return None
+    target = target_status.target if target_status.found else None
+    if target is None:
+        return None
+    return GnomeHelperPresentationSignature(
+        target_token=request.target_token,
+        requested_rect=_rect_signature(request.content_rect),
+        monitor_rect=_rect_signature(target.monitor_rect),
+        rect_source=request.rect_source,
+        visibility_action=str(previous_surface_action or ""),
+        target_has_focus=bool(target.has_focus),
+        target_showing_on_workspace=bool(target.showing_on_workspace),
+        target_minimized=bool(target.minimized),
+        target_fullscreen=bool(target.fullscreen),
+        overlay_title=request.overlay_title,
+        overlay_wm_class=request.overlay_wm_class,
+        standalone_mode=bool(request.standalone_mode),
+        renderer=request.renderer,
+        rect_tolerance=int(request.rect_tolerance),
+        require_placement=bool(request.require_placement),
+        require_chrome_free=bool(request.require_chrome_free),
+        require_stacking=bool(request.require_stacking),
+        require_click_through=bool(request.require_click_through),
+        require_focus_safe=bool(request.require_focus_safe),
+        request_degrade_reasons=tuple(request.degrade_reasons),
+    )
+
+
+def _rect_signature(rect: HelperRect | None) -> tuple[int, int, int, int] | None:
+    if rect is None or not rect.valid:
+        return None
+    return (rect.x, rect.y, rect.width, rect.height)
 
 
 def _call_gnome_shell_helper_method(method: str, argument: str | None = None) -> object:

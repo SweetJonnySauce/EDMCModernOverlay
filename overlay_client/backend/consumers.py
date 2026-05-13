@@ -53,6 +53,9 @@ class BackendPresentationCycleResult:
             self.prime_rect_source,
             tuple(payload.get("presentation_reasons") or ()),
             tuple(payload.get("retry_reasons") or ()),
+            payload.get("presentation_skipped"),
+            payload.get("presentation_skip_reason"),
+            payload.get("target_poll_skipped"),
             payload.get("legacy_geometry_policy"),
         )
 
@@ -237,6 +240,7 @@ def run_backend_presentation_cycle(
     status: Optional[BackendSelectionStatus],
     *,
     standalone_mode: bool = False,
+    previous_surface_action: str = "",
     gnome_runner: GnomePresentationCycleRunner | None = None,
 ) -> BackendPresentationCycleResult | None:
     """Run a backend-owned runtime presentation cycle when the selected backend exposes one."""
@@ -244,7 +248,12 @@ def run_backend_presentation_cycle(
     if not _gnome_shell_helper_presentation_available(status):
         return None
     runner = gnome_runner or _gnome_shell_helper_presentation_runner()
-    return _backend_result_from_gnome_helper_result(runner(standalone_mode=standalone_mode))
+    return _backend_result_from_gnome_helper_result(
+        runner(
+            standalone_mode=standalone_mode,
+            previous_surface_action=previous_surface_action,
+        )
+    )
 
 
 def _gnome_shell_helper_presentation_available(status: Optional[BackendSelectionStatus]) -> bool:

@@ -446,11 +446,17 @@ def test_backend_presentation_cycle_wraps_gnome_helper_result_when_helper_availa
     )
     calls: list[bool] = []
 
-    def fake_runner(*, standalone_mode: bool = False) -> _FakeGnomePresentationResult:
+    def fake_runner(*, standalone_mode: bool = False, previous_surface_action: str = "") -> _FakeGnomePresentationResult:
         calls.append(standalone_mode)
+        assert previous_surface_action == "mapped_visible"
         return _FakeGnomePresentationResult()
 
-    result = run_backend_presentation_cycle(status, standalone_mode=False, gnome_runner=fake_runner)
+    result = run_backend_presentation_cycle(
+        status,
+        standalone_mode=False,
+        previous_surface_action="mapped_visible",
+        gnome_runner=fake_runner,
+    )
 
     assert isinstance(result, BackendPresentationCycleResult)
     assert calls == [False]

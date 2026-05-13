@@ -1,4 +1,100 @@
+import sys
+import types
+
 import pytest
+
+try:  # pragma: no cover - exercised when PyQt6 is present
+    from PyQt6 import QtCore as _QtCore  # noqa: F401
+    from PyQt6 import QtGui as _QtGui  # noqa: F401
+    from PyQt6 import QtWidgets as _QtWidgets  # noqa: F401
+    from PyQt6.QtCore import QRect as _QRectImport  # noqa: F401
+    from PyQt6.QtCore import QSize as _QSizeImport  # noqa: F401
+except Exception:  # pragma: no cover - lightweight stub path
+    if "PyQt6" not in sys.modules:
+        sys.modules["PyQt6"] = types.ModuleType("PyQt6")
+
+    class _QRect:
+        def __init__(self, x=0, y=0, width=0, height=0) -> None:
+            self._x = int(x)
+            self._y = int(y)
+            self._width = int(width)
+            self._height = int(height)
+
+        def x(self) -> int:
+            return self._x
+
+        def y(self) -> int:
+            return self._y
+
+        def width(self) -> int:
+            return self._width
+
+        def height(self) -> int:
+            return self._height
+
+        def center(self):
+            return self
+
+        def intersects(self, other) -> bool:
+            return not (
+                self._x + self._width <= other.x()
+                or other.x() + other.width() <= self._x
+                or self._y + self._height <= other.y()
+                or other.y() + other.height() <= self._y
+            )
+
+    class _QSize:
+        def __init__(self, width=0, height=0) -> None:
+            self._width = int(width)
+            self._height = int(height)
+
+        def width(self) -> int:
+            return self._width
+
+        def height(self) -> int:
+            return self._height
+
+    qtcore = sys.modules.get("PyQt6.QtCore") or types.ModuleType("PyQt6.QtCore")
+    qtcore.QRect = getattr(qtcore, "QRect", _QRect)
+    qtcore.QSize = getattr(qtcore, "QSize", _QSize)
+    qtcore.Qt = getattr(
+        qtcore,
+        "Qt",
+        type(
+            "Qt",
+            (),
+            {
+                "KeyboardModifier": type("KeyboardModifier", (), {"AltModifier": 1}),
+            },
+        ),
+    )
+    sys.modules["PyQt6.QtCore"] = qtcore
+
+    qtgui = sys.modules.get("PyQt6.QtGui") or types.ModuleType("PyQt6.QtGui")
+    qtgui.QGuiApplication = getattr(
+        qtgui,
+        "QGuiApplication",
+        type(
+            "QGuiApplication",
+            (),
+            {
+                "screens": staticmethod(lambda: []),
+                "primaryScreen": staticmethod(lambda: None),
+                "screenAt": staticmethod(lambda _point: None),
+            },
+        ),
+    )
+    qtgui.QWindow = getattr(qtgui, "QWindow", object)
+    qtgui.QScreen = getattr(qtgui, "QScreen", object)
+    sys.modules["PyQt6.QtGui"] = qtgui
+
+    qtwidgets = sys.modules.get("PyQt6.QtWidgets") or types.ModuleType("PyQt6.QtWidgets")
+    qtwidgets.QApplication = getattr(
+        qtwidgets,
+        "QApplication",
+        type("QApplication", (), {"queryKeyboardModifiers": staticmethod(lambda: 0)}),
+    )
+    sys.modules["PyQt6.QtWidgets"] = qtwidgets
 
 from overlay_client.backend import (
     BackendDescriptor,
@@ -367,19 +463,20 @@ def test_refresh_follow_geometry_uses_gnome_helper_presentation_and_skips_legacy
     stub = _FollowSurfaceStub()
     stub._client_backend_status = _backend_status(helper_available=True)
     result = _fake_backend_presentation_result()
-    calls: list[bool] = []
+    calls: list[tuple[bool, str]] = []
 
-    def fake_cycle(_status, *, standalone_mode: bool = False):
-        calls.append(standalone_mode)
+    def fake_cycle(_status, *, standalone_mode: bool = False, previous_surface_action: str = ""):
+        calls.append((standalone_mode, previous_surface_action))
         return result
 
     monkeypatch.setattr("overlay_client.follow_surface.run_backend_presentation_cycle", fake_cycle)
 
     stub._refresh_follow_geometry()
 
-    assert calls == [False]
+    assert calls == [(False, "")]
     assert stub._follow_controller.refresh_called == 0
     assert stub._last_backend_presentation is result
+    assert stub._last_backend_presentation_surface_action == "mapped_visible"
     assert stub._visibility_helper.calls == [True]
 
 
