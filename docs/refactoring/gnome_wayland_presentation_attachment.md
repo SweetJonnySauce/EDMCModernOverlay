@@ -308,6 +308,7 @@ Record:
 | 6B | Frame fallback monitor-bounds clamp | Manual Monitor-Bounds Passed; 6A Recheck Passed |
 | 7 | Manual validation matrix and true-overlay gate review | In Progress |
 | 8 | Performance stabilization addendum for GNOME helper presentation churn | Phase 8.9 Manual Pause Validation Passed; Broader GNOME Regression Pending |
+| 9 | GNOME content-rect and alignment proof | Scoped; Pending Implementation |
 
 ## Phase Details
 
@@ -1528,6 +1529,71 @@ make check
 - Phase 8.8-specific evidence: in stable focused and stable `mapped_suppressed` states, unchanged signatures should no longer show periodic real `attempts=1` applies after the old `1.0s`/`2.0s` windows. `target_poll_skipped=True` may still appear during suppressed throttling, and `skip_reason=fresh_matching_presentation` should appear after target polls confirm the unchanged signature.
 - Phase 8.9-specific pause validation passed on 2026-05-13: user reported that the system performance issues appear to have gone away. Keep checking for regression during the broader GNOME behavior pass.
 - Confirm Phase 7 windowed behavior still holds: no wrong-monitor movement, click-through still works while visible and mapped-suppressed, focus loss/return still has no hide/remap flash, and `frame_rect_fallback` remains degraded.
+
+### Phase 9: GNOME Content Rect And Alignment Proof
+- Goal: replace `frame_rect_fallback` as the active GNOME helper-mode rect source only when the helper can provide a valid content-aligned rectangle or a documented equivalent proof that passes the support gate.
+- Current blocker: the tested Elite windowed target exposes valid `frameRect` and `bufferRect`, but `contentRect=null` and `decorationInsets=null`. Runtime therefore uses `frame_rect_fallback`, which works operationally but still includes unresolved content/chrome alignment risk.
+- Non-goals:
+- Do not claim `true_overlay` during diagnostics.
+- Do not remove the Phase 6B monitor clamp.
+- Do not regress Phase 6A mapped suppression, Phase 8 performance throttling, click-through, stacking, or PyQt rendering.
+- Do not hardcode an Elite-specific titlebar height or decoration inset unless repeated evidence proves it is stable and safe for the documented window mode.
+- Preserve fix219 boundaries: GNOME geometry discovery and rect-source decisions stay behind backend/helper-owned interfaces. Generic follow/runtime code must not import GNOME helper implementation modules or branch on raw helper protocol details.
+
+#### Phase 9 Target Behavior
+- Preferred pass path: helper target payload provides a valid `contentRect`; backend selects `rect_source=content_rect`; presentation applies; `applied` matches `requested`; no unresolved degrade reasons remain.
+- Equivalent-proof path: if GNOME cannot expose a direct content rect, a derived or mode-specific content rect may be considered only if all of these are true:
+- the derivation is documented and deterministic for the validated mode;
+- repeated windowed sizes/positions prove stable decoration/content insets;
+- borderless mode proves chrome-free alignment separately;
+- move, resize, focus loss/return, click-through, stacking, target loss/reacquire, and monitor clamp checks still pass;
+- logs expose enough diagnostics to audit the selected rect source and residual risk.
+- Fail/conservative path: if content alignment cannot be proven, keep using `frame_rect_fallback` as degraded/experimental and do not claim `true_overlay`.
+
+#### Phase 9 Proposed Implementation Scope
+- Add a helper-side geometry diagnostic payload for target windows. Capture available GNOME/Mutter geometry methods/properties without changing placement behavior first.
+- Probe at least:
+- `get_frame_rect`
+- `get_buffer_rect`
+- `get_client_area_rect` availability/result
+- any other MetaWindow geometry/client-area/work-area methods discoverable on the runtime object
+- monitor geometry/scale and workspace/fullscreen/windowed state
+- Compute and log candidate insets between frame, buffer, and any client/content rect candidates.
+- Keep diagnostics gated so normal release logs are not flooded.
+- If a native content rect exists and is stable, wire it as the preferred helper `contentRect`.
+- If no native content rect exists, decide whether a derived rect is acceptable for windowed mode; otherwise leave windowed degraded and consider whether borderless can independently satisfy the equivalent-proof gate.
+
+#### Phase 9 Validation Matrix
+1. Windowed geometry diagnostics across multiple positions and sizes.
+2. Windowed candidate content rect stability across move/resize.
+3. Windowed overlay alignment against visible game content, not titlebar/chrome.
+4. 1440-height windowed clamp still prevents wrong-monitor movement.
+5. Focus loss/return still has no hide/remap flash.
+6. Click-through still works while visible and mapped-suppressed.
+7. Stacking still remains above Elite while visible and focused.
+8. Game exit/relaunch target loss/reacquire still works.
+9. Borderless geometry diagnostics and chrome-free alignment.
+10. Borderless move/focus/click-through/stacking/target-loss checks.
+11. Support gate review: only remove degraded/experimental wording if `content_rect` or equivalent proof passes every required gate.
+
+#### Phase 9 Locked Decisions Before Implementation
+- Diagnostics-first is required for the first patch. Gather helper geometry candidates before changing runtime rect selection.
+- Windowed and borderless may land with different support wording. Borderless may be provable before decorated windowed mode.
+- If `contentRect` remains unavailable, acceptable equivalent proof requires repeated evidence across positions/sizes, documented deterministic insets or mode-specific alignment rules, and unchanged Phase 7 behavior. A single visual check is not enough.
+- A derived content rect must not be enabled by default until the derivation is proven stable and tested. Use diagnostics/dev gating first if needed.
+- `frame_rect_fallback` must not be treated as user-approved for `true_overlay` just because it looks good. It can remain usable/degraded, but not `true_overlay`.
+- Support wording must not be upgraded as part of the implementation patch. Keep support wording changes as the final Phase 9 gate after manual evidence is recorded.
+
+| Stage | Description | Status |
+| --- | --- | --- |
+| 9.1 | Add helper-side geometry diagnostics for all available target-window rect candidates without changing runtime placement | Pending |
+| 9.2 | Capture windowed geometry evidence across multiple positions, sizes, and the 1440-height case | Pending |
+| 9.3 | Capture borderless geometry evidence and chrome-free alignment evidence | Pending |
+| 9.4 | Decide whether native `contentRect`, derived rect, borderless-only proof, or continued degraded fallback is supportable | Pending Evidence |
+| 9.5 | Implement selected rect-source behavior behind backend/helper-owned interfaces, if evidence supports a change | Pending Decision |
+| 9.6 | Add/update unit and static/source tests for geometry candidate parsing, rect-source selection, degradation reasons, and fix219 boundaries | Pending |
+| 9.7 | Run Phase 7 regression matrix for the selected rect-source behavior | Pending Implementation |
+| 9.8 | Update support/status wording only if all `true_overlay` gates pass; otherwise keep degraded/experimental wording | Pending Validation |
 
 ## Execution Log
 - Plan created on 2026-05-11.
