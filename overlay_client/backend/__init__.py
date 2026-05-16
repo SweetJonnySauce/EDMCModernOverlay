@@ -52,6 +52,9 @@ from .helper_ipc import (
     HelperDbusUnreachable,
     HelperEndpointConfig,
     HelperDecorationInsets,
+    HelperGeometryCandidate,
+    HelperGeometryDiagnostics,
+    HelperGeometryInset,
     HelperHealthState,
     HelperHealthStatus,
     HelperMessage,
@@ -86,6 +89,7 @@ from .override_options import (
 )
 from .selector import BackendSelector
 from .status import BackendSelectionStatus, HelperCapabilityState
+from .surface_preparation import BackendPresentationSurfacePreparation
 
 __all__ = [
     "BackendBundle",
@@ -95,6 +99,7 @@ __all__ = [
     "BackendFamily",
     "BackendInstance",
     "BackendOverrideOption",
+    "BackendPresentationSurfacePreparation",
     "BackendSelectionStatus",
     "CapabilityClassification",
     "FallbackReason",
@@ -131,6 +136,9 @@ __all__ = [
     "HelperDbusUnreachable",
     "HelperDecorationInsets",
     "HelperEndpointConfig",
+    "HelperGeometryCandidate",
+    "HelperGeometryDiagnostics",
+    "HelperGeometryInset",
     "HelperHealthState",
     "HelperHealthStatus",
     "HelperIpcBackend",

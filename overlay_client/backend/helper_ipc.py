@@ -218,6 +218,80 @@ class HelperDecorationInsets:
 
 
 @dataclass(frozen=True, slots=True)
+class HelperGeometryCandidate:
+    """One optional helper-reported target geometry candidate."""
+
+    name: str
+    method: str = ""
+    available: bool = False
+    valid: bool = False
+    rect: HelperRect | None = None
+    detail: str = ""
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "method": self.method,
+            "available": self.available,
+            "valid": self.valid,
+            "rect": self.rect.to_payload() if self.rect is not None else None,
+            "detail": self.detail,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class HelperGeometryInset:
+    """Insets/deltas between two helper-reported target geometry candidates."""
+
+    name: str
+    source: str = ""
+    target: str = ""
+    valid: bool = False
+    insets: HelperDecorationInsets | None = None
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "source": self.source,
+            "target": self.target,
+            "valid": self.valid,
+            "insets": self.insets.to_payload() if self.insets is not None else None,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class HelperGeometryDiagnostics:
+    """Optional diagnostic target geometry payload preserved for manual proof."""
+
+    schema: int = 1
+    candidates: tuple[HelperGeometryCandidate, ...] = field(default_factory=tuple)
+    insets: tuple[HelperGeometryInset, ...] = field(default_factory=tuple)
+    monitor_rect: HelperRect | None = None
+    monitor_scale: float | None = None
+    output_name: str = ""
+    has_focus: bool = False
+    showing_on_workspace: bool = False
+    minimized: bool = False
+    fullscreen: bool = False
+    workspace: str = ""
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "schema": self.schema,
+            "candidates": [candidate.to_payload() for candidate in self.candidates],
+            "insets": [inset.to_payload() for inset in self.insets],
+            "monitor_rect": self.monitor_rect.to_payload() if self.monitor_rect is not None else None,
+            "monitor_scale": self.monitor_scale,
+            "output_name": self.output_name,
+            "has_focus": self.has_focus,
+            "showing_on_workspace": self.showing_on_workspace,
+            "minimized": self.minimized,
+            "fullscreen": self.fullscreen,
+            "workspace": self.workspace,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class HelperTargetWindow:
     """Validated GNOME helper target window snapshot."""
 
@@ -242,6 +316,7 @@ class HelperTargetWindow:
     minimized: bool = False
     fullscreen: bool = False
     workspace: str = ""
+    geometry_diagnostics: HelperGeometryDiagnostics | None = None
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -268,6 +343,9 @@ class HelperTargetWindow:
             "minimized": self.minimized,
             "fullscreen": self.fullscreen,
             "workspace": self.workspace,
+            "geometry_diagnostics": (
+                self.geometry_diagnostics.to_payload() if self.geometry_diagnostics is not None else None
+            ),
         }
 
 
@@ -338,10 +416,11 @@ class HelperPresentationRequest:
     require_stacking: bool = True
     require_click_through: bool = True
     require_focus_safe: bool = True
+    include_presentation_diagnostics: bool = False
     degrade_reasons: tuple[str, ...] = field(default_factory=tuple)
 
     def to_payload(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "action": self.action.value,
             "target_token": self.target_token,
             "coordinate_space": self.coordinate_space,
@@ -363,6 +442,9 @@ class HelperPresentationRequest:
             },
             "degrade_reasons": list(self.degrade_reasons),
         }
+        if self.include_presentation_diagnostics:
+            payload["include_presentation_diagnostics"] = True
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -397,6 +479,7 @@ class HelperPresentationStatus:
     generated_at_unix_ms: int = 0
     observed_at_monotonic: float = 0.0
     stale_after_seconds: float = GNOME_SHELL_HELPER_PRESENTATION_STALE_SECONDS
+    presentation_diagnostics: Mapping[str, object] | None = None
     detail: str = ""
 
     @property
@@ -457,6 +540,9 @@ class HelperPresentationStatus:
             "generated_at_unix_ms": self.generated_at_unix_ms,
             "observed_at_monotonic": self.observed_at_monotonic,
             "stale_after_seconds": self.stale_after_seconds,
+            "presentation_diagnostics": dict(self.presentation_diagnostics)
+            if self.presentation_diagnostics is not None
+            else None,
             "detail": self.detail,
         }
 
@@ -995,6 +1081,7 @@ def build_gnome_shell_helper_presentation_request(
     standalone_mode: bool = False,
     overlay_title: str = "EDMC Modern Overlay",
     overlay_wm_class: str = "EDMCModernOverlay",
+    include_presentation_diagnostics: bool = False,
 ) -> HelperPresentationRequest:
     """Build a narrow presentation request from validated helper target state."""
 
@@ -1004,6 +1091,7 @@ def build_gnome_shell_helper_presentation_request(
             standalone_mode=bool(standalone_mode),
             overlay_title=overlay_title,
             overlay_wm_class=overlay_wm_class,
+            include_presentation_diagnostics=bool(include_presentation_diagnostics),
             degrade_reasons=(target_status.state.value,),
         )
     target = target_status.target
@@ -1015,6 +1103,7 @@ def build_gnome_shell_helper_presentation_request(
             standalone_mode=bool(standalone_mode),
             overlay_title=overlay_title,
             overlay_wm_class=overlay_wm_class,
+            include_presentation_diagnostics=bool(include_presentation_diagnostics),
             rect_source=rect_resolution.source,
             degrade_reasons=rect_resolution.degrade_reasons or ("geometry_incomplete",),
         )
@@ -1027,6 +1116,7 @@ def build_gnome_shell_helper_presentation_request(
             standalone_mode=bool(standalone_mode),
             overlay_title=overlay_title,
             overlay_wm_class=overlay_wm_class,
+            include_presentation_diagnostics=bool(include_presentation_diagnostics),
             degrade_reasons=tuple(dict.fromkeys(("target_hidden",) + rect_resolution.degrade_reasons)),
         )
     return HelperPresentationRequest(
@@ -1037,6 +1127,7 @@ def build_gnome_shell_helper_presentation_request(
         standalone_mode=bool(standalone_mode),
         overlay_title=overlay_title,
         overlay_wm_class=overlay_wm_class,
+        include_presentation_diagnostics=bool(include_presentation_diagnostics),
         degrade_reasons=rect_resolution.degrade_reasons,
     )
 
@@ -1378,6 +1469,9 @@ def validate_gnome_shell_helper_presentation_payload(
     focus_safe = _mapping_bool(payload, "focus_safe", "focusSafe")
     standalone_mode = _mapping_bool(payload, "standalone_mode", "standaloneMode") or request.standalone_mode
     pyqt_renderer_preserved = renderer == "pyqt"
+    presentation_diagnostics = _payload_mapping(
+        payload.get("presentation_diagnostics", payload.get("presentationDiagnostics")),
+    )
 
     if presentation_state is HelperPresentationState.APPLIED:
         missing_gate_reasons = _missing_presentation_gate_reasons(
@@ -1423,6 +1517,7 @@ def validate_gnome_shell_helper_presentation_payload(
                 generated_at_unix_ms=generated_at_unix_ms,
                 observed_at_monotonic=observed_at,
                 stale_after_seconds=stale_after_seconds,
+                presentation_diagnostics=presentation_diagnostics,
                 detail=_payload_text(payload, "detail"),
             )
 
@@ -1468,6 +1563,7 @@ def validate_gnome_shell_helper_presentation_payload(
         generated_at_unix_ms=generated_at_unix_ms,
         observed_at_monotonic=observed_at,
         stale_after_seconds=stale_after_seconds,
+        presentation_diagnostics=presentation_diagnostics,
         detail=_payload_text(payload, "detail"),
     )
 
@@ -1635,6 +1731,7 @@ def _helper_presentation_status(
     generated_at_unix_ms: int = 0,
     observed_at_monotonic: float = 0.0,
     stale_after_seconds: float = GNOME_SHELL_HELPER_PRESENTATION_STALE_SECONDS,
+    presentation_diagnostics: Mapping[str, object] | None = None,
     detail: str = "",
 ) -> HelperPresentationStatus:
     return HelperPresentationStatus(
@@ -1666,6 +1763,7 @@ def _helper_presentation_status(
         generated_at_unix_ms=generated_at_unix_ms,
         observed_at_monotonic=observed_at_monotonic,
         stale_after_seconds=stale_after_seconds,
+        presentation_diagnostics=presentation_diagnostics,
         detail=detail,
     )
 
@@ -1683,6 +1781,9 @@ def _parse_helper_target_window(payload: Mapping[str, object]) -> tuple[HelperTa
     content_rect = _payload_rect(payload.get("contentRect", payload.get("content_rect")))
     decoration_insets = _payload_insets(payload.get("decorationInsets", payload.get("decoration_insets")))
     monitor_rect = _payload_rect(payload.get("monitorRect", payload.get("monitor_rect")))
+    geometry_diagnostics = _payload_geometry_diagnostics(
+        payload.get("geometryDiagnostics", payload.get("geometry_diagnostics"))
+    )
     if frame_rect is None or not frame_rect.valid:
         return None, "frameRect missing or invalid"
     if buffer_rect is None or not buffer_rect.valid:
@@ -1715,6 +1816,7 @@ def _parse_helper_target_window(payload: Mapping[str, object]) -> tuple[HelperTa
             minimized=_mapping_bool(payload, "minimized"),
             fullscreen=_mapping_bool(payload, "fullscreen"),
             workspace=_mapping_text(payload, "workspace"),
+            geometry_diagnostics=geometry_diagnostics,
         ),
         "",
     )
@@ -1742,6 +1844,101 @@ def _payload_insets(raw_insets: object) -> HelperDecorationInsets | None:
     if left is None or top is None or right is None or bottom is None:
         return None
     return HelperDecorationInsets(left=left, top=top, right=right, bottom=bottom)
+
+
+def _payload_geometry_diagnostics(raw_diagnostics: object) -> HelperGeometryDiagnostics | None:
+    if not isinstance(raw_diagnostics, Mapping):
+        return None
+    monitor = raw_diagnostics.get("monitor")
+    monitor_rect: HelperRect | None = None
+    monitor_scale: float | None = None
+    output_name = ""
+    if isinstance(monitor, Mapping):
+        monitor_rect = _payload_rect(monitor.get("rect", monitor.get("monitor_rect")))
+        monitor_scale = _mapping_float(monitor, "scale", "monitorScale", "monitor_scale")
+        output_name = _mapping_text(monitor, "outputName", "output_name")
+
+    state = raw_diagnostics.get("state")
+    state_mapping = state if isinstance(state, Mapping) else {}
+    return HelperGeometryDiagnostics(
+        schema=_mapping_int(raw_diagnostics, "schema") or 1,
+        candidates=_payload_geometry_candidates(raw_diagnostics.get("candidates")),
+        insets=_payload_geometry_insets(raw_diagnostics.get("insets")),
+        monitor_rect=monitor_rect if monitor_rect is None or monitor_rect.valid else None,
+        monitor_scale=monitor_scale,
+        output_name=output_name,
+        has_focus=_mapping_bool(state_mapping, "hasFocus", "has_focus"),
+        showing_on_workspace=_mapping_bool(state_mapping, "showingOnWorkspace", "showing_on_workspace"),
+        minimized=_mapping_bool(state_mapping, "minimized"),
+        fullscreen=_mapping_bool(state_mapping, "fullscreen"),
+        workspace=_mapping_text(state_mapping, "workspace"),
+    )
+
+
+def _payload_geometry_candidates(raw_candidates: object) -> tuple[HelperGeometryCandidate, ...]:
+    if isinstance(raw_candidates, Mapping):
+        items = list(raw_candidates.items())
+    elif isinstance(raw_candidates, list):
+        items = [(str(index), value) for index, value in enumerate(raw_candidates)]
+    else:
+        return ()
+    candidates: list[HelperGeometryCandidate] = []
+    for fallback_name, raw_candidate in items:
+        candidate = _payload_geometry_candidate(str(fallback_name), raw_candidate)
+        if candidate is not None:
+            candidates.append(candidate)
+    return tuple(candidates)
+
+
+def _payload_geometry_candidate(
+    fallback_name: str,
+    raw_candidate: object,
+) -> HelperGeometryCandidate | None:
+    if not isinstance(raw_candidate, Mapping):
+        return None
+    rect = _payload_rect(raw_candidate.get("rect"))
+    valid = _mapping_bool(raw_candidate, "valid")
+    if rect is not None and rect.valid:
+        valid = True if "valid" not in raw_candidate else valid
+    return HelperGeometryCandidate(
+        name=_mapping_text(raw_candidate, "name") or fallback_name,
+        method=_mapping_text(raw_candidate, "method"),
+        available=_mapping_bool(raw_candidate, "available"),
+        valid=valid,
+        rect=rect if rect is None or rect.valid else None,
+        detail=_mapping_text(raw_candidate, "detail"),
+    )
+
+
+def _payload_geometry_insets(raw_insets: object) -> tuple[HelperGeometryInset, ...]:
+    if isinstance(raw_insets, Mapping):
+        items = list(raw_insets.items())
+    elif isinstance(raw_insets, list):
+        items = [(str(index), value) for index, value in enumerate(raw_insets)]
+    else:
+        return ()
+    insets: list[HelperGeometryInset] = []
+    for fallback_name, raw_inset in items:
+        inset = _payload_geometry_inset(str(fallback_name), raw_inset)
+        if inset is not None:
+            insets.append(inset)
+    return tuple(insets)
+
+
+def _payload_geometry_inset(fallback_name: str, raw_inset: object) -> HelperGeometryInset | None:
+    if not isinstance(raw_inset, Mapping):
+        return None
+    insets = _payload_insets(raw_inset.get("insets"))
+    valid = _mapping_bool(raw_inset, "valid")
+    if insets is not None:
+        valid = True if "valid" not in raw_inset else valid
+    return HelperGeometryInset(
+        name=_mapping_text(raw_inset, "name") or fallback_name,
+        source=_mapping_text(raw_inset, "source"),
+        target=_mapping_text(raw_inset, "target"),
+        valid=valid,
+        insets=insets,
+    )
 
 
 def _is_elite_client_candidate(candidate: Mapping[str, object]) -> bool:
@@ -1844,6 +2041,12 @@ def _payload_string_tuple(value: object) -> tuple[str, ...]:
     if not isinstance(value, (list, tuple, set, frozenset)):
         return ()
     return tuple(str(item).strip() for item in value if str(item).strip())
+
+
+def _payload_mapping(value: object) -> Mapping[str, object] | None:
+    if not isinstance(value, Mapping):
+        return None
+    return dict(value)
 
 
 def _missing_presentation_gate_reasons(

@@ -11,6 +11,7 @@ from overlay_client.backend.presentation_policy import BackendPresentationVisibi
 from overlay_client.backend.probe import ProbeInputs, ProbeSource, collect_platform_probe
 from overlay_client.backend.selector import BackendSelector
 from overlay_client.backend.status import BackendSelectionStatus
+from overlay_client.backend.surface_preparation import BackendPresentationSurfacePreparation
 
 if TYPE_CHECKING:
     from overlay_client.backend.bundles._gnome_shell_helper_presentation import GnomeHelperPresentationCycleResult
@@ -56,6 +57,9 @@ class BackendPresentationCycleResult:
             payload.get("presentation_skipped"),
             payload.get("presentation_skip_reason"),
             payload.get("target_poll_skipped"),
+            payload.get("surface_preparation"),
+            str(payload.get("surface_preparation_rect")),
+            payload.get("surface_preparation_failed"),
             payload.get("legacy_geometry_policy"),
         )
 
@@ -234,6 +238,7 @@ def platform_label_for_bundle(bundle: BackendBundle) -> str:
 
 
 GnomePresentationCycleRunner = Callable[..., "GnomeHelperPresentationCycleResult"]
+BackendPresentationSurfacePreparer = Callable[[BackendPresentationSurfacePreparation], bool]
 
 
 def run_backend_presentation_cycle(
@@ -242,6 +247,7 @@ def run_backend_presentation_cycle(
     standalone_mode: bool = False,
     previous_surface_action: str = "",
     gnome_runner: GnomePresentationCycleRunner | None = None,
+    prepare_surface: BackendPresentationSurfacePreparer | None = None,
 ) -> BackendPresentationCycleResult | None:
     """Run a backend-owned runtime presentation cycle when the selected backend exposes one."""
 
@@ -252,6 +258,7 @@ def run_backend_presentation_cycle(
         runner(
             standalone_mode=standalone_mode,
             previous_surface_action=previous_surface_action,
+            prepare_surface=prepare_surface,
         )
     )
 

@@ -45,7 +45,15 @@ from overlay_client.backend import (
     HelperPresentationState,
 )
 from overlay_client.backend.bundles._gnome_shell_helper_presentation import (
+    GNOME_HELPER_BORDERLESS_FULLSCREEN_PREP_ENV,
+    GNOME_HELPER_GEOMETRY_DIAGNOSTICS_ENV,
+    GNOME_HELPER_PRESENTATION_DIAGNOSTICS_ENV,
+    GNOME_HELPER_REASON_PERSISTENT_APPLIED_RECT_MISMATCH,
+    GNOME_HELPER_REASON_SURFACE_PREPARATION_FAILED,
+    GNOME_HELPER_REASON_WRONG_MONITOR_APPLIED_RECT,
+    GNOME_HELPER_SURFACE_PREPARATION_FULLSCREEN_MONITOR,
     GnomeHelperPresentationRuntimeState,
+    _target_query_payload,
     run_gnome_shell_helper_presentation_cycle,
 )
 
@@ -143,6 +151,33 @@ def _presentation_payload(request: HelperPresentationRequest, **overrides: objec
     return payload
 
 
+def _borderless_target(**overrides: object) -> dict[str, object]:
+    payload = _target_window(
+        frameRect={"x": 0, "y": 0, "width": 3440, "height": 1440},
+        bufferRect={"x": 0, "y": 0, "width": 3440, "height": 1440},
+        contentRect={"x": 0, "y": 0, "width": 3440, "height": 1440},
+        decorationInsets={"left": 0, "top": 0, "right": 0, "bottom": 0},
+        monitorRect={"x": 0, "y": 0, "width": 3440, "height": 1440},
+        fullscreen=True,
+    )
+    payload.update(overrides)
+    return payload
+
+
+def _wrong_monitor_presentation_payload(request: HelperPresentationRequest) -> dict[str, object]:
+    return _presentation_payload(
+        request,
+        applied_rect={"x": 3440, "y": 0, "width": 3440, "height": 1440},
+    )
+
+
+def _work_area_offset_presentation_payload(request: HelperPresentationRequest) -> dict[str, object]:
+    return _presentation_payload(
+        request,
+        applied_rect={"x": 0, "y": 29, "width": 3440, "height": 1440},
+    )
+
+
 def test_presentation_cycle_retries_once_when_applied_rect_readback_lags() -> None:
     calls: list[HelperPresentationRequest] = []
 
@@ -171,6 +206,284 @@ def test_presentation_cycle_retries_once_when_applied_rect_readback_lags() -> No
     assert len(calls) == 2
 
 
+def test_presentation_cycle_tracks_persistent_wrong_monitor_mismatch_and_backs_off() -> None:
+    clock = _Clock()
+    state = GnomeHelperPresentationRuntimeState()
+    presentation_calls: list[HelperPresentationRequest] = []
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        presentation_calls.append(request)
+        return _wrong_monitor_presentation_payload(request)
+
+    first = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_borderless_target()),
+        fetch_presentation=fetch_presentation,
+        clock=clock,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+    )
+    clock.now += 0.5
+    second = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_borderless_target()),
+        fetch_presentation=fetch_presentation,
+        clock=clock,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+    )
+    clock.now += 0.5
+    third = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_borderless_target()),
+        fetch_presentation=fetch_presentation,
+        clock=clock,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+    )
+
+    assert first.attempts == 2
+    assert first.presentation_status is not None
+    assert GNOME_HELPER_REASON_WRONG_MONITOR_APPLIED_RECT in first.presentation_status.degrade_reasons
+    assert GNOME_HELPER_REASON_PERSISTENT_APPLIED_RECT_MISMATCH not in first.presentation_status.degrade_reasons
+    assert first.persistent_mismatch_count == 1
+
+    assert second.attempts == 2
+    assert second.presentation_status is not None
+    assert GNOME_HELPER_REASON_WRONG_MONITOR_APPLIED_RECT in second.presentation_status.degrade_reasons
+    assert GNOME_HELPER_REASON_PERSISTENT_APPLIED_RECT_MISMATCH in second.presentation_status.degrade_reasons
+    assert second.persistent_mismatch_count == 2
+
+    assert third.attempts == 0
+    assert third.presentation_skipped is True
+    assert third.presentation_skip_reason == GNOME_HELPER_REASON_PERSISTENT_APPLIED_RECT_MISMATCH
+    assert third.persistent_mismatch_backoff is True
+    assert third.should_show_overlay is True
+    assert third.presentation_status is not None
+    assert GNOME_HELPER_REASON_PERSISTENT_APPLIED_RECT_MISMATCH in third.presentation_status.degrade_reasons
+    assert len(presentation_calls) == 4
+
+
+def test_persistent_wrong_monitor_backoff_preserves_mapped_suppressed_visibility_policy() -> None:
+    clock = _Clock()
+    state = GnomeHelperPresentationRuntimeState()
+    target = _borderless_target(hasFocus=False)
+    presentation_calls: list[HelperPresentationRequest] = []
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        presentation_calls.append(request)
+        return _wrong_monitor_presentation_payload(request)
+
+    for _ in range(2):
+        run_gnome_shell_helper_presentation_cycle(
+            previous_surface_action="mapped_suppressed",
+            fetch_health=_health_payload,
+            fetch_target=lambda: _target_payload(target),
+            fetch_presentation=fetch_presentation,
+            clock=clock,
+            runtime_state=state,
+            health_cache_jitter_seconds=lambda: 0.0,
+        )
+        clock.now += 0.5
+
+    backed_off = run_gnome_shell_helper_presentation_cycle(
+        previous_surface_action="mapped_suppressed",
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(target),
+        fetch_presentation=fetch_presentation,
+        clock=clock,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+    )
+
+    assert backed_off.presentation_skipped is True
+    assert backed_off.presentation_skip_reason == GNOME_HELPER_REASON_PERSISTENT_APPLIED_RECT_MISMATCH
+    assert backed_off.target_found is True
+    assert backed_off.should_show_overlay is True
+    assert backed_off.target_status is not None
+    assert backed_off.target_status.target is not None
+    assert backed_off.target_status.target.has_focus is False
+    assert len(presentation_calls) == 4
+
+
+def test_borderless_fullscreen_prep_is_dev_gated(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(GNOME_HELPER_BORDERLESS_FULLSCREEN_PREP_ENV, raising=False)
+    surface_preparations = []
+
+    result = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_borderless_target()),
+        fetch_presentation=_presentation_payload,
+        prepare_surface=lambda request: surface_preparations.append(request) or True,
+        clock=lambda: 100.0,
+    )
+
+    assert result.presentation_status is not None
+    assert result.presentation_status.rect_match is True
+    assert surface_preparations == []
+    assert result.surface_preparation is None
+
+
+def test_borderless_fullscreen_prep_runs_before_helper_presentation_when_eligible(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(GNOME_HELPER_BORDERLESS_FULLSCREEN_PREP_ENV, "1")
+    events: list[str] = []
+
+    def prepare_surface(preparation) -> bool:
+        events.append("prepare")
+        assert preparation.mode == GNOME_HELPER_SURFACE_PREPARATION_FULLSCREEN_MONITOR
+        assert preparation.rect == (0, 0, 3440, 1440)
+        assert preparation.target_token == "meta:21"
+        assert preparation.rect_source == "content_rect"
+        return True
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        events.append("presentation")
+        return _presentation_payload(request)
+
+    result = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_borderless_target()),
+        fetch_presentation=fetch_presentation,
+        prepare_surface=prepare_surface,
+        clock=lambda: 100.0,
+    )
+
+    assert events == ["prepare", "presentation"]
+    assert result.surface_preparation is not None
+    assert result.surface_preparation.mode == GNOME_HELPER_SURFACE_PREPARATION_FULLSCREEN_MONITOR
+    assert result.presentation_status is not None
+    assert result.presentation_status.rect_match is True
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        _target_window(contentRect=None, decorationInsets=None),
+        _borderless_target(fullscreen=False),
+        _borderless_target(contentRect={"x": 0, "y": 29, "width": 3440, "height": 1411}),
+        _borderless_target(monitorRect={"x": 3440, "y": 0, "width": 3440, "height": 1440}),
+    ],
+)
+def test_borderless_fullscreen_prep_is_not_eligible_for_non_full_monitor_attach(
+    monkeypatch: pytest.MonkeyPatch,
+    target: dict[str, object],
+) -> None:
+    monkeypatch.setenv(GNOME_HELPER_BORDERLESS_FULLSCREEN_PREP_ENV, "1")
+    surface_preparations = []
+
+    result = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(target),
+        fetch_presentation=_presentation_payload,
+        prepare_surface=lambda request: surface_preparations.append(request) or True,
+        clock=lambda: 100.0,
+    )
+
+    assert surface_preparations == []
+    assert result.surface_preparation is None
+
+
+def test_borderless_fullscreen_prep_is_not_eligible_for_hidden_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(GNOME_HELPER_BORDERLESS_FULLSCREEN_PREP_ENV, "1")
+    surface_preparations = []
+    presentation_calls: list[HelperPresentationRequest] = []
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        presentation_calls.append(request)
+        return {
+            **_presentation_payload(request),
+            "status": "presentation_hidden",
+            "action": request.action.value,
+            "applied_rect": None,
+            "placement": False,
+            "chrome_free": False,
+            "stacking": False,
+            "click_through": False,
+            "focus_safe": False,
+            "degrade_reasons": ["target_hidden"],
+        }
+
+    result = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_borderless_target(minimized=True)),
+        fetch_presentation=fetch_presentation,
+        prepare_surface=lambda request: surface_preparations.append(request) or True,
+        clock=lambda: 100.0,
+    )
+
+    assert surface_preparations == []
+    assert result.surface_preparation is None
+    assert presentation_calls
+
+
+def test_borderless_fullscreen_prep_failure_does_not_call_helper_presentation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(GNOME_HELPER_BORDERLESS_FULLSCREEN_PREP_ENV, "1")
+    presentation_calls: list[HelperPresentationRequest] = []
+
+    result = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_borderless_target()),
+        fetch_presentation=lambda request: presentation_calls.append(request) or _presentation_payload(request),
+        prepare_surface=lambda _request: False,
+        clock=lambda: 100.0,
+    )
+
+    assert presentation_calls == []
+    assert result.surface_preparation_failed is True
+    assert result.presentation_status is not None
+    assert result.presentation_status.state is HelperPresentationState.DEGRADED
+    assert GNOME_HELPER_REASON_SURFACE_PREPARATION_FAILED in result.presentation_status.degrade_reasons
+    assert result.should_show_overlay is True
+
+
+def test_borderless_fullscreen_prep_mismatch_backs_off_without_wrong_monitor_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(GNOME_HELPER_BORDERLESS_FULLSCREEN_PREP_ENV, "1")
+    clock = _Clock()
+    state = GnomeHelperPresentationRuntimeState()
+    presentation_calls: list[HelperPresentationRequest] = []
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        presentation_calls.append(request)
+        return _work_area_offset_presentation_payload(request)
+
+    for _ in range(2):
+        run_gnome_shell_helper_presentation_cycle(
+            fetch_health=_health_payload,
+            fetch_target=lambda: _target_payload(_borderless_target()),
+            fetch_presentation=fetch_presentation,
+            prepare_surface=lambda _request: True,
+            clock=clock,
+            runtime_state=state,
+            health_cache_jitter_seconds=lambda: 0.0,
+        )
+        clock.now += 0.5
+
+    backed_off = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_borderless_target()),
+        fetch_presentation=fetch_presentation,
+        prepare_surface=lambda _request: True,
+        clock=clock,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+    )
+
+    assert backed_off.presentation_skipped is True
+    assert backed_off.presentation_skip_reason == GNOME_HELPER_REASON_PERSISTENT_APPLIED_RECT_MISMATCH
+    assert backed_off.presentation_status is not None
+    assert GNOME_HELPER_REASON_PERSISTENT_APPLIED_RECT_MISMATCH in backed_off.presentation_status.degrade_reasons
+    assert GNOME_HELPER_REASON_WRONG_MONITOR_APPLIED_RECT not in backed_off.presentation_status.degrade_reasons
+    assert len(presentation_calls) == 4
+
+
 def test_presentation_cycle_does_not_retry_frame_rect_fallback_degrade() -> None:
     target = _target_window(contentRect=None, decorationInsets=None)
     calls: list[HelperPresentationRequest] = []
@@ -195,6 +508,14 @@ def test_presentation_cycle_does_not_retry_frame_rect_fallback_degrade() -> None
     assert result.presentation_status.rect_match is True
     assert result.presentation_ready is False
     assert len(calls) == 1
+
+
+def test_target_query_payload_requests_geometry_diagnostics_only_when_enabled() -> None:
+    assert _target_query_payload({}) == "{}"
+    assert _target_query_payload({GNOME_HELPER_GEOMETRY_DIAGNOSTICS_ENV: "0"}) == "{}"
+    assert _target_query_payload({GNOME_HELPER_GEOMETRY_DIAGNOSTICS_ENV: "1"}) == (
+        '{"include_geometry_diagnostics":true}'
+    )
 
 
 def test_presentation_cycle_skips_fresh_matching_apply_for_same_signature() -> None:
@@ -308,6 +629,152 @@ def test_presentation_cycle_does_not_skip_after_applied_rect_mismatch() -> None:
     assert first.presentation_status.rect_match is False
     assert second.presentation_skipped is False
     assert len(presentation_calls) == 2
+
+
+@pytest.mark.parametrize(
+    ("target_overrides", "second_surface_action"),
+    [
+        ({"targetToken": "meta:22"}, ""),
+        ({"contentRect": {"x": 80, "y": 0, "width": 3440, "height": 1440}}, ""),
+        ({"monitorRect": {"x": 80, "y": 0, "width": 3440, "height": 1440}}, ""),
+        ({"hasFocus": False}, ""),
+        ({"showingOnWorkspace": False}, ""),
+        ({"fullscreen": False}, ""),
+        ({}, "mapped_suppressed"),
+    ],
+)
+def test_persistent_wrong_monitor_backoff_clears_on_hard_signature_changes(
+    target_overrides: dict[str, object],
+    second_surface_action: str,
+) -> None:
+    clock = _Clock()
+    state = GnomeHelperPresentationRuntimeState()
+    presentation_calls: list[HelperPresentationRequest] = []
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        presentation_calls.append(request)
+        return _wrong_monitor_presentation_payload(request)
+
+    for _ in range(2):
+        run_gnome_shell_helper_presentation_cycle(
+            fetch_health=_health_payload,
+            fetch_target=lambda: _target_payload(_borderless_target()),
+            fetch_presentation=fetch_presentation,
+            clock=clock,
+            runtime_state=state,
+            health_cache_jitter_seconds=lambda: 0.0,
+        )
+        clock.now += 0.5
+
+    result = run_gnome_shell_helper_presentation_cycle(
+        previous_surface_action=second_surface_action,
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_borderless_target(**target_overrides)),
+        fetch_presentation=fetch_presentation,
+        clock=clock,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+    )
+
+    assert result.presentation_skipped is False
+    assert result.attempts >= 1
+    assert len(presentation_calls) > 4
+
+
+def test_same_monitor_applied_rect_mismatch_is_not_classified_as_wrong_monitor() -> None:
+    state = GnomeHelperPresentationRuntimeState()
+    presentation_calls: list[HelperPresentationRequest] = []
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        presentation_calls.append(request)
+        return _presentation_payload(
+            request,
+            applied_rect={"x": 10, "y": 10, "width": 320, "height": 200},
+        )
+
+    result = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_borderless_target()),
+        fetch_presentation=fetch_presentation,
+        clock=lambda: 100.0,
+        max_attempts=1,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+    )
+
+    assert result.presentation_status is not None
+    assert "applied_rect_mismatch" in result.presentation_status.degrade_reasons
+    assert GNOME_HELPER_REASON_WRONG_MONITOR_APPLIED_RECT not in result.presentation_status.degrade_reasons
+    assert result.persistent_mismatch_count == 0
+    assert len(presentation_calls) == 1
+
+
+def test_successful_matching_presentation_clears_persistent_wrong_monitor_backoff() -> None:
+    clock = _Clock()
+    state = GnomeHelperPresentationRuntimeState()
+    presentation_calls: list[HelperPresentationRequest] = []
+
+    def wrong_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        presentation_calls.append(request)
+        return _wrong_monitor_presentation_payload(request)
+
+    for _ in range(2):
+        run_gnome_shell_helper_presentation_cycle(
+            fetch_health=_health_payload,
+            fetch_target=lambda: _target_payload(_borderless_target()),
+            fetch_presentation=wrong_presentation,
+            clock=clock,
+            runtime_state=state,
+            health_cache_jitter_seconds=lambda: 0.0,
+        )
+        clock.now += 0.5
+
+    def matching_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        presentation_calls.append(request)
+        return _presentation_payload(request)
+
+    repaired_target = _borderless_target(contentRect={"x": 40, "y": 0, "width": 3440, "height": 1440})
+    repaired = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(repaired_target),
+        fetch_presentation=matching_presentation,
+        clock=clock,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+    )
+
+    assert repaired.presentation_status is not None
+    assert repaired.presentation_status.rect_match is True
+    assert repaired.persistent_mismatch_count == 0
+    assert state.persistent_mismatch_key is None
+
+
+def test_presentation_diagnostics_env_requests_helper_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(GNOME_HELPER_PRESENTATION_DIAGNOSTICS_ENV, "1")
+    captured_requests: list[HelperPresentationRequest] = []
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        captured_requests.append(request)
+        assert request.to_payload()["include_presentation_diagnostics"] is True
+        return _presentation_payload(
+            request,
+            presentation_diagnostics={"schema": 1, "placement": {"moveResizeAction": "move_resize_frame"}},
+        )
+
+    result = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_borderless_target()),
+        fetch_presentation=fetch_presentation,
+        clock=lambda: 100.0,
+    )
+
+    assert captured_requests
+    assert captured_requests[0].include_presentation_diagnostics is True
+    assert result.presentation_status is not None
+    assert result.presentation_status.presentation_diagnostics == {
+        "schema": 1,
+        "placement": {"moveResizeAction": "move_resize_frame"},
+    }
 
 
 def test_presentation_cycle_focused_same_signature_skips_after_old_freshness_window() -> None:

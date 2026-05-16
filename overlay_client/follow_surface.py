@@ -6,7 +6,7 @@ import sys
 import time
 from typing import Optional, Tuple
 
-from PyQt6.QtCore import Qt, QRect, QSize
+from PyQt6.QtCore import Qt, QPoint, QRect, QSize
 from PyQt6.QtGui import QGuiApplication, QWindow, QScreen
 from PyQt6.QtWidgets import QApplication
 
@@ -136,6 +136,7 @@ class FollowSurfaceMixin:
                 getattr(self, "_client_backend_status", None),
                 standalone_mode=False,
                 previous_surface_action=str(getattr(self, "_last_backend_presentation_surface_action", "")),
+                prepare_surface=self._prepare_backend_presentation_surface,
             )
         except Exception as exc:  # pragma: no cover - defensive runtime guard
             _CLIENT_LOGGER.warning("Backend presentation cycle failed: %s", exc)
@@ -158,6 +159,80 @@ class FollowSurfaceMixin:
         if decision.show and result.scale_size is not None:
             self._update_auto_legacy_scale(*result.scale_size)
         return True
+
+    def _prepare_backend_presentation_surface(self, preparation: object) -> bool:
+        mode = str(getattr(preparation, "mode", "") or "")
+        if mode != "fullscreen_monitor":
+            return False
+        rect = getattr(preparation, "rect", None)
+        try:
+            x, y, width, height = (int(rect[0]), int(rect[1]), int(rect[2]), int(rect[3]))
+        except (TypeError, ValueError, IndexError):
+            return False
+        if width <= 0 or height <= 0:
+            return False
+        screen = self._screen_for_backend_presentation_rect((x, y, width, height))
+        if screen is None:
+            _CLIENT_LOGGER.debug(
+                "Backend fullscreen surface preparation failed: no Qt screen for rect=%s reason=%s",
+                (x, y, width, height),
+                getattr(preparation, "reason", ""),
+            )
+            return False
+        show_fullscreen = getattr(self, "showFullScreen", None)
+        if not callable(show_fullscreen):
+            return False
+        try:
+            self._interaction_controller.prepare_window_flags_for_click_through(
+                True,
+                reason="backend_presentation_fullscreen_prepare",
+            )
+            window = self.windowHandle()
+            if window is not None and hasattr(window, "setScreen"):
+                window.setScreen(screen)
+            target = (x, y, width, height)
+            self._last_set_geometry = target
+            self.setGeometry(QRect(*target))
+            show_fullscreen()
+            window = self.windowHandle()
+            if window is not None:
+                self._platform_controller.prepare_window(window)
+            self._platform_controller.apply_click_through(True)
+            _CLIENT_LOGGER.debug(
+                "Prepared backend fullscreen surface rect=%s screen=%s reason=%s; %s",
+                target,
+                self._describe_screen(screen),
+                getattr(preparation, "reason", ""),
+                self.format_scale_debug(),
+            )
+            return True
+        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+            _CLIENT_LOGGER.debug("Backend fullscreen surface preparation failed: %s", exc)
+            return False
+
+    def _screen_for_backend_presentation_rect(self, rect: tuple[int, int, int, int]) -> QScreen | None:
+        x, y, width, height = rect
+        center = QPoint(x + max(0, width // 2), y + max(0, height // 2))
+        try:
+            screen = QGuiApplication.screenAt(center)
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            screen = None
+        if screen is not None:
+            return screen
+        target_rect = QRect(x, y, width, height)
+        try:
+            screens = list(QGuiApplication.screens() or ())
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            screens = []
+        for candidate in screens:
+            try:
+                if candidate.geometry().intersects(target_rect):
+                    return candidate
+            except (AttributeError, RuntimeError, TypeError, ValueError):
+                continue
+        if len(screens) == 1:
+            return screens[0]
+        return None
 
     def _update_backend_presentation_visibility(
         self,
@@ -262,6 +337,7 @@ class FollowSurfaceMixin:
             "%s: health=%s target=%s token=%s seq=%s target_monitor=%s output=%s monitor_rect=%s frame_rect=%s rect_source=%s "
             "requested=%s applied=%s prime=%s prime_source=%s delta=%s rect_match=%s state=%s reasons=%s attempts=%s retries=%s "
             "presentation_skipped=%s skip_reason=%s target_poll_skipped=%s "
+            "surface_preparation=%s surface_preparation_failed=%s "
             "visibility=%s visibility_reason=%s surface_action=%s content_visible=%s keep_overlay_visible=%s target_focus=%s target_workspace=%s "
             "target_minimized=%s focus_loss_samples=%s focus_loss_elapsed=%.3fs remap_warmup=%s "
             "remap_warmup_samples=%s remap_warmup_elapsed=%.3fs overlay_window_found=%s legacy_geometry=%s; %s",
@@ -288,6 +364,8 @@ class FollowSurfaceMixin:
             payload.get("presentation_skipped"),
             payload.get("presentation_skip_reason"),
             payload.get("target_poll_skipped"),
+            payload.get("surface_preparation"),
+            payload.get("surface_preparation_failed"),
             "visible" if decision.show else "hidden",
             decision.reason,
             decision.surface_action,
@@ -305,6 +383,13 @@ class FollowSurfaceMixin:
             payload["legacy_geometry_policy"],
             self.format_scale_debug(),
         )
+        geometry_diagnostics = payload.get("target_geometry_diagnostics")
+        if geometry_diagnostics:
+            _CLIENT_LOGGER.debug(
+                "%s geometry diagnostics: %s",
+                result.log_prefix,
+                geometry_diagnostics,
+            )
 
     def _convert_native_rect_to_qt(
         self,

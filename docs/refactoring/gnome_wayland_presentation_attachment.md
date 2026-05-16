@@ -308,7 +308,14 @@ Record:
 | 6B | Frame fallback monitor-bounds clamp | Manual Monitor-Bounds Passed; 6A Recheck Passed |
 | 7 | Manual validation matrix and true-overlay gate review | In Progress |
 | 8 | Performance stabilization addendum for GNOME helper presentation churn | Phase 8.9 Manual Pause Validation Passed; Broader GNOME Regression Pending |
-| 9 | GNOME content-rect and alignment proof | Scoped; Pending Implementation |
+| 9 | GNOME content-rect and alignment proof | Phase 9.1 Headless Diagnostics Implemented; Phase 9.2 Manual Evidence In Progress |
+| 9.9A | Borderless wrong-monitor mismatch addendum | Headless Implementation Complete; Manual Validation Pending |
+| 9B | Borderless full-monitor work-area constraint fix | Managed PyQt Path Not Viable; Evidence Retained |
+| 10 | GNOME Shell-native borderless/fullscreen small proof | Active-Fullscreen Proof Passed; Phase 11 Unblocked |
+| 11 | GNOME Shell-native PyQt raster bridge architecture | Completed; Phase 12 Ready |
+| 12 | GNOME Shell-native PyQt raster bridge small production proof | Ready For Implementation |
+| 13 | GNOME Shell-native PyQt raster bridge hardening and support gate | Pending Phase 12 Implementation |
+| 14 | GNOME Shell-native PyQt raster parity/performance expansion | Pending Phase 13 Decision |
 
 ## Phase Details
 
@@ -1586,14 +1593,1557 @@ make check
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 9.1 | Add helper-side geometry diagnostics for all available target-window rect candidates without changing runtime placement | Pending |
-| 9.2 | Capture windowed geometry evidence across multiple positions, sizes, and the 1440-height case | Pending |
-| 9.3 | Capture borderless geometry evidence and chrome-free alignment evidence | Pending |
+| 9.1 | Add helper-side geometry diagnostics for all available target-window rect candidates without changing runtime placement | Headless Tests Passed |
+| 9.2 | Capture windowed geometry evidence across multiple positions, sizes, and the 1440-height case | Partial Evidence Captured |
+| 9.3 | Capture borderless geometry evidence and chrome-free alignment evidence | Partial Evidence Captured; Wrong-Monitor Placement Observed |
 | 9.4 | Decide whether native `contentRect`, derived rect, borderless-only proof, or continued degraded fallback is supportable | Pending Evidence |
 | 9.5 | Implement selected rect-source behavior behind backend/helper-owned interfaces, if evidence supports a change | Pending Decision |
-| 9.6 | Add/update unit and static/source tests for geometry candidate parsing, rect-source selection, degradation reasons, and fix219 boundaries | Pending |
+| 9.6 | Add/update unit and static/source tests for geometry candidate parsing, rect-source selection, degradation reasons, and fix219 boundaries | Headless Tests Passed |
 | 9.7 | Run Phase 7 regression matrix for the selected rect-source behavior | Pending Implementation |
 | 9.8 | Update support/status wording only if all `true_overlay` gates pass; otherwise keep degraded/experimental wording | Pending Validation |
+| 9.9A | Addendum: scope persistent borderless wrong-monitor `applied_rect_mismatch` and retry churn | Headless Implementation Complete |
+| 9.10 | Implement persistent mismatch visible fail-soft/backoff policy | Headless Tests Passed |
+| 9.11 | Add opt-in presentation diagnostics for target/overlay monitor and pre/post rect state | Headless Tests Passed |
+| 9.12 | Revalidate borderless placement and decide borderless support wording | Manual Validation Found Same-Monitor Offset Mismatch |
+| 9B.1 | Scope proper fix for borderless full-monitor overlay constrained to GNOME work area | Completed |
+| 9B.2 | Prove whether Qt-side fullscreen/chrome-free presentation can place the PyQt overlay at full monitor bounds | Manual Validation Failed |
+| 9B.3 | Prove whether helper-side fullscreen/full-monitor presentation can bypass work-area clamping while preserving click-through/focus safety | Partial Manual Evidence; Non-Fullscreen Probes Failed |
+| 9B.4 | Implement the selected full-monitor presentation path or explicitly keep borderless degraded if no PyQt path can satisfy the gate | Qt Path Rejected; Proper Fix Pending |
+| 9B.5 | Add unit/static/harness coverage for selected path, readback mismatch degradation, and fix219 boundaries | Headless Tests Passed |
+| 9B.6 | Manually validate borderless full-monitor placement, click-through, no flash, and no presentation churn | Failed For Qt Fullscreen Attempt |
+
+#### Phase 9.1 Implementation Plan
+- Touch points:
+- `helpers/gnome_shell_extension/extension.js`: emit gated target-window geometry diagnostics in `GetTargetState` payloads without changing placement or `contentRect` selection.
+- `overlay_client/backend/helper_ipc.py`: parse and preserve geometry diagnostics on the backend-owned helper target model.
+- `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py`: expose concise geometry diagnostics in runtime log payloads without letting diagnostics drive placement.
+- `overlay_client/follow_surface.py`: log backend-provided geometry diagnostics only when present, without importing GNOME helper modules or branching on helper protocol details.
+- Tests: static/source coverage for the GNOME Shell extension diagnostics seam, backend unit tests for parsing and non-placement behavior, follow-surface harness coverage for optional diagnostic logging, and existing GNOME presentation runtime tests for unchanged degraded `frame_rect_fallback` behavior.
+- Test type selection: unit tests are required for backend parsing and rect-source behavior because this is pure helper payload validation. Static/source tests are required for the GNOME Shell extension because there is no JS runtime seam in the current test suite. Manual GNOME validation remains pending for Phase 9.2+ evidence capture.
+
+#### Phase 9.1 Implementation Summary
+- Implemented on 2026-05-13 as diagnostics-first only. Placement behavior remains unchanged: diagnostic geometry candidates do not drive selected rects, and `frame_rect_fallback` remains degraded and blocks `true_overlay`.
+- Helper changes: `GetTargetState` now accepts an opt-in query flag (`include_geometry_diagnostics` / `includeGeometryDiagnostics`) and, only when requested, includes `geometryDiagnostics` on target window payloads. The diagnostic payload records `get_frame_rect`, `get_buffer_rect`, `get_client_area_rect`, `get_work_area_current_monitor`, selected helper content rect, candidate insets, monitor data, and focus/workspace/fullscreen state.
+- Follow-up parser hardening: after direct manual probes initially omitted `geometryDiagnostics`, the helper query parser was updated to unwrap single-argument DBus tuple/Variant shapes before parsing the JSON query string. This should allow `gdbus ... GetTargetState '{"include_geometry_diagnostics":true}'` to activate diagnostics after the helper is reloaded.
+- Backend/runtime changes: `EDMC_OVERLAY_GNOME_GEOMETRY_DIAGNOSTICS=1` makes the runtime `GetTargetState` query request geometry diagnostics. Backend helper IPC parses and preserves those diagnostics on `HelperTargetWindow`; runtime presentation logs expose them only when present.
+- Manual direct probe option:
+```bash
+gdbus call --session \
+  --dest org.edmc.ModernOverlay.Helper \
+  --object-path /org/edmc/ModernOverlay/Helper \
+  --method org.edmc.ModernOverlay.Helper.GetTargetState \
+  '{"include_geometry_diagnostics":true}'
+```
+- Manual runtime option: launch/restart EDMC or the overlay client with `EDMC_OVERLAY_GNOME_GEOMETRY_DIAGNOSTICS=1`, then capture `GNOME helper presentation` logs. This option is intentionally off by default to avoid normal release log/performance churn.
+- Reload guidance: try `./scripts/dev_gnome_helper.sh reload` first. Log out and back in only if reload reports the helper is inactive/not discovered, DBus health does not respond, or the direct diagnostic probe still lacks `geometryDiagnostics` after reload.
+- Files changed for Phase 9.1: `helpers/gnome_shell_extension/extension.js`, `overlay_client/backend/helper_ipc.py`, `overlay_client/backend/__init__.py`, `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py`, `overlay_client/follow_surface.py`, `overlay_client/tests/test_gnome_shell_helper_target_state.py`, `overlay_client/tests/test_gnome_helper_presentation_runtime.py`, `overlay_client/tests/test_gnome_shell_helper_extension_source.py`, and `overlay_client/tests/test_follow_surface_mixin.py`.
+
+#### Tests Run For Phase 9.1
+- Command:
+```bash
+python3 -m py_compile overlay_client/backend/helper_ipc.py overlay_client/backend/bundles/_gnome_shell_helper_presentation.py overlay_client/follow_surface.py overlay_client/tests/test_gnome_shell_helper_target_state.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_gnome_shell_helper_extension_source.py overlay_client/tests/test_follow_surface_mixin.py
+```
+- Result: passed.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_target_state.py overlay_client/tests/test_gnome_helper_presentation_runtime.py
+```
+- Result: passed; `26 passed`.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed; `4 passed`.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_follow_surface_mixin.py
+```
+- Result: passed; `14 passed`.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_presentation_state.py overlay_client/tests/test_backend_architecture_boundary.py overlay_client/tests/test_follow_surface_mixin.py overlay_client/tests/test_backend_consumers.py
+```
+- Result: passed; `66 passed`.
+- Command:
+```bash
+make check
+```
+- Result: passed. Ruff passed, mypy passed, and `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest` passed with `995 passed`, `21 skipped`.
+
+#### Phase 9.2 Windowed Evidence
+- Partial windowed evidence captured on 2026-05-13 after logout/login caused GNOME Shell to load the updated helper code.
+- Windowed normal sample:
+- `frameRect={"x":499,"y":210,"width":1920,"height":837}`
+- `bufferRect={"x":485,"y":198,"width":1948,"height":866}`
+- `contentRect=null`; `decorationInsets=null`.
+- `geometryDiagnostics.candidates.client_area`: unavailable and invalid.
+- `geometryDiagnostics.candidates.selected_content`: unavailable and invalid.
+- `geometryDiagnostics.insets.frame_to_buffer`: `{"left":-14,"top":-12,"right":-14,"bottom":-17}`.
+- Windowed moved sample:
+- `frameRect={"x":56,"y":139,"width":1920,"height":837}`
+- `bufferRect={"x":42,"y":127,"width":1948,"height":866}`
+- `contentRect=null`; `decorationInsets=null`.
+- `geometryDiagnostics.candidates.client_area`: unavailable and invalid.
+- `geometryDiagnostics.candidates.selected_content`: unavailable and invalid.
+- `geometryDiagnostics.insets.frame_to_buffer`: `{"left":-14,"top":-12,"right":-14,"bottom":-17}`.
+- Windowed resized sample:
+- `frameRect={"x":696,"y":120,"width":2048,"height":1189}`
+- `bufferRect={"x":682,"y":108,"width":2076,"height":1218}`
+- `contentRect=null`; `decorationInsets=null`.
+- `geometryDiagnostics.candidates.client_area`: unavailable and invalid.
+- `geometryDiagnostics.candidates.selected_content`: unavailable and invalid.
+- `geometryDiagnostics.insets.frame_to_buffer`: `{"left":-14,"top":-12,"right":-14,"bottom":-17}`.
+- Windowed 1440-height sample:
+- `frameRect={"x":760,"y":29,"width":1920,"height":1477}`
+- `bufferRect={"x":746,"y":17,"width":1948,"height":1506}`
+- `contentRect=null`
+- `decorationInsets=null`
+- `monitorRect={"x":0,"y":0,"width":3440,"height":1440}`
+- `geometryDiagnostics.candidates.frame`: available and valid; matches `frameRect`.
+- `geometryDiagnostics.candidates.buffer`: available and valid; matches `bufferRect`.
+- `geometryDiagnostics.candidates.client_area`: unavailable and invalid; `get_client_area_rect` is not available for this target in this GNOME/Mutter path.
+- `geometryDiagnostics.candidates.work_area_current_monitor`: available and valid; returned `{"x":0,"y":29,"width":3440,"height":1411}`. This is monitor work-area geometry, not target content geometry.
+- `geometryDiagnostics.candidates.selected_content`: unavailable and invalid because the helper still has no valid content rect candidate.
+- `geometryDiagnostics.insets.frame_to_buffer`: `{"left":-14,"top":-12,"right":-14,"bottom":-17}`. Negative insets confirm `bufferRect` is larger than `frameRect` and is not a content rect.
+- Interpretation: these samples confirm the diagnostics path is live and show stable GNOME/Mutter geometry availability across windowed normal, moved, resized, and 1440-height states. No native `contentRect`, client-area rect, selected-content rect, or decoration inset is available. The stable frame-to-buffer delta is diagnostic only because `bufferRect` is larger than `frameRect`; it does not identify Elite's content area.
+- Result: windowed mode remains on degraded `frame_rect_fallback`; the evidence does not support a `true_overlay` claim and does not justify switching runtime placement away from `frame_rect_fallback`.
+- Evidence still needed for Phase 9.2/9.3: focus loss/return confirmation with diagnostics live, borderless presentation logs for the wrong-monitor placement, and any repeated samples needed to prove whether borderless has a native or equivalent chrome-free content-alignment signal.
+
+#### Phase 9.3 Borderless Evidence
+- Partial borderless evidence captured on 2026-05-13.
+- User observation: in windowed-borderless mode, the overlay is visible on the second monitor, not over Elite. This fails the wrong-monitor gate even though the helper target payload reports monitor `0`.
+- Borderless normal sample:
+- `frameRect={"x":0,"y":0,"width":3440,"height":1440}`
+- `bufferRect={"x":0,"y":0,"width":3440,"height":1440}`
+- `contentRect={"x":0,"y":0,"width":3440,"height":1440}`
+- `decorationInsets={"left":0,"top":0,"right":0,"bottom":0}`
+- `monitorRect={"x":0,"y":0,"width":3440,"height":1440}`
+- `fullscreen=true`; `showingOnWorkspace=true`; `minimized=false`.
+- `geometryDiagnostics.candidates.frame`: available and valid; matches `frameRect`.
+- `geometryDiagnostics.candidates.buffer`: available and valid; matches `bufferRect`.
+- `geometryDiagnostics.candidates.client_area`: unavailable and invalid.
+- `geometryDiagnostics.candidates.selected_content`: available and valid; matches `contentRect`.
+- `geometryDiagnostics.insets.frame_to_buffer`: `{"left":0,"top":0,"right":0,"bottom":0}`.
+- `geometryDiagnostics.insets.frame_to_selected_content`: `{"left":0,"top":0,"right":0,"bottom":0}`.
+- Interpretation: borderless mode exposes a native chrome-free `contentRect` and selected-content candidate matching the monitor-sized frame/buffer rect. This is promising for borderless content alignment, but current visible placement is wrong-monitor, so borderless cannot pass Phase 9 or `true_overlay` gates until runtime presentation logs explain and fix the monitor placement failure.
+- Borderless runtime presentation evidence:
+- Target payload stayed on `target_monitor=0` with `monitor_rect={"x":0,"y":0,"width":3440,"height":1440}` and `rect_source=content_rect`.
+- Runtime requested `{"x":0,"y":0,"width":3440,"height":1440}` from the native `contentRect`.
+- Helper readback consistently returned `applied={"x":3440,"y":0,"width":3440,"height":1440}`.
+- `delta=[3440,0,0,0]`, `rect_match=False`, `state=presentation_degraded`, `reasons=["applied_rect_mismatch"]`, and `attempts=2`.
+- The same applied-rect mismatch persisted in both `mapped_suppressed` and `mapped_visible` / `target_focused` states.
+- Interpretation: backend rect selection is not choosing the second monitor; it requests the monitor-0 content rect. GNOME/Mutter or the overlay window placement path moves or leaves the PyQt overlay one monitor width to the right. Because every presentation attempt mismatches, Phase 8 no-op suppression cannot engage in this state and the runtime retries presentation every cycle.
+- Result: borderless has a valid content rect but fails the wrong-monitor and applied-rect-match gates. The next implementation decision must treat persistent applied-rect mismatch as both a placement bug and a churn hazard.
+
+#### Phase 9.9A Addendum: Borderless Wrong-Monitor Mismatch
+- Problem statement: borderless mode now proves a native chrome-free `contentRect`, but `ApplyPresentation` cannot currently attach the PyQt overlay to the same monitor. The backend requests the target's monitor-0 rect, while helper readback reports the overlay at `x=3440`, one 3440-wide monitor to the right. This fails the wrong-monitor and applied-rect-match gates.
+- Performance risk: every cycle reports `applied_rect_mismatch`, so the Phase 8 event-driven no-op cache never becomes eligible. Borderless mode can therefore reintroduce repeated compositor-facing presentation attempts even after the Phase 8 churn fixes.
+- Goal: keep the overlay visible while backing off safely when the same presentation signature repeatedly produces the same wrong-monitor applied rect, while gathering enough opt-in diagnostics to identify whether Mutter/fullscreen policy, overlay-window identity, or coordinate-space handling is responsible.
+- Non-goals:
+- Do not claim `true_overlay`.
+- Do not enable borderless as supported until wrong-monitor placement is fixed or explicitly marked unsupported.
+- Do not move rendering into the GNOME Shell extension.
+- Do not change windowed `frame_rect_fallback` behavior.
+- Do not undo Phase 8 event-driven presentation suppression.
+- Locked decisions:
+- Visible fail-soft is required: keep the overlay mapped/visible according to the current focus/content visibility policy; do not hide/unmap solely because borderless placement mismatches.
+- Use a threshold of `2` consecutive identical wrong-monitor `applied_rect_mismatch` results before treating the mismatch as persistent.
+- After the threshold, retry only on hard changes: target token, target rect/monitor, visibility action, focus/workspace/fullscreen state, helper restart, overlay identity, or mode switch.
+- Do not add a slow timed recovery retry in the first implementation.
+- Add concise degradation reasons for both `wrong_monitor_applied_rect` and `persistent_applied_rect_mismatch`.
+- Preserve current mapped-visible/mapped-suppressed content behavior. If `keep_overlay_visible=false` and Elite is unfocused, content should remain suppressed as it does today.
+- Add opt-in diagnostics for overlay pre/post frame rect, buffer rect, monitor, selected overlay token/title/class, requested rect, target monitor, and whether `move_resize_frame` was called.
+- Gate detailed diagnostics behind an environment/dev diagnostic flag, off by default. Normal logs should show only concise reasons and skip/backoff state.
+- Do not update support wording or claim `true_overlay`; borderless has `contentRect`, but wrong-monitor placement still fails the gate.
+- Phase 9.9A implementation touch points:
+- `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py`: add backend-owned persistent wrong-monitor mismatch tracking, visible fail-soft backoff, concise log fields, and opt-in presentation diagnostics request wiring.
+- `overlay_client/backend/helper_ipc.py`: add request/response fields for opt-in presentation diagnostics and preserve the helper response payload behind backend-owned types.
+- `helpers/gnome_shell_extension/extension.js`: add opt-in `ApplyPresentation` diagnostics for selected overlay identity, pre/post rects, monitor state, target monitor, requested rect, and move/resize action.
+- `overlay_client/tests/test_gnome_helper_presentation_runtime.py`: add unit coverage for mismatch threshold, backoff skip, hard-change resets, current visibility policy preservation, same-monitor mismatch classification, and success clearing.
+- `overlay_client/tests/test_gnome_shell_helper_extension_source.py`: add static/source coverage for the gated helper presentation diagnostics seam.
+- Test type selection: unit tests are required for the backend mismatch detector because it is deterministic state logic. Static/source tests are required for the GNOME Shell helper diagnostics because there is no JS runtime seam. Existing runtime tests continue to cover Phase 8 no-op suppression and Phase 6A/6B behavior where represented in the backend harness.
+- Recommended implementation scope:
+1. Add a backend-owned persistent mismatch detector keyed by presentation signature, requested rect, applied rect, and target token.
+2. After a small threshold of identical mismatches, stop immediate `ApplyPresentation` retries for that unchanged signature.
+3. Use visible fail-soft behavior for wrong-monitor mismatches: keep the overlay mapped and preserve the normal content visibility policy, but mark presentation degraded and suppress immediate re-apply churn for the unchanged bad signature. Re-attempt only when a hard-change occurs, such as target token change, target rect/monitor change, visibility action change, focus/workspace/fullscreen change, helper restart, overlay identity change, or an explicit bounded retry interval if a retry is selected.
+4. Add a clear reason such as `persistent_applied_rect_mismatch` and preserve the original `applied_rect_mismatch` evidence in diagnostics.
+5. Add opt-in presentation diagnostics around `ApplyPresentation`, gated behind an environment/dev diagnostic flag, capturing target token/state, requested rect, target monitor/rect, selected overlay token/title/class, overlay pre/post frame and buffer rects, overlay monitor before/after, and whether the helper called `move_resize_frame` or skipped it.
+6. Keep normal logs concise. Detailed presentation diagnostics must not emit by default.
+- Test type selection:
+- Unit tests for backend persistent mismatch state, threshold behavior, hard-change reset conditions, and visible fail-soft/backoff result shape.
+- Unit tests for parser/model support if presentation diagnostics are added to helper response payloads.
+- Static/source tests for GNOME Shell extension diagnostic fields and gated emission because no JS runtime seam exists.
+- Existing GNOME helper presentation runtime tests must continue to prove Phase 8 no-op suppression still works after successful matching applies.
+- Manual validation required after implementation:
+- Borderless with Elite fullscreen/borderless on monitor 0: confirm repeated wrong-monitor applies stop after the threshold while the overlay remains visible according to the current focus/content visibility policy.
+- Switch back to windowed mode: confirm normal Phase 7 windowed behavior still works and the mismatch cache clears on signature change.
+- Borderless focus loss/return: confirm no renewed infinite retry loop.
+- Capture one diagnostic sample with opt-in presentation diagnostics enabled to identify overlay pre/post monitor and rect state.
+- Support decision after validation: if wrong-monitor mismatch persists, borderless must remain degraded/unsupported for true-overlay purposes despite having a valid `contentRect`. If diagnostics reveal a safe same-monitor attach fix, implement that fix in a later Phase 9 stage before revisiting support wording.
+
+#### Phase 9.9A Implementation Summary
+- Implemented on 2026-05-13 as visible fail-soft/backoff only. Support wording remains unchanged and `true_overlay` is not claimed.
+- Backend runtime now tracks repeated wrong-monitor `applied_rect_mismatch` results by presentation signature, target token, requested rect, and applied rect. After `2` identical wrong-monitor mismatches, unchanged signatures skip immediate `ApplyPresentation` with `presentation_skip_reason=persistent_applied_rect_mismatch`.
+- The overlay remains mapped/visible according to the existing focus/content policy. In `mapped_suppressed`, content suppression remains unchanged when `keep_overlay_visible=false`.
+- Runtime diagnostics now add concise fields for `persistent_mismatch_count` and `persistent_mismatch_backoff`, and persistent failures include `wrong_monitor_applied_rect` plus `persistent_applied_rect_mismatch`.
+- Hard changes bypass the backoff and re-attempt presentation: target token, rect, monitor rect, focus/workspace/fullscreen, visibility action, overlay/request options, and diagnostic-request mode changes.
+- Helper IPC now supports an opt-in `include_presentation_diagnostics` request flag and preserves optional `presentation_diagnostics` response payloads behind backend-owned types.
+- GNOME Shell helper `ApplyPresentation` can now return opt-in presentation diagnostics with selected overlay identity, target monitor/rect, requested rect, overlay pre/post frame and buffer rects, overlay monitor before/after, and `moveResizeAction`.
+- Detailed presentation diagnostics remain off by default. Enable with `EDMC_OVERLAY_GNOME_PRESENTATION_DIAGNOSTICS=1` when launching EDMC/overlay client or when issuing direct helper requests that include `include_presentation_diagnostics`.
+- Files changed for Phase 9.9A: `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py`, `overlay_client/backend/helper_ipc.py`, `helpers/gnome_shell_extension/extension.js`, `overlay_client/tests/test_gnome_helper_presentation_runtime.py`, `overlay_client/tests/test_gnome_shell_helper_extension_source.py`, and this document.
+
+#### Tests Run For Phase 9.9A
+- Command:
+```bash
+python3 -m py_compile overlay_client/backend/helper_ipc.py overlay_client/backend/bundles/_gnome_shell_helper_presentation.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_helper_presentation_runtime.py
+```
+- Result: passed; `29 passed`.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed; `6 passed`.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_target_state.py overlay_client/tests/test_gnome_shell_helper_presentation_state.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_gnome_shell_helper_extension_source.py overlay_client/tests/test_backend_architecture_boundary.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_follow_surface_mixin.py
+```
+- Result: passed; `110 passed`.
+- Command:
+```bash
+make check
+```
+- Result: passed. Ruff passed, mypy passed, and `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest` passed with `1009 passed`, `21 skipped`.
+- Command:
+```bash
+git diff --check
+```
+- Result: passed.
+
+#### Phase 9.9A Manual Validation Pending
+- Reload helper with `./scripts/dev_gnome_helper.sh reload` because `helpers/gnome_shell_extension/extension.js` changed.
+- Restart EDMC/overlay client.
+- Enter Elite windowed-borderless mode.
+- Confirm the overlay remains visible.
+- Confirm repeated `attempts=2` stops after persistent mismatch threshold for the unchanged signature.
+- Confirm logs show `wrong_monitor_applied_rect`, `persistent_applied_rect_mismatch`, and `presentation_skip_reason=persistent_applied_rect_mismatch`.
+- Confirm focus loss/return does not restart an infinite retry loop.
+- Switch back to windowed mode and confirm Phase 7 windowed behavior still works.
+- Optional diagnostic run: launch with `EDMC_OVERLAY_GNOME_PRESENTATION_DIAGNOSTICS=1`, capture one presentation sample, and inspect overlay pre/post monitor and rect state.
+
+#### Phase 9.12 Manual Validation Evidence
+- Partial manual validation captured on 2026-05-13.
+- User could not reproduce the click-through or idle flashing during the supplied capture.
+- Borderless placement changed from the earlier wrong-monitor `x=3440` applied rect to a same-monitor top-offset mismatch:
+- `requested={"x":0,"y":0,"width":3440,"height":1440}`
+- `applied={"x":0,"y":29,"width":3440,"height":1440}`
+- `delta=[0,29,0,0]`, `rect_match=False`, `state=presentation_degraded`, `reasons=["applied_rect_mismatch"]`, `attempts=2`.
+- The mismatch repeated every cycle in both `mapped_suppressed` and `mapped_visible` / `target_focused` states. No `presentation_skipped=True` or `persistent_applied_rect_mismatch` backoff appeared.
+- Interpretation: Phase 9.9A's wrong-monitor-specific detector did not trigger because the applied rect overlaps the target monitor. The remaining churn is a stable same-monitor `applied_rect_mismatch`, likely caused by Mutter constraining the overlay below the top panel/work-area boundary at `y=29` while the borderless target reports full-monitor content at `y=0`.
+- Result: wrong-monitor placement appears improved in this run, but borderless still fails the applied-rect-match gate and can still retry `ApplyPresentation` every cycle. Phase 9B now owns the proper fix for the `work_area_top_offset_applied_rect` case; broadening mismatch backoff alone is not the desired solution.
+
+#### Phase 9B Addendum: Borderless Full-Monitor Work-Area Constraint Fix
+- Goal: implement the correct borderless/full-monitor attachment path for GNOME helper mode so a PyQt-rendered overlay can attach to a fullscreen borderless Elite target at the target monitor bounds instead of being constrained to the GNOME work area. This is a proper placement fix, not another retry/backoff band-aid.
+- Diagnostic evidence captured on 2026-05-13:
+- `GetTargetState` for borderless Elite returned `contentRect={"x":0,"y":0,"width":3440,"height":1440}`, matching `frameRect`, `bufferRect`, and `selected_content`.
+- The same target reported `work_area_current_monitor={"x":0,"y":29,"width":3440,"height":1411}`.
+- Direct `ApplyPresentation` with `include_presentation_diagnostics=true` requested `{"x":0,"y":0,"width":3440,"height":1440}` for target token `meta:18`.
+- The helper selected overlay token `meta:25`, reported `chrome_free=true`, `stacking=true`, `click_through=true`, `focus_safe=true`, and called `move_resize_frame`.
+- Presentation diagnostics showed the overlay before rect was already `{"x":0,"y":29,"width":3440,"height":1440}` and after rect remained `{"x":0,"y":29,"width":3440,"height":1440}`.
+- Interpretation: the offset is not caused by a titlebar or missing chrome-free flags. Mutter appears to constrain the managed PyQt overlay to the work area below the GNOME top panel even when the target is fullscreen and the helper requests full monitor bounds.
+- Secondary diagnostic correctness issue: the helper returned `status="presentation_applied"` with no degrade reasons even though post-apply readback did not match the requested rect. The backend currently catches the mismatch, but helper-side presentation status should also degrade on readback mismatch.
+- Non-goals:
+- Do not solve this with a broader persistent mismatch backoff alone. Backoff may remain a churn guard, but it is not the Phase 9B fix.
+- Do not claim `true_overlay` or upgrade support wording until borderless readback matches requested bounds and Phase 7/8 behavior remains valid.
+- Do not move rendering into GNOME Shell in the first implementation patch.
+- Do not change windowed `frame_rect_fallback` behavior.
+- Do not regress Phase 6A mapped suppression, Phase 6B monitor clamp, Phase 8 event-driven suppression, or Phase 9.9A visible fail-soft behavior.
+- Preserve fix219 boundaries: GNOME-specific placement strategy stays behind backend/helper-owned interfaces under `overlay_client/backend/`; generic follow/runtime code must not import helper implementations or branch on raw helper protocol details.
+- Locked decisions accepted on 2026-05-13:
+- Try Qt-side fullscreen/chrome-free presentation first for borderless/fullscreen targets. PyQt owns the overlay window; the helper remains responsible for target truth, stacking, click-through, focus-safe proof, and readback validation.
+- Keep Phase 9B borderless/fullscreen-only. Do not change windowed `frame_rect_fallback`.
+- Activate only when the helper target reports `fullscreen=true` and a valid `contentRect` matching monitor bounds.
+- Start behind a dev/runtime gate first. Promote to default only after manual GNOME validation proves placement, click-through, focus safety, no flashing, and no presentation churn.
+- Keep visible fail-soft behavior on failure. If fullscreen presentation fails or readback remains offset, keep the overlay visible under current mapped-visible/mapped-suppressed policy, mark presentation degraded, and avoid retry churn.
+- Correct helper-side readback semantics: helper `ApplyPresentation` should degrade when the post-apply rect does not match the requested rect, even if `move_resize_frame` returned successfully.
+- Keep Phase 9.9A as a churn guard only. Do not expand backoff as the primary Phase 9B fix.
+- Preserve helper protocol compatibility where possible by adding only optional request/response fields.
+- If Qt-side fullscreen cannot satisfy the gate, test helper-side fullscreen/full-monitor APIs next. If neither path preserves `chrome_free`, `click_through`, `focus_safe`, and matching readback, keep borderless degraded and scope a larger alternate-surface approach separately.
+- Candidate fix paths to evaluate in order:
+1. Qt-side fullscreen presentation for borderless targets: have the PyQt overlay enter a true fullscreen/chrome-free state on the target `QScreen` before helper stacking/click-through validation. Verify this changes Shell readback to `y=0` and preserves click-through/focus safety.
+2. Helper-side fullscreen/full-monitor presentation: if Mutter exposes a safe `MetaWindow` API for fullscreening the overlay window from the extension, prototype it behind an opt-in diagnostic path, then verify readback, stacking, click-through, and focus safety.
+3. If a managed PyQt top-level cannot bypass work-area clamping while preserving click-through, keep borderless degraded and scope a larger alternate-surface approach separately, such as a layer-shell-capable surface or Shell-rendered overlay. This is not part of the first Phase 9B implementation.
+- Phase 9B touch points:
+- `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py`: select and request any new borderless/full-monitor presentation mode behind backend-owned policy; preserve current degraded behavior unless the selected path proves readback match.
+- `overlay_client/backend/helper_ipc.py`: add request/response fields only if the selected helper protocol needs an explicit fullscreen/full-monitor presentation option.
+- `helpers/gnome_shell_extension/extension.js`: add helper-side fullscreen/full-monitor presentation only if the helper API path is selected; also degrade helper presentation responses when post-apply readback mismatches requested rect.
+- `overlay_client/follow_surface.py` or the backend consumer seam: add Qt-side fullscreen/chrome-free overlay presentation only if needed, without importing GNOME helper implementation modules or dispatching on raw helper enums in generic code.
+- Tests: unit tests for backend policy/readback mismatch handling, static/source tests for helper readback degradation and optional fullscreen diagnostics, harness tests if Qt window flag/fullscreen wiring changes, and manual GNOME validation for compositor placement.
+- Phase 9B.2 implementation plan:
+- Add a backend-owned, generic surface-preparation request type used by the GNOME helper presentation bundle and consumed by `follow_surface.py` through `run_backend_presentation_cycle(..., prepare_surface=...)`.
+- Gate the first implementation behind `EDMC_OVERLAY_GNOME_BORDERLESS_FULLSCREEN_PREP=1`.
+- Keep eligibility pure and narrow: request action must be attach, target must be fullscreen, target `contentRect` must be valid, `contentRect` must match `monitorRect` within the existing presentation tolerance, and runtime must still use `rect_source=content_rect`.
+- In `follow_surface.py`, implement a backend-neutral preparation handler that makes the PyQt surface chrome-free/click-through-safe, selects the target `QScreen` from the requested full-monitor rect, primes the geometry, and calls `showFullScreen()` before helper validation.
+- Preserve existing map-prime/show behavior for non-9B paths and windowed `frame_rect_fallback`.
+- In `helpers/gnome_shell_extension/extension.js`, add helper-side degradation for post-apply readback mismatch so direct `ApplyPresentation` no longer reports `presentation_applied` when `applied_rect` differs from `requested_rect`.
+- Test type selection for Phase 9B.2:
+- Unit tests are required for backend fullscreen-prep eligibility because this is deterministic policy logic.
+- Harness/follow-surface tests are required because Qt surface preparation reaches `follow_surface.py` and changes window state calls.
+- Static/source tests are required for the GNOME Shell extension readback mismatch degradation because there is no JS runtime seam.
+- Manual GNOME validation remains pending for Phase 9B.6.
+- Test type selection:
+- Unit tests are required for backend selection policy, degraded state mapping, and helper IPC parsing because these are deterministic.
+- Static/source tests are required for GNOME Shell extension behavior if no JS runtime seam exists.
+- Harness tests are required if Phase 9B changes PyQt window flags, fullscreen state, or backend-to-surface wiring.
+- Manual GNOME validation is required because work-area clamping, fullscreen behavior, click-through, focus safety, and visual flashing are compositor behavior.
+- Manual validation requirements after implementation:
+- Reload helper with `./scripts/dev_gnome_helper.sh reload` if helper files change.
+- Restart EDMC/overlay client.
+- Enter Elite windowed-borderless mode on monitor 0.
+- Confirm helper target still reports `contentRect={"x":0,"y":0,"width":3440,"height":1440}` or the current monitor-equivalent bounds.
+- Confirm runtime/helper presentation applies with `requested` and `applied` matching at `y=0`, not `y=29`.
+- Confirm `chrome_free=true`, `stacking=true`, `click_through=true`, and `focus_safe=true`.
+- Confirm no repeated `attempts=2` or periodic `ApplyPresentation` churn returns after a successful matching attach.
+- Confirm click-through, focus loss/return, no flashing, and target loss/reacquire behavior still match Phase 7/8 expectations.
+- Confirm windowed mode still uses degraded `frame_rect_fallback` and remains operational.
+
+#### Phase 9B Implementation Summary
+- Implemented on 2026-05-13 as a dev-gated Qt-side fullscreen preparation path. Support wording remains degraded/experimental, and `true_overlay` is not claimed.
+- Added backend-owned surface preparation request plumbing through `BackendPresentationSurfacePreparation`. The GNOME helper presentation bundle creates this request only when `EDMC_OVERLAY_GNOME_BORDERLESS_FULLSCREEN_PREP=1`, the helper target is fullscreen, the request action is attach, `rect_source=content_rect`, and the target content rect matches the target monitor rect within the existing presentation tolerance.
+- `follow_surface.py` now accepts the backend-owned preparation callback from `run_backend_presentation_cycle`. For `fullscreen_monitor` preparation, it prepares click-through/focus-safe window flags, selects the target `QScreen` from the requested full-monitor rect, primes geometry, calls `showFullScreen()`, prepares the platform window, and reapplies click-through before helper `ApplyPresentation` validates stacking/readback/click-through/focus safety.
+- The GNOME Shell helper now adds `applied_rect_mismatch` to `degrade_reasons` when post-apply readback does not match the requested rect within tolerance. Direct helper calls should no longer report `presentation_applied` for the known `y=29` work-area mismatch.
+- The Phase 9.9A persistent mismatch guard remains a guard, not the primary fix. With the 9B fullscreen-prep gate enabled, repeated same-signature applied-rect mismatches back off after the existing threshold so a failed Qt-side fullscreen attempt does not reintroduce immediate `ApplyPresentation` churn.
+- Files changed for Phase 9B: `overlay_client/backend/surface_preparation.py`, `overlay_client/backend/__init__.py`, `overlay_client/backend/consumers.py`, `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py`, `overlay_client/follow_surface.py`, `helpers/gnome_shell_extension/extension.js`, `overlay_client/tests/test_gnome_helper_presentation_runtime.py`, `overlay_client/tests/test_backend_consumers.py`, `overlay_client/tests/test_follow_surface_mixin.py`, `overlay_client/tests/test_gnome_shell_helper_extension_source.py`, and this document.
+- Test files added/updated for Phase 9B: `overlay_client/tests/test_gnome_helper_presentation_runtime.py`, `overlay_client/tests/test_backend_consumers.py`, `overlay_client/tests/test_follow_surface_mixin.py`, and `overlay_client/tests/test_gnome_shell_helper_extension_source.py`.
+
+#### Tests Run For Phase 9B
+- Command:
+```bash
+python3 -m py_compile overlay_client/backend/surface_preparation.py overlay_client/backend/__init__.py overlay_client/backend/consumers.py overlay_client/backend/bundles/_gnome_shell_helper_presentation.py overlay_client/follow_surface.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_follow_surface_mixin.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_follow_surface_mixin.py overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed; `89 passed`.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_follow_surface_mixin.py overlay_client/tests/test_gnome_shell_helper_extension_source.py overlay_client/tests/test_backend_architecture_boundary.py overlay_client/tests/test_gnome_shell_helper_presentation_state.py overlay_client/tests/test_setup_surface.py
+```
+- Result: passed; `114 passed`, `4 skipped`. The skips were existing PyQt-marked setup tests in the targeted command without `PYQT_TESTS=1`.
+- Command:
+```bash
+make check
+```
+- Result: passed. Ruff passed, mypy passed, and `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest` passed with `1022 passed`, `21 skipped`.
+
+#### Phase 9B Manual Validation Evidence
+- Validation date: 2026-05-13.
+- Qt-side fullscreen prep was tested with `EDMC_OVERLAY_GNOME_BORDERLESS_FULLSCREEN_PREP=1`.
+- Result: failed. The overlay became completely black and opaque. This rejects the Qt `showFullScreen()` preparation path even though it was dev-gated, because it breaks the transparent PyQt compositing surface.
+- The original no-flag startup command was retested:
+```bash
+source /home/jon/Applications/EDMC/EDMarketConnector-6.1.2/venv/bin/activate && python3 /home/jon/Applications/EDMC/EDMarketConnector-6.1.2/EDMarketConnector.py
+```
+- Result: the overlay returned to the second-monitor placement failure, but with no title bar. This confirms the titlebar/chrome hypothesis is not the root cause. The overlay can be chrome-free while Mutter still places the managed PyQt top-level on the wrong output or constrains it away from the requested full-monitor rect.
+- Conclusion: keep the Qt-side fullscreen prep gate off by default and do not promote it. Phase 9B.3 should now scope a helper/compositor-side full-monitor placement path or an alternate surface strategy. Phase 9.9A remains only a churn guard; broader backoff is still not the proper fix.
+
+#### Phase 9B.3 Scope: Helper-Side Full-Monitor Presentation Proof
+- Goal: prove whether the GNOME Shell helper can place the existing transparent PyQt overlay at borderless/full-monitor target bounds using Shell/Mutter-side window APIs, without Qt `showFullScreen()` and without changing rendering ownership.
+- Status: scoped on 2026-05-13. This is a diagnostic/proof stage. Do not promote support wording, do not claim `true_overlay`, and do not make helper-side fullscreen behavior default in this stage.
+- Core question: can a managed PyQt top-level remain transparent/click-through/focus-safe while Shell/Mutter places it at the fullscreen target monitor rect, or is a normal managed PyQt window fundamentally constrained to work-area/monitor-placement behavior under GNOME Wayland?
+- In-scope hypotheses to test:
+- `move_to_monitor(target_monitor)` before `move_resize_frame(...)` may correct the second-monitor placement case without changing fullscreen state.
+- `move_resize_frame(...)` followed by `move_to_monitor(...)`, or the reverse order, may have different Mutter behavior and should be proven with readback.
+- Shell-side fullscreen APIs such as `make_fullscreen()` / `unmake_fullscreen()`, if available on the overlay `MetaWindow`, may bypass work-area clamping. This must be tested for transparency, click-through, focus safety, and readback, because Qt-side fullscreen already failed visually.
+- Overlay workspace/state APIs such as `change_workspace(...)`, `move_to_workspace(...)`, `stick(...)`, or equivalent methods may be needed only if diagnostics show workspace or monitor migration is part of the failure.
+- It may be impossible for a managed PyQt top-level to occupy full-monitor bounds under GNOME Wayland while preserving transparency. If so, Phase 9B should explicitly keep borderless degraded and scope a later alternate-surface path.
+- Out of scope:
+- No Qt `showFullScreen()` retry or promotion.
+- No broader mismatch backoff as the primary fix.
+- No Shell-rendered overlay implementation in 9B.3.
+- No payload logging, BGS-Tally, generic payload dedupe, windowed `frame_rect_fallback`, support wording, or `true_overlay` changes.
+- No direct GNOME helper runtime imports or helper protocol checks in `follow_surface.py`; preserve the fix219 boundary.
+- Proposed helper diagnostics:
+- Add an opt-in `ApplyPresentation` diagnostic/probe option, off by default, for helper-side placement strategies.
+- Report which overlay `MetaWindow` methods exist before attempting them: at minimum `move_to_monitor`, `move_resize_frame`, `move_frame`, `make_fullscreen`, `unmake_fullscreen`, `make_above`, workspace movement/stick methods, fullscreen state fields, monitor index, frame rect, buffer rect, and work area.
+- For each attempted strategy, capture pre/post frame rect, buffer rect, monitor, fullscreen state, workspace, requested rect, target monitor rect, action order, and any thrown error.
+- Keep diagnostics optional and concise in normal runtime logs; large strategy payloads should appear only when explicitly requested.
+- Candidate strategy probes, in order:
+1. `normal_move_resize`: current control path, to keep evidence comparable.
+2. `move_to_monitor_then_resize`: move overlay to target monitor, then call `move_resize_frame(...)`.
+3. `resize_then_move_to_monitor`: call `move_resize_frame(...)`, then move overlay to target monitor.
+4. `make_fullscreen_then_resize`: call helper-side fullscreen on the overlay, then resize/read back.
+5. `resize_then_make_fullscreen`: resize first, then call helper-side fullscreen/read back.
+6. `fullscreen_only`: helper-side fullscreen without explicit resize, to see Mutter's native fullscreen rect for the selected overlay.
+- Strategy safety requirements:
+- All strategy probes must be opt-in and limited to borderless/fullscreen targets where helper target state has `fullscreen=true`, valid `contentRect`, and `contentRect` matching `monitorRect`.
+- If a probe leaves the overlay fullscreen or moved unexpectedly and the strategy is not selected as a success, the helper should attempt best-effort restoration to the pre-probe state or document why restoration is not safe.
+- A successful strategy must prove all of: applied rect matches requested full-monitor rect within tolerance, overlay remains visually transparent, no black/opaque surface appears, `chrome_free=true`, `stacking=true`, `click_through=true`, `focus_safe=true`, no repeated `ApplyPresentation` churn, and Phase 6A/6B/8 behavior remains intact.
+- Failure handling:
+- If every managed-window strategy fails, mark Phase 9B.3 as failed and keep borderless degraded. The next phase should scope an alternate surface architecture, such as a real layer-shell surface or a Shell-side rendering bridge, instead of continuing to tune managed PyQt top-level placement.
+- Phase 9B.3 touch points:
+- `helpers/gnome_shell_extension/extension.js`: add opt-in strategy probing and diagnostics around overlay `MetaWindow` placement methods.
+- `overlay_client/backend/helper_ipc.py`: parse optional strategy diagnostics only if the helper response shape changes.
+- `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py`: add backend-owned request options and diagnostic surfacing only behind an explicit development gate.
+- Tests: static/source tests for helper strategy gates and diagnostic fields; unit tests for backend option eligibility/parser handling if touched; backend-boundary tests if any runtime wiring changes.
+- Phase 9B.3 implementation status:
+- Marked in progress on 2026-05-13.
+- Intended touch points for this implementation: `helpers/gnome_shell_extension/extension.js`, `overlay_client/tests/test_gnome_shell_helper_extension_source.py`, and this document. Backend parser/runtime files should remain untouched unless the helper response needs structured runtime parsing beyond optional JSON passthrough.
+- Test type selection for this implementation:
+- Static/source tests are required for the GNOME Shell extension strategy probe because there is no JS runtime seam in the current test suite.
+- Backend parser/unit tests are not required if the new strategy diagnostics remain nested under the existing optional `presentation_diagnostics` response payload and are not parsed into typed backend models.
+- Harness tests are not required because normal runtime wiring and PyQt window state should not change in this diagnostic-only patch.
+- Manual GNOME validation remains required before any strategy can be selected for Phase 9B.4.
+- Manual validation plan:
+- Reload helper with `./scripts/dev_gnome_helper.sh reload`.
+- Start EDMC without `EDMC_OVERLAY_GNOME_BORDERLESS_FULLSCREEN_PREP=1`.
+- Enter Elite windowed-borderless mode on monitor 0 and confirm target `contentRect` equals `monitorRect`.
+- Run direct `ApplyPresentation` strategy probes with diagnostics enabled for each candidate strategy.
+- For each probe, record requested/applied rect, overlay monitor, fullscreen state, `chrome_free`, `stacking`, `click_through`, `focus_safe`, visual transparency, click-through, focus loss/return, and whether any flashing or black/opaque surface occurs.
+- Only after a strategy passes manually should Phase 9B.4 implement it as the selected path, still behind a dev/runtime gate first.
+
+#### Phase 9B.3 Implementation Summary
+- Implemented on 2026-05-13 as an opt-in helper-side strategy probe. Normal `ApplyPresentation` behavior is unchanged unless a request explicitly sets `presentation_strategy_probe` / `presentationStrategyProbe` or `include_presentation_strategy_diagnostics` / `includePresentationStrategyDiagnostics`.
+- The helper now supports diagnostic probes for `normal_move_resize`, `move_to_monitor_then_resize`, `resize_then_move_to_monitor`, `make_fullscreen_then_resize`, `resize_then_make_fullscreen`, and `fullscreen_only`.
+- Probes are gated to borderless/fullscreen target state: target `fullscreen=true`, valid `contentRect`, valid `monitorRect`, target `contentRect` matching `monitorRect`, and requested rect matching `monitorRect` within the existing tolerance. If the gate fails, diagnostics explain why and no strategy actions run.
+- Per-strategy diagnostics are nested under existing `presentation_diagnostics.strategyProbe`; backend parser/runtime behavior is unchanged and diagnostics do not drive placement.
+- Strategy diagnostics record method availability, target monitor/content rect, requested rect, pre/post overlay frame/buffer rect, monitor, fullscreen state, workspace, action order, errors, readback match, monitor/fullscreen changes, and best-effort restoration after fullscreen probes.
+- Helper-side fullscreen probes attempt `unmake_fullscreen()` and a move/resize back to the pre-probe frame when the overlay was not fullscreen before the probe.
+- Files changed for Phase 9B.3: `helpers/gnome_shell_extension/extension.js`, `overlay_client/tests/test_gnome_shell_helper_extension_source.py`, and this document.
+- Test files added/updated for Phase 9B.3: `overlay_client/tests/test_gnome_shell_helper_extension_source.py`.
+
+#### Tests Run For Phase 9B.3
+- Command:
+```bash
+python3 -m py_compile overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed; `13 passed`.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py overlay_client/tests/test_backend_architecture_boundary.py overlay_client/tests/test_gnome_helper_presentation_runtime.py
+```
+- Result: passed; `53 passed`.
+- Command:
+```bash
+git diff --check
+```
+- Result: passed.
+- Command:
+```bash
+make check
+```
+- Result: passed. Ruff passed, mypy passed, and `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest` passed with `1028 passed`, `21 skipped`.
+
+#### Phase 9B.3 Manual Validation Pending
+- Reload helper with `./scripts/dev_gnome_helper.sh reload` because `helpers/gnome_shell_extension/extension.js` changed.
+- Start EDMC without `EDMC_OVERLAY_GNOME_BORDERLESS_FULLSCREEN_PREP=1`.
+- Enter Elite windowed-borderless mode on monitor 0.
+- Confirm target reports `fullscreen=true` and `contentRect == monitorRect`.
+- Run one direct `ApplyPresentation` call per candidate strategy with `presentation_strategy_probe` set to the strategy name and `include_presentation_diagnostics=true`.
+- For each strategy, capture requested rect, applied rect, overlay monitor, overlay fullscreen state, method availability, match result, restoration result, visual transparency, click-through, focus loss/return, and flashing/opaque-black behavior.
+- Keep Phase 9B.4 pending until manual evidence proves whether any helper-side strategy can satisfy all placement and behavior gates.
+
+#### Phase 9B.3 Manual Validation Evidence
+- Validation date: 2026-05-14.
+- Current borderless target: `targetToken=meta:19`, `fullscreen=true`, `contentRect={"x":0,"y":0,"width":3440,"height":1440}`, `monitorRect={"x":0,"y":0,"width":3440,"height":1440}`, `work_area_current_monitor={"x":0,"y":29,"width":3440,"height":1411}`.
+- Baseline strategy probe `normal_move_resize`:
+- Returned `status="presentation_degraded"`, `degrade_reasons=["applied_rect_mismatch"]`.
+- Requested `{"x":0,"y":0,"width":3440,"height":1440}`; applied/readback `{"x":0,"y":29,"width":3440,"height":1440}`.
+- `strategyProbe.eligible=true`, `actions=[move_resize_frame ok]`, `rectMatch=false`, `monitorChanged=false`, `fullscreenChanged=false`.
+- `chrome_free=true`, `stacking=true`, `click_through=true`, and `focus_safe=true` were reported by the helper, but the user visually observed a title bar on the overlay while it was on the primary monitor and in front.
+- Strategy probe `move_to_monitor_then_resize`:
+- Returned `status="presentation_degraded"`, `degrade_reasons=["applied_rect_mismatch"]`.
+- Requested `{"x":0,"y":0,"width":3440,"height":1440}`; applied/readback remained `{"x":0,"y":29,"width":3440,"height":1440}`.
+- `strategyProbe.eligible=true`, `actions=[move_to_monitor ok, move_resize_frame ok]`, `rectMatch=false`, `monitorChanged=false`, `fullscreenChanged=false`.
+- User observations: overlay remained on the primary monitor and in front; it behaved like a standalone app and had a visible title bar on the primary monitor; click-through could flash; when the game/overlay moved to the secondary monitor the title bar disappeared, but clicking through sometimes moved the overlay behind the game and it did not return to foreground.
+- Follow-on normal non-strategy diagnostic confirmed the same state: helper selected overlay token `meta:30`, `moveResizeAction="move_resize_frame"`, before/after rects both `{"x":0,"y":29,"width":3440,"height":1440}`, monitor `0`, and `degrade_reasons=["applied_rect_mismatch"]`.
+- Runtime logs during this state showed repeated `GNOME helper presentation` attempts with `attempts=2`, `retries=["applied_rect_mismatch"]`, `presentation_skipped=false`, `rect_match=false`, and `delta=[0,29,0,0]`. Because the mismatch is same-monitor/work-area rather than wrong-monitor, Phase 9.9A's wrong-monitor backoff does not engage.
+- Interpretation: `move_to_monitor` does not address the work-area top offset. Helper `chrome_free=true` is not sufficient proof of the user-visible no-titlebar/no-normal-managed-window behavior in this GNOME Wayland/XWayland path. Do not promote a non-fullscreen helper-side move strategy. Fullscreen probes remain unvalidated and potentially risky because Qt-side fullscreen already produced a black/opaque surface.
+
+### Phase 10: GNOME Shell-Native Borderless/Fullscreen Small Proof
+- Goal: prove the smallest possible GNOME Shell-owned presentation surface can satisfy the borderless/fullscreen compositor gates that a normal managed PyQt top-level cannot satisfy under GNOME Wayland.
+- Current conclusion from Phase 9B evidence: the managed PyQt top-level path is not the correct borderless/fullscreen architecture. Mutter constrains or treats the PyQt overlay as a managed application window: normal helper moves can leave it at work-area `y=29` or on the wrong monitor, and Qt-side fullscreen can become black/opaque. Keep that evidence, but do not keep tuning managed-window placement as the primary fix.
+- Phase 10 is proof-only. It must not implement payload rendering, production scene transport, runtime automatic selection, support wording changes, or `true_overlay` claims.
+- Preserve existing behavior:
+- PyQt rendering remains the default path for windowed mode, non-GNOME behavior, and all production runtime behavior during this phase.
+- Windowed GNOME helper mode remains operational through the existing backend/helper presentation path, with `frame_rect_fallback` degraded.
+- Phase 6A mapped suppression, Phase 6B clamp, Phase 8 event-driven suppression, Phase 9.9A churn guard, and Phase 9B evidence remain intact.
+- Preserve fix219 boundaries: GNOME Shell-native proof policy must stay behind backend/helper-owned interfaces. Generic follow/runtime code must not import GNOME helper implementation modules or branch on raw helper protocol details.
+
+#### Phase 10 Small Proof Scope
+- Build a transparent GNOME Shell/St/Clutter actor, owned by the extension, positioned at the target `contentRect`/monitor rect above Elite in borderless fullscreen mode.
+- The proof actor should render only a hardcoded diagnostic label/box or minimal overlay marker. It does not need payload rendering, layout parity, live scene updates, or user-facing production UI.
+- The proof actor must be opt-in/dev-gated and off by default.
+- Proposed dev gate name for the first proof: `EDMC_OVERLAY_GNOME_SHELL_ACTOR_PROOF=1` or an equivalent helper/backend proof flag. The exact name can change during implementation, but the gate must be off by default.
+- The proof actor must be borderless/fullscreen-only:
+- target `fullscreen=true`;
+- target has a valid `contentRect`;
+- `contentRect` matches the target monitor bounds within existing tolerance;
+- target is on the current workspace and not minimized.
+- The proof actor must not steal focus and should not receive pointer input. Manual validation must confirm click-through to Elite still works.
+- The proof actor should be destroyed or hidden promptly on target loss, workspace mismatch, minimized target, helper disable, or dev gate disable.
+
+#### Phase 10 Locked Decisions
+- Trigger: expose a direct manual/helper proof path first. Do not add automatic runtime selection in Phase 10.
+- Actor content: use a simple visible diagnostic marker, such as a small label plus outline rectangle. It does not need to resemble the production overlay.
+- Eligibility: use strict borderless/fullscreen gating only. Refuse the proof unless the target is fullscreen, has a valid `contentRect`, and that `contentRect` matches the target monitor bounds within tolerance.
+- Click-through: the proof actor must be non-reactive/click-through. If it blocks clicks, Phase 10 fails rather than deferring that to a later production phase.
+- Layer/parent probing: start with one Shell actor parent/layer candidate at a time and record the chosen parent/layer in diagnostics. Do not automatically cycle multiple parent candidates in the first implementation.
+- Cleanup: remove the actor on explicit clear, target loss, helper disable/reload, and stale proof timeout.
+- Stale timeout: use about `5s` for the proof actor unless it is refreshed by an explicit proof/update request.
+- Runtime impact: do not suppress PyQt content, do not alter normal EDMC overlay behavior, and do not implement payload rendering or production scene transport in Phase 10.
+- Pass/fail bar: Phase 10 passes only if the proof actor satisfies the full acceptance gate below. A partial pass is evidence, not permission to start Phase 11.
+- Follow-up gate: Phase 11 starts only after Phase 10 passes. If Phase 10 fails, record the failed gate and scope another GNOME-native proof option before content-bridge work.
+
+#### Phase 10 Refactor Staging
+| Stage | Description | Status |
+| --- | --- | --- |
+| 10.1 | Scope Shell-native small-proof goals, boundaries, non-goals, and test type selection | Completed |
+| 10.2 | Add a dev-gated Shell-native proof actor in the GNOME Shell extension without changing normal runtime placement | Headless Tests Passed |
+| 10.3 | Add direct helper command/request fields to show, update, and clear the proof actor without automatic runtime selection | Headless Tests Passed |
+| 10.4 | Add static/source and parser/unit coverage for the proof actor gate, lifecycle, response fields, and fix219 boundaries | Headless Tests Passed |
+| 10.5 | Manually validate the proof actor in borderless fullscreen: full-monitor geometry, no `y=29` offset, no titlebar, transparency, click-through, focus safety, no flashing, no presentation churn, monitor/workspace behavior, and target loss/reacquire | Active-Fullscreen Proof Passed; Production Lifecycle Hardening Deferred |
+| 10.6 | Try single fullscreen-aware Shell actor parent/layer candidates after `Main.uiGroup` failed the active-fullscreen visibility gate | `trackFullscreen=true` Failed; `trackFullscreen=false` Failed; `global.stage` Failed; `global.top_window_group` Failed |
+| 10.7 | Add proof-only Shell/Mutter group diagnostics to report available global actor groups and child/order metadata before choosing another candidate | Headless Tests Passed; Manual Diagnostics Pending |
+| 10.8 | Refine proof-only Shell/Mutter diagnostics with `uiGroup` ordering, `global.window_group` MetaWindowActor details, visible proof actor sibling metadata, and optional target-token matching | Headless Tests Passed; Manual Diagnostics Pending |
+| 10.9 | Try the single evidence-based `global.window_group` proof parent so the Shell proof actor is appended after current window actors | `global.window_group` Failed |
+| 10.10 | Try the single `target_window_actor_child` proof parent by attaching the proof actor directly to the Elite fullscreen MetaWindowActor | Manual Validation Passed |
+| 10.11 | Record Phase 10 decision: Shell actor proof passed and Phase 11 may start, or proof failed and alternate GNOME-native options must be scoped | Completed; Phase 11 Unblocked |
+
+#### Phase 10 Implementation Plan
+- Implementation status: started on 2026-05-14.
+- Intended touch points:
+- `helpers/gnome_shell_extension/extension.js`: add direct opt-in `shell_actor_proof` handling, strict borderless/fullscreen eligibility, Shell actor creation/positioning, diagnostics, explicit clear, stale timeout cleanup, and disable cleanup.
+- `overlay_client/tests/test_gnome_shell_helper_extension_source.py`: add source/static tests for proof opt-in behavior, eligibility, actor non-reactive/click-through setup, parent/layer diagnostics, stale timeout, explicit clear, cleanup paths, and preservation of normal `ApplyPresentation`.
+- This document: record implementation plan, files changed, commands, and outcomes.
+- Backend/runtime files are intentionally out of scope for the first implementation unless helper response parsing forces a typed Python model. No automatic runtime selection should be added in Phase 10.
+- Test type selection:
+- Static/source tests are required for the GNOME Shell extension proof actor because there is no JS runtime seam in the current headless suite.
+- Unit/parser tests are not required unless backend helper IPC parsing changes.
+- Harness tests are not required because the proof is direct helper-triggered and should not change follow-surface lifecycle or backend consumer contracts.
+- Manual GNOME validation remains required for compositor behavior and keeps Phase 10.5 pending.
+
+#### Phase 10 Follow-Up Implementation Plan
+- Implementation status: implemented on 2026-05-15 after manual validation showed the first `Main.uiGroup` candidate can draw at full-monitor bounds but does not stay above active fullscreen Elite.
+- Intended touch points:
+- `helpers/gnome_shell_extension/extension.js`: replace the proof actor's single parent/layer candidate with `Main.layoutManager.addChrome(...)` using fullscreen tracking and an input-region-neutral configuration. Preserve the direct proof command, eligibility gate, stale timeout, and normal managed PyQt `ApplyPresentation` path.
+- `overlay_client/tests/test_gnome_shell_helper_extension_source.py`: update static/source assertions for the new single parent/layer candidate, cleanup through Shell layout manager tracking, and click-through-oriented chrome options.
+- This document: record follow-up scope, files changed, commands, outcomes, and manual validation requirements.
+- Test type selection:
+- Static/source tests remain sufficient because this patch only changes GNOME Shell extension proof actor source and there is no JS runtime seam in the headless suite.
+- Unit/parser tests are not required because the helper IPC shape is unchanged.
+- Harness/backend-boundary tests are not required unless backend/follow wiring changes. This follow-up should not touch backend/follow wiring.
+- Manual GNOME validation remains required to prove active-fullscreen stacking, click-through, transparency, no taskbar/Alt-Tab Shell actor entry, stale cleanup, and no flashing.
+
+#### Phase 10 Second Follow-Up Implementation Plan
+- Implementation status: implemented on 2026-05-15 after manual validation showed `Main.layoutManager.addChrome(trackFullscreen=true,affectsInputRegion=false)` loaded correctly and reported full-monitor actor bounds, but the marker still stayed with the VS Code/normal-window layer rather than active fullscreen Elite.
+- Intended touch points:
+- `helpers/gnome_shell_extension/extension.js`: keep the same layout-manager chrome candidate and direct proof command, but switch the single candidate option from `trackFullscreen=true` to `trackFullscreen=false` while preserving `affectsInputRegion=false`.
+- `overlay_client/tests/test_gnome_shell_helper_extension_source.py`: update static/source assertions for the current single candidate.
+- This document: record the failed `trackFullscreen=true` evidence, the new candidate, and test/manual validation requirements.
+- Test type selection:
+- Static/source tests remain sufficient because the helper IPC shape and backend/follow wiring are unchanged.
+- Manual GNOME validation remains required because only the compositor can prove active-fullscreen stacking.
+
+#### Phase 10 Third Follow-Up Implementation Plan
+- Implementation status: implemented on 2026-05-15 after manual validation showed both layout-manager chrome candidates had correct full-monitor actor bounds but still stayed with the VS Code/normal-window layer instead of active fullscreen Elite.
+- Intended touch points:
+- `helpers/gnome_shell_extension/extension.js`: replace the single proof parent/layer candidate with `global.stage`, a lower-level Shell scene graph candidate. Preserve the same direct proof request fields, strict eligibility gate, marker styling, stale timeout, explicit clear, and normal managed PyQt `ApplyPresentation` path.
+- `overlay_client/tests/test_gnome_shell_helper_extension_source.py`: update static/source assertions for the new single candidate and cleanup path.
+- This document: record failed candidate evidence, current `global.stage` candidate, files changed, commands, outcomes, and manual validation requirements.
+- Test type selection:
+- Static/source tests remain sufficient because this patch changes only GNOME Shell extension proof actor source and does not change helper IPC shape.
+- Backend/parser tests are not required unless response shape changes.
+- Harness tests are not required because runtime wiring must remain unchanged.
+- Manual GNOME validation remains required because only the compositor can prove active-fullscreen stacking.
+
+#### Phase 10 Fourth Follow-Up Implementation Plan
+- Implementation status: implemented on 2026-05-15 after manual validation showed `global.stage` loaded correctly and reported full-monitor actor bounds, but still stayed with the VS Code/normal-window layer instead of active fullscreen Elite.
+- Intended touch points:
+- `helpers/gnome_shell_extension/extension.js`: replace the single proof parent/layer candidate with `global.top_window_group`, a Mutter/Shell top-window group candidate. Preserve the same direct proof request fields, strict eligibility gate, marker styling, stale timeout, explicit clear, and normal managed PyQt `ApplyPresentation` path.
+- `overlay_client/tests/test_gnome_shell_helper_extension_source.py`: update static/source assertions for the new single candidate and unchanged cleanup path.
+- This document: record failed candidate evidence, current `global.top_window_group` candidate, files changed, commands, outcomes, and manual validation requirements.
+- Test type selection:
+- Static/source tests remain sufficient because this patch changes only GNOME Shell extension proof actor source and does not change helper IPC shape.
+- Backend/parser tests are not required unless response shape changes.
+- Harness tests are not required because runtime wiring must remain unchanged.
+- Manual GNOME validation remains required because only the compositor can prove active-fullscreen stacking.
+
+#### Phase 10 Group Diagnostics Implementation Plan
+- Implementation status: implemented on 2026-05-15 after `Main.uiGroup`, both layout-manager chrome variants, `global.stage`, and `global.top_window_group` all placed a transparent actor at full-monitor bounds but failed active-fullscreen stacking. Manual GNOME diagnostics are pending.
+- Goal: add a proof-only helper command that reports available global GNOME Shell/Mutter actor groups and concise child/order metadata so the next single parent/layer candidate is chosen from evidence rather than guessed.
+- Intended touch points:
+- `helpers/gnome_shell_extension/extension.js`: add an opt-in `shell_actor_proof_action="diagnose_groups"` path under the existing Shell actor proof command family. It must not create, move, or destroy proof actors and must not change normal `ApplyPresentation`.
+- `overlay_client/tests/test_gnome_shell_helper_extension_source.py`: add static/source assertions that group diagnostics are opt-in, include known global group names, include child/order metadata, are bounded, and do not auto-cycle candidates.
+- This document: record diagnostics scope, files changed, commands, outcomes, and manual command.
+- Test type selection:
+- Static/source tests are required because there is no JS runtime seam for the GNOME Shell extension in the headless suite.
+- Backend/parser tests are not required because the helper IPC shape remains JSON with optional diagnostics fields and no backend parser is touched.
+- Harness tests are not required because runtime wiring remains unchanged.
+- Manual GNOME validation remains required to inspect the returned group metadata from the actual compositor session.
+- Locked boundaries:
+- Do not add runtime selection, auto-cycling, payload rendering, PyQt suppression, support wording changes, or `true_overlay` claims.
+- Do not touch `follow_surface.py` or backend/follow wiring.
+- Keep `show` and `clear` proof behavior unchanged.
+
+#### Phase 10 Group Diagnostics Follow-Up Implementation Plan
+- Implementation status: implemented on 2026-05-15 after the first `diagnose_groups` response showed that `global.stage` only exposes `UiActor:uiGroup` and `UIAreaIndicator`, while the ordering needed for fullscreen analysis is inside `uiGroup`. Manual diagnostics with a fresh target token are pending.
+- Goal: keep the same proof-only diagnostics command but add enough bounded scene-graph detail to identify the active fullscreen target window actor, the proof actor's sibling position if visible, and the relevant `uiGroup` ordering before choosing another single proof parent.
+- Intended touch points:
+- `helpers/gnome_shell_extension/extension.js`: enrich `shell_actor_proof_action="diagnose_groups"` with `uiGroup` child order, `global.window_group` child MetaWindowActor details, optional `target_token` matching, and visible proof actor metadata. Do not create/move/destroy actors and do not change normal `ApplyPresentation`.
+- `overlay_client/tests/test_gnome_shell_helper_extension_source.py`: extend static/source assertions for bounded `uiGroup` diagnostics, window actor metadata fields, target-token matching, and proof actor sibling metadata.
+- This document: record scope, commands, outcomes, and the manual diagnostics command.
+- Test type selection:
+- Static/source tests remain required because there is no JS runtime seam for the GNOME Shell extension.
+- Backend/parser tests remain unnecessary because the response remains optional JSON diagnostics and no backend parser is touched.
+- Harness tests remain unnecessary because runtime wiring must not change.
+- Manual GNOME validation remains required to inspect live compositor actor metadata and choose the next single candidate.
+- Locked boundaries:
+- Do not add runtime selection, parent auto-cycling, payload rendering, PyQt suppression, support wording changes, or `true_overlay` claims.
+- Do not change the current proof actor parent candidate in this patch.
+- Do not touch `follow_surface.py` or backend/follow wiring.
+
+#### Phase 10 Window Group Candidate Implementation Plan
+- Implementation status: implemented on 2026-05-15 after active-fullscreen diagnostics showed Elite moves inside `global.window_group` from child index `6` to child index `7` when focused, with VS Code moving behind it. This indicates Mutter's active window stacking is represented inside `global.window_group`. Manual GNOME validation is pending.
+- Goal: keep the direct proof path proof-only and change the single proof parent candidate to `global.window_group`, appending the proof actor after current window actors to test whether that layer can stay above focused Elite borderless fullscreen.
+- Intended touch points:
+- `helpers/gnome_shell_extension/extension.js`: replace the current `global.top_window_group` proof parent with `global.window_group`. Preserve direct proof request fields, strict borderless/fullscreen gate, marker styling, stale timeout, explicit clear, diagnostics, and normal managed PyQt `ApplyPresentation`.
+- `overlay_client/tests/test_gnome_shell_helper_extension_source.py`: update static/source assertions for the new single candidate and ensure no auto-cycling or old UI/chrome candidates are reintroduced.
+- This document: record candidate rationale, files changed, commands, outcomes, and manual validation requirements.
+- Test type selection:
+- Static/source tests remain sufficient because this patch changes only GNOME Shell extension proof actor source and does not change helper IPC shape.
+- Backend/parser tests are not required because diagnostics and direct proof request fields are unchanged.
+- Harness tests are not required because runtime wiring must remain unchanged.
+- Manual GNOME validation remains required because only the compositor can prove active-fullscreen stacking, transparency, click-through, and focus behavior.
+- Locked boundaries:
+- Do not add runtime selection, parent auto-cycling, payload rendering, PyQt suppression, support wording changes, or `true_overlay` claims.
+- Do not touch `follow_surface.py` or backend/follow wiring.
+
+#### Phase 10 Target Window Actor Child Candidate Implementation Plan
+- Implementation status: implemented on 2026-05-15 after manual validation showed `global.window_group` reported full-monitor actor bounds and preserved transparency, but the marker stayed attached to the VS Code/normal-window view, click-through worked only over VS Code, and the marker disappeared immediately when Elite gained focus. Manual GNOME validation is pending.
+- Goal: keep Phase 10 proof-only and test whether a Shell actor attached directly to the Elite fullscreen MetaWindowActor can render above Elite borderless fullscreen.
+- Intended touch points:
+- `helpers/gnome_shell_extension/extension.js`: replace the current `global.window_group` proof parent with a `target_window_actor_child` candidate. Resolve the target MetaWindowActor from `target_token`, attach the proof actor as a direct child, preserve strict eligibility, stale timeout, explicit clear, diagnostics, and normal managed PyQt `ApplyPresentation`.
+- `overlay_client/tests/test_gnome_shell_helper_extension_source.py`: update static/source assertions for the new single candidate, target MetaWindowActor lookup, target-token matching, and absence of old active proof parents.
+- This document: record failed candidate evidence, new candidate, files changed, commands, outcomes, and manual validation requirements.
+- Test type selection:
+- Static/source tests remain sufficient because this patch changes only GNOME Shell extension proof actor source and does not change helper IPC shape.
+- Backend/parser tests are not required unless response shape changes.
+- Harness tests are not required because runtime wiring must remain unchanged.
+- Manual GNOME validation remains required because only the compositor can prove active-fullscreen stacking, transparency, click-through, focus behavior, and cleanup.
+- Locked boundaries:
+- Do not add runtime selection, parent auto-cycling, content-subactor cycling, payload rendering, PyQt suppression, support wording changes, or `true_overlay` claims.
+- Do not touch `follow_surface.py` or backend/follow wiring.
+
+#### Phase 10 Touch Points
+- `helpers/gnome_shell_extension/extension.js`: create, position, stack, hide/destroy, and report the Shell-native proof actor. Keep all behavior opt-in and preserve existing helper protocol compatibility through optional fields.
+- `overlay_client/backend/helper_ipc.py`: parse optional proof actor request/response fields only if direct proof commands need typed Python parsing.
+- `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py`: touched only if the proof is requested through an existing backend-owned helper interface. Do not add production runtime selection in Phase 10.
+- `overlay_client/backend/consumers.py` and `overlay_client/follow_surface.py`: should remain untouched unless a narrow backend-owned proof request path is unavoidable. No generic runtime policy should be added in Phase 10.
+- Tests:
+- `overlay_client/tests/test_gnome_shell_helper_extension_source.py` for static/source proof that the actor is dev-gated, borderless/fullscreen-gated, non-reactive/click-through-oriented, lifecycle-managed, and does not replace the normal `ApplyPresentation` path.
+- Backend parser tests only if request/response contracts change.
+- `overlay_client/tests/test_backend_architecture_boundary.py` if any backend/follow wiring changes.
+
+#### Phase 10 Handoff Context
+- The GNOME Shell helper already owns reliable target discovery through `GetTargetState`. In borderless mode it can report a native `contentRect` equal to the target monitor bounds.
+- The existing helper `ApplyPresentation` path can find and manipulate the PyQt overlay window, but the PyQt window is still a managed top-level. That managed-window role is the problem for borderless fullscreen on GNOME Wayland.
+- Phase 10 should stop trying to make the PyQt top-level be the fullscreen borderless presentation surface. The PyQt path remains valuable for windowed mode and for fallback.
+- The Shell-native proof should treat the GNOME Shell extension as the compositor-side presenter. EDMC/overlay client remains the owner of overlay state, plugin settings, and payload interpretation in later phases.
+- First implementation should be direct and reversible: one proof actor, one dev gate, one manual command path, and no automatic runtime selection.
+
+#### Phase 10 Proof Data Flow
+1. `GetTargetState` proves the borderless target is eligible.
+2. A direct helper command asks the extension to show a proof actor at the target rect.
+3. Helper response reports actor visibility, requested rect, applied actor bounds, target token, target monitor, actor parent/layer, and any degradation reason.
+4. Manual validation confirms visual behavior.
+5. A direct clear request, target loss, helper disable, or stale proof state removes the actor.
+
+#### Phase 10 Test Type Selection
+- Static/source tests are required for the GNOME Shell extension proof actor because there is no JS runtime seam in the current headless suite.
+- Unit tests are required for any new backend parsing or eligibility helpers because those decisions are deterministic.
+- Harness tests are not required unless Phase 10 changes follow-surface lifecycle wiring, backend consumer contracts, or surface visibility calls.
+- Manual GNOME validation is mandatory for compositor behavior: placement above borderless fullscreen, transparency, click-through, no focus steal, no flashing, monitor/workspace behavior, and no presentation churn.
+
+#### Phase 10 Non-Goals
+- Do not move the full overlay renderer into GNOME Shell in Phase 10.
+- Do not implement production scene transport or payload rendering.
+- Do not add automatic runtime selection for Shell-native presentation.
+- Do not remove or replace the existing PyQt renderer.
+- Do not claim `true_overlay` or update support wording.
+- Do not change windowed `frame_rect_fallback` behavior.
+- Do not reintroduce timed `ApplyPresentation` churn.
+- Do not solve non-GNOME compositors or other operating systems.
+
+#### Phase 10 Acceptance Gates
+- Small proof passes only if a Shell-native actor appears over Elite borderless fullscreen on the target monitor at full-monitor bounds with no work-area `y=29` offset.
+- The actor must remain transparent except for intentional diagnostic marks; no black/opaque fullscreen surface is acceptable.
+- Click-through must still work.
+- Elite focus must remain stable enough for mapped-visible/mapped-suppressed policy to behave as intended.
+- The actor must not appear as a standalone app, titlebar, taskbar item, or Alt-Tab target.
+- There must be no recurring compositor-facing placement churn for an unchanged target.
+- Target loss, minimize, workspace changes, monitor changes, helper reload, and EDMC shutdown must remove or hide the actor cleanly.
+- Only after Phase 10 passes should Phase 11 choose a production content bridge.
+
+#### Phase 10 Implementation Summary
+- Implemented on 2026-05-14 as a helper-side direct proof path only. No automatic runtime selection, payload rendering, production scene transport, PyQt content suppression, support wording change, or `true_overlay` claim was added.
+- `ApplyPresentation` now accepts optional `shell_actor_proof` / `shellActorProof` and `shell_actor_proof_action` / `shellActorProofAction` request fields. These fields are off by default and are required for the Shell actor proof path to run.
+- `shell_actor_proof_action="show"` validates strict borderless/fullscreen eligibility, creates an extension-owned `St.Widget` actor under one single candidate Shell parent/layer, positions it at the requested target content rect, renders a transparent diagnostic outline plus `EDMC Shell Proof` label, records actor parent/layer diagnostics, and starts a `5s` stale timeout.
+- Initial Phase 10 used `Main.uiGroup` as the single candidate parent. The first 2026-05-15 follow-up kept the one-candidate rule and changed the candidate to `Main.layoutManager.addChrome(trackFullscreen=true,affectsInputRegion=false)`.
+- Manual validation showed the `trackFullscreen=true` candidate loaded and preserved full-monitor actor bounds, but still failed active-fullscreen stacking by staying attached to the normal-window/VS Code layer. The second 2026-05-15 follow-up keeps `Main.layoutManager.addChrome(...)` but changes the current candidate to `Main.layoutManager.addChrome(trackFullscreen=false,affectsInputRegion=false)` to test whether fullscreen tracking was hiding or reordering the actor behind active fullscreen windows.
+- Manual validation showed the `trackFullscreen=false` candidate also loaded and preserved full-monitor actor bounds, but still failed active-fullscreen stacking by staying attached to the normal-window/VS Code layer. The third 2026-05-15 follow-up changes the current single candidate to `global.stage` to test a lower-level Shell scene graph parent.
+- Manual validation showed the `global.stage` candidate also loaded and preserved full-monitor actor bounds, but still failed active-fullscreen stacking by staying attached to the normal-window/VS Code layer. The fourth 2026-05-15 follow-up changes the current single candidate to `global.top_window_group` to test a Mutter/Shell top-window group candidate.
+- The `global.top_window_group` proof candidate reported `shell_actor_proof.actor_parent="global.top_window_group"` after helper reload.
+- The fifth 2026-05-15 follow-up changed the current single candidate to `global.window_group`, appending the proof actor after current window actors based on active-fullscreen diagnostics showing Elite becomes the later/top child in that group when focused.
+- Manual validation showed the `global.window_group` candidate reported full-monitor actor bounds and preserved transparency, but the marker stayed attached to VS Code/normal-window view, click-through worked only over VS Code, and the marker disappeared immediately when Elite gained focus. The sixth 2026-05-15 follow-up changes the current single candidate to `target_window_actor_child`, resolving the Elite MetaWindowActor from `target_token` and attaching the proof actor directly to that target actor.
+- Manual validation showed the `target_window_actor_child` candidate passes the Phase 10 active-fullscreen proof: the marker appeared above focused Elite borderless fullscreen, stayed at `0,0,3440,1440` with no `y=29` work-area offset, preserved transparency with no black/opaque surface, allowed click-through to Elite, and remained visible until the `5s` stale timeout.
+- Phase 10 decision: a GNOME Shell-owned actor attached to the target fullscreen MetaWindowActor is viable for GNOME/Wayland borderless fullscreen. Phase 11 may start design/contract work for the production content bridge. Support remains degraded/experimental, and no `true_overlay` claim is made.
+- Follow-up cleanup now removes the proof actor from its current parent where possible and then destroys it, so the cleanup path works for `global.stage` without layout-manager chrome registration.
+- `shell_actor_proof_action="clear"` removes the proof actor without requiring a target or overlay window.
+- `shell_actor_proof_action="diagnose_groups"` returns proof-only GNOME Shell/Mutter group diagnostics without requiring a target, creating an actor, changing the active proof candidate, or changing normal runtime behavior. The payload is bounded and reports known global group availability, parent/index, visibility/mapped/reactive state, bounds, child counts, bounded child summaries, and `global.stage` child order.
+- The refined `diagnose_groups` payload also reports `ui_group_child_order`, `window_group_child_order` with MetaWindowActor window details, `proof_actor` sibling/parent metadata when the proof actor is visible, and `target_window_actor` matches when a `target_token` is supplied.
+- The proof actor is explicitly non-reactive/click-through oriented (`reactive: false` plus `set_reactive(false)` on actor and child marker widgets). Manual validation still owns the actual click-through proof.
+- Ineligible target states do not create/show the actor and return `shell_actor_proof` diagnostics with concise eligibility reasons. Ineligible show requests also clear any existing proof actor.
+- Cleanup paths cover explicit clear, ineligible target refresh, stale timeout, replacement of an existing actor, and helper disable/reload.
+- The normal managed PyQt `ApplyPresentation` path remains available and unchanged unless proof fields are explicitly present.
+- Files changed for Phase 10: `helpers/gnome_shell_extension/extension.js`, `overlay_client/tests/test_gnome_shell_helper_extension_source.py`, and this document.
+- Test files added/updated for Phase 10: `overlay_client/tests/test_gnome_shell_helper_extension_source.py`.
+
+#### Tests Run For Phase 10
+- Command:
+```bash
+python3 -m py_compile overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed; `18 passed`.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py overlay_client/tests/test_backend_architecture_boundary.py overlay_client/tests/test_gnome_helper_presentation_runtime.py
+```
+- Result: passed; `58 passed`.
+- Command:
+```bash
+make check
+```
+- Result: passed. Ruff passed, mypy passed, and `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest` passed with `1033 passed`, `21 skipped`.
+- Command:
+```bash
+git diff --check
+```
+- Result: passed.
+
+#### Tests Run For Phase 10 Follow-Up
+- Command:
+```bash
+python3 -m py_compile overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed; `18 passed`.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py overlay_client/tests/test_backend_architecture_boundary.py overlay_client/tests/test_gnome_helper_presentation_runtime.py
+```
+- Result: passed; `58 passed`.
+- Command:
+```bash
+make check
+```
+- Result: passed. Ruff passed, mypy passed, and `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest` passed with `1033 passed`, `21 skipped`.
+- Command:
+```bash
+git diff --check
+```
+- Result: passed.
+
+#### Tests Run For Phase 10 Second Follow-Up
+- Command:
+```bash
+python3 -m py_compile overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed; `18 passed`.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py overlay_client/tests/test_backend_architecture_boundary.py overlay_client/tests/test_gnome_helper_presentation_runtime.py
+```
+- Result: passed; `58 passed`.
+- Command:
+```bash
+make check
+```
+- Result: passed. Ruff passed, mypy passed, and `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest` passed with `1033 passed`, `21 skipped`.
+- Command:
+```bash
+git diff --check
+```
+- Result: passed.
+
+#### Tests Run For Phase 10 Third Follow-Up
+- Command:
+```bash
+python3 -m py_compile overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed; `18 passed`.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py overlay_client/tests/test_backend_architecture_boundary.py overlay_client/tests/test_gnome_helper_presentation_runtime.py
+```
+- Result: passed; `58 passed`.
+- Command:
+```bash
+make check
+```
+- Result: passed. Ruff passed, mypy passed, and `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest` passed with `1033 passed`, `21 skipped`.
+- Command:
+```bash
+git diff --check
+```
+- Result: passed.
+
+#### Tests Run For Phase 10 Fourth Follow-Up
+- Command:
+```bash
+python3 -m py_compile overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed; `18 passed`.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py overlay_client/tests/test_backend_architecture_boundary.py overlay_client/tests/test_gnome_helper_presentation_runtime.py
+```
+- Result: passed; `58 passed`.
+- Command:
+```bash
+make check
+```
+- Result: passed. Ruff passed, mypy passed, and `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest` passed with `1033 passed`, `21 skipped`.
+- Command:
+```bash
+git diff --check
+```
+- Result: passed.
+
+#### Tests Run For Phase 10 Group Diagnostics
+- Command:
+```bash
+python3 -m py_compile overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed; `19 passed`.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py overlay_client/tests/test_backend_architecture_boundary.py overlay_client/tests/test_gnome_helper_presentation_runtime.py
+```
+- Result: passed; `59 passed`.
+- Command:
+```bash
+make check
+```
+- Result: passed. Ruff passed, mypy passed, and `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest` passed with `1034 passed`, `21 skipped`.
+- Command:
+```bash
+git diff --check
+```
+- Result: passed.
+
+#### Tests Run For Phase 10 Group Diagnostics Follow-Up
+- Command:
+```bash
+python3 -m py_compile overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed; `19 passed`.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py overlay_client/tests/test_backend_architecture_boundary.py overlay_client/tests/test_gnome_helper_presentation_runtime.py
+```
+- Result: passed; `59 passed`.
+- Command:
+```bash
+make check
+```
+- Result: passed. Ruff passed, mypy passed, and `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest` passed with `1034 passed`, `21 skipped`.
+- Command:
+```bash
+git diff --check
+```
+- Result: passed.
+
+#### Tests Run For Phase 10 Window Group Candidate
+- Command:
+```bash
+python3 -m py_compile overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed; `19 passed`.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py overlay_client/tests/test_backend_architecture_boundary.py overlay_client/tests/test_gnome_helper_presentation_runtime.py
+```
+- Result: passed; `59 passed`.
+- Command:
+```bash
+make check
+```
+- Result: passed. Ruff passed, mypy passed, and `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest` passed with `1034 passed`, `21 skipped`.
+- Command:
+```bash
+git diff --check
+```
+- Result: passed.
+
+#### Tests Run For Phase 10 Target Window Actor Child Candidate
+- Command:
+```bash
+python3 -m py_compile overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py
+```
+- Result: passed; `19 passed`.
+- Command:
+```bash
+overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py overlay_client/tests/test_backend_architecture_boundary.py overlay_client/tests/test_gnome_helper_presentation_runtime.py
+```
+- Result: passed; `59 passed`.
+- Command:
+```bash
+make check
+```
+- Result: passed. Ruff passed, mypy passed, and `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest` passed with `1034 passed`, `21 skipped`.
+- Command:
+```bash
+git diff --check
+```
+- Result: passed.
+
+#### Phase 10 Manual Validation Commands
+- Reload helper:
+```bash
+./scripts/dev_gnome_helper.sh reload
+```
+- Start EDMC normally. Do not enable `EDMC_OVERLAY_GNOME_BORDERLESS_FULLSCREEN_PREP=1`.
+- Enter Elite windowed-borderless mode and capture current target token/rect:
+```bash
+gdbus call --session \
+  --dest org.edmc.ModernOverlay.Helper \
+  --object-path /org/edmc/ModernOverlay/Helper \
+  --method org.edmc.ModernOverlay.Helper.GetTargetState \
+  '{"include_geometry_diagnostics":true}'
+```
+- Confirm target reports `fullscreen=true` and `contentRect == monitorRect`.
+- Capture proof-only Shell/Mutter group diagnostics:
+```bash
+gdbus call --session \
+  --dest org.edmc.ModernOverlay.Helper \
+  --object-path /org/edmc/ModernOverlay/Helper \
+  --method org.edmc.ModernOverlay.Helper.ApplyPresentation \
+  '{"shell_actor_proof":true,"shell_actor_proof_action":"diagnose_groups"}'
+```
+- Expected diagnostics response: `status="shell_actor_group_diagnostics"` with `shell_actor_proof.group_diagnostics` containing the bounded global group and child/order metadata.
+- Capture refined group diagnostics with the current target token to identify the Elite MetaWindowActor:
+```bash
+gdbus call --session \
+  --dest org.edmc.ModernOverlay.Helper \
+  --object-path /org/edmc/ModernOverlay/Helper \
+  --method org.edmc.ModernOverlay.Helper.ApplyPresentation \
+  '{"target_token":"<targetToken>","shell_actor_proof":true,"shell_actor_proof_action":"diagnose_groups"}'
+```
+- Expected refined diagnostics fields: `ui_group_child_order`, `window_group_child_order`, `target_window_actor`, and `proof_actor`.
+- Trigger proof actor for the current `target_window_actor_child` candidate. Replace token and rect with the current target payload:
+```bash
+gdbus call --session \
+  --dest org.edmc.ModernOverlay.Helper \
+  --object-path /org/edmc/ModernOverlay/Helper \
+  --method org.edmc.ModernOverlay.Helper.ApplyPresentation \
+  '{"action":"attach","target_token":"<targetToken>","content_rect":{"x":0,"y":0,"width":3440,"height":1440},"standalone_mode":false,"shell_actor_proof":true,"shell_actor_proof_action":"show"}'
+```
+- Expected proof response after helper reload: `shell_actor_proof.actor_parent="target_window_actor_child"`.
+- To validate over active fullscreen, run the proof command with a delay and focus Elite before it executes:
+```bash
+sleep 5; gdbus call --session \
+  --dest org.edmc.ModernOverlay.Helper \
+  --object-path /org/edmc/ModernOverlay/Helper \
+  --method org.edmc.ModernOverlay.Helper.ApplyPresentation \
+  '{"action":"attach","target_token":"<targetToken>","content_rect":{"x":0,"y":0,"width":3440,"height":1440},"standalone_mode":false,"shell_actor_proof":true,"shell_actor_proof_action":"show"}'
+```
+- Clear proof actor explicitly:
+```bash
+gdbus call --session \
+  --dest org.edmc.ModernOverlay.Helper \
+  --object-path /org/edmc/ModernOverlay/Helper \
+  --method org.edmc.ModernOverlay.Helper.ApplyPresentation \
+  '{"shell_actor_proof":true,"shell_actor_proof_action":"clear"}'
+```
+- Validation evidence checklist:
+- diagnostic marker appears above Elite;
+- marker is on the correct monitor;
+- marker has no `y=29` work-area offset;
+- no titlebar/taskbar/Alt-Tab entry appears;
+- background remains transparent with no black/opaque fullscreen surface;
+- click-through works;
+- Elite focus remains stable;
+- no flashing;
+- proof actor clears after explicit clear;
+- proof actor clears after the `5s` stale timeout if not refreshed;
+- target loss/minimize/workspace mismatch clears or hides actor.
+- Phase 10 active-fullscreen proof is complete once the `target_window_actor_child` evidence below is supplied. Broader production lifecycle hardening, target-change handling, and content transport belong to Phase 11+.
+
+#### Phase 10 Manual Validation Evidence
+- Validation date: 2026-05-15.
+- After helper reload/log-in, the new proof path was active. A stale target token returned `target_unavailable` with a `shell_actor_proof` diagnostics payload, confirming the new helper code was loaded and the proof path was executing.
+- Fresh target state:
+- `targetToken="meta:16"`.
+- `fullscreen=true`.
+- `contentRect={"x":0,"y":0,"width":3440,"height":1440}`.
+- `monitorRect={"x":0,"y":0,"width":3440,"height":1440}`.
+- `work_area_current_monitor={"x":0,"y":29,"width":3440,"height":1411}`.
+- Proof command response:
+- `status="shell_actor_proof_visible"`.
+- `renderer="gnome_shell_actor_proof"`.
+- `requested_rect={"x":0,"y":0,"width":3440,"height":1440}`.
+- `applied_rect={"x":0,"y":0,"width":3440,"height":1440}`.
+- `shell_actor_proof.actor_visible=true`.
+- `shell_actor_proof.applied_actor_bounds={"x":0,"y":0,"width":3440,"height":1440}`.
+- `shell_actor_proof.actor_parent="Main.uiGroup"`.
+- `degrade_reasons=[]`.
+- Manual observations:
+- The `EDMC Shell Proof` marker/outline appeared above Elite.
+- The marker/background was transparent; no black/opaque fullscreen surface appeared.
+- No titlebar and no taskbar entry appeared.
+- An Alt-Tab entry was observed. This still needs attribution: a Shell actor should not create an Alt-Tab entry, so the observed entry may be the existing PyQt overlay window left running during the proof, but Phase 10 cannot pass the Alt-Tab gate until confirmed.
+- Click-through remains unresolved. User was unsure; when alt-tabbing to the game, the marker disappeared. This may be the expected `5s` stale timeout or focus/stacking behavior, but it needs a refreshed proof test before Phase 10.5 can pass.
+- The proof actor disappeared after about `5s`, matching the stale-timeout requirement.
+- Interpretation: Phase 10 now has a strong geometry/transparency/stale-cleanup proof. It proves a Shell-owned actor can occupy the full monitor at `y=0` above the borderless target, bypassing the managed PyQt work-area `y=29` constraint. Phase 10 remains incomplete pending explicit Alt-Tab attribution and click-through/focus validation.
+- Follow-up observation: the taskbar/Alt-Tab entry was confirmed to be a `python3` icon that looks like the existing PyQt overlay window, currently on the second monitor. Treat this as a PyQt coexistence artifact, not evidence that the Shell actor creates a taskbar entry. PyQt coexistence/suppression belongs to Phase 11/12, not Phase 10.
+- Refreshed proof-loop observation: the proof marker appeared over VS Code and clicks passed through to VS Code, which supports the non-reactive/click-through behavior of the Shell actor. When the user alt-tabbed to Elite, the marker disappeared. This means the first parent/layer candidate, `Main.uiGroup`, does not yet satisfy the "stays above active fullscreen Elite" gate. Phase 10 should remain open and try the next single parent/layer candidate in a follow-up proof patch, rather than moving to Phase 11.
+- Layout-manager `trackFullscreen=true` observation: after helper reload/log-in, the proof response reported `shell_actor_proof.actor_parent="Main.layoutManager.addChrome(trackFullscreen=true,affectsInputRegion=false)"` and full-monitor actor bounds at `{"x":0,"y":0,"width":3440,"height":1440}`, but the marker still stayed attached to the VS Code/normal-window layer instead of active fullscreen Elite. This candidate fails the active-fullscreen gate.
+- Layout-manager `trackFullscreen=false` observation: after helper reload/log-in, the proof response reported `shell_actor_proof.actor_parent="Main.layoutManager.addChrome(trackFullscreen=false,affectsInputRegion=false)"` and full-monitor actor bounds at `{"x":0,"y":0,"width":3440,"height":1440}`. Manual validation while Elite was in borderless mode showed the marker was still attached to VS Code, not Elite. This candidate also fails the active-fullscreen gate.
+- `global.stage` observation: after helper reload/log-in, the proof response reported `shell_actor_proof.actor_parent="global.stage"` and full-monitor actor bounds at `{"x":0,"y":0,"width":3440,"height":1440}`. Manual validation while Elite was in borderless mode showed the marker was still attached to VS Code, not Elite. This candidate also fails the active-fullscreen gate.
+- `global.top_window_group` observation: after helper reload/log-in, the proof response reported `shell_actor_proof.actor_parent="global.top_window_group"` and full-monitor actor bounds at `{"x":0,"y":0,"width":3440,"height":1440}`. Manual validation while Elite was in borderless mode showed the marker was still attached to VS Code, was visible over non-fullscreen application windows, and disappeared when alt-tabbing to Elite or another window. This candidate also fails the active-fullscreen gate.
+- Interpretation: `Main.uiGroup`, both `Main.layoutManager.addChrome(...)` variants, `global.stage`, and `global.top_window_group` can place a transparent Shell actor at the right full-monitor geometry, but none of those layers stays above active fullscreen Elite. Phase 10 still proves the geometry and transparency mechanism, but not the fullscreen stacking layer. The next step should inspect actual GNOME Shell/Mutter group ordering and available fullscreen/overlay groups before choosing another single candidate, not continue guessing generic Shell parents and not broaden into production bridge work yet.
+
+#### Phase 10 Group Diagnostics Scope
+- Add direct helper proof action: `shell_actor_proof_action="diagnose_groups"`.
+- The command may be called without `target_token` or `content_rect`; it is not an attach/show request.
+- It should return a `shell_actor_proof.group_diagnostics` object with:
+- schema version;
+- known group names checked;
+- available/unavailable state per group;
+- parent name and index within parent where available;
+- actor type/class name;
+- visibility/mapped/reactive state where available;
+- bounds where available;
+- child count and a bounded child summary list;
+- stage child order summary if `global.stage` is available.
+- `uiGroup` child order summary;
+- `global.window_group` child order with bounded MetaWindowActor metadata;
+- proof actor parent/sibling metadata if the proof actor is visible;
+- target-window match metadata when `target_token` is supplied.
+- Keep diagnostics concise and bounded; do not serialize arbitrary actor trees.
+- Use the result to choose the next single proof candidate only after manual review.
+
+#### Phase 10 Follow-Up Scope: Fullscreen-Aware Chrome Candidate
+- Follow-up goal: keep the same direct proof command and strict borderless/fullscreen gate, but change only the Shell actor parent/layer candidate from `Main.uiGroup` to a fullscreen-aware GNOME Shell chrome registration.
+- First candidate: `Main.layoutManager.addChrome(actor, { trackFullscreen: true, affectsInputRegion: false })`.
+- Reason: local GNOME Shell extensions use `Main.layoutManager.addChrome(...)` for Shell-owned chrome, including `trackFullscreen: true` for fullscreen-aware actors. The proof actor remains non-reactive, and `affectsInputRegion: false` keeps the candidate click-through-oriented.
+- Manual result: this candidate loaded and reported `shell_actor_proof.actor_parent="Main.layoutManager.addChrome(trackFullscreen=true,affectsInputRegion=false)"`, but it still stayed with the VS Code/normal-window layer and failed the active-fullscreen gate.
+- Second candidate: `Main.layoutManager.addChrome(actor, { trackFullscreen: false, affectsInputRegion: false })`.
+- Second candidate reason: if `trackFullscreen=true` makes Shell track or hide chrome around fullscreen windows, `trackFullscreen=false` may leave the proof actor in the Shell chrome layer instead of letting fullscreen-window tracking push it behind active fullscreen content.
+- Implementation result: the proof actor used this candidate and reported `shell_actor_proof.actor_parent="Main.layoutManager.addChrome(trackFullscreen=false,affectsInputRegion=false)"` in proof diagnostics after helper reload.
+- Manual result: this candidate loaded correctly, but the marker was still attached to VS Code/normal-window focus rather than active fullscreen Elite. It does not pass Phase 10.
+- Third candidate: `global.stage`.
+- Third candidate reason: `global.stage` tests a lower-level Shell scene graph parent instead of Shell chrome/layout-manager registration. This remains proof-only and single-candidate.
+- Implementation result: the proof actor used this candidate and reported `shell_actor_proof.actor_parent="global.stage"` in proof diagnostics after helper reload.
+- Manual result: this candidate loaded correctly, but the marker was still attached to VS Code/normal-window focus rather than active fullscreen Elite. It does not pass Phase 10.
+- Fourth candidate: `global.top_window_group`.
+- Fourth candidate reason: `global.top_window_group` tests a Mutter/Shell top-window group rather than a Shell UI/chrome/stage group, which may be closer to the fullscreen window stacking layer.
+- Implementation result: the proof actor used this candidate and reported `shell_actor_proof.actor_parent="global.top_window_group"` in proof diagnostics after helper reload.
+- Manual result: this candidate loaded correctly, but the marker was still attached to VS Code/non-fullscreen window focus and disappeared when alt-tabbing to Elite or another window. It does not pass Phase 10.
+- Diagnostic result: focused Elite moves to a later/top child index inside `global.window_group`, while VS Code moves behind it. `global.top_window_group` is above `global.window_group` in `uiGroup` order but still fails active-fullscreen visibility.
+- Fifth candidate: `global.window_group`.
+- Fifth candidate reason: adding the proof actor directly to `global.window_group` appends it after current window actors, which tests the same stacking layer that Mutter uses for the active fullscreen game.
+- Implementation result: the proof actor uses this candidate and should report `shell_actor_proof.actor_parent="global.window_group"` after helper reload.
+- Manual result: this candidate reported full-monitor actor bounds and preserved transparency, but it stayed attached to VS Code/normal-window view, click-through worked only over VS Code, and the marker disappeared immediately when Elite gained focus. It does not pass Phase 10.
+- Sixth candidate: `target_window_actor_child`.
+- Sixth candidate reason: direct attachment to the Elite MetaWindowActor tests whether content inside the fullscreen window actor tree can render above the active fullscreen game when global Shell/window groups cannot.
+- Implementation result: the proof actor uses this candidate and should report `shell_actor_proof.actor_parent="target_window_actor_child"` after helper reload.
+- Manual result: this candidate passes the active-fullscreen proof. The response reported `shell_actor_proof.actor_parent="target_window_actor_child"`, `applied_rect={"x":0,"y":0,"width":3440,"height":1440}`, and `degrade_reasons=[]`. User observed the marker above focused Elite, no `y=29` offset, transparent/no black background, click-through to Elite, and visibility until the stale timeout.
+- Phase 10 decision: Shell-native attachment to the target fullscreen MetaWindowActor is viable. Phase 11 may proceed to production bridge design and contracts.
+- Scope boundary: do not auto-cycle parent/layer candidates. If this candidate fails active-fullscreen validation, record the failed gate and scope the next single GNOME-native proof option.
+- Backend/runtime impact: none expected. No automatic runtime selection, no PyQt content suppression, no payload rendering, no support wording change, and no `true_overlay` claim.
+- Manual validation required after the patch:
+- reload helper with `./scripts/dev_gnome_helper.sh reload`;
+- start EDMC normally without `EDMC_OVERLAY_GNOME_BORDERLESS_FULLSCREEN_PREP=1`;
+- keep Elite in borderless fullscreen with `contentRect == monitorRect`;
+- run the existing Phase 10 proof show command repeatedly or refresh within the `5s` timeout;
+- confirm `shell_actor_proof.actor_parent` reports the current candidate;
+- confirm the marker appears over active fullscreen Elite, not only over other apps;
+- confirm click-through, transparency, no taskbar/Alt-Tab Shell actor entry, no flashing, and stale/explicit cleanup.
+
+### Phase 11: GNOME Shell-Native PyQt Raster Bridge Architecture
+- Goal: after the Phase 10 proof passes, define the production bridge that keeps PyQt as the renderer while using a GNOME Shell actor as the GNOME/Wayland borderless/fullscreen presentation surface.
+- Phase 11 is design and contract work. It may add small parser/model prototypes if needed, but it must not enable production Shell-native rendering by default.
+- Preserve existing behavior and support wording from Phase 10.
+- Locked direction: PyQt remains required. GNOME Shell must not become the primary overlay renderer in this plan. The Shell extension should display PyQt-generated raster content only for the GNOME/Wayland borderless/fullscreen case that cannot be solved with a managed PyQt top-level window.
+
+#### Phase 11 Refactor Staging
+| Stage | Description | Status |
+| --- | --- | --- |
+| 11.1 | Review Phase 10 manual proof evidence and record whether Shell-native borderless presentation is viable | Completed; Phase 10 Proof Passed |
+| 11.2 | Choose content bridge option: Shell-rendered primitives, client-generated raster frames/textures, or hybrid scene protocol | Completed; PyQt-generated raster frames/textures selected |
+| 11.3 | Define frame/update/clear protocol, frame versioning, target-token binding, scale handling, stale-frame timeout, and compatibility rules | Completed; File-Based PNG Frame Contract Locked |
+| 11.4 | Define helper-side Shell presentation controller boundaries so proof actor, frame updates, lifecycle cleanup, and diagnostics are not spread through unrelated helper code | Completed; Helper Controller Boundary Locked |
+| 11.5 | Define backend-owned Python models and IPC helpers without leaking GNOME-specific protocol details into generic follow/runtime code | Completed; Backend-Owned Frame Model Boundary Locked |
+| 11.6 | Decide PyQt coexistence policy for Shell-native production mode: suppress PyQt content, keep PyQt as fallback, or use an explicit transition/debug mode | Completed; PyQt renderer retained, managed PyQt window remains default/fallback, Shell actor displays raster only for gated borderless/fullscreen |
+| 11.7 | Decide whether renderer parity can fit in Phase 12 or must be deferred to Phase 14; default expectation is to defer broad parity work | Completed; Phase 12 is a small raster proof, broader parity/performance work moves to Phase 14+ |
+| 11.8 | Record Phase 12 implementation prompt, touch points, test plan, manual validation plan, and explicit out-of-scope renderer parity items | Completed; Phase 12 Prompt Recorded |
+
+#### Phase 11.8 Documentation Plan
+- Implementation type: documentation/contract handoff only. No Phase 12 runtime behavior, automatic runtime selection, helper code, backend code, or PyQt presentation behavior should change in Phase 11.8.
+- Intended touch point: this document.
+- Test type selection: `git diff --check -- docs/refactoring/gnome_wayland_presentation_attachment.md` is sufficient for this doc-only contract update. Unit/static/harness tests are not required unless code is touched.
+- Support wording remains degraded/experimental. Do not claim `true_overlay`.
+
+#### Phase 11 Locked Decisions
+- PyQt remains the renderer. The project must not switch to Shell-rendered primitives as the primary overlay rendering path.
+- GNOME Shell becomes the presentation surface only for the GNOME/Wayland borderless/fullscreen case proven in Phase 10.
+- The selected content bridge is client-generated raster frames/textures produced from PyQt-rendered overlay content.
+- Shell-rendered primitives are rejected for the first production bridge because they require recreating the overlay renderer in GNOME Shell.
+- A hybrid bridge is deferred. It may be reconsidered only after the PyQt raster bridge has a measured limitation that justifies more contract surface.
+- The raster bridge must behave like UI snapshots, not video streaming: event-driven updates, no-op suppression, bounded cadence, byte/size guards, stale cleanup, and visible fallback are required before runtime use.
+- Phase 12 must stay intentionally small. It should prove one transparent PyQt-generated frame or cropped frame displayed by the Phase 10 target-window-actor path, not full renderer parity.
+- Phase 13 owns hardening and support gates for the minimal bridge. Phase 14+ owns broader parity, performance tuning, transfer strategy refinement, and feature expansion.
+- Scope is GNOME Wayland windowed-borderless/full-monitor only. Windowed Elite remains on the existing managed PyQt overlay path unless a future phase scopes a separate reason to change it.
+- Transfer starts with local PNG files under a controlled EDMC overlay runtime/cache directory. Shared memory, raw buffers, and direct texture transfer are deferred until performance evidence requires them.
+- Raster frames should be cropped to the overlay content bounds with placement metadata. Full-monitor transparent frames are allowed only for a specific proof or fallback case.
+- Runtime activation is off by default behind `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1`.
+
+#### Phase 11 Accepted Recommendations
+- Frame transport: PyQt writes PNG files to a controlled runtime/cache directory; the helper receives only validated paths under that directory.
+- Frame shape: use cropped frames plus `x`, `y`, `width`, and `height` placement metadata. Avoid full `3440x1440` frames in the steady state.
+- Update trigger: event-driven only. Do not send new frames unless overlay content or target binding changes.
+- Update suppression: include a checksum/signature and suppress unchanged frames before IPC.
+- Update cadence: start with a conservative `2-5 FPS` maximum for the Phase 12 proof/hardening path, then adjust only after measuring GNOME Shell responsiveness.
+- Path/security rule: reject arbitrary paths and any path traversal; only accept regular image files under the configured EDMC overlay runtime/cache directory.
+- Clear behavior: support explicit clear plus stale timeout. Clear on target loss, token change, workspace mismatch, minimize, helper reload/disable, EDMC shutdown, overlay client shutdown, and stale-frame expiry.
+- PyQt coexistence: keep PyQt as the renderer and default/fallback presenter. Suppress or hide the managed PyQt overlay window only while the gated Shell raster path is active and healthy for borderless/full-monitor mode.
+- Fallback: if the Shell frame path fails validation, load, texture apply, target binding, or readback, clear the Shell actor and fall back visibly to the current degraded PyQt helper path.
+- Phase 12 scope: one transparent PyQt-generated test frame or cropped frame over Elite via `target_window_actor_child`; no full overlay parity.
+
+#### Phase 11 Frame Protocol Contract
+- The Phase 12 request fields should be optional and backward-compatible with the existing helper protocol.
+- Request actions:
+- `update`: validate target/path/frame metadata, load the PNG frame, attach or refresh the Shell texture actor under the target fullscreen MetaWindowActor, and acknowledge the applied frame version.
+- `clear`: remove the Shell raster actor and associated stale timer without requiring an overlay window or a currently valid frame file.
+- Suggested optional request fields:
+- `shell_raster_frame`: boolean gate for the raster-frame path.
+- `shell_raster_frame_action`: `"update"` or `"clear"`.
+- `frame_version`: monotonically increasing integer or string version for no-op and acknowledgement tracking.
+- `target_token`: helper target token that the frame is bound to.
+- `target_rect`: target content/full-monitor rect used for eligibility validation.
+- `frame_rect`: placement rect for the raster frame within GNOME Shell global logical coordinates.
+- `scale`: logical-to-render scale used when producing the frame.
+- `image_path`: absolute path to the PNG frame under the allowed runtime/cache directory.
+- `checksum`: content checksum used for no-op suppression and optional helper-side diagnostics.
+- `byte_size`: frame file size, used for diagnostics and guardrails.
+- `stale_timeout_ms`: required stale cleanup deadline.
+- Required response fields:
+- `status`: success/degraded/clear result.
+- `frame_version`: acknowledged frame version, when applicable.
+- `target_token`: target token used by the helper.
+- `applied_actor_bounds`: Shell actor bounds after apply.
+- `frame_rect`: accepted placement rect.
+- `frame_dimensions`: decoded image dimensions.
+- `cleanup_action`: clear/stale action, if any.
+- `degrade_reasons`: concise failure reasons.
+- Required degradation/failure reasons:
+- `target_unavailable`: target token could not be resolved.
+- `target_not_borderless_full_monitor`: target does not satisfy the GNOME Wayland windowed-borderless/full-monitor gate.
+- `workspace_mismatch`: target is not showing on the current workspace.
+- `target_minimized`: target is minimized.
+- `invalid_frame_path`: frame path is missing, malformed, non-absolute, or otherwise invalid.
+- `path_outside_allowed_cache_dir`: frame path is not under the configured EDMC overlay runtime/cache directory.
+- `frame_file_missing`: frame path does not exist or is not a regular file.
+- `frame_file_too_large`: frame file exceeds the configured byte-size guard.
+- `frame_decode_failed`: helper could not decode/load the image.
+- `texture_apply_failed`: helper could not create or apply the Shell texture actor.
+- `stale_frame`: frame update expired or stale cleanup fired.
+- `frame_rect_mismatch`: applied actor bounds do not match the requested frame rect.
+- Compatibility:
+- All new request/response fields remain optional and backward-compatible.
+- No helper protocol bump is required for Phase 12 unless implementation proves the optional-field contract is insufficient.
+- Existing `ApplyPresentation` behavior must remain unchanged unless `shell_raster_frame=true` is explicitly supplied.
+
+#### Phase 11 Controller Boundaries
+- Helper-side Shell presentation control should be isolated from the Phase 10 proof code before production use. The controller owns frame actor creation, target-window-actor attachment, texture/image loading, stale cleanup, explicit clear, diagnostics, and helper-disable cleanup.
+- The existing proof path may remain for manual diagnostics, but production frame update/clear behavior should not be interleaved with proof-only marker code.
+- Backend-owned Python code owns eligibility policy, runtime gate checks, frame signatures, path construction, request building, response parsing, fallback decisions, and concise logging.
+- Generic follow/runtime code must call backend-owned presentation interfaces only. It must not import GNOME helper implementation details, check raw helper protocol fields, or dispatch behavior based on compositor-specific enum/string checks.
+
+#### Phase 11 Phase 12 Touch Point Handoff
+- `helpers/gnome_shell_extension/extension.js` or a helper-local module split: helper-side Shell raster presentation controller, target-window-actor attachment, PNG decode/texture actor lifecycle, explicit clear, stale timeout, diagnostics, and disable/reload cleanup.
+- `overlay_client/backend/helper_ipc.py`: typed optional request/response parsing for raster frame update/clear fields.
+- `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py`: GNOME-specific eligibility, runtime gate, frame signature/no-op policy, request construction, response interpretation, and fail-soft fallback.
+- Backend-owned frame model/helper module if needed: frame metadata model, checksum/signature generation, cache-dir/path validation, byte-size guards, and update cadence helpers.
+- PyQt rendering/export touch point: produce one transparent PNG frame or cropped frame for the Phase 12 proof without changing normal windowed presentation behavior.
+- Tests: helper source/static tests, backend model/unit tests, runtime policy tests, backend-boundary tests, and harness tests only if runtime selection or PyQt window suppression wiring changes.
+
+#### Phase 11 Content Bridge Options
+- Option A: Shell-rendered primitives.
+- Decision: not selected for the first production bridge.
+- Reason: primitives would make GNOME Shell a second overlay renderer and would require recreating PyQt visual behavior in St/Clutter.
+- Keep this only as a possible future optimization for very small static elements if the raster bridge later proves too expensive.
+- Option B: client-generated raster frames/textures.
+- Decision: selected.
+- Python/PyQt renders transparent overlay content into a bounded raster frame or cropped frame; the Shell extension displays that frame as a texture attached to the target fullscreen MetaWindowActor.
+- Pros: preserves PyQt as renderer, preserves visual parity direction, avoids the managed PyQt top-level window placement/stacking problem, and builds directly on the Phase 10 actor proof.
+- Cons: heavier than primitives, requires careful transfer, cadence, memory, and stale-frame controls.
+- Option C: hybrid scene protocol.
+- Decision: deferred.
+- Reason: hybrid adds contract surface before there is evidence that a bounded PyQt raster bridge is insufficient.
+
+#### Phase 11 Production Data Flow Design
+1. Existing EDMC/plugin logic continues to produce overlay state.
+2. PyQt renders overlay content into a transparent raster frame or cropped frame without relying on the managed PyQt top-level window as the GNOME borderless presentation surface.
+3. Overlay client converts that frame into a backend-owned Shell frame/update model.
+4. Backend/helper IPC sends frame version, target token, target/content bounds, scale, visibility/action, frame reference or transfer handle, checksum/signature, byte dimensions, and stale timeout to the helper.
+5. Extension validates the target token and bounds, then displays the frame as a Shell texture actor attached to the target fullscreen MetaWindowActor.
+6. Extension acknowledges applied frame version, actor bounds, frame dimensions, and cleanup state.
+7. Backend logs concise state, suppresses no-op updates, and enforces bounded update cadence before any compositor-facing work.
+
+#### Phase 11 Test Type Selection
+- Unit tests are required for schema/model decisions because frame eligibility, versioning, and no-op signatures are deterministic.
+- Static/source tests are required for planned extension controller boundaries if prototype code is added.
+- Harness tests are required only if runtime lifecycle or backend consumer contracts change during prototyping.
+
+### Phase 12: GNOME Shell-Native PyQt Raster Bridge Small Production Proof
+- Goal: implement the first selected PyQt raster bridge behind a dev/runtime gate, preserving managed PyQt helper presentation as the default for windowed, unsupported, and fallback paths.
+- Phase 12 should start with the smallest useful raster proof: one transparent PyQt-generated frame or cropped frame displayed by the Phase 10 target-window-actor path.
+- Broad renderer parity is not in Phase 12. Larger visual parity, high-cadence transfer, richer cropping/damage tracking, and performance expansion move to Phase 14+.
+- Support wording remains degraded/experimental throughout Phase 12.
+
+#### Phase 12 Refactor Staging
+| Stage | Description | Status |
+| --- | --- | --- |
+| 12.1 | Extract helper-side Shell presentation controller/class from the Phase 10 proof code | Ready For Implementation |
+| 12.2 | Add backend-owned Shell frame models, request builders, response parsers, and optional helper capability fields | Ready For Implementation |
+| 12.3 | Implement frame/update/clear IPC in the helper with backward-compatible optional request/response fields | Ready For Implementation |
+| 12.4 | Implement the selected minimal PyQt raster bridge behind a dev/runtime gate, with explicit limits on frame dimensions, bytes, cadence, and supported transparency behavior | Ready For Implementation |
+| 12.5 | Wire runtime selection for GNOME borderless/fullscreen Shell-native presentation through backend-owned interfaces only | Ready For Implementation |
+| 12.6 | Preserve PyQt presentation for windowed mode and add visible fail-soft fallback for unsupported/failing Shell-native presentation | Ready For Implementation |
+| 12.7 | Add frame signatures/no-op suppression and bounded update cadence before enabling any runtime loop | Ready For Implementation |
+| 12.8 | Add headless unit/static/harness coverage for parser, policy, backend boundaries, fallback behavior, and regression slices from Phases 6A, 6B, 8, 9.9A, and 9B | Ready For Implementation |
+| 12.9 | Run targeted tests and `make check`; leave manual production validation to Phase 13 | Ready For Implementation |
+| 12.10 | Record unsupported renderer features and required Phase 14 parity work before Phase 12 closes | Ready For Implementation |
+
+#### Phase 12 Touch Points
+- `helpers/gnome_shell_extension/extension.js` or a helper-local module if the extension is split: Shell presentation controller, frame actor updates, cleanup, diagnostics.
+- `overlay_client/backend/helper_ipc.py`: typed optional frame request/response parsing.
+- `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py`: GNOME-specific runtime policy for Shell-native presentation eligibility, frame signatures, fallback, and diagnostics.
+- `overlay_client/backend/consumers.py` and `overlay_client/follow_surface.py`: only neutral backend presentation calls; no raw GNOME helper protocol checks.
+- Existing PyQt rendering paths: touched only where needed to produce the bounded transparent raster frame and to suppress duplicate managed-window visibility for the gated GNOME borderless/fullscreen path.
+
+#### Phase 12 Test Type Selection
+- Unit tests are required for frame signatures, eligibility, fallback decisions, response parsing, and no-op suppression.
+- Static/source tests are required for helper actor lifecycle, diagnostic gating, non-reactive actor behavior, and normal `ApplyPresentation` preservation.
+- Harness tests are required for runtime selection/fallback wiring and any PyQt content-suppression lifecycle.
+- Manual GNOME validation can be sampled during Phase 12, but support-gate validation is Phase 13.
+
+#### Phase 12 Manual Validation Plan
+- Reload helper with `./scripts/dev_gnome_helper.sh reload --yes` if helper files changed.
+- Start EDMC normally with `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1`.
+- Put Elite in GNOME Wayland windowed-borderless/full-monitor mode.
+- Confirm helper target state reports `fullscreen=true` and `contentRect == monitorRect`.
+- Trigger one transparent PyQt-generated PNG frame or cropped frame update.
+- Confirm the frame appears above active Elite via the `target_window_actor_child` path.
+- Confirm actor/frame bounds match the requested rect with no `y=29` work-area offset.
+- Confirm transparency/no black background.
+- Confirm click-through and focus stability.
+- Confirm explicit clear removes the frame.
+- Confirm stale timeout removes the frame if updates stop.
+- Confirm invalid image path and target-token-change failures clear/fail soft and do not leave stale actors.
+- Confirm windowed Elite still uses the existing managed PyQt overlay path.
+
+#### Phase 12 Implementation Prompt
+```text
+Implement Phase 12 of docs/refactoring/gnome_wayland_presentation_attachment.md.
+
+Follow AGENTS.md. Start by reading:
+- Phase 10 Manual Validation Evidence
+- Phase 10 Target Window Actor Child Candidate Implementation Plan
+- Phase 11 Locked Decisions
+- Phase 11 Accepted Recommendations
+- Phase 11 Frame Protocol Contract
+- Phase 11 Controller Boundaries
+- Phase 11 Phase 12 Touch Point Handoff
+- Phase 12 Manual Validation Plan
+- fix219 backend-boundary rules
+
+Before touching code:
+- Update Phase 12 stage statuses and record intended touch points plus test type selection.
+- Keep support/status wording degraded/experimental.
+- Do not claim `true_overlay`.
+- Do not implement full overlay parity.
+- Do not enable Shell raster presentation by default.
+- Do not move rendering into GNOME Shell primitives.
+- Do not change windowed-mode presentation behavior.
+
+Goal:
+Implement a small PyQt PNG raster proof for GNOME Wayland windowed-borderless/full-monitor mode.
+
+This is Phase 12 small production proof only. PyQt remains the renderer. GNOME Shell is only the presentation surface for the borderless/full-monitor case proven by Phase 10.
+
+Locked decisions:
+- Runtime activation is off by default behind `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1`.
+- Scope is GNOME Wayland windowed-borderless/full-monitor only.
+- Windowed Elite remains on the existing managed PyQt overlay path.
+- The first transport is local PNG files under a controlled EDMC overlay runtime/cache directory.
+- Prefer cropped frames with `frame_rect` placement metadata.
+- Use event-driven updates only.
+- Add checksum/no-op suppression before compositor-facing frame update work.
+- Start with a conservative `2-5 FPS` maximum update cadence.
+- Add byte-size guards and reject arbitrary paths/path traversal.
+- Add explicit clear and stale timeout cleanup.
+- Visible fail-soft fallback is required.
+- All helper request/response fields must be optional and backward-compatible.
+- Do not add shared memory, raw buffers, direct texture transfer, high-rate streaming, Shell primitives, non-GNOME support, windowed-mode migration, support wording promotion, or `true_overlay`.
+
+Implementation requirements:
+
+1. Documentation first
+- Mark Phase 12.1 in progress and record Phase 12 touch points.
+- Record test type selection:
+  - unit tests for frame model/signature/path validation/eligibility/fallback decisions
+  - static/source tests for helper actor lifecycle, image loading, path validation, stale cleanup, explicit clear, and normal `ApplyPresentation` preservation
+  - harness tests if runtime selection or PyQt window suppression is wired
+  - backend-boundary tests if backend/follow wiring changes
+
+2. Helper-side Shell raster controller
+In `helpers/gnome_shell_extension/extension.js`, or a helper-local module if split:
+- Add an isolated Shell raster presentation controller separate from the Phase 10 proof marker code.
+- Support optional request fields:
+  - `shell_raster_frame`
+  - `shell_raster_frame_action`
+  - `frame_version`
+  - `target_token`
+  - `target_rect`
+  - `frame_rect`
+  - `scale`
+  - `image_path`
+  - `checksum`
+  - `byte_size`
+  - `stale_timeout_ms`
+- Support actions:
+  - `update`
+  - `clear`
+- For `update`:
+  - require strict target eligibility: target exists, `fullscreen=true`, valid `contentRect`, valid `monitorRect`, `contentRect == monitorRect`, target on current workspace, target not minimized
+  - validate the frame path is under the allowed EDMC overlay runtime/cache directory
+  - reject missing, non-regular, oversized, or undecodable image files
+  - attach/update the image actor under the target MetaWindowActor using the proven `target_window_actor_child` path
+  - position at `frame_rect`
+  - keep the actor non-reactive/click-through oriented
+  - refresh stale timeout
+- For `clear`:
+  - remove the frame actor and stale timer without requiring a valid target or image path
+- Preserve the existing `ApplyPresentation` path unless `shell_raster_frame=true` is explicitly requested.
+
+3. Backend-owned frame model and IPC
+In backend-owned code under `overlay_client/backend/`:
+- Add typed frame request/response models or helpers as needed.
+- Add checksum/signature generation and no-op suppression for unchanged target/frame content.
+- Add cache-dir/path construction and validation before request construction.
+- Add response parsing for frame version, actor bounds, frame dimensions, cleanup action, and degrade reasons.
+- Keep GNOME-specific policy behind backend-owned bundle/consumer interfaces.
+- Preserve fix219 boundaries:
+  - no direct GNOME helper imports in `follow_surface.py`
+  - no raw GNOME backend/helper enum dispatch in generic follow/runtime
+  - no helper protocol action checks in `follow_surface.py`
+
+4. PyQt PNG proof export
+- Add the smallest PyQt-rendered transparent PNG export needed for the proof.
+- It may be a static/cropped test frame if that is the smallest safe proof.
+- Do not implement full overlay visual parity.
+- Do not migrate windowed mode.
+- Do not enable high-rate frame streaming.
+
+5. Runtime gate and fallback
+- Shell raster path may run only when:
+  - `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1`
+  - GNOME helper mode is active
+  - target is windowed-borderless/full-monitor
+  - helper capability/protocol supports the optional raster fields
+- If validation/load/apply/readback fails:
+  - clear/stale the Shell actor
+  - keep overlay visible under current policy
+  - fall back to the existing degraded PyQt helper path
+  - avoid repeated compositor-facing churn for unchanged failures
+
+6. Tests
+Add/update tests based on touched files:
+- Unit tests for frame model, checksum/signature, cache-dir/path validation, no-op decisions, eligibility, and fallback decisions.
+- Static/source tests for helper raster code:
+  - opt-in only
+  - normal `ApplyPresentation` remains available
+  - target-window-actor attachment is used
+  - path validation exists
+  - image load/decode failure is handled
+  - stale timeout exists
+  - explicit clear exists
+  - actor remains non-reactive/click-through oriented
+  - helper disable/reload cleanup exists
+- Harness tests if runtime selection or PyQt window suppression is wired.
+- Backend-boundary tests if backend/follow wiring changes.
+
+7. Validation commands
+Run targeted tests first, based on touched files. Expected baseline:
+- `python3 -m py_compile` for touched Python tests/modules
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py`
+- relevant backend model/parser/runtime tests
+- relevant backend-boundary tests
+
+Then run:
+- `make check`
+- `git diff --check`
+
+8. Manual validation to leave pending for user
+- Reload helper with `./scripts/dev_gnome_helper.sh reload --yes`.
+- Start EDMC normally with `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1`.
+- Put Elite in GNOME Wayland windowed-borderless/full-monitor mode.
+- Confirm `fullscreen=true` and `contentRect == monitorRect`.
+- Trigger one transparent PyQt-generated PNG frame/cropped frame update.
+- Confirm the frame appears above active Elite via `target_window_actor_child`.
+- Confirm no `y=29` offset.
+- Confirm transparency/no black background.
+- Confirm click-through and focus stability.
+- Confirm explicit clear.
+- Confirm stale timeout.
+- Confirm invalid path and stale/changed target token fail soft.
+- Confirm windowed mode still uses the existing PyQt overlay path.
+
+After implementation:
+- Record files changed.
+- Record exact commands and outcomes.
+- Keep Phase 13 pending.
+- Keep support wording degraded/experimental.
+- Do not mark Phase 13 support gates complete.
+```
+
+### Phase 13: GNOME Shell-Native PyQt Raster Bridge Hardening And Support Gate
+- Goal: harden the Phase 12 minimal bridge, run the full manual matrix for the implemented subset, and update support wording only if every required gate passes for that subset.
+- Phase 13 owns production readiness for the minimal Shell-native PyQt raster path, not full renderer parity. It should not introduce major architecture changes or large rendering features; if Phase 13 exposes a design flaw, return to Phase 11 or 12 with a scoped follow-up.
+- If Phase 12 does not yet cover all existing overlay visuals, Phase 13 must clearly record the supported feature subset and leave full parity to Phase 14.
+
+#### Phase 13 Refactor Staging
+| Stage | Description | Status |
+| --- | --- | --- |
+| 13.1 | Add lifecycle hardening: stale-frame timeout, target token/monitor/workspace validation, helper reload cleanup, EDMC shutdown cleanup, and visible fail-soft fallback | Pending Phase 12 |
+| 13.2 | Add performance hardening: bounded update cadence, no-op suppression, large-payload guards, diagnostics gating, and no compositor-facing churn for unchanged frames | Pending Phase 12 |
+| 13.3 | Add observability hardening: concise normal logs, gated diagnostic logs, frame version, actor bounds, update skip/apply reasons, and cleanup events | Pending Phase 12 |
+| 13.4 | Run full headless regression suite and `make check` after hardening | Pending Phase 12 |
+| 13.5 | Run manual production validation matrix on primary and secondary monitor borderless modes | Pending Phase 12 |
+| 13.6 | Decide whether the hardened minimal subset is shippable as an opt-in GNOME borderless mode or remains proof-only | Pending Validation |
+| 13.7 | Update support/status wording only if all `true_overlay` gates pass for the implemented subset; otherwise keep degraded/experimental wording and record remaining blockers | Pending Validation |
+
+#### Phase 13 Production Hardening Plan
+- Eligibility:
+- Shell-native production path is eligible only for GNOME Wayland helper mode, borderless/fullscreen targets, valid target `contentRect`, `contentRect` matching monitor bounds, current workspace, not minimized, helper protocol/capability support, and an enabled runtime/dev gate until support is promoted.
+- Fallback:
+- If the Shell-native path is unavailable, fails target validation, fails frame apply, or returns stale/mismatched target token, fallback must leave the overlay visible under the current policy and use the existing degraded PyQt helper path where appropriate.
+- Failure must be concise in normal logs and detailed only with diagnostics enabled.
+- Lifecycle:
+- Clear Shell actors on target loss, target token change, monitor/workspace mismatch, minimize, helper disable/reload, EDMC shutdown, overlay client shutdown, and stale frame timeout.
+- A stale frame timeout is required so a crashed client cannot leave a permanent Shell actor on screen.
+- Performance:
+- Do not send frame updates every follow tick if the frame and target signature are unchanged.
+- Add frame signatures or versioned no-op suppression before any production runtime mode is enabled.
+- Bound update cadence separately from target polling.
+- Gate large diagnostics and any raster/frame payload logging behind explicit debug/dev settings.
+- Observability:
+- Normal logs should show mode, target token, actor visible, requested/applied bounds, frame version, update skipped/applied, and concise reasons.
+- Diagnostic logs should include actor parent/layer, target monitor/workspace, scale, content bridge type, frame count/version, frame dimensions, frame bytes, and cleanup events.
+- Compatibility:
+- The helper protocol must remain backward-compatible. New request/response fields must be optional until a new protocol version is intentionally required.
+- The existing PyQt helper presentation path must remain available for windowed mode and as a fallback while Shell-native support is being proven.
+
+#### Phase 13 Production Validation Matrix
+1. Borderless fullscreen on primary monitor: actor appears at full-monitor bounds, no `y=29` offset, no titlebar, no Alt-Tab/taskbar entry.
+2. Borderless fullscreen on secondary monitor: actor follows target monitor and stays above Elite.
+3. Click-through: pointer/keyboard focus remains with Elite when interacting through the overlay area.
+4. Focus loss/return: mapped-visible/mapped-suppressed behavior remains stable and does not flash.
+5. Target loss/relaunch: actor clears on loss and reacquires only for the new target token.
+6. Workspace switch: actor hides or clears when Elite is not on the current workspace and returns cleanly when appropriate.
+7. Minimize/unminimize: actor hides on minimize and restores only after target state is valid.
+8. Resolution/mode change: actor updates bounds after borderless resolution changes and does not leave stale geometry.
+9. Helper reload/disable: actor is removed and runtime falls back visibly without hanging.
+10. EDMC shutdown/crash simulation: actor clears by explicit shutdown or stale-frame timeout.
+11. Performance: no recurring compositor-visible placement churn for unchanged target/frame; GNOME Shell responsiveness remains acceptable.
+12. Regression: windowed `frame_rect_fallback`, Phase 6A mapped suppression, Phase 6B clamp, Phase 8 no-op suppression, and Phase 9.9A churn guard still pass.
+
+### Phase 14: GNOME Shell-Native PyQt Raster Parity And Performance Expansion
+- Goal: expand the Shell-native PyQt raster bridge from the hardened minimal subset toward current overlay visual/functionality parity while keeping PyQt as the renderer.
+- Phase 14 starts only after Phase 13 decides the minimal path is architecturally sound. If Phase 13 keeps the feature proof-only, Phase 14 should not start until the blocking production-readiness issues are resolved.
+- Phase 14 scope depends on the Phase 12 raster subset and Phase 13 performance evidence.
+- Raster bridge path: harden frame generation, transfer mechanism, texture lifetime, cropping/damage strategy, update cadence, memory limits, and stale-frame cleanup.
+- If Phase 13 proves raster transfer is too expensive for some content, Phase 14 may split additional sub-phases for transfer optimization or a narrowly justified hybrid optimization. Do not reintroduce Shell primitives as the primary renderer without a new explicit decision.
+- Phase 14 may need multiple sub-phases. Do not force all renderer parity into one patch if the bridge choice makes that large or risky.
+
+#### Phase 14 Refactor Staging
+| Stage | Description | Status |
+| --- | --- | --- |
+| 14.1 | Inventory current overlay visual/features against the Phase 12 supported Shell-native subset | Pending Phase 13 |
+| 14.2 | Split raster parity and performance work into independently testable slices based on the Phase 12/13 evidence | Pending Phase 13 |
+| 14.3 | Implement the first missing parity slice behind the existing Shell-native gate | Pending Phase 13 |
+| 14.4 | Add unit/static/harness coverage for the parity slice and run targeted manual validation | Pending Phase 13 |
+| 14.5 | Repeat parity slices until the supported GNOME Shell-native overlay feature set is explicitly complete or remaining gaps are documented | Pending Phase 13 |
+| 14.6 | Update support/status wording only after parity and production gates both pass | Pending Validation |
 
 ## Execution Log
 - Plan created on 2026-05-11.

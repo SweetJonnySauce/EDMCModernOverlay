@@ -6,7 +6,7 @@ import json
 import os
 import subprocess
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, Mapping
 
 from overlay_client.backend import (
@@ -17,7 +17,9 @@ from overlay_client.backend import (
     GNOME_SHELL_HELPER_DBUS_SERVICE,
     GNOME_SHELL_HELPER_DBUS_TARGET_METHOD,
     GNOME_SHELL_HELPER_RECT_REASON_FRAME_FALLBACK_CLAMPED,
+    GNOME_SHELL_HELPER_RECT_SOURCE_CONTENT,
     GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK,
+    HELPER_PROTOCOL,
     HelperDbusProbeError,
     HelperDbusServiceMissing,
     HelperHealthStatus,
@@ -32,6 +34,7 @@ from overlay_client.backend import (
     probe_gnome_shell_helper_presentation,
     probe_gnome_shell_helper_target,
 )
+from overlay_client.backend.surface_preparation import BackendPresentationSurfacePreparation
 
 GNOME_HELPER_PRESENTATION_MAX_ATTEMPTS = 2
 GNOME_HELPER_PRESENTATION_DBUS_TIMEOUT_SECONDS = 0.75
@@ -42,6 +45,15 @@ GNOME_HELPER_HEALTH_CACHE_SECONDS = 5.0
 GNOME_HELPER_HEALTH_CACHE_JITTER_SECONDS = 0.5
 GNOME_HELPER_SUPPRESSED_TARGET_POLL_SECONDS = 1.5
 GNOME_HELPER_SURFACE_ACTION_MAPPED_SUPPRESSED = "mapped_suppressed"
+GNOME_HELPER_GEOMETRY_DIAGNOSTICS_ENV = "EDMC_OVERLAY_GNOME_GEOMETRY_DIAGNOSTICS"
+GNOME_HELPER_PRESENTATION_DIAGNOSTICS_ENV = "EDMC_OVERLAY_GNOME_PRESENTATION_DIAGNOSTICS"
+GNOME_HELPER_BORDERLESS_FULLSCREEN_PREP_ENV = "EDMC_OVERLAY_GNOME_BORDERLESS_FULLSCREEN_PREP"
+GNOME_HELPER_PERSISTENT_MISMATCH_THRESHOLD = 2
+GNOME_HELPER_REASON_APPLIED_RECT_MISMATCH = "applied_rect_mismatch"
+GNOME_HELPER_REASON_WRONG_MONITOR_APPLIED_RECT = "wrong_monitor_applied_rect"
+GNOME_HELPER_REASON_PERSISTENT_APPLIED_RECT_MISMATCH = "persistent_applied_rect_mismatch"
+GNOME_HELPER_REASON_SURFACE_PREPARATION_FAILED = "surface_preparation_failed"
+GNOME_HELPER_SURFACE_PREPARATION_FULLSCREEN_MONITOR = "fullscreen_monitor"
 GNOME_HELPER_EXPECTED_DEGRADE_REASONS = frozenset(
     (
         GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK,
@@ -73,7 +85,19 @@ class GnomeHelperPresentationSignature:
     require_stacking: bool
     require_click_through: bool
     require_focus_safe: bool
+    include_presentation_diagnostics: bool
+    surface_preparation_mode: str
     request_degrade_reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class GnomeHelperPersistentMismatchKey:
+    """Stable key for repeated wrong-monitor applied rect mismatches."""
+
+    signature: GnomeHelperPresentationSignature
+    target_token: str
+    requested_rect: tuple[int, int, int, int]
+    applied_rect: tuple[int, int, int, int]
 
 
 @dataclass(slots=True)
@@ -88,6 +112,10 @@ class GnomeHelperPresentationRuntimeState:
     last_signature: GnomeHelperPresentationSignature | None = None
     last_success_at: float = 0.0
     next_suppressed_target_poll_at: float = 0.0
+    persistent_mismatch_key: GnomeHelperPersistentMismatchKey | None = None
+    persistent_mismatch_count: int = 0
+    persistent_mismatch_status: HelperPresentationStatus | None = None
+    last_surface_preparation: BackendPresentationSurfacePreparation | None = None
 
 
 _DEFAULT_PRESENTATION_RUNTIME_STATE = GnomeHelperPresentationRuntimeState()
@@ -108,6 +136,10 @@ class GnomeHelperPresentationCycleResult:
     presentation_skip_reason: str = ""
     target_poll_skipped: bool = False
     health_cache_hit: bool = False
+    persistent_mismatch_count: int = 0
+    persistent_mismatch_backoff: bool = False
+    surface_preparation: BackendPresentationSurfacePreparation | None = None
+    surface_preparation_failed: bool = False
 
     @property
     def helper_healthy(self) -> bool:
@@ -146,6 +178,11 @@ class GnomeHelperPresentationCycleResult:
             "target_frame_rect": (
                 target.frame_rect.to_payload() if target is not None and target.frame_rect is not None else None
             ),
+            "target_geometry_diagnostics": (
+                target.geometry_diagnostics.to_payload()
+                if target is not None and target.geometry_diagnostics is not None
+                else None
+            ),
             "rect_source": self.request.rect_source if self.request is not None else "unavailable",
             "requested_rect": (
                 self.request.content_rect.to_payload()
@@ -165,6 +202,11 @@ class GnomeHelperPresentationCycleResult:
             "presentation_reasons": (
                 list(self.presentation_status.degrade_reasons) if self.presentation_status is not None else []
             ),
+            "presentation_diagnostics": (
+                dict(self.presentation_status.presentation_diagnostics)
+                if self.presentation_status is not None and self.presentation_status.presentation_diagnostics is not None
+                else None
+            ),
             "attempts": self.attempts,
             "retry_reasons": list(self.retry_reasons),
             "legacy_geometry_policy": self.legacy_geometry_policy,
@@ -172,6 +214,20 @@ class GnomeHelperPresentationCycleResult:
             "presentation_skip_reason": self.presentation_skip_reason,
             "target_poll_skipped": self.target_poll_skipped,
             "health_cache_hit": self.health_cache_hit,
+            "persistent_mismatch_count": self.persistent_mismatch_count,
+            "persistent_mismatch_backoff": self.persistent_mismatch_backoff,
+            "surface_preparation": self.surface_preparation.mode if self.surface_preparation is not None else "",
+            "surface_preparation_rect": (
+                {
+                    "x": self.surface_preparation.rect[0],
+                    "y": self.surface_preparation.rect[1],
+                    "width": self.surface_preparation.rect[2],
+                    "height": self.surface_preparation.rect[3],
+                }
+                if self.surface_preparation is not None
+                else None
+            ),
+            "surface_preparation_failed": self.surface_preparation_failed,
         }
 
 
@@ -186,6 +242,7 @@ def run_gnome_shell_helper_presentation_cycle(
     max_attempts: int = GNOME_HELPER_PRESENTATION_MAX_ATTEMPTS,
     runtime_state: GnomeHelperPresentationRuntimeState | None = None,
     health_cache_jitter_seconds: Callable[[], float] | None = None,
+    prepare_surface: Callable[[BackendPresentationSurfacePreparation], bool] | None = None,
 ) -> GnomeHelperPresentationCycleResult:
     """Fetch target state and apply bounded Shell-mediated presentation."""
 
@@ -231,9 +288,12 @@ def run_gnome_shell_helper_presentation_cycle(
         )
 
     attempts_allowed = max(1, int(max_attempts))
+    include_presentation_diagnostics = _env_flag_enabled(os.environ.get(GNOME_HELPER_PRESENTATION_DIAGNOSTICS_ENV, ""))
     target_status: HelperTargetStatus | None = None
     request: HelperPresentationRequest | None = None
     presentation_status: HelperPresentationStatus | None = None
+    surface_preparation: BackendPresentationSurfacePreparation | None = None
+    surface_preparation_failed = False
     retry_reasons: list[str] = []
     attempts = 0
     for attempt in range(1, attempts_allowed + 1):
@@ -245,11 +305,18 @@ def run_gnome_shell_helper_presentation_cycle(
         request = build_gnome_shell_helper_presentation_request(
             target_status,
             standalone_mode=standalone_mode,
+            include_presentation_diagnostics=include_presentation_diagnostics,
+        )
+        surface_preparation = _borderless_fullscreen_surface_preparation(
+            target_status,
+            request,
+            env=os.environ,
         )
         signature = _presentation_signature(
             target_status,
             request,
             previous_surface_action=previous_surface_action,
+            surface_preparation=surface_preparation,
         )
         if attempt == 1 and _should_skip_presentation_apply(
             state,
@@ -268,7 +335,34 @@ def run_gnome_shell_helper_presentation_cycle(
                 presentation_skipped=True,
                 presentation_skip_reason="fresh_matching_presentation",
                 health_cache_hit=health_cache_hit,
+                surface_preparation=surface_preparation,
             )
+        if attempt == 1 and _should_skip_persistent_mismatch_apply(state, signature):
+            state.last_target_status = target_status
+            state.last_request = request
+            state.last_presentation_status = state.persistent_mismatch_status
+            return GnomeHelperPresentationCycleResult(
+                health_status=health_status,
+                target_status=target_status,
+                request=request,
+                presentation_status=state.persistent_mismatch_status,
+                presentation_skipped=True,
+                presentation_skip_reason=GNOME_HELPER_REASON_PERSISTENT_APPLIED_RECT_MISMATCH,
+                health_cache_hit=health_cache_hit,
+                persistent_mismatch_count=state.persistent_mismatch_count,
+                persistent_mismatch_backoff=True,
+                surface_preparation=surface_preparation,
+            )
+        if attempt == 1 and surface_preparation is not None:
+            if not _apply_surface_preparation(surface_preparation, prepare_surface):
+                surface_preparation_failed = True
+                presentation_status = _surface_preparation_failed_status(
+                    target_status,
+                    request,
+                    surface_preparation=surface_preparation,
+                    now_monotonic=now,
+                )
+                break
         presentation_status = probe_gnome_shell_helper_presentation(
             presentation_fetcher,
             health_status=health_status,
@@ -276,12 +370,32 @@ def run_gnome_shell_helper_presentation_cycle(
             request=request,
             clock=clock,
         )
+        presentation_status = _presentation_status_with_wrong_monitor_reason(
+            presentation_status,
+            target_status,
+        )
         attempts = attempt
         if _should_retry_presentation(presentation_status) and attempt < attempts_allowed:
             retry_reasons.append("applied_rect_mismatch")
             continue
         break
 
+    signature = (
+        _presentation_signature(
+            target_status,
+            request,
+            previous_surface_action=previous_surface_action,
+            surface_preparation=surface_preparation,
+        )
+        if target_status is not None and request is not None
+        else None
+    )
+    presentation_status = _update_persistent_mismatch_cache(
+        state,
+        signature=signature,
+        request=request,
+        presentation_status=presentation_status,
+    )
     _update_presentation_cache(
         state,
         target_status=target_status,
@@ -289,6 +403,7 @@ def run_gnome_shell_helper_presentation_cycle(
         presentation_status=presentation_status,
         previous_surface_action=previous_surface_action,
         now_monotonic=now,
+        surface_preparation=surface_preparation,
     )
     return GnomeHelperPresentationCycleResult(
         health_status=health_status,
@@ -298,6 +413,13 @@ def run_gnome_shell_helper_presentation_cycle(
         attempts=attempts,
         retry_reasons=tuple(retry_reasons),
         health_cache_hit=health_cache_hit,
+        persistent_mismatch_count=state.persistent_mismatch_count,
+        persistent_mismatch_backoff=(
+            state.persistent_mismatch_count >= GNOME_HELPER_PERSISTENT_MISMATCH_THRESHOLD
+            and state.persistent_mismatch_key is not None
+        ),
+        surface_preparation=surface_preparation,
+        surface_preparation_failed=surface_preparation_failed,
     )
 
 
@@ -310,7 +432,10 @@ def fetch_gnome_shell_helper_health_via_gdbus() -> object:
 def fetch_gnome_shell_helper_target_via_gdbus() -> object:
     """Fetch helper target state through the local user session bus using gdbus."""
 
-    return _call_gnome_shell_helper_method(GNOME_SHELL_HELPER_DBUS_TARGET_METHOD, "{}")
+    return _call_gnome_shell_helper_method(
+        GNOME_SHELL_HELPER_DBUS_TARGET_METHOD,
+        _target_query_payload(os.environ),
+    )
 
 
 def fetch_gnome_shell_helper_presentation_via_gdbus(request: HelperPresentationRequest) -> object:
@@ -323,7 +448,102 @@ def fetch_gnome_shell_helper_presentation_via_gdbus(request: HelperPresentationR
 def _should_retry_presentation(status: HelperPresentationStatus) -> bool:
     return (
         status.state is HelperPresentationState.DEGRADED
-        and "applied_rect_mismatch" in status.degrade_reasons
+        and GNOME_HELPER_REASON_APPLIED_RECT_MISMATCH in status.degrade_reasons
+    )
+
+
+def _borderless_fullscreen_surface_preparation(
+    target_status: HelperTargetStatus | None,
+    request: HelperPresentationRequest | None,
+    *,
+    env: Mapping[str, str],
+) -> BackendPresentationSurfacePreparation | None:
+    if not _env_flag_enabled(env.get(GNOME_HELPER_BORDERLESS_FULLSCREEN_PREP_ENV, "")):
+        return None
+    if target_status is None or request is None or request.action is not HelperPresentationAction.ATTACH:
+        return None
+    target = target_status.target if target_status.found else None
+    if target is None or not target.fullscreen:
+        return None
+    if request.rect_source != GNOME_SHELL_HELPER_RECT_SOURCE_CONTENT:
+        return None
+    if (
+        target.content_rect is None
+        or target.monitor_rect is None
+        or request.content_rect is None
+        or not target.content_rect.valid
+        or not target.monitor_rect.valid
+        or not request.content_rect.valid
+    ):
+        return None
+    tolerance = int(max(0, request.rect_tolerance))
+    if not _helper_rects_match(target.content_rect, target.monitor_rect, tolerance=tolerance):
+        return None
+    if not _helper_rects_match(request.content_rect, target.monitor_rect, tolerance=tolerance):
+        return None
+    rect = _rect_signature(request.content_rect)
+    if rect is None:
+        return None
+    return BackendPresentationSurfacePreparation(
+        mode=GNOME_HELPER_SURFACE_PREPARATION_FULLSCREEN_MONITOR,
+        rect=rect,
+        reason="gnome_borderless_full_monitor",
+        target_token=request.target_token,
+        rect_source=request.rect_source,
+    )
+
+
+def _apply_surface_preparation(
+    surface_preparation: BackendPresentationSurfacePreparation,
+    prepare_surface: Callable[[BackendPresentationSurfacePreparation], bool] | None,
+) -> bool:
+    if prepare_surface is None:
+        return False
+    try:
+        return bool(prepare_surface(surface_preparation))
+    except Exception:
+        return False
+
+
+def _surface_preparation_failed_status(
+    target_status: HelperTargetStatus | None,
+    request: HelperPresentationRequest,
+    *,
+    surface_preparation: BackendPresentationSurfacePreparation,
+    now_monotonic: float,
+) -> HelperPresentationStatus:
+    target_token = request.target_token
+    target = target_status.target if target_status is not None else None
+    if target is not None and not target_token:
+        target_token = target.target_token
+    return HelperPresentationStatus(
+        state=HelperPresentationState.DEGRADED,
+        action=request.action,
+        helper_protocol=HELPER_PROTOCOL,
+        target_token=target_token,
+        rect_source=request.rect_source,
+        requested_rect=request.content_rect,
+        renderer=request.renderer,
+        standalone_mode=request.standalone_mode,
+        pyqt_renderer_preserved=request.renderer == "pyqt",
+        degrade_reasons=tuple(
+            dict.fromkeys(request.degrade_reasons + (GNOME_HELPER_REASON_SURFACE_PREPARATION_FAILED,))
+        ),
+        observed_at_monotonic=now_monotonic,
+        presentation_diagnostics={
+            "surface_preparation": {
+                "mode": surface_preparation.mode,
+                "rect": {
+                    "x": surface_preparation.rect[0],
+                    "y": surface_preparation.rect[1],
+                    "width": surface_preparation.rect[2],
+                    "height": surface_preparation.rect[3],
+                },
+                "reason": surface_preparation.reason,
+                "failed": True,
+            }
+        },
+        detail="surface preparation failed before helper presentation",
     )
 
 
@@ -386,6 +606,16 @@ def _default_health_cache_jitter_seconds() -> float:
     return ((os.getpid() % 1000) / 1000.0) * GNOME_HELPER_HEALTH_CACHE_JITTER_SECONDS
 
 
+def _target_query_payload(env: Mapping[str, str]) -> str:
+    if not _env_flag_enabled(env.get(GNOME_HELPER_GEOMETRY_DIAGNOSTICS_ENV, "")):
+        return "{}"
+    return json.dumps({"include_geometry_diagnostics": True}, separators=(",", ":"))
+
+
+def _env_flag_enabled(value: str) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on", "debug"}
+
+
 def _should_skip_suppressed_target_poll(
     state: GnomeHelperPresentationRuntimeState,
     *,
@@ -417,6 +647,17 @@ def _should_skip_presentation_apply(
     )
 
 
+def _should_skip_persistent_mismatch_apply(
+    state: GnomeHelperPresentationRuntimeState,
+    signature: GnomeHelperPresentationSignature | None,
+) -> bool:
+    if signature is None or state.persistent_mismatch_key is None:
+        return False
+    if state.persistent_mismatch_count < GNOME_HELPER_PERSISTENT_MISMATCH_THRESHOLD:
+        return False
+    return state.persistent_mismatch_key.signature == signature
+
+
 def _cached_presentation_is_matching_success(
     state: GnomeHelperPresentationRuntimeState,
     *,
@@ -430,6 +671,126 @@ def _cached_presentation_is_matching_success(
     return _presentation_status_is_matching_success(status, request)
 
 
+def _presentation_status_with_wrong_monitor_reason(
+    status: HelperPresentationStatus,
+    target_status: HelperTargetStatus | None,
+) -> HelperPresentationStatus:
+    if not _presentation_status_is_wrong_monitor_mismatch(status, target_status):
+        return status
+    return _presentation_status_with_reasons(status, GNOME_HELPER_REASON_WRONG_MONITOR_APPLIED_RECT)
+
+
+def _presentation_status_is_wrong_monitor_mismatch(
+    status: HelperPresentationStatus,
+    target_status: HelperTargetStatus | None,
+) -> bool:
+    if status.rect_match:
+        return False
+    if GNOME_HELPER_REASON_APPLIED_RECT_MISMATCH not in status.degrade_reasons:
+        return False
+    if status.applied_rect is None or not status.applied_rect.valid:
+        return False
+    target = target_status.target if target_status is not None else None
+    if target is None or target.monitor_rect is None or not target.monitor_rect.valid:
+        return False
+    return not _rects_overlap(status.applied_rect, target.monitor_rect)
+
+
+def _update_persistent_mismatch_cache(
+    state: GnomeHelperPresentationRuntimeState,
+    *,
+    signature: GnomeHelperPresentationSignature | None,
+    request: HelperPresentationRequest | None,
+    presentation_status: HelperPresentationStatus | None,
+) -> HelperPresentationStatus | None:
+    key = _persistent_mismatch_key(
+        signature,
+        request=request,
+        presentation_status=presentation_status,
+    )
+    if key is None:
+        _clear_persistent_mismatch_cache(state)
+        return presentation_status
+
+    if state.persistent_mismatch_key == key:
+        state.persistent_mismatch_count += 1
+    else:
+        state.persistent_mismatch_key = key
+        state.persistent_mismatch_count = 1
+
+    status = presentation_status
+    if _presentation_status_is_wrong_monitor_persistent_candidate(presentation_status):
+        status = _presentation_status_with_reasons(
+            status,
+            GNOME_HELPER_REASON_WRONG_MONITOR_APPLIED_RECT,
+        )
+    if state.persistent_mismatch_count >= GNOME_HELPER_PERSISTENT_MISMATCH_THRESHOLD:
+        status = _presentation_status_with_reasons(
+            status,
+            GNOME_HELPER_REASON_PERSISTENT_APPLIED_RECT_MISMATCH,
+        )
+    state.persistent_mismatch_status = status
+    return status
+
+
+def _persistent_mismatch_key(
+    signature: GnomeHelperPresentationSignature | None,
+    *,
+    request: HelperPresentationRequest | None,
+    presentation_status: HelperPresentationStatus | None,
+) -> GnomeHelperPersistentMismatchKey | None:
+    if signature is None or request is None or presentation_status is None:
+        return None
+    if not _presentation_status_is_persistent_mismatch_candidate(signature, presentation_status):
+        return None
+    requested_rect = _rect_signature(presentation_status.requested_rect or request.content_rect)
+    applied_rect = _rect_signature(presentation_status.applied_rect)
+    if requested_rect is None or applied_rect is None:
+        return None
+    target_token = presentation_status.target_token or request.target_token
+    if not target_token:
+        return None
+    return GnomeHelperPersistentMismatchKey(
+        signature=signature,
+        target_token=target_token,
+        requested_rect=requested_rect,
+        applied_rect=applied_rect,
+    )
+
+
+def _presentation_status_is_persistent_mismatch_candidate(
+    signature: GnomeHelperPresentationSignature,
+    status: HelperPresentationStatus,
+) -> bool:
+    if status.rect_match:
+        return False
+    if GNOME_HELPER_REASON_APPLIED_RECT_MISMATCH not in status.degrade_reasons:
+        return False
+    return _presentation_status_is_wrong_monitor_persistent_candidate(status) or bool(
+        signature.surface_preparation_mode
+    )
+
+
+def _presentation_status_is_wrong_monitor_persistent_candidate(status: HelperPresentationStatus) -> bool:
+    return GNOME_HELPER_REASON_WRONG_MONITOR_APPLIED_RECT in status.degrade_reasons
+
+
+def _presentation_status_with_reasons(
+    status: HelperPresentationStatus,
+    *reasons: str,
+) -> HelperPresentationStatus:
+    merged_reasons = tuple(dict.fromkeys(status.degrade_reasons + tuple(reason for reason in reasons if reason)))
+    if merged_reasons == status.degrade_reasons:
+        return status
+    return replace(status, degrade_reasons=merged_reasons)
+
+
+def _clear_persistent_mismatch_cache(state: GnomeHelperPresentationRuntimeState) -> None:
+    state.persistent_mismatch_key = None
+    state.persistent_mismatch_count = 0
+    state.persistent_mismatch_status = None
+
+
 def _update_presentation_cache(
     state: GnomeHelperPresentationRuntimeState,
     *,
@@ -438,12 +799,18 @@ def _update_presentation_cache(
     presentation_status: HelperPresentationStatus | None,
     previous_surface_action: str,
     now_monotonic: float,
+    surface_preparation: BackendPresentationSurfacePreparation | None,
 ) -> None:
     state.last_target_status = target_status
     state.last_request = request
     state.last_presentation_status = presentation_status
     signature = (
-        _presentation_signature(target_status, request, previous_surface_action=previous_surface_action)
+        _presentation_signature(
+            target_status,
+            request,
+            previous_surface_action=previous_surface_action,
+            surface_preparation=surface_preparation,
+        )
         if target_status is not None and request is not None
         else None
     )
@@ -453,6 +820,7 @@ def _update_presentation_cache(
     ):
         state.last_signature = signature
         state.last_success_at = now_monotonic
+        _clear_persistent_mismatch_cache(state)
         if previous_surface_action == GNOME_HELPER_SURFACE_ACTION_MAPPED_SUPPRESSED:
             state.next_suppressed_target_poll_at = now_monotonic + GNOME_HELPER_SUPPRESSED_TARGET_POLL_SECONDS
         else:
@@ -470,6 +838,7 @@ def _clear_presentation_cache(state: GnomeHelperPresentationRuntimeState) -> Non
     state.last_signature = None
     state.last_success_at = 0.0
     state.next_suppressed_target_poll_at = 0.0
+    _clear_persistent_mismatch_cache(state)
 
 
 def _presentation_status_is_matching_success(
@@ -513,6 +882,7 @@ def _presentation_signature(
     request: HelperPresentationRequest | None,
     *,
     previous_surface_action: str,
+    surface_preparation: BackendPresentationSurfacePreparation | None,
 ) -> GnomeHelperPresentationSignature | None:
     if target_status is None or request is None:
         return None
@@ -539,6 +909,8 @@ def _presentation_signature(
         require_stacking=bool(request.require_stacking),
         require_click_through=bool(request.require_click_through),
         require_focus_safe=bool(request.require_focus_safe),
+        include_presentation_diagnostics=bool(request.include_presentation_diagnostics),
+        surface_preparation_mode=surface_preparation.mode if surface_preparation is not None else "",
         request_degrade_reasons=tuple(request.degrade_reasons),
     )
 
@@ -547,6 +919,22 @@ def _rect_signature(rect: HelperRect | None) -> tuple[int, int, int, int] | None
     if rect is None or not rect.valid:
         return None
     return (rect.x, rect.y, rect.width, rect.height)
+
+
+def _rects_overlap(left: HelperRect, right: HelperRect) -> bool:
+    return (
+        max(left.x, right.x) < min(left.x + left.width, right.x + right.width)
+        and max(left.y, right.y) < min(left.y + left.height, right.y + right.height)
+    )
+
+
+def _helper_rects_match(left: HelperRect, right: HelperRect, *, tolerance: int) -> bool:
+    return (
+        abs(left.x - right.x) <= tolerance
+        and abs(left.y - right.y) <= tolerance
+        and abs(left.width - right.width) <= tolerance
+        and abs(left.height - right.height) <= tolerance
+    )
 
 
 def _call_gnome_shell_helper_method(method: str, argument: str | None = None) -> object:

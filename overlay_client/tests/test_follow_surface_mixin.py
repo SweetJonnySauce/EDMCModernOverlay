@@ -54,7 +54,19 @@ except Exception:  # pragma: no cover - lightweight stub path
         def height(self) -> int:
             return self._height
 
+    class _QPoint:
+        def __init__(self, x=0, y=0) -> None:
+            self._x = int(x)
+            self._y = int(y)
+
+        def x(self) -> int:
+            return self._x
+
+        def y(self) -> int:
+            return self._y
+
     qtcore = sys.modules.get("PyQt6.QtCore") or types.ModuleType("PyQt6.QtCore")
+    qtcore.QPoint = getattr(qtcore, "QPoint", _QPoint)
     qtcore.QRect = getattr(qtcore, "QRect", _QRect)
     qtcore.QSize = getattr(qtcore, "QSize", _QSize)
     qtcore.Qt = getattr(
@@ -110,6 +122,7 @@ from overlay_client.backend.presentation_policy import (
     BackendPresentationVisibilitySnapshot,
     BackendPresentationVisibilityState,
 )
+from overlay_client.backend.surface_preparation import BackendPresentationSurfacePreparation
 from overlay_client.follow_surface import FollowSurfaceMixin
 from overlay_client.window_tracking import WindowState
 
@@ -151,6 +164,9 @@ class _StubWindowHandle:
 
     def setTransientParent(self, parent) -> None:
         self.transient_parents.append(parent)
+
+    def setScreen(self, screen) -> None:
+        self._screen = screen
 
 
 class _StubLabel:
@@ -288,16 +304,23 @@ class _FollowSurfaceStub(FollowSurfaceMixin):
             },
         )()
         self._visibility_helper = _StubVisibilityHelper()
-        self._platform_controller = type(
-            "StubPlatform",
-            (),
-            {
-                "apply_click_through": lambda *args, **kwargs: None,
-                "platform_label": lambda self=None: "stub",
-                "uses_transient_parent": lambda self=None: False,
-                "is_wayland_backend": lambda self=None: False,
-            },
-        )()
+        class _StubPlatform:
+            def prepare_window(self, *_args, **_kwargs) -> None:
+                owner._event_order.append("platformPrepare")
+
+            def apply_click_through(self, *_args, **_kwargs) -> None:
+                owner._event_order.append("platformClickThrough")
+
+            def platform_label(self) -> str:
+                return "stub"
+
+            def uses_transient_parent(self) -> bool:
+                return False
+
+            def is_wayland_backend(self) -> bool:
+                return False
+
+        self._platform_controller = _StubPlatform()
         self._client_backend_status = _backend_status(helper_available=False)
 
     # Qt shell shims
@@ -322,6 +345,10 @@ class _FollowSurfaceStub(FollowSurfaceMixin):
     def show(self) -> None:
         self._visible = True
         self._event_order.append("show")
+
+    def showFullScreen(self) -> None:
+        self._visible = True
+        self._event_order.append("showFullScreen")
 
     def hide(self) -> None:
         self._visible = False
@@ -396,7 +423,40 @@ def _fake_backend_presentation_result(
     overlay_window_found: bool = True,
     presentation_rect_match: bool = True,
     prime_rect: tuple[int, int, int, int] | None = (10, 20, 300, 200),
+    geometry_diagnostics: dict[str, object] | None = None,
 ) -> BackendPresentationCycleResult:
+    diagnostics = {
+        "helper_health": "healthy",
+        "target_state": "target_found",
+        "target_token": "meta:21",
+        "target_sequence": 3,
+        "rect_source": "content_rect",
+        "requested_rect": {"x": 10, "y": 20, "width": 300, "height": 200},
+        "presentation_state": "presentation_applied",
+        "applied_rect": {"x": 10, "y": 20, "width": 300, "height": 200},
+        "rect_match": True,
+        "rect_delta": [0, 0, 0, 0],
+        "presentation_reasons": [],
+        "attempts": 1,
+        "retry_reasons": [],
+        "legacy_geometry_policy": "ignored_helper_source_of_truth",
+        "target_available": True,
+        "target_has_focus": target_has_focus,
+        "target_showing_on_workspace": target_showing_on_workspace,
+        "target_minimized": target_minimized,
+        "presentation_available": True,
+        "presentation_attachable": presentation_attachable,
+        "overlay_window_found": overlay_window_found,
+        "presentation_rect_match": presentation_rect_match,
+        "prime_rect": (
+            {"x": prime_rect[0], "y": prime_rect[1], "width": prime_rect[2], "height": prime_rect[3]}
+            if prime_rect is not None
+            else None
+        ),
+        "prime_rect_source": "requested_rect" if prime_rect is not None else "unavailable",
+    }
+    if geometry_diagnostics is not None:
+        diagnostics["target_geometry_diagnostics"] = geometry_diagnostics
     return BackendPresentationCycleResult(
         should_show_overlay=True,
         scale_size=(300, 200),
@@ -412,36 +472,7 @@ def _fake_backend_presentation_result(
             overlay_window_found=overlay_window_found,
             presentation_rect_match=presentation_rect_match,
         ),
-        diagnostics={
-            "helper_health": "healthy",
-            "target_state": "target_found",
-            "target_token": "meta:21",
-            "target_sequence": 3,
-            "rect_source": "content_rect",
-            "requested_rect": {"x": 10, "y": 20, "width": 300, "height": 200},
-            "presentation_state": "presentation_applied",
-            "applied_rect": {"x": 10, "y": 20, "width": 300, "height": 200},
-            "rect_match": True,
-            "rect_delta": [0, 0, 0, 0],
-            "presentation_reasons": [],
-            "attempts": 1,
-            "retry_reasons": [],
-            "legacy_geometry_policy": "ignored_helper_source_of_truth",
-            "target_available": True,
-            "target_has_focus": target_has_focus,
-            "target_showing_on_workspace": target_showing_on_workspace,
-            "target_minimized": target_minimized,
-            "presentation_available": True,
-            "presentation_attachable": presentation_attachable,
-            "overlay_window_found": overlay_window_found,
-            "presentation_rect_match": presentation_rect_match,
-            "prime_rect": (
-                {"x": prime_rect[0], "y": prime_rect[1], "width": prime_rect[2], "height": prime_rect[3]}
-                if prime_rect is not None
-                else None
-            ),
-            "prime_rect_source": "requested_rect" if prime_rect is not None else "unavailable",
-        },
+        diagnostics=diagnostics,
         log_prefix="GNOME helper presentation",
     )
 
@@ -465,7 +496,7 @@ def test_refresh_follow_geometry_uses_gnome_helper_presentation_and_skips_legacy
     result = _fake_backend_presentation_result()
     calls: list[tuple[bool, str]] = []
 
-    def fake_cycle(_status, *, standalone_mode: bool = False, previous_surface_action: str = ""):
+    def fake_cycle(_status, *, standalone_mode: bool = False, previous_surface_action: str = "", **_kwargs):
         calls.append((standalone_mode, previous_surface_action))
         return result
 
@@ -478,6 +509,34 @@ def test_refresh_follow_geometry_uses_gnome_helper_presentation_and_skips_legacy
     assert stub._last_backend_presentation is result
     assert stub._last_backend_presentation_surface_action == "mapped_visible"
     assert stub._visibility_helper.calls == [True]
+
+
+def test_refresh_follow_geometry_logs_backend_geometry_diagnostics_when_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _FollowSurfaceStub()
+    result = _fake_backend_presentation_result(
+        geometry_diagnostics={
+            "candidates": [
+                {
+                    "name": "client_area",
+                    "rect": {"x": 10, "y": 57, "width": 300, "height": 163},
+                },
+            ]
+        }
+    )
+    debug_calls: list[tuple[str, tuple[object, ...]]] = []
+
+    monkeypatch.setattr("overlay_client.follow_surface.run_backend_presentation_cycle", lambda *_args, **_kwargs: result)
+    monkeypatch.setattr(
+        "overlay_client.follow_surface._CLIENT_LOGGER.debug",
+        lambda message, *args, **_kwargs: debug_calls.append((str(message), args)),
+    )
+
+    stub._refresh_follow_geometry()
+
+    assert any("geometry diagnostics" in message for message, _args in debug_calls)
+    assert any("client_area" in str(args) for _message, args in debug_calls)
 
 
 def test_refresh_follow_geometry_primes_backend_rect_before_showing_hidden_overlay(
@@ -494,6 +553,54 @@ def test_refresh_follow_geometry_primes_backend_rect_before_showing_hidden_overl
     assert stub._geometry_calls == [(431, 167, 1440, 997)]
     assert stub._event_order[:3] == ["prepareWindowFlags", "setGeometry", "show"]
     assert stub._backend_presentation_visibility_state.remap_warmup_active is True
+
+
+def test_backend_fullscreen_surface_preparation_sets_screen_geometry_and_fullscreen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _FollowSurfaceStub()
+    screen = type("Screen", (), {"geometry": lambda self: type("Rect", (), {"intersects": lambda *_: True})()})()
+    monkeypatch.setattr("overlay_client.follow_surface.QGuiApplication.screenAt", lambda _point: screen)
+
+    prepared = stub._prepare_backend_presentation_surface(
+        BackendPresentationSurfacePreparation(
+            mode="fullscreen_monitor",
+            rect=(0, 0, 3440, 1440),
+            reason="test",
+            target_token="meta:18",
+            rect_source="content_rect",
+        )
+    )
+
+    assert prepared is True
+    assert stub.windowHandle().screen() is screen
+    assert stub._geometry_calls[-1] == (0, 0, 3440, 1440)
+    assert stub._visible is True
+    assert stub._event_order[:5] == [
+        "prepareWindowFlags",
+        "setGeometry",
+        "showFullScreen",
+        "platformPrepare",
+        "platformClickThrough",
+    ]
+
+
+def test_refresh_follow_geometry_passes_backend_surface_preparer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _FollowSurfaceStub()
+    result = _fake_backend_presentation_result()
+    callbacks = []
+
+    def fake_cycle(_status, **kwargs):
+        callbacks.append(kwargs.get("prepare_surface"))
+        return result
+
+    monkeypatch.setattr("overlay_client.follow_surface.run_backend_presentation_cycle", fake_cycle)
+
+    stub._refresh_follow_geometry()
+
+    assert callbacks and callbacks[0] == stub._prepare_backend_presentation_surface
 
 
 def test_refresh_follow_geometry_warmup_keeps_visible_after_remap_focus_flip(

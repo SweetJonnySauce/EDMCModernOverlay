@@ -75,6 +75,7 @@ from overlay_client.backend.consumers import (
     run_backend_presentation_cycle,
     uses_transient_parent,
 )
+from overlay_client.backend.surface_preparation import BackendPresentationSurfacePreparation
 from overlay_client.backend.contracts import (
     BackendBundle,
     BackendCapabilities,
@@ -446,9 +447,15 @@ def test_backend_presentation_cycle_wraps_gnome_helper_result_when_helper_availa
     )
     calls: list[bool] = []
 
-    def fake_runner(*, standalone_mode: bool = False, previous_surface_action: str = "") -> _FakeGnomePresentationResult:
+    def fake_runner(
+        *,
+        standalone_mode: bool = False,
+        previous_surface_action: str = "",
+        prepare_surface=None,
+    ) -> _FakeGnomePresentationResult:
         calls.append(standalone_mode)
         assert previous_surface_action == "mapped_visible"
+        assert prepare_surface is None
         return _FakeGnomePresentationResult()
 
     result = run_backend_presentation_cycle(
@@ -473,6 +480,51 @@ def test_backend_presentation_cycle_wraps_gnome_helper_result_when_helper_availa
     assert result.visibility_snapshot.presentation_attachable is True
     assert result.visibility_snapshot.overlay_window_found is True
     assert result.visibility_snapshot.presentation_rect_match is True
+
+
+def test_backend_presentation_cycle_passes_surface_preparer_to_gnome_runner():
+    status = BackendSelectionStatus(
+        probe=PlatformProbeResult(
+            operating_system=OperatingSystem.LINUX,
+            session_type=SessionType.WAYLAND,
+            qt_platform_name="wayland",
+            compositor="gnome-shell",
+        ),
+        selected_backend=BackendDescriptor(
+            BackendFamily.NATIVE_WAYLAND,
+            BackendInstance.GNOME_SHELL_WAYLAND,
+        ),
+        classification=CapabilityClassification.DEGRADED_OVERLAY,
+        helper_states=(
+            HelperCapabilityState(
+                helper=HelperKind.GNOME_SHELL_EXTENSION,
+                required=True,
+                installed=True,
+                enabled=True,
+                approved=True,
+            ),
+        ),
+    )
+    preparation = BackendPresentationSurfacePreparation(
+        mode="fullscreen_monitor",
+        rect=(0, 0, 3440, 1440),
+        reason="test",
+    )
+    prepared: list[BackendPresentationSurfacePreparation] = []
+
+    def prepare_surface(request: BackendPresentationSurfacePreparation) -> bool:
+        prepared.append(request)
+        return True
+
+    def fake_runner(**kwargs) -> _FakeGnomePresentationResult:
+        assert kwargs["prepare_surface"] is prepare_surface
+        kwargs["prepare_surface"](preparation)
+        return _FakeGnomePresentationResult()
+
+    result = run_backend_presentation_cycle(status, gnome_runner=fake_runner, prepare_surface=prepare_surface)
+
+    assert result is not None
+    assert prepared == [preparation]
 
 
 def test_focus_safe_overlay_flags_are_required_for_available_gnome_helper():

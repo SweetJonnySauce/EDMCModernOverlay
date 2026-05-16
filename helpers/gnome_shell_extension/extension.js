@@ -1,6 +1,7 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
+import St from 'gi://St';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import {
@@ -46,6 +47,26 @@ const DISPLAY_CONFIG_DBUS_INTERFACE = 'org.gnome.Mutter.DisplayConfig';
 const DISPLAY_CONFIG_GET_CURRENT_STATE_METHOD = 'GetCurrentState';
 const DISPLAY_CONFIG_MONITOR_CACHE_TTL_US = 1000000;
 const DISPLAY_CONFIG_DBUS_TIMEOUT_MS = 250;
+const SHELL_ACTOR_PROOF_TIMEOUT_MS = 5000;
+const SHELL_ACTOR_GROUP_DIAGNOSTIC_CHILD_LIMIT = 12;
+const SHELL_ACTOR_PROOF_PARENT = 'target_window_actor_child';
+const SHELL_ACTOR_GROUP_DIAGNOSTIC_NAMES = [
+    'global.stage',
+    'global.window_group',
+    'global.top_window_group',
+    'global.overlay_group',
+    'global.bottom_window_group',
+    'global.background_group',
+    'global.screen_group',
+];
+const PRESENTATION_STRATEGY_PROBES = [
+    'normal_move_resize',
+    'move_to_monitor_then_resize',
+    'resize_then_move_to_monitor',
+    'make_fullscreen_then_resize',
+    'resize_then_make_fullscreen',
+    'fullscreen_only',
+];
 
 class HelperHealthService {
     constructor() {
@@ -55,6 +76,8 @@ class HelperHealthService {
         this._presentationSequence = 0;
         this._displayConfigMonitorCache = null;
         this._displayConfigMonitorCacheExpiresUs = 0;
+        this._shellActorProof = null;
+        this._shellActorProofTimeoutId = 0;
     }
 
     Hello(_client) {
@@ -83,7 +106,8 @@ class HelperHealthService {
         this._targetSequence += 1;
         const generatedAtUnixMs = Date.now();
         const generatedAtMonotonicUs = GLib.get_monotonic_time();
-        const windows = this._enumerateWindows();
+        const queryOptions = this._targetQueryOptions(_query);
+        const windows = this._enumerateWindows(queryOptions);
         const selection = this._selectEliteTarget(windows);
         return JSON.stringify({
             status: selection.status,
@@ -123,6 +147,28 @@ class HelperHealthService {
         const requestedRect = this._requestRect(payload, 'content_rect', 'contentRect');
         const rectTolerance = this._requestInt(payload, 2, 'rect_tolerance', 'rectTolerance');
         const standaloneMode = this._requestBool(payload, 'standalone_mode', 'standaloneMode');
+        const includePresentationDiagnostics = this._requestBool(
+            payload,
+            'include_presentation_diagnostics',
+            'includePresentationDiagnostics',
+            'presentationDiagnostics',
+        );
+        const includePresentationStrategyDiagnostics = this._requestBool(
+            payload,
+            'include_presentation_strategy_diagnostics',
+            'includePresentationStrategyDiagnostics',
+        );
+        const presentationStrategyProbe = this._requestString(
+            payload,
+            'presentation_strategy_probe',
+            'presentationStrategyProbe',
+        );
+        const shellActorProofRequested = this._requestBool(payload, 'shell_actor_proof', 'shellActorProof');
+        const shellActorProofAction = this._requestString(
+            payload,
+            'shell_actor_proof_action',
+            'shellActorProofAction',
+        );
         const base = {
             action,
             targetToken,
@@ -131,6 +177,14 @@ class HelperHealthService {
             generatedAtUnixMs,
             generatedAtMonotonicUs,
         };
+
+        if (shellActorProofRequested || shellActorProofAction) {
+            return JSON.stringify(this._handleShellActorProof({
+                ...base,
+                proofAction: shellActorProofAction || 'show',
+                rectTolerance,
+            }));
+        }
 
         if (action === 'hide') {
             return JSON.stringify(this._presentationPayload({
@@ -196,7 +250,18 @@ class HelperHealthService {
             }));
         }
 
-        const result = this._applyOverlayPresentation(overlayEntry.window, requestedRect, rectTolerance);
+        const result = this._applyOverlayPresentation(
+            overlayEntry.window,
+            requestedRect,
+            rectTolerance,
+            {
+                includePresentationDiagnostics,
+                includePresentationStrategyDiagnostics,
+                presentationStrategyProbe,
+                overlayPayload: overlayEntry.payload,
+                targetPayload: targetEntry.payload,
+            },
+        );
         const chromeFree = this._windowChromeFree(overlayEntry.payload);
         const clickThrough = this._requestBool(payload, 'click_through_expected', 'clickThroughExpected');
         const focusSafe = result.stacking && clickThrough;
@@ -231,26 +296,27 @@ class HelperHealthService {
             standaloneMode,
             unsupportedFeatures,
             degradeReasons,
+            presentationDiagnostics: result.presentationDiagnostics,
             detail: status === 'presentation_applied' ? '' : 'required presentation gate unproven',
         }));
     }
 
-    _enumerateWindows() {
-        return this._enumerateWindowEntries().map(entry => entry.payload);
+    _enumerateWindows(options = {}) {
+        return this._enumerateWindowEntries(options).map(entry => entry.payload);
     }
 
-    _enumerateWindowEntries() {
+    _enumerateWindowEntries(options = {}) {
         const tracker = Shell.WindowTracker.get_default();
         return global.get_window_actors()
             .map(actor => actor?.get_meta_window?.())
             .filter(window => window)
             .map(window => ({
                 window,
-                payload: this._windowPayload(window, tracker),
+                payload: this._windowPayload(window, tracker, options),
             }));
     }
 
-    _windowPayload(window, tracker) {
+    _windowPayload(window, tracker, options = {}) {
         const app = tracker?.get_window_app?.(window);
         const frameRect = this._rectPayload(this._safeCall(window, 'get_frame_rect'));
         const bufferRect = this._rectPayload(this._safeCall(window, 'get_buffer_rect'));
@@ -258,7 +324,7 @@ class HelperHealthService {
         const monitor = this._safeCall(window, 'get_monitor');
         const monitorInfo = this._monitorForIndex(monitor);
         const monitorRect = this._rectPayload(monitorInfo);
-        return {
+        const payload = {
             targetToken: this._targetToken(window),
             title: String(this._safeCall(window, 'get_title') || ''),
             wmClass: String(this._safeCall(window, 'get_wm_class') || ''),
@@ -281,6 +347,17 @@ class HelperHealthService {
             fullscreen: Boolean(window?.fullscreen || window?.is_fullscreen?.()),
             workspace: this._workspaceName(window),
         };
+        if (options.includeGeometryDiagnostics) {
+            payload.geometryDiagnostics = this._geometryDiagnosticsPayload(window, {
+                frameRect,
+                bufferRect,
+                contentRect,
+                monitor,
+                monitorRect,
+                monitorInfo,
+            });
+        }
+        return payload;
     }
 
     _selectEliteTarget(windows) {
@@ -390,11 +467,114 @@ class HelperHealthService {
         if (!frameRect || !contentRect) {
             return null;
         }
+        return this._rectInsets(frameRect, contentRect);
+    }
+
+    _rectInsets(outerRect, innerRect) {
+        if (!outerRect || !innerRect) {
+            return null;
+        }
         return {
-            left: contentRect.x - frameRect.x,
-            top: contentRect.y - frameRect.y,
-            right: (frameRect.x + frameRect.width) - (contentRect.x + contentRect.width),
-            bottom: (frameRect.y + frameRect.height) - (contentRect.y + contentRect.height),
+            left: innerRect.x - outerRect.x,
+            top: innerRect.y - outerRect.y,
+            right: (outerRect.x + outerRect.width) - (innerRect.x + innerRect.width),
+            bottom: (outerRect.y + outerRect.height) - (innerRect.y + innerRect.height),
+        };
+    }
+
+    _targetQueryOptions(rawQuery) {
+        const parsed = this._parseJsonObject(rawQuery);
+        const query = parsed.ok ? parsed.value : {};
+        return {
+            includeGeometryDiagnostics: this._requestBool(
+                query,
+                'include_geometry_diagnostics',
+                'includeGeometryDiagnostics',
+                'geometryDiagnostics',
+            ),
+        };
+    }
+
+    _geometryDiagnosticsPayload(window, context) {
+        const frameRect = context.frameRect;
+        const bufferRect = context.bufferRect;
+        const clientAreaRect = this._rectPayload(this._safeCall(window, 'get_client_area_rect'));
+        const workAreaRect = this._rectPayload(this._safeCall(window, 'get_work_area_current_monitor'));
+        const contentRect = context.contentRect;
+        return {
+            schema: 1,
+            candidates: {
+                frame: this._geometryCandidatePayload(window, 'frame', 'get_frame_rect', frameRect),
+                buffer: this._geometryCandidatePayload(window, 'buffer', 'get_buffer_rect', bufferRect),
+                client_area: this._geometryCandidatePayload(
+                    window,
+                    'client_area',
+                    'get_client_area_rect',
+                    clientAreaRect,
+                ),
+                work_area_current_monitor: this._geometryCandidatePayload(
+                    window,
+                    'work_area_current_monitor',
+                    'get_work_area_current_monitor',
+                    workAreaRect,
+                ),
+                selected_content: {
+                    name: 'selected_content',
+                    method: 'helper_selected_content_rect',
+                    available: Boolean(contentRect),
+                    valid: this._rectIsValid(contentRect),
+                    rect: contentRect,
+                },
+            },
+            insets: {
+                frame_to_buffer: this._geometryInsetPayload('frame', frameRect, 'buffer', bufferRect),
+                frame_to_client_area: this._geometryInsetPayload(
+                    'frame',
+                    frameRect,
+                    'client_area',
+                    clientAreaRect,
+                ),
+                frame_to_selected_content: this._geometryInsetPayload(
+                    'frame',
+                    frameRect,
+                    'selected_content',
+                    contentRect,
+                ),
+            },
+            monitor: {
+                index: context.monitor,
+                rect: context.monitorRect,
+                outputName: this._monitorOutputName(context.monitorInfo),
+                scale: this._monitorScale(context.monitorInfo),
+            },
+            state: {
+                hasFocus: Boolean(window?.has_focus?.()),
+                showingOnWorkspace: Boolean(window?.showing_on_its_workspace?.()),
+                minimized: Boolean(window?.minimized),
+                fullscreen: Boolean(window?.fullscreen || window?.is_fullscreen?.()),
+                workspace: this._workspaceName(window),
+            },
+        };
+    }
+
+    _geometryCandidatePayload(window, name, method, rect) {
+        return {
+            name,
+            method,
+            available: typeof window?.[method] === 'function',
+            valid: this._rectIsValid(rect),
+            rect,
+        };
+    }
+
+    _geometryInsetPayload(source, sourceRect, target, targetRect) {
+        const valid = this._rectIsValid(sourceRect) && this._rectIsValid(targetRect);
+        return {
+            name: `${source}_to_${target}`,
+            source,
+            target,
+            valid,
+            insets: valid ? this._rectInsets(sourceRect, targetRect) : null,
         };
     }
 
@@ -649,9 +829,11 @@ class HelperHealthService {
         degradeReasons = [],
         generatedAtUnixMs = Date.now(),
         generatedAtMonotonicUs = GLib.get_monotonic_time(),
+        presentationDiagnostics = null,
+        shellActorProof = null,
         detail = '',
     }) {
-        return {
+        const payload = {
             status,
             helper_kind: HELPER_KIND,
             helper_version: HELPER_VERSION,
@@ -676,6 +858,652 @@ class HelperHealthService {
             generated_at_monotonic_us: generatedAtMonotonicUs,
             detail,
         };
+        if (presentationDiagnostics) {
+            payload.presentation_diagnostics = presentationDiagnostics;
+        }
+        if (shellActorProof) {
+            payload.shell_actor_proof = shellActorProof;
+        }
+        return payload;
+    }
+
+    _handleShellActorProof({
+        action,
+        targetToken,
+        requestedRect,
+        standaloneMode,
+        generatedAtUnixMs,
+        generatedAtMonotonicUs,
+        proofAction,
+        rectTolerance,
+    }) {
+        const normalisedAction = String(proofAction || 'show').trim().toLowerCase();
+        if (normalisedAction === 'clear') {
+            const cleanupAction = this._clearShellActorProof('explicit_clear');
+            return this._presentationPayload({
+                status: 'shell_actor_proof_cleared',
+                action,
+                targetToken,
+                requestedRect,
+                standaloneMode,
+                generatedAtUnixMs,
+                generatedAtMonotonicUs,
+                shellActorProof: this._shellActorProofPayload({
+                    requestedAction: normalisedAction,
+                    visible: false,
+                    requestedRect,
+                    targetToken,
+                    cleanupAction,
+                }),
+            });
+        }
+        if (normalisedAction === 'diagnose_groups') {
+            return this._presentationPayload({
+                status: 'shell_actor_group_diagnostics',
+                action,
+                targetToken,
+                requestedRect,
+                standaloneMode,
+                generatedAtUnixMs,
+                generatedAtMonotonicUs,
+                renderer: 'gnome_shell_actor_proof',
+                shellActorProof: this._shellActorProofPayload({
+                    requestedAction: normalisedAction,
+                    visible: Boolean(this._shellActorProof?.actor),
+                    requestedRect,
+                    targetToken,
+                    groupDiagnostics: this._shellActorGroupDiagnostics(targetToken),
+                }),
+            });
+        }
+        if (normalisedAction !== 'show') {
+            return this._presentationPayload({
+                status: 'malformed_payload',
+                action: 'degrade',
+                targetToken,
+                requestedRect,
+                standaloneMode,
+                generatedAtUnixMs,
+                generatedAtMonotonicUs,
+                degradeReasons: ['unsupported_shell_actor_proof_action'],
+                detail: `unsupported shell actor proof action=${normalisedAction}`,
+                shellActorProof: this._shellActorProofPayload({
+                    requestedAction: normalisedAction,
+                    visible: Boolean(this._shellActorProof?.actor),
+                    requestedRect,
+                    targetToken,
+                    eligible: false,
+                    eligibilityReasons: ['unsupported_shell_actor_proof_action'],
+                }),
+            });
+        }
+
+        const windows = this._enumerateWindowEntries();
+        const targetEntry = windows.find(entry => entry.payload.targetToken === targetToken);
+        const targetPayload = targetEntry?.payload || null;
+        const eligibility = this._shellActorProofEligibility(targetPayload, requestedRect, rectTolerance);
+        if (!eligibility.eligible) {
+            const cleanupAction = this._clearShellActorProof('ineligible_target');
+            return this._presentationPayload({
+                status: targetPayload ? 'shell_actor_proof_ineligible' : 'target_unavailable',
+                action,
+                targetToken,
+                requestedRect,
+                standaloneMode,
+                generatedAtUnixMs,
+                generatedAtMonotonicUs,
+                degradeReasons: eligibility.reasons,
+                detail: 'shell actor proof eligibility failed',
+                shellActorProof: this._shellActorProofPayload({
+                    requestedAction: normalisedAction,
+                    visible: false,
+                    requestedRect,
+                    targetToken,
+                    targetPayload,
+                    eligible: false,
+                    eligibilityReasons: eligibility.reasons,
+                    cleanupAction,
+                }),
+            });
+        }
+
+        const proofResult = this._showShellActorProof(targetPayload, requestedRect);
+        const status = proofResult.visible ? 'shell_actor_proof_visible' : 'shell_actor_proof_degraded';
+        return this._presentationPayload({
+            status,
+            action,
+            targetToken,
+            requestedRect,
+            appliedRect: proofResult.appliedRect,
+            renderer: 'gnome_shell_actor_proof',
+            placement: proofResult.visible,
+            chromeFree: proofResult.visible,
+            stacking: proofResult.visible,
+            clickThrough: proofResult.visible,
+            focusSafe: proofResult.visible,
+            standaloneMode,
+            generatedAtUnixMs,
+            generatedAtMonotonicUs,
+            degradeReasons: proofResult.visible ? [] : ['shell_actor_proof_unavailable'],
+            detail: proofResult.visible ? '' : 'shell actor proof unavailable',
+            shellActorProof: this._shellActorProofPayload({
+                requestedAction: normalisedAction,
+                visible: proofResult.visible,
+                requestedRect,
+                targetToken,
+                targetPayload,
+                appliedRect: proofResult.appliedRect,
+                actorParent: proofResult.actorParent,
+                eligible: true,
+                staleTimeoutSeconds: SHELL_ACTOR_PROOF_TIMEOUT_MS / 1000,
+            }),
+        });
+    }
+
+    _shellActorProofEligibility(targetPayload, requestedRect, rectTolerance) {
+        const reasons = [];
+        if (!targetPayload) {
+            reasons.push('target_unavailable');
+            return { eligible: false, reasons };
+        }
+        if (!targetPayload.fullscreen) {
+            reasons.push('target_not_fullscreen');
+        }
+        if (!targetPayload.showingOnWorkspace) {
+            reasons.push('target_not_on_current_workspace');
+        }
+        if (targetPayload.minimized) {
+            reasons.push('target_minimized');
+        }
+        if (!this._rectIsValid(targetPayload.contentRect)) {
+            reasons.push('missing_target_content_rect');
+        }
+        if (!this._rectIsValid(targetPayload.monitorRect)) {
+            reasons.push('missing_target_monitor_rect');
+        }
+        if (!this._rectIsValid(requestedRect)) {
+            reasons.push('invalid_requested_rect');
+        }
+        if (
+            this._rectIsValid(targetPayload.contentRect) &&
+            this._rectIsValid(targetPayload.monitorRect) &&
+            !this._rectsMatchWithinTolerance(targetPayload.contentRect, targetPayload.monitorRect, rectTolerance)
+        ) {
+            reasons.push('target_content_rect_not_monitor_bounds');
+        }
+        if (
+            this._rectIsValid(targetPayload.contentRect) &&
+            this._rectIsValid(requestedRect) &&
+            !this._rectsMatchWithinTolerance(requestedRect, targetPayload.contentRect, rectTolerance)
+        ) {
+            reasons.push('requested_rect_not_target_content_rect');
+        }
+        return {
+            eligible: reasons.length === 0,
+            reasons,
+        };
+    }
+
+    _showShellActorProof(targetPayload, requestedRect) {
+        const parent = this._shellActorProofParent(targetPayload);
+        if (!parent.container) {
+            this._clearShellActorProof('missing_actor_parent');
+            return {
+                visible: false,
+                appliedRect: null,
+                actorParent: parent.name,
+            };
+        }
+        this._clearShellActorProof('replace_existing');
+
+        const actor = new St.Widget({
+            reactive: false,
+            visible: true,
+            style_class: 'edmc-shell-actor-proof',
+            style: 'background-color: rgba(0, 0, 0, 0);',
+        });
+        actor.set_reactive?.(false);
+        actor.set_position(requestedRect.x, requestedRect.y);
+        actor.set_size(requestedRect.width, requestedRect.height);
+
+        const outline = new St.Widget({
+            reactive: false,
+            visible: true,
+            style_class: 'edmc-shell-actor-proof-outline',
+            style: 'border: 3px solid rgba(0, 255, 180, 0.95); background-color: rgba(0, 0, 0, 0);',
+        });
+        outline.set_reactive?.(false);
+        outline.set_position(0, 0);
+        outline.set_size(requestedRect.width, requestedRect.height);
+
+        const label = new St.Label({
+            reactive: false,
+            visible: true,
+            text: 'EDMC Shell Proof',
+            style_class: 'edmc-shell-actor-proof-label',
+            style: 'background-color: rgba(0, 0, 0, 0.45); color: #00ffb4; padding: 6px 10px; font-weight: bold;',
+        });
+        label.set_reactive?.(false);
+        label.set_position(16, 16);
+
+        actor.add_child(outline);
+        actor.add_child(label);
+        const attached = this._addShellActorProofToParent(actor, parent);
+        if (!attached) {
+            actor.destroy?.();
+            return {
+                visible: false,
+                appliedRect: null,
+                actorParent: parent.name,
+            };
+        }
+        actor.set_position(requestedRect.x, requestedRect.y);
+        actor.set_size(requestedRect.width, requestedRect.height);
+        actor.show?.();
+        actor.raise_top?.();
+
+        this._shellActorProof = {
+            actor,
+            targetToken: targetPayload.targetToken,
+            requestedRect,
+            actorParent: parent.name,
+            actorParentMode: parent.mode,
+        };
+        this._refreshShellActorProofTimeout();
+        return {
+            visible: true,
+            appliedRect: this._shellActorBounds(actor),
+            actorParent: parent.name,
+        };
+    }
+
+    _shellActorProofParent(targetPayload = null) {
+        const targetActor = this._targetWindowActorForToken(targetPayload?.targetToken || '');
+        return {
+            container: targetActor,
+            mode: 'target_window_actor_child',
+            name: SHELL_ACTOR_PROOF_PARENT,
+        };
+    }
+
+    _addShellActorProofToParent(actor, parent) {
+        if (
+            parent.mode === 'target_window_actor_child' &&
+            typeof parent.container?.add_child === 'function'
+        ) {
+            try {
+                parent.container.add_child(actor);
+                return true;
+            } catch (_error) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    _targetWindowActorForToken(targetToken = '') {
+        if (!targetToken) {
+            return null;
+        }
+        const actors = global.get_window_actors?.() || [];
+        for (const actor of actors) {
+            const window = this._metaWindowForActor(actor);
+            if (window && this._targetToken(window) === targetToken) {
+                return actor;
+            }
+        }
+        return null;
+    }
+
+    _shellActorGroupDiagnostics(targetToken = '') {
+        const uiGroup = this._uiGroupActor();
+        return {
+            schema: 1,
+            target_token: targetToken,
+            known_groups: SHELL_ACTOR_GROUP_DIAGNOSTIC_NAMES,
+            child_limit: SHELL_ACTOR_GROUP_DIAGNOSTIC_CHILD_LIMIT,
+            groups: SHELL_ACTOR_GROUP_DIAGNOSTIC_NAMES.map(name => this._shellActorGroupDiagnostic(
+                name,
+                {
+                    targetToken,
+                    includeWindowDetails: name === 'global.window_group',
+                },
+            )),
+            stage_child_order: this._shellActorChildOrder('global.stage', { targetToken }),
+            ui_group_child_order: this._actorChildOrder(
+                'Main.uiGroup',
+                uiGroup,
+                { targetToken, includeWindowDetails: true },
+            ),
+            window_group_child_order: this._shellActorChildOrder(
+                'global.window_group',
+                { targetToken, includeWindowDetails: true },
+            ),
+            proof_actor: this._shellActorProofDiagnostic(),
+            target_window_actor: this._targetWindowActorDiagnostic(targetToken),
+        };
+    }
+
+    _shellActorGroupDiagnostic(name, options = {}) {
+        const actor = this._globalActorByName(name);
+        if (!actor) {
+            return {
+                name,
+                available: false,
+                actor_type: '',
+                parent: '',
+                parent_index: null,
+                visible: null,
+                mapped: null,
+                reactive: null,
+                bounds: null,
+                child_count: 0,
+                children: [],
+                children_truncated: false,
+            };
+        }
+
+        const children = this._actorChildren(actor);
+        const parent = this._actorParent(actor);
+        return {
+            name,
+            available: true,
+            actor_type: this._actorType(actor),
+            parent: this._actorLabel(parent),
+            parent_index: this._actorIndexInParent(parent, actor),
+            visible: this._actorBoolean(actor, 'visible'),
+            mapped: this._actorBoolean(actor, 'mapped'),
+            reactive: this._actorBoolean(actor, 'reactive'),
+            bounds: this._shellActorBounds(actor),
+            child_count: children.length,
+            children: this._actorChildSummaries(actor, options),
+            children_truncated: children.length > SHELL_ACTOR_GROUP_DIAGNOSTIC_CHILD_LIMIT,
+        };
+    }
+
+    _shellActorChildOrder(name, options = {}) {
+        const actor = this._globalActorByName(name);
+        return this._actorChildOrder(name, actor, options);
+    }
+
+    _actorChildOrder(parentLabel, actor, options = {}) {
+        const children = this._actorChildren(actor);
+        return {
+            parent: parentLabel,
+            available: Boolean(actor),
+            child_count: children.length,
+            children: this._actorChildSummaries(actor, options),
+            children_truncated: children.length > SHELL_ACTOR_GROUP_DIAGNOSTIC_CHILD_LIMIT,
+        };
+    }
+
+    _uiGroupActor() {
+        const windowGroupParent = this._actorParent(this._globalActorByName('global.window_group'));
+        if (windowGroupParent) {
+            return windowGroupParent;
+        }
+        return this._actorChildren(this._globalActorByName('global.stage'))
+            .find(actor => this._actorName(actor) === 'uiGroup' || this._actorType(actor) === 'UiActor') || null;
+    }
+
+    _globalActorByName(name) {
+        if (!name?.startsWith?.('global.')) {
+            return null;
+        }
+        const key = name.slice('global.'.length);
+        try {
+            return global?.[key] || null;
+        } catch (_error) {
+            return null;
+        }
+    }
+
+    _actorChildren(actor) {
+        try {
+            return actor?.get_children?.() || [];
+        } catch (_error) {
+            return [];
+        }
+    }
+
+    _actorParent(actor) {
+        try {
+            return actor?.get_parent?.() || null;
+        } catch (_error) {
+            return null;
+        }
+    }
+
+    _actorChildSummaries(actor, options = {}) {
+        return this._actorChildren(actor)
+            .slice(0, SHELL_ACTOR_GROUP_DIAGNOSTIC_CHILD_LIMIT)
+            .map((child, index) => this._actorSummary(child, index, options));
+    }
+
+    _actorSummary(actor, index = null, options = {}) {
+        const summary = {
+            index,
+            label: this._actorLabel(actor),
+            actor_type: this._actorType(actor),
+            name: this._actorName(actor),
+            visible: this._actorBoolean(actor, 'visible'),
+            mapped: this._actorBoolean(actor, 'mapped'),
+            reactive: this._actorBoolean(actor, 'reactive'),
+            bounds: this._shellActorBounds(actor),
+            child_count: this._actorChildren(actor).length,
+        };
+        if (options.includeWindowDetails) {
+            summary.window = this._windowActorPayload(actor, options.targetToken || '');
+        }
+        return summary;
+    }
+
+    _windowActorPayload(actor, targetToken = '') {
+        const window = this._metaWindowForActor(actor);
+        if (!window) {
+            return null;
+        }
+        const tracker = Shell.WindowTracker.get_default();
+        const payload = this._windowPayload(window, tracker);
+        return {
+            target_token: payload.targetToken,
+            target_token_match: Boolean(targetToken && payload.targetToken === targetToken),
+            title: payload.title,
+            wm_class: payload.wmClass,
+            wm_class_instance: payload.wmClassInstance,
+            app_id: payload.appId,
+            app_name: payload.appName,
+            pid: payload.pid,
+            monitor: payload.monitor,
+            fullscreen: payload.fullscreen,
+            has_focus: payload.hasFocus,
+            showing_on_workspace: payload.showingOnWorkspace,
+            minimized: payload.minimized,
+            workspace: payload.workspace,
+            frame_rect: payload.frameRect,
+            buffer_rect: payload.bufferRect,
+            content_rect: payload.contentRect,
+        };
+    }
+
+    _targetWindowActorDiagnostic(targetToken = '') {
+        if (!targetToken) {
+            return null;
+        }
+        const windowGroup = this._globalActorByName('global.window_group');
+        const matches = this._actorChildren(windowGroup)
+            .map((child, index) => this._actorSummary(
+                child,
+                index,
+                { targetToken, includeWindowDetails: true },
+            ))
+            .filter(summary => Boolean(summary.window?.target_token_match));
+        return {
+            target_token: targetToken,
+            window_group_available: Boolean(windowGroup),
+            match_count: matches.length,
+            matches,
+        };
+    }
+
+    _shellActorProofDiagnostic() {
+        const actor = this._shellActorProof?.actor || null;
+        const parent = this._actorParent(actor);
+        const parentIndex = this._actorIndexInParent(parent, actor);
+        return {
+            actor_visible: Boolean(actor),
+            actor_parent: this._shellActorProof?.actorParent || '',
+            parent: this._actorLabel(parent),
+            parent_index: parentIndex,
+            sibling_index: parentIndex,
+            visible: this._actorBoolean(actor, 'visible'),
+            mapped: this._actorBoolean(actor, 'mapped'),
+            reactive: this._actorBoolean(actor, 'reactive'),
+            bounds: this._shellActorBounds(actor),
+            child_count: this._actorChildren(actor).length,
+        };
+    }
+
+    _metaWindowForActor(actor) {
+        try {
+            return actor?.get_meta_window?.() || null;
+        } catch (_error) {
+            return null;
+        }
+    }
+
+    _actorIndexInParent(parent, actor) {
+        if (!parent || !actor) {
+            return null;
+        }
+        const children = this._actorChildren(parent);
+        const index = children.indexOf(actor);
+        return index >= 0 ? index : null;
+    }
+
+    _actorLabel(actor) {
+        const type = this._actorType(actor);
+        const name = this._actorName(actor);
+        if (type && name) {
+            return `${type}:${name}`;
+        }
+        return type || name || '';
+    }
+
+    _actorType(actor) {
+        if (!actor) {
+            return '';
+        }
+        try {
+            return String(actor.constructor?.name || actor.toString?.() || '');
+        } catch (_error) {
+            return '';
+        }
+    }
+
+    _actorName(actor) {
+        if (!actor) {
+            return '';
+        }
+        try {
+            return String(actor.get_name?.() || actor.name || '');
+        } catch (_error) {
+            return '';
+        }
+    }
+
+    _actorBoolean(actor, key) {
+        if (!actor || actor[key] === undefined || actor[key] === null) {
+            return null;
+        }
+        return Boolean(actor[key]);
+    }
+
+    _shellActorBounds(actor) {
+        if (!actor) {
+            return null;
+        }
+        return {
+            x: Math.round(Number(actor.x) || 0),
+            y: Math.round(Number(actor.y) || 0),
+            width: Math.round(Number(actor.width) || 0),
+            height: Math.round(Number(actor.height) || 0),
+        };
+    }
+
+    _shellActorProofPayload({
+        requestedAction,
+        visible,
+        requestedRect = null,
+        targetToken = '',
+        targetPayload = null,
+        appliedRect = null,
+        actorParent = '',
+        eligible = true,
+        eligibilityReasons = [],
+        cleanupAction = '',
+        staleTimeoutSeconds = SHELL_ACTOR_PROOF_TIMEOUT_MS / 1000,
+        groupDiagnostics = null,
+    }) {
+        const payload = {
+            schema: 1,
+            requested: Boolean(requestedAction),
+            action: requestedAction,
+            actor_visible: Boolean(visible),
+            requested_rect: requestedRect,
+            applied_actor_bounds: appliedRect,
+            target_token: targetToken,
+            target_monitor: targetPayload?.monitor ?? null,
+            target_monitor_rect: targetPayload?.monitorRect || null,
+            actor_parent: actorParent || this._shellActorProof?.actorParent || '',
+            eligible,
+            eligibility_reasons: eligibilityReasons,
+            stale_timeout_seconds: staleTimeoutSeconds,
+            cleanup_action: cleanupAction,
+        };
+        if (groupDiagnostics) {
+            payload.group_diagnostics = groupDiagnostics;
+        }
+        return payload;
+    }
+
+    _refreshShellActorProofTimeout() {
+        if (this._shellActorProofTimeoutId) {
+            GLib.source_remove(this._shellActorProofTimeoutId);
+            this._shellActorProofTimeoutId = 0;
+        }
+        this._shellActorProofTimeoutId = GLib.timeout_add(
+            GLib.PRIORITY_DEFAULT,
+            SHELL_ACTOR_PROOF_TIMEOUT_MS,
+            () => {
+                this._clearShellActorProof('stale_timeout');
+                return GLib.SOURCE_REMOVE;
+            },
+        );
+    }
+
+    _clearShellActorProof(reason = 'clear') {
+        const hadActor = Boolean(this._shellActorProof?.actor);
+        const proof = this._shellActorProof;
+        if (this._shellActorProofTimeoutId) {
+            GLib.source_remove(this._shellActorProofTimeoutId);
+            this._shellActorProofTimeoutId = 0;
+        }
+        this._shellActorProof = null;
+        try {
+            const parent = proof?.actor?.get_parent?.();
+            if (parent && typeof parent.remove_child === 'function') {
+                parent.remove_child(proof.actor);
+            }
+        } catch (_error) {
+            // Best-effort cleanup only; diagnostics report the requested cleanup reason.
+        }
+        try {
+            proof?.actor?.destroy?.();
+        } catch (_error) {
+            // Best-effort cleanup only; diagnostics report the requested cleanup reason.
+        }
+        return hadActor ? reason : '';
     }
 
     _findOverlayWindow(entries, request, targetToken) {
@@ -701,41 +1529,76 @@ class HelperHealthService {
         }) || null;
     }
 
-    _applyOverlayPresentation(window, requestedRect, rectTolerance = 2) {
+    _applyOverlayPresentation(window, requestedRect, rectTolerance = 2, options = {}) {
         const unsupportedFeatures = [];
         const degradeReasons = [];
         let placement = false;
         let stacking = false;
         let appliedRect = null;
+        let moveResizeAction = 'not_attempted';
+        let strategyProbeDiagnostics = null;
+        const strategyProbe = this._normalisePresentationStrategyProbe(
+            options.presentationStrategyProbe,
+            options.includePresentationStrategyDiagnostics,
+        );
         const currentFrameRect = this._rectPayload(this._safeCall(window, 'get_frame_rect'));
-        try {
-            if (
-                currentFrameRect &&
-                this._rectIsValid(currentFrameRect) &&
-                this._rectsMatchWithinTolerance(currentFrameRect, requestedRect, rectTolerance)
-            ) {
-                placement = true;
-                appliedRect = currentFrameRect;
-            } else if (typeof window?.move_resize_frame === 'function') {
-                window.move_resize_frame(
-                    false,
-                    requestedRect.x,
-                    requestedRect.y,
-                    requestedRect.width,
-                    requestedRect.height,
-                );
-                placement = true;
-            } else if (typeof window?.move_frame === 'function') {
-                window.move_frame(false, requestedRect.x, requestedRect.y);
-                unsupportedFeatures.push('resize_frame');
-                degradeReasons.push('placement_size_unproven');
-            } else {
-                unsupportedFeatures.push('move_resize_frame');
+        const preBufferRect = this._rectPayload(this._safeCall(window, 'get_buffer_rect'));
+        const preMonitor = this._safeCall(window, 'get_monitor');
+        if (strategyProbe) {
+            strategyProbeDiagnostics = this._applyPresentationStrategyProbe(
+                window,
+                strategyProbe,
+                requestedRect,
+                rectTolerance,
+                options.targetPayload,
+            );
+            placement = Boolean(strategyProbeDiagnostics.placement);
+            appliedRect = strategyProbeDiagnostics.appliedRect || null;
+            moveResizeAction = `strategy_probe:${strategyProbeDiagnostics.strategy || strategyProbe}`;
+            if (!strategyProbeDiagnostics.eligible) {
+                degradeReasons.push('presentation_strategy_probe_ineligible');
+            }
+            if (strategyProbeDiagnostics.error) {
+                degradeReasons.push('presentation_strategy_probe_error');
+            }
+            if (!placement) {
                 degradeReasons.push('placement_unproven');
             }
-        } catch (_error) {
-            placement = false;
-            degradeReasons.push('placement_error');
+        } else {
+            try {
+                if (
+                    currentFrameRect &&
+                    this._rectIsValid(currentFrameRect) &&
+                    this._rectsMatchWithinTolerance(currentFrameRect, requestedRect, rectTolerance)
+                ) {
+                    placement = true;
+                    appliedRect = currentFrameRect;
+                    moveResizeAction = 'skipped_matching_frame';
+                } else if (typeof window?.move_resize_frame === 'function') {
+                    window.move_resize_frame(
+                        false,
+                        requestedRect.x,
+                        requestedRect.y,
+                        requestedRect.width,
+                        requestedRect.height,
+                    );
+                    placement = true;
+                    moveResizeAction = 'move_resize_frame';
+                } else if (typeof window?.move_frame === 'function') {
+                    window.move_frame(false, requestedRect.x, requestedRect.y);
+                    unsupportedFeatures.push('resize_frame');
+                    degradeReasons.push('placement_size_unproven');
+                    moveResizeAction = 'move_frame';
+                } else {
+                    unsupportedFeatures.push('move_resize_frame');
+                    degradeReasons.push('placement_unproven');
+                    moveResizeAction = 'unsupported';
+                }
+            } catch (_error) {
+                placement = false;
+                degradeReasons.push('placement_error');
+                moveResizeAction = 'error';
+            }
         }
         try {
             if (typeof window?.make_above === 'function') {
@@ -750,12 +1613,427 @@ class HelperHealthService {
             degradeReasons.push('stacking_error');
         }
         const frameRect = this._rectPayload(this._safeCall(window, 'get_frame_rect'));
+        const postBufferRect = this._rectPayload(this._safeCall(window, 'get_buffer_rect'));
+        const postMonitor = this._safeCall(window, 'get_monitor');
         if (frameRect && this._rectIsValid(frameRect)) {
-            appliedRect = frameRect;
+            appliedRect = strategyProbeDiagnostics?.appliedRect || frameRect;
         } else if (placement) {
             appliedRect = appliedRect || requestedRect;
         }
-        return { placement, stacking, appliedRect, unsupportedFeatures, degradeReasons };
+        if (
+            placement &&
+            appliedRect &&
+            requestedRect &&
+            this._rectIsValid(appliedRect) &&
+            this._rectIsValid(requestedRect) &&
+            !this._rectsMatchWithinTolerance(appliedRect, requestedRect, rectTolerance)
+        ) {
+            degradeReasons.push('applied_rect_mismatch');
+        }
+        const presentationDiagnostics = (options.includePresentationDiagnostics || strategyProbeDiagnostics)
+            ? this._presentationDiagnosticsPayload({
+                requestedRect,
+                overlayPayload: options.overlayPayload,
+                targetPayload: options.targetPayload,
+                moveResizeAction,
+                preFrameRect: currentFrameRect,
+                preBufferRect,
+                preMonitor,
+                postFrameRect: frameRect,
+                postBufferRect,
+                postMonitor,
+                strategyProbeDiagnostics,
+            })
+            : null;
+        return {
+            placement,
+            stacking,
+            appliedRect,
+            unsupportedFeatures,
+            degradeReasons,
+            presentationDiagnostics,
+        };
+    }
+
+    _presentationDiagnosticsPayload({
+        requestedRect,
+        overlayPayload,
+        targetPayload,
+        moveResizeAction,
+        preFrameRect,
+        preBufferRect,
+        preMonitor,
+        postFrameRect,
+        postBufferRect,
+        postMonitor,
+        strategyProbeDiagnostics,
+    }) {
+        const payload = {
+            schema: 1,
+            requestedRect,
+            target: {
+                targetToken: targetPayload?.targetToken || '',
+                monitor: targetPayload?.monitor ?? null,
+                monitorRect: targetPayload?.monitorRect || null,
+                frameRect: targetPayload?.frameRect || null,
+                bufferRect: targetPayload?.bufferRect || null,
+                contentRect: targetPayload?.contentRect || null,
+                fullscreen: Boolean(targetPayload?.fullscreen),
+                showingOnWorkspace: Boolean(targetPayload?.showingOnWorkspace),
+            },
+            overlay: {
+                targetToken: overlayPayload?.targetToken || '',
+                title: overlayPayload?.title || '',
+                wmClass: overlayPayload?.wmClass || '',
+                wmClassInstance: overlayPayload?.wmClassInstance || '',
+                appId: overlayPayload?.appId || '',
+                appName: overlayPayload?.appName || '',
+            },
+            placement: {
+                moveResizeAction,
+            },
+            before: {
+                frameRect: preFrameRect,
+                bufferRect: preBufferRect,
+                monitor: preMonitor ?? null,
+            },
+            after: {
+                frameRect: postFrameRect,
+                bufferRect: postBufferRect,
+                monitor: postMonitor ?? null,
+            },
+        };
+        if (strategyProbeDiagnostics) {
+            payload.strategyProbe = strategyProbeDiagnostics;
+        }
+        return payload;
+    }
+
+    _normalisePresentationStrategyProbe(rawStrategy, includePresentationStrategyDiagnostics) {
+        const strategy = String(rawStrategy || '').trim();
+        if (strategy) {
+            return strategy;
+        }
+        return includePresentationStrategyDiagnostics ? 'normal_move_resize' : '';
+    }
+
+    _applyPresentationStrategyProbe(window, strategy, requestedRect, rectTolerance, targetPayload) {
+        const normalisedStrategy = PRESENTATION_STRATEGY_PROBES.includes(strategy)
+            ? strategy
+            : '';
+        const before = this._presentationProbeWindowState(window);
+        const methodAvailability = this._presentationProbeMethodAvailability(window);
+        const eligibility = this._presentationStrategyEligibility(targetPayload, requestedRect, rectTolerance);
+        const diagnostics = {
+            schema: 1,
+            requestedStrategy: strategy,
+            strategy: normalisedStrategy || strategy,
+            knownStrategies: PRESENTATION_STRATEGY_PROBES,
+            eligible: eligibility.eligible && Boolean(normalisedStrategy),
+            eligibilityReasons: normalisedStrategy ? eligibility.reasons : ['unsupported_strategy'],
+            methodAvailability,
+            requestedRect,
+            target: {
+                targetToken: targetPayload?.targetToken || '',
+                monitor: targetPayload?.monitor ?? null,
+                monitorRect: targetPayload?.monitorRect || null,
+                contentRect: targetPayload?.contentRect || null,
+                fullscreen: Boolean(targetPayload?.fullscreen),
+            },
+            before,
+            actions: [],
+            after: null,
+            appliedRect: null,
+            rectMatch: false,
+            monitorChanged: false,
+            fullscreenChanged: false,
+            placement: false,
+            error: '',
+            restoration: {
+                attempted: false,
+                actions: [],
+                after: null,
+                restoredFrame: null,
+                detail: '',
+            },
+        };
+        if (!diagnostics.eligible) {
+            diagnostics.after = this._presentationProbeWindowState(window);
+            diagnostics.appliedRect = diagnostics.after.frameRect;
+            diagnostics.rectMatch = this._rectsMatchWithinTolerance(
+                diagnostics.appliedRect,
+                requestedRect,
+                rectTolerance,
+            );
+            return diagnostics;
+        }
+
+        try {
+            this._runPresentationStrategyProbe(window, normalisedStrategy, requestedRect, targetPayload, diagnostics);
+        } catch (error) {
+            diagnostics.error = this._errorMessage(error);
+        }
+        const strategyAfter = this._presentationProbeWindowState(window);
+        diagnostics.after = strategyAfter;
+        diagnostics.appliedRect = strategyAfter.frameRect;
+        diagnostics.rectMatch = this._rectsMatchWithinTolerance(strategyAfter.frameRect, requestedRect, rectTolerance);
+        diagnostics.monitorChanged = before.monitor !== strategyAfter.monitor;
+        diagnostics.fullscreenChanged = before.fullscreen !== strategyAfter.fullscreen;
+        diagnostics.placement = diagnostics.actions.some(action => action.ok);
+
+        if (this._strategyUsesFullscreen(normalisedStrategy) && !before.fullscreen) {
+            this._restoreAfterFullscreenProbe(window, before, diagnostics.restoration);
+        }
+        return diagnostics;
+    }
+
+    _presentationStrategyEligibility(targetPayload, requestedRect, rectTolerance) {
+        const reasons = [];
+        const contentRect = targetPayload?.contentRect || null;
+        const monitorRect = targetPayload?.monitorRect || null;
+        if (!targetPayload?.fullscreen) {
+            reasons.push('target_not_fullscreen');
+        }
+        if (!this._rectIsValid(contentRect)) {
+            reasons.push('missing_target_content_rect');
+        }
+        if (!this._rectIsValid(monitorRect)) {
+            reasons.push('missing_target_monitor_rect');
+        }
+        if (!this._rectIsValid(requestedRect)) {
+            reasons.push('invalid_requested_rect');
+        }
+        if (
+            this._rectIsValid(contentRect) &&
+            this._rectIsValid(monitorRect) &&
+            !this._rectsMatchWithinTolerance(contentRect, monitorRect, rectTolerance)
+        ) {
+            reasons.push('target_content_rect_not_monitor_bounds');
+        }
+        if (
+            this._rectIsValid(requestedRect) &&
+            this._rectIsValid(monitorRect) &&
+            !this._rectsMatchWithinTolerance(requestedRect, monitorRect, rectTolerance)
+        ) {
+            reasons.push('requested_rect_not_monitor_bounds');
+        }
+        return {
+            eligible: reasons.length === 0,
+            reasons,
+        };
+    }
+
+    _runPresentationStrategyProbe(window, strategy, requestedRect, targetPayload, diagnostics) {
+        switch (strategy) {
+        case 'normal_move_resize':
+            this._probeMoveResize(window, requestedRect, diagnostics.actions);
+            break;
+        case 'move_to_monitor_then_resize':
+            this._probeMoveToMonitor(window, targetPayload?.monitor, diagnostics.actions);
+            this._probeMoveResize(window, requestedRect, diagnostics.actions);
+            break;
+        case 'resize_then_move_to_monitor':
+            this._probeMoveResize(window, requestedRect, diagnostics.actions);
+            this._probeMoveToMonitor(window, targetPayload?.monitor, diagnostics.actions);
+            break;
+        case 'make_fullscreen_then_resize':
+            this._probeMakeFullscreen(window, diagnostics.actions);
+            this._probeMoveResize(window, requestedRect, diagnostics.actions);
+            break;
+        case 'resize_then_make_fullscreen':
+            this._probeMoveResize(window, requestedRect, diagnostics.actions);
+            this._probeMakeFullscreen(window, diagnostics.actions);
+            break;
+        case 'fullscreen_only':
+            this._probeMakeFullscreen(window, diagnostics.actions);
+            break;
+        default:
+            diagnostics.error = 'unsupported strategy';
+            break;
+        }
+    }
+
+    _probeMoveResize(window, requestedRect, actions) {
+        const currentFrameRect = this._rectPayload(this._safeCall(window, 'get_frame_rect'));
+        if (
+            currentFrameRect &&
+            this._rectIsValid(currentFrameRect) &&
+            this._rectsMatchWithinTolerance(currentFrameRect, requestedRect, 0)
+        ) {
+            actions.push({
+                name: 'skip_matching_frame',
+                method: 'get_frame_rect',
+                available: true,
+                ok: true,
+                error: '',
+            });
+            return;
+        }
+        if (typeof window?.move_resize_frame === 'function') {
+            this._recordPresentationProbeAction(actions, 'move_resize_frame', () => {
+                window.move_resize_frame(
+                    false,
+                    requestedRect.x,
+                    requestedRect.y,
+                    requestedRect.width,
+                    requestedRect.height,
+                );
+            });
+            return;
+        }
+        if (typeof window?.move_frame === 'function') {
+            this._recordPresentationProbeAction(actions, 'move_frame', () => {
+                window.move_frame(false, requestedRect.x, requestedRect.y);
+            });
+            return;
+        }
+        actions.push({
+            name: 'move_resize_frame',
+            method: 'move_resize_frame',
+            available: false,
+            ok: false,
+            error: 'method unavailable',
+        });
+    }
+
+    _probeMoveToMonitor(window, monitorIndex, actions) {
+        if (typeof window?.move_to_monitor !== 'function') {
+            actions.push({
+                name: 'move_to_monitor',
+                method: 'move_to_monitor',
+                available: false,
+                ok: false,
+                error: 'method unavailable',
+            });
+            return;
+        }
+        const index = this._normaliseMonitorIndex(monitorIndex);
+        if (index === null) {
+            actions.push({
+                name: 'move_to_monitor',
+                method: 'move_to_monitor',
+                available: true,
+                ok: false,
+                error: 'target monitor unavailable',
+            });
+            return;
+        }
+        this._recordPresentationProbeAction(actions, 'move_to_monitor', () => {
+            window.move_to_monitor(index);
+        });
+    }
+
+    _probeMakeFullscreen(window, actions) {
+        if (typeof window?.make_fullscreen !== 'function') {
+            actions.push({
+                name: 'make_fullscreen',
+                method: 'make_fullscreen',
+                available: false,
+                ok: false,
+                error: 'method unavailable',
+            });
+            return;
+        }
+        this._recordPresentationProbeAction(actions, 'make_fullscreen', () => {
+            window.make_fullscreen();
+        });
+    }
+
+    _restoreAfterFullscreenProbe(window, before, restoration) {
+        restoration.attempted = true;
+        if (typeof window?.unmake_fullscreen === 'function') {
+            this._recordPresentationProbeAction(restoration.actions, 'unmake_fullscreen', () => {
+                window.unmake_fullscreen();
+            });
+        } else {
+            restoration.actions.push({
+                name: 'unmake_fullscreen',
+                method: 'unmake_fullscreen',
+                available: false,
+                ok: false,
+                error: 'method unavailable',
+            });
+        }
+        if (this._rectIsValid(before.frameRect) && typeof window?.move_resize_frame === 'function') {
+            this._recordPresentationProbeAction(restoration.actions, 'restore_move_resize_frame', () => {
+                window.move_resize_frame(
+                    false,
+                    before.frameRect.x,
+                    before.frameRect.y,
+                    before.frameRect.width,
+                    before.frameRect.height,
+                );
+            });
+        } else {
+            restoration.actions.push({
+                name: 'restore_move_resize_frame',
+                method: 'move_resize_frame',
+                available: typeof window?.move_resize_frame === 'function',
+                ok: false,
+                error: 'pre-probe frame unavailable or method unavailable',
+            });
+        }
+        restoration.after = this._presentationProbeWindowState(window);
+        restoration.restoredFrame = this._rectsMatchWithinTolerance(
+            restoration.after.frameRect,
+            before.frameRect,
+            2,
+        );
+    }
+
+    _recordPresentationProbeAction(actions, method, callback) {
+        try {
+            callback();
+            actions.push({
+                name: method,
+                method,
+                available: true,
+                ok: true,
+                error: '',
+            });
+        } catch (error) {
+            actions.push({
+                name: method,
+                method,
+                available: true,
+                ok: false,
+                error: this._errorMessage(error),
+            });
+        }
+    }
+
+    _presentationProbeWindowState(window) {
+        return {
+            frameRect: this._rectPayload(this._safeCall(window, 'get_frame_rect')),
+            bufferRect: this._rectPayload(this._safeCall(window, 'get_buffer_rect')),
+            monitor: this._safeCall(window, 'get_monitor'),
+            fullscreen: Boolean(window?.fullscreen || window?.is_fullscreen?.()),
+            workspace: this._workspaceName(window),
+        };
+    }
+
+    _presentationProbeMethodAvailability(window) {
+        return {
+            move_to_monitor: typeof window?.move_to_monitor === 'function',
+            move_resize_frame: typeof window?.move_resize_frame === 'function',
+            move_frame: typeof window?.move_frame === 'function',
+            make_fullscreen: typeof window?.make_fullscreen === 'function',
+            unmake_fullscreen: typeof window?.unmake_fullscreen === 'function',
+            make_above: typeof window?.make_above === 'function',
+            change_workspace: typeof window?.change_workspace === 'function',
+            move_to_workspace: typeof window?.move_to_workspace === 'function',
+            stick: typeof window?.stick === 'function',
+        };
+    }
+
+    _strategyUsesFullscreen(strategy) {
+        return strategy === 'make_fullscreen_then_resize' ||
+            strategy === 'resize_then_make_fullscreen' ||
+            strategy === 'fullscreen_only';
+    }
+
+    _errorMessage(error) {
+        return String(error?.message || error || '');
     }
 
     _windowChromeFree(payload) {
@@ -771,7 +2049,7 @@ class HelperHealthService {
 
     _parseJsonObject(rawValue) {
         try {
-            const parsed = JSON.parse(String(rawValue || '{}'));
+            const parsed = JSON.parse(this._jsonStringPayload(rawValue));
             if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
                 return { ok: false, detail: 'request must be a JSON object' };
             }
@@ -779,6 +2057,14 @@ class HelperHealthService {
         } catch (_error) {
             return { ok: false, detail: 'request is not valid JSON' };
         }
+    }
+
+    _jsonStringPayload(rawValue) {
+        let value = this._deepUnpack(rawValue);
+        if (Array.isArray(value) && value.length === 1) {
+            value = this._deepUnpack(value[0]);
+        }
+        return String(value || '{}');
     }
 
     _requestString(payload, ...names) {
@@ -879,6 +2165,7 @@ export default class EdmcModernOverlayHelperExtension extends Extension {
             Gio.bus_unown_name(this._busOwnerId);
             this._busOwnerId = 0;
         }
+        this._healthService?._clearShellActorProof?.('helper_disable');
         this._unexportDbusObject();
         this._healthService = null;
         this._helperIdentity = null;

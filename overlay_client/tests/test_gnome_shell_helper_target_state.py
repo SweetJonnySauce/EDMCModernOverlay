@@ -153,6 +153,75 @@ def test_validate_gnome_shell_helper_target_accepts_geometry_without_content_rec
     assert resolution.degrade_reasons == (GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK,)
 
 
+def test_validate_gnome_shell_helper_target_preserves_geometry_diagnostics_without_selecting_them() -> None:
+    target = _target_window()
+    target.pop("contentRect")
+    target.pop("decorationInsets")
+    target["geometryDiagnostics"] = {
+        "schema": 1,
+        "candidates": {
+            "frame": {
+                "name": "frame",
+                "method": "get_frame_rect",
+                "available": True,
+                "valid": True,
+                "rect": {"x": 1080, "y": 216, "width": 1280, "height": 997},
+            },
+            "client_area": {
+                "name": "client_area",
+                "method": "get_client_area_rect",
+                "available": True,
+                "valid": True,
+                "rect": {"x": 1080, "y": 253, "width": 1280, "height": 960},
+            },
+        },
+        "insets": {
+            "frame_to_client_area": {
+                "name": "frame_to_client_area",
+                "source": "frame",
+                "target": "client_area",
+                "valid": True,
+                "insets": {"left": 0, "top": 37, "right": 0, "bottom": 0},
+            },
+        },
+        "monitor": {
+            "rect": {"x": 0, "y": 0, "width": 3440, "height": 1440},
+            "scale": 1,
+            "outputName": "DP-2",
+        },
+        "state": {
+            "hasFocus": True,
+            "showingOnWorkspace": True,
+            "minimized": False,
+            "fullscreen": False,
+            "workspace": "0",
+        },
+    }
+
+    status = validate_gnome_shell_helper_target_payload(
+        _target_payload(target=target),
+        health_status=_health_status(),
+        observed_at_monotonic=200.0,
+        now_monotonic=200.0,
+    )
+    resolution = resolve_gnome_shell_helper_target_rect(status)
+
+    assert status.state is HelperTargetState.FOUND
+    assert status.target is not None
+    diagnostics = status.target.geometry_diagnostics
+    assert diagnostics is not None
+    assert diagnostics.output_name == "DP-2"
+    assert diagnostics.monitor_rect == HelperRect(x=0, y=0, width=3440, height=1440)
+    assert [candidate.name for candidate in diagnostics.candidates] == ["frame", "client_area"]
+    assert diagnostics.candidates[1].rect == HelperRect(x=1080, y=253, width=1280, height=960)
+    assert diagnostics.insets[0].insets is not None
+    assert diagnostics.insets[0].insets.top == 37
+    assert status.target.to_payload()["geometry_diagnostics"] is not None
+    assert resolution.source == GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK
+    assert resolution.rect == HelperRect(x=0, y=0, width=3440, height=1440)
+    assert resolution.degrade_reasons == (GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK,)
+
+
 def test_validate_gnome_shell_helper_target_reports_not_found_launcher_only_and_ambiguous() -> None:
     health = _health_status()
 
