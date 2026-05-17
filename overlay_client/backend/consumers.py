@@ -14,7 +14,9 @@ from overlay_client.backend.status import BackendSelectionStatus
 from overlay_client.backend.surface_preparation import BackendPresentationSurfacePreparation
 
 if TYPE_CHECKING:
+    from overlay_client.backend import HelperPresentationRequest, HelperTargetStatus
     from overlay_client.backend.bundles._gnome_shell_helper_presentation import GnomeHelperPresentationCycleResult
+    from overlay_client.backend.shell_raster_frame import ShellRasterFrameBuildResult
     from overlay_client.platform_integration import PlatformContext
     from overlay_client.window_tracking import MonitorProvider, WindowTracker
 
@@ -240,6 +242,10 @@ def platform_label_for_bundle(bundle: BackendBundle) -> str:
 
 GnomePresentationCycleRunner = Callable[..., "GnomeHelperPresentationCycleResult"]
 BackendPresentationSurfacePreparer = Callable[[BackendPresentationSurfacePreparation], bool]
+BackendRasterFrameProvider = Callable[
+    ["HelperTargetStatus | None", "HelperPresentationRequest | None", bool],
+    "ShellRasterFrameBuildResult",
+]
 
 
 def run_backend_presentation_cycle(
@@ -250,6 +256,7 @@ def run_backend_presentation_cycle(
     previous_surface_action: str = "",
     gnome_runner: GnomePresentationCycleRunner | None = None,
     prepare_surface: BackendPresentationSurfacePreparer | None = None,
+    raster_frame_provider: BackendRasterFrameProvider | None = None,
 ) -> BackendPresentationCycleResult | None:
     """Run a backend-owned runtime presentation cycle when the selected backend exposes one."""
 
@@ -262,6 +269,7 @@ def run_backend_presentation_cycle(
             keep_overlay_visible=keep_overlay_visible,
             previous_surface_action=previous_surface_action,
             prepare_surface=prepare_surface,
+            shell_raster_frame_provider=raster_frame_provider,
         )
     )
 

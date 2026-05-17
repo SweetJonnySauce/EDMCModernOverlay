@@ -231,14 +231,16 @@ class OverlayWindow(SetupSurfaceMixin, InteractionSurfaceMixin, QWidget, RenderS
         return util_aspect_ratio_label(width, height)
 
     def _compute_legacy_mapper(self) -> LegacyMapper:
-        width = max(float(self.width()), 1.0)
-        height = max(float(self.height()), 1.0)
+        width_i, height_i = self._render_surface_logical_size()
+        width = max(float(width_i), 1.0)
+        height = max(float(height_i), 1.0)
         mode_value = (self._scale_mode or "fit").strip().lower()
         return util_compute_legacy_mapper(mode_value, width, height)
 
     def _viewport_state(self) -> ViewportState:
-        width = max(float(self.width()), 1.0)
-        height = max(float(self.height()), 1.0)
+        width_i, height_i = self._render_surface_logical_size()
+        width = max(float(width_i), 1.0)
+        height = max(float(height_i), 1.0)
         try:
             ratio = self.devicePixelRatioF()
         except (AttributeError, RuntimeError) as exc:

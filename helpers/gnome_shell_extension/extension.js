@@ -87,6 +87,7 @@ class HelperHealthService {
         this._shellActorProof = null;
         this._shellActorProofTimeoutId = 0;
         this._shellRasterFrame = null;
+        this._shellRasterRegions = new Map();
         this._shellRasterFrameTimeoutId = 0;
         this._shellRasterOverviewSignalIds = [];
         this._connectShellRasterOverviewSignals();
@@ -976,6 +977,11 @@ class HelperHealthService {
         const imagePath = this._requestString(payload, 'image_path', 'imagePath');
         const checksum = this._requestString(payload, 'checksum');
         const byteSize = this._requestInt(payload, 0, 'byte_size', 'byteSize');
+        const frameRegions = this._shellRasterFrameRegionsFromPayload({
+            regions: this._requestArray(payload, 'shell_raster_regions', 'shellRasterRegions'),
+            targetToken,
+            targetRect,
+        });
         const allowUnfocusedTarget = this._requestBool(
             payload,
             'allow_unfocused_target',
@@ -990,6 +996,7 @@ class HelperHealthService {
             'shell_raster_frame_diagnostics',
             'shellRasterFrameDiagnostics',
         );
+        const multiRegionRequested = frameRegions.length > 0;
 
         const windows = this._enumerateWindowEntries();
         const targetEntry = windows.find(entry => entry.payload.targetToken === targetToken);
@@ -1021,6 +1028,7 @@ class HelperHealthService {
                     imagePath,
                     checksum,
                     byteSize,
+                    regions: frameRegions,
                     eligible: false,
                     eligibilityReasons: [focusRiskReason],
                     cleanupAction,
@@ -1033,7 +1041,9 @@ class HelperHealthService {
             });
         }
         const eligibility = this._shellRasterFrameEligibility(targetPayload, targetRect, frameRect, rectTolerance);
-        const pathValidation = this._validateShellRasterFramePath(imagePath, byteSize);
+        const pathValidation = multiRegionRequested
+            ? this._validateShellRasterFrameRegions(frameRegions, targetRect)
+            : this._validateShellRasterFramePath(imagePath, byteSize);
         const reasons = [...eligibility.reasons, ...pathValidation.reasons];
         if (reasons.length) {
             const cleanupAction = this._clearShellRasterFrame('invalid_frame');
@@ -1061,6 +1071,7 @@ class HelperHealthService {
                     imagePath,
                     checksum,
                     byteSize,
+                    regions: frameRegions,
                     eligible: false,
                     eligibilityReasons: reasons,
                     cleanupAction,
@@ -1072,16 +1083,25 @@ class HelperHealthService {
             });
         }
 
-        const frameResult = this._showShellRasterFrame({
-            targetPayload,
-            targetRect,
-            frameRect,
-            frameVersion,
-            imagePath,
-            checksum,
-            byteSize,
-            staleTimeoutMs,
-        });
+        const frameResult = multiRegionRequested
+            ? this._showShellRasterFrameRegions({
+                targetPayload,
+                targetRect,
+                frameRect,
+                frameVersion,
+                regions: frameRegions,
+                staleTimeoutMs,
+            })
+            : this._showShellRasterFrame({
+                targetPayload,
+                targetRect,
+                frameRect,
+                frameVersion,
+                imagePath,
+                checksum,
+                byteSize,
+                staleTimeoutMs,
+            });
         const degradeReasons = frameResult.visible ? [] : frameResult.reasons;
         return this._presentationPayload({
             status: frameResult.visible ? 'presentation_applied' : 'presentation_degraded',
@@ -1117,6 +1137,7 @@ class HelperHealthService {
                 imagePath,
                 checksum,
                 byteSize,
+                regions: frameResult.regions || frameRegions,
                 eligible: true,
                 eligibilityReasons: degradeReasons,
                 staleTimeoutMs,
@@ -1258,6 +1279,60 @@ class HelperHealthService {
         };
     }
 
+    _shellRasterFrameRegionsFromPayload({ regions, targetToken, targetRect }) {
+        const parsed = [];
+        for (const entry of regions || []) {
+            if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+                continue;
+            }
+            const regionId = this._requestString(entry, 'region_id', 'regionId');
+            const frameRect = this._requestRect(entry, 'frame_rect', 'frameRect');
+            const imagePath = this._requestString(entry, 'image_path', 'imagePath');
+            const checksum = this._requestString(entry, 'checksum');
+            const byteSize = this._requestInt(entry, 0, 'byte_size', 'byteSize');
+            parsed.push({
+                regionId,
+                targetToken: this._requestString(entry, 'target_token', 'targetToken') || targetToken,
+                targetRect: this._requestRect(entry, 'target_rect', 'targetRect') || targetRect,
+                frameRect,
+                frameVersion: this._requestString(entry, 'frame_version', 'frameVersion'),
+                imagePath,
+                checksum,
+                byteSize,
+                diagnostics: this._requestObject(entry, 'diagnostics'),
+            });
+        }
+        return parsed.filter(region => region.regionId && this._rectIsValid(region.frameRect));
+    }
+
+    _validateShellRasterFrameRegions(regions, targetRect) {
+        const reasons = [];
+        if (!Array.isArray(regions) || regions.length <= 0) {
+            return { ok: false, reasons: ['missing_regions'] };
+        }
+        const seenRegionIds = new Set();
+        for (const region of regions) {
+            if (!region.regionId) {
+                reasons.push('invalid_region_id');
+            }
+            if (seenRegionIds.has(region.regionId)) {
+                reasons.push('duplicate_region_id');
+            }
+            seenRegionIds.add(region.regionId);
+            if (!this._rectIsValid(region.frameRect)) {
+                reasons.push('invalid_region_frame_rect');
+            } else if (this._rectIsValid(targetRect) && !this._rectContains(targetRect, region.frameRect)) {
+                reasons.push('region_frame_rect_mismatch');
+            }
+            const pathValidation = this._validateShellRasterFramePath(region.imagePath, region.byteSize);
+            reasons.push(...pathValidation.reasons.map(reason => `region_${reason}`));
+        }
+        return {
+            ok: reasons.length === 0,
+            reasons: [...new Set(reasons)],
+        };
+    }
+
     _shellRasterAllowedCacheDirs() {
         const dirs = [];
         const runtimeDir = String(GLib.getenv('XDG_RUNTIME_DIR') || GLib.get_user_runtime_dir?.() || '').trim();
@@ -1310,12 +1385,13 @@ class HelperHealthService {
         if (reusableFrame) {
             return reusableFrame;
         }
+        const regionsCleanupAction = this._clearShellRasterRegionActors('replace_regions_with_single');
         const cleanupReason = this._shellRasterFrame?.sessionId &&
             sessionId &&
             this._shellRasterFrame.sessionId !== sessionId
             ? 'session_generation_mismatch'
             : 'replace_existing';
-        const cleanupAction = this._clearShellRasterFrame(cleanupReason);
+        const cleanupAction = this._clearShellRasterFrame(cleanupReason) || regionsCleanupAction;
         let textureActor = null;
         let dimensions = null;
         let decodeMs = 0;
@@ -1402,6 +1478,183 @@ class HelperHealthService {
         };
     }
 
+    _showShellRasterFrameRegions({
+        targetPayload,
+        targetRect,
+        frameRect,
+        frameVersion,
+        regions,
+        staleTimeoutMs,
+    }) {
+        const totalStartedUs = GLib.get_monotonic_time();
+        const sessionId = this._shellRasterSessionIdFromVersion(frameVersion);
+        const targetActor = this._targetWindowActorForToken(targetPayload?.targetToken || '');
+        if (!targetActor || typeof targetActor.add_child !== 'function') {
+            const cleanupAction = this._clearShellRasterFrame('missing_target_window_actor');
+            return {
+                visible: false,
+                actorParent: SHELL_RASTER_FRAME_PARENT,
+                appliedRect: null,
+                frameDimensions: null,
+                cleanupAction,
+                reasons: ['target_window_actor_unavailable'],
+                timing: this._shellRasterHelperTiming(totalStartedUs),
+                regions: [],
+            };
+        }
+
+        this._clearSingleShellRasterFrame('replace_single_with_regions');
+        const incomingIds = new Set(regions.map(region => region.regionId));
+        const regionResults = [];
+        let totalDecodeMs = 0;
+        let totalApplyMs = 0;
+        let decodedCount = 0;
+        let reusedCount = 0;
+        let cleanupAction = '';
+
+        for (const region of regions) {
+            const regionStartedUs = GLib.get_monotonic_time();
+            const reusable = this._reuseShellRasterRegionIfMatching({
+                targetActor,
+                targetPayload,
+                targetRect,
+                region,
+                staleTimeoutMs,
+                startedUs: regionStartedUs,
+            });
+            if (reusable) {
+                reusedCount += 1;
+                totalApplyMs += Number(reusable.timing?.helper_apply_ms || 0);
+                regionResults.push(reusable.regionPayload);
+                continue;
+            }
+
+            let textureActor = null;
+            let dimensions = null;
+            let decodeMs = 0;
+            try {
+                const decodeStartedUs = GLib.get_monotonic_time();
+                const loaded = this._loadShellRasterTextureActor(region.imagePath);
+                decodeMs = this._elapsedMs(decodeStartedUs);
+                textureActor = loaded.actor;
+                dimensions = loaded.dimensions;
+                if (dimensions.width > region.frameRect.width || dimensions.height > region.frameRect.height) {
+                    textureActor.destroy?.();
+                    this._clearShellRasterFrame('region_dimensions_exceed_rect');
+                    return {
+                        visible: false,
+                        actorParent: SHELL_RASTER_FRAME_PARENT,
+                        appliedRect: null,
+                        frameDimensions: null,
+                        cleanupAction: 'region_dimensions_exceed_rect',
+                        reasons: ['frame_dimensions_exceed_rect'],
+                        timing: this._shellRasterHelperTiming(totalStartedUs, { decodeMs: totalDecodeMs + decodeMs }),
+                        regions: regionResults,
+                    };
+                }
+            } catch (_error) {
+                this._clearShellRasterFrame('region_decode_load_failed');
+                return {
+                    visible: false,
+                    actorParent: SHELL_RASTER_FRAME_PARENT,
+                    appliedRect: null,
+                    frameDimensions: null,
+                    cleanupAction: 'region_decode_load_failed',
+                    reasons: ['decode_load_failed'],
+                    timing: this._shellRasterHelperTiming(totalStartedUs, { decodeMs: totalDecodeMs }),
+                    regions: regionResults,
+                };
+            }
+
+            const localX = region.frameRect.x - targetRect.x;
+            const localY = region.frameRect.y - targetRect.y;
+            const applyStartedUs = GLib.get_monotonic_time();
+            let applyMs = 0;
+            textureActor.set_reactive?.(false);
+            textureActor.set_position(localX, localY);
+            textureActor.set_size(region.frameRect.width, region.frameRect.height);
+            try {
+                this._destroyShellRasterRegion(region.regionId, 'replace_region');
+                targetActor.add_child(textureActor);
+            } catch (_error) {
+                applyMs = this._elapsedMs(applyStartedUs);
+                textureActor.destroy?.();
+                this._clearShellRasterFrame('region_texture_apply_failed');
+                return {
+                    visible: false,
+                    actorParent: SHELL_RASTER_FRAME_PARENT,
+                    appliedRect: null,
+                    frameDimensions: null,
+                    cleanupAction: 'region_texture_apply_failed',
+                    reasons: ['texture_apply_failed'],
+                    timing: this._shellRasterHelperTiming(totalStartedUs, {
+                        decodeMs: totalDecodeMs + decodeMs,
+                        applyMs: totalApplyMs + applyMs,
+                    }),
+                    regions: regionResults,
+                };
+            }
+            textureActor.show?.();
+            textureActor.raise_top?.();
+            applyMs = this._elapsedMs(applyStartedUs);
+            decodedCount += 1;
+            totalDecodeMs += decodeMs;
+            totalApplyMs += applyMs;
+            const record = {
+                actor: textureActor,
+                regionId: region.regionId,
+                targetToken: targetPayload.targetToken,
+                targetRect,
+                frameRect: region.frameRect,
+                frameVersion: region.frameVersion,
+                imagePath: region.imagePath,
+                checksum: region.checksum,
+                byteSize: region.byteSize,
+                sessionId,
+                actorParent: SHELL_RASTER_FRAME_PARENT,
+                frameDimensions: dimensions,
+            };
+            this._shellRasterRegions.set(region.regionId, record);
+            regionResults.push(this._shellRasterRegionStatusPayload(region, {
+                actor_visible: true,
+                actor_parent: SHELL_RASTER_FRAME_PARENT,
+                frame_dimensions: dimensions,
+                session_id: sessionId,
+                update_reason: 'decoded_new_region',
+                diagnostics: this._shellRasterHelperTiming(regionStartedUs, {
+                    decodeMs,
+                    applyMs,
+                    updateReason: 'decoded_new_region',
+                }),
+            }));
+        }
+
+        for (const regionId of [...this._shellRasterRegions.keys()]) {
+            if (!incomingIds.has(regionId)) {
+                cleanupAction = this._destroyShellRasterRegion(regionId, 'remove_stale_region') || cleanupAction;
+            }
+        }
+        this._refreshShellRasterFrameTimeout(staleTimeoutMs);
+        return {
+            visible: true,
+            actorParent: SHELL_RASTER_FRAME_PARENT,
+            appliedRect: frameRect,
+            frameDimensions: { x: 0, y: 0, width: frameRect.width, height: frameRect.height },
+            cleanupAction,
+            sessionId,
+            updateReason: 'multi_region_update',
+            reasons: [],
+            regions: regionResults,
+            timing: this._shellRasterHelperTiming(totalStartedUs, {
+                decodeMs: totalDecodeMs,
+                applyMs: totalApplyMs,
+                reusedFrame: reusedCount > 0 && decodedCount === 0,
+                decodeSkipped: decodedCount === 0,
+                updateReason: decodedCount === 0 ? 'reused_existing_regions' : 'decoded_changed_regions',
+            }),
+        };
+    }
+
     _reuseShellRasterFrameIfMatching({
         targetActor,
         targetPayload,
@@ -1451,6 +1704,55 @@ class HelperHealthService {
                 reusedFrame: true,
                 decodeSkipped: true,
                 updateReason: 'reused_existing_frame',
+            }),
+        };
+    }
+
+    _reuseShellRasterRegionIfMatching({
+        targetActor,
+        targetPayload,
+        targetRect,
+        region,
+        startedUs,
+    }) {
+        const frame = this._shellRasterRegions.get(region.regionId);
+        if (!frame?.actor) {
+            return null;
+        }
+        if (!this._shellRasterFrameIdentityMatches(frame, {
+            targetToken: targetPayload?.targetToken || '',
+            targetRect,
+            frameRect: region.frameRect,
+            frameVersion: region.frameVersion,
+            imagePath: region.imagePath,
+            checksum: region.checksum,
+            byteSize: region.byteSize,
+        })) {
+            return null;
+        }
+        if (typeof frame.actor.get_parent === 'function' && frame.actor.get_parent() !== targetActor) {
+            return null;
+        }
+
+        const applyStartedUs = GLib.get_monotonic_time();
+        frame.actor.show?.();
+        frame.actor.raise_top?.();
+        const timing = this._shellRasterHelperTiming(startedUs, {
+            decodeMs: 0,
+            applyMs: this._elapsedMs(applyStartedUs),
+            reusedFrame: true,
+            decodeSkipped: true,
+            updateReason: 'reused_existing_region',
+        });
+        return {
+            timing,
+            regionPayload: this._shellRasterRegionStatusPayload(region, {
+                actor_visible: true,
+                actor_parent: frame.actorParent || SHELL_RASTER_FRAME_PARENT,
+                frame_dimensions: frame.frameDimensions,
+                session_id: frame.sessionId,
+                update_reason: 'reused_existing_region',
+                diagnostics: timing,
             }),
         };
     }
@@ -1519,6 +1821,7 @@ class HelperHealthService {
         imagePath = '',
         checksum = '',
         byteSize = 0,
+        regions = [],
         eligible = true,
         eligibilityReasons = [],
         cleanupAction = '',
@@ -1548,6 +1851,8 @@ class HelperHealthService {
             image_path: imagePath,
             checksum,
             byte_size: byteSize,
+            regions: Array.isArray(regions) ? regions.map(region => this._shellRasterRegionStatusPayload(region)) : [],
+            region_count: Array.isArray(regions) ? regions.length : 0,
             session_id: sessionId || this._shellRasterFrame?.sessionId || '',
             eligible,
             eligibility_reasons: eligibilityReasons,
@@ -1562,6 +1867,22 @@ class HelperHealthService {
             framePayload.diagnostics = diagnostics;
         }
         return framePayload;
+    }
+
+    _shellRasterRegionStatusPayload(region, extra = {}) {
+        return {
+            region_id: String(region?.regionId || region?.region_id || ''),
+            target_token: String(region?.targetToken || region?.target_token || ''),
+            target_rect: region?.targetRect || region?.target_rect || null,
+            frame_rect: region?.frameRect || region?.frame_rect || null,
+            frame_version: String(region?.frameVersion || region?.frame_version || ''),
+            frame_dimensions: region?.frameDimensions || region?.frame_dimensions || null,
+            image_path: String(region?.imagePath || region?.image_path || ''),
+            checksum: String(region?.checksum || ''),
+            byte_size: Number(region?.byteSize || region?.byte_size || 0) || 0,
+            update_reason: String(region?.updateReason || region?.update_reason || ''),
+            ...extra,
+        };
     }
 
     _shellRasterFrameDiagnostics(requestDiagnostics, helperTiming) {
@@ -1620,12 +1941,14 @@ class HelperHealthService {
 
     _clearShellRasterFrame(reason = 'clear') {
         const hadActor = Boolean(this._shellRasterFrame?.actor);
+        const hadRegions = Boolean(this._shellRasterRegions?.size);
         const frame = this._shellRasterFrame;
         if (this._shellRasterFrameTimeoutId) {
             GLib.source_remove(this._shellRasterFrameTimeoutId);
             this._shellRasterFrameTimeoutId = 0;
         }
         this._shellRasterFrame = null;
+        this._clearShellRasterRegionActors(reason);
         try {
             const parent = frame?.actor?.get_parent?.();
             if (parent && typeof parent.remove_child === 'function') {
@@ -1639,7 +1962,61 @@ class HelperHealthService {
         } catch (_error) {
             // Best-effort cleanup only; diagnostics report the requested cleanup reason.
         }
-        return hadActor ? reason : '';
+        return hadActor || hadRegions ? reason : '';
+    }
+
+    _clearSingleShellRasterFrame(reason = 'clear_single') {
+        const frame = this._shellRasterFrame;
+        if (!frame?.actor) {
+            this._shellRasterFrame = null;
+            return '';
+        }
+        this._shellRasterFrame = null;
+        try {
+            const parent = frame.actor.get_parent?.();
+            if (parent && typeof parent.remove_child === 'function') {
+                parent.remove_child(frame.actor);
+            }
+        } catch (_error) {
+            // Best-effort cleanup only; diagnostics report the requested cleanup reason.
+        }
+        try {
+            frame.actor.destroy?.();
+        } catch (_error) {
+            // Best-effort cleanup only; diagnostics report the requested cleanup reason.
+        }
+        return reason;
+    }
+
+    _clearShellRasterRegionActors(reason = 'clear_regions') {
+        let cleanupAction = '';
+        for (const regionId of [...(this._shellRasterRegions?.keys?.() || [])]) {
+            cleanupAction = this._destroyShellRasterRegion(regionId, reason) || cleanupAction;
+        }
+        return cleanupAction;
+    }
+
+    _destroyShellRasterRegion(regionId, reason = 'destroy_region') {
+        const frame = this._shellRasterRegions?.get(regionId);
+        if (!frame?.actor) {
+            this._shellRasterRegions?.delete?.(regionId);
+            return '';
+        }
+        this._shellRasterRegions.delete(regionId);
+        try {
+            const parent = frame.actor.get_parent?.();
+            if (parent && typeof parent.remove_child === 'function') {
+                parent.remove_child(frame.actor);
+            }
+        } catch (_error) {
+            // Best-effort cleanup only; diagnostics report the requested cleanup reason.
+        }
+        try {
+            frame.actor.destroy?.();
+        } catch (_error) {
+            // Best-effort cleanup only; diagnostics report the requested cleanup reason.
+        }
+        return reason;
     }
 
     _connectShellRasterOverviewSignals() {
@@ -2939,6 +3316,16 @@ class HelperHealthService {
             }
         }
         return null;
+    }
+
+    _requestArray(payload, ...names) {
+        for (const name of names) {
+            const value = payload?.[name];
+            if (Array.isArray(value)) {
+                return value;
+            }
+        }
+        return [];
     }
 
     _requestRect(payload, ...names) {

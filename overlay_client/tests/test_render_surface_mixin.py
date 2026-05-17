@@ -4,12 +4,12 @@ from typing import Any, Optional, Tuple
 
 import pytest
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QBrush, QColor
 
 from overlay_client.group_transform import GroupKey
 from overlay_client.legacy_store import LegacyItem
-from overlay_client.paint_commands import _MessagePaintCommand, _RectPaintCommand
-from overlay_client.render_surface import RenderSurfaceMixin, _MeasuredText, _OverlayBounds
+from overlay_client.paint_commands import _MessagePaintCommand, _RectPaintCommand, _VectorPaintCommand
+from overlay_client.render_surface import RenderSurfaceMixin, _MeasuredText, _OverlayBounds, _ScreenBounds
 
 
 class _StubMode:
@@ -37,6 +37,8 @@ class _StubMapper:
 class _StubSurface(RenderSurfaceMixin):
     def __init__(self) -> None:
         # Only initialise members touched by the tested helpers.
+        self._width = 100
+        self._height = 50
         self._line_widths = {}
         self._line_width_defaults = {}
         self._text_cache = {}
@@ -48,15 +50,29 @@ class _StubSurface(RenderSurfaceMixin):
         self._measure_stats: dict[str, Any] = {}
         self._text_measurer = None
         self._dev_mode_enabled = False
+        self._debug_config = SimpleNamespace(group_bounds_outline=False, payload_vertex_markers=False)
+        self._grouping_adapter = None
         self._debug_message_point_size = 0.0
         self._last_logged_scale = None
         self._font_scale_diag = 0.0
+        self._font_min_point = 1.0
+        self._font_max_point = 72.0
+
+    def width(self) -> int:
+        return self._width
+
+    def height(self) -> int:
+        return self._height
 
     def devicePixelRatioF(self) -> float:
         return 2.0
 
     def _compute_legacy_mapper(self) -> _StubMapper:
         return _StubMapper()
+
+    def _viewport_state(self) -> SimpleNamespace:
+        width, height = self._render_surface_logical_size()
+        return SimpleNamespace(width=float(width), height=float(height), device_ratio=1.0)
 
     def _update_message_font(self) -> None:
         return None
@@ -248,6 +264,181 @@ def test_reset_group_cache_clears_target_maps() -> None:
     assert surface._repaint_calls == [("group_cache_reset", True)]
 
 
+def _message_command(
+    key: Tuple[str, Optional[str]],
+    *,
+    item_id: str = "msg-1",
+    text: str = "BGS",
+    bounds: Tuple[int, int, int, int] = (100, 100, 180, 120),
+    color: str = "white",
+) -> _MessagePaintCommand:
+    left, top, right, bottom = bounds
+    return _MessagePaintCommand(
+        group_key=GroupKey(*key),
+        group_transform=None,
+        legacy_item=LegacyItem(item_id=item_id, kind="message", data={"text": text}, plugin=key[0]),
+        bounds=bounds,
+        overlay_bounds=(float(left), float(top), float(right), float(bottom)),
+        effective_anchor=None,
+        debug_log=None,
+        text=text,
+        color=QColor(color),
+        point_size=12.0,
+        x=left,
+        baseline=bottom - 4,
+        text_width=max(0, right - left),
+        ascent=max(0, bottom - top - 4),
+        descent=4,
+    )
+
+
+def _rect_command(
+    key: Tuple[str, Optional[str]],
+    *,
+    item_id: str = "rect-1",
+    bounds: Tuple[int, int, int, int] = (90, 90, 210, 130),
+    fill: str = "#80000000",
+) -> _RectPaintCommand:
+    left, top, right, bottom = bounds
+    return _RectPaintCommand(
+        group_key=GroupKey(*key),
+        group_transform=None,
+        legacy_item=LegacyItem(
+            item_id=item_id,
+            kind="rect",
+            data={"x": left, "y": top, "w": right - left, "h": bottom - top, "fill": fill, "color": "none"},
+            plugin=key[0],
+        ),
+        bounds=bounds,
+        overlay_bounds=(float(left), float(top), float(right), float(bottom)),
+        effective_anchor=None,
+        debug_log=None,
+        brush=QBrush(QColor(fill)),
+        x=left,
+        y=top,
+        width=max(0, right - left),
+        height=max(0, bottom - top),
+    )
+
+
+def _broad_group_bounds() -> _ScreenBounds:
+    bounds = _ScreenBounds()
+    bounds.include_rect(0, 0, 3440, 1440)
+    return bounds
+
+
+def test_shell_raster_crop_uses_visible_command_bounds_not_broad_group_bounds() -> None:
+    surface = _StubSurface()
+    key = ("BGS-Tally", "main")
+    commands = [
+        _message_command(key, bounds=(100, 100, 180, 120)),
+        _rect_command(key, bounds=(90, 90, 210, 130)),
+    ]
+
+    content_bounds, diagnostics = surface._shell_raster_crop_snapshot(
+        {
+            "commands": commands,
+            "anchor_translation_by_group": {},
+            "translations": {},
+            "translated_bounds_by_group": {key: _broad_group_bounds()},
+            "transform_by_group": {},
+        }
+    )
+
+    assert content_bounds is not None
+    assert content_bounds.to_payload() == {"x": 90, "y": 90, "width": 120, "height": 40}
+    assert diagnostics["crop_source"] == "visible_paint_contributors"
+    assert diagnostics["crop_contributor_count"] == 2
+    assert diagnostics["crop_largest_contributors"][0]["source"] == "rect"
+
+
+def test_shell_raster_crop_excludes_empty_transparent_and_zero_size_contributors() -> None:
+    surface = _StubSurface()
+    key = ("Plugin", "main")
+    commands = [
+        _message_command(key, item_id="empty-message", text="", bounds=(0, 0, 200, 20)),
+        _rect_command(key, item_id="transparent-rect", bounds=(0, 0, 300, 100), fill="#00000000"),
+        _rect_command(key, item_id="zero-rect", bounds=(0, 0, 0, 100), fill="#80000000"),
+        _message_command(key, item_id="visible-message", text="visible", bounds=(50, 60, 150, 80)),
+    ]
+
+    content_bounds, diagnostics = surface._shell_raster_crop_snapshot(
+        {
+            "commands": commands,
+            "anchor_translation_by_group": {},
+            "translations": {},
+            "translated_bounds_by_group": {key: _broad_group_bounds()},
+            "transform_by_group": {},
+        }
+    )
+
+    assert content_bounds is not None
+    assert content_bounds.to_payload() == {"x": 50, "y": 60, "width": 100, "height": 20}
+    assert diagnostics["crop_contributor_count"] == 1
+    assert diagnostics["crop_largest_contributors"][0]["item_id"] == "visible-message"
+
+
+def test_shell_raster_crop_ignores_transparent_group_background() -> None:
+    surface = _StubSurface()
+    key = ("Plugin", "main")
+    command = _message_command(key, bounds=(50, 60, 150, 80))
+    transform = SimpleNamespace(background_color="#00000000", background_border_color="", background_border_width=0)
+
+    content_bounds, diagnostics = surface._shell_raster_crop_snapshot(
+        {
+            "commands": [command],
+            "anchor_translation_by_group": {},
+            "translations": {},
+            "translated_bounds_by_group": {key: _broad_group_bounds()},
+            "transform_by_group": {key: transform},
+        }
+    )
+
+    assert content_bounds is not None
+    assert content_bounds.to_payload() == {"x": 50, "y": 60, "width": 100, "height": 20}
+    assert diagnostics["crop_contributor_count"] == 1
+
+
+def test_shell_raster_crop_keeps_full_width_visible_vector_line() -> None:
+    surface = _StubSurface()
+    surface._line_width_defaults = {"vector_line": 2, "vector_marker": 2, "vector_cross": 2}
+    key = ("Plugin", "vectors")
+    command = _VectorPaintCommand(
+        group_key=GroupKey(*key),
+        group_transform=None,
+        legacy_item=LegacyItem(
+            item_id="vector-1",
+            kind="vector",
+            data={"points": [{"x": 0, "y": 50}, {"x": 3440, "y": 50}]},
+            plugin=key[0],
+        ),
+        bounds=(0, 50, 3440, 50),
+        overlay_bounds=(0.0, 50.0, 3440.0, 50.0),
+        effective_anchor=None,
+        debug_log=None,
+        vector_payload={"base_color": "white", "points": [{"x": 0, "y": 50}, {"x": 3440, "y": 50}]},
+        scale=1.0,
+        base_offset_x=0.0,
+        base_offset_y=0.0,
+    )
+
+    content_bounds, diagnostics = surface._shell_raster_crop_snapshot(
+        {
+            "commands": [command],
+            "anchor_translation_by_group": {},
+            "translations": {},
+            "translated_bounds_by_group": {key: _broad_group_bounds()},
+            "transform_by_group": {},
+        }
+    )
+
+    assert content_bounds is not None
+    payload = content_bounds.to_payload()
+    assert payload["width"] >= 3440
+    assert payload["height"] > 0
+    assert diagnostics["crop_largest_contributors"][0]["source"] == "vector"
+
+
 def test_line_width_respects_override_defaults() -> None:
     surface = _StubSurface()
     surface._line_width_defaults = {"custom": 7}
@@ -276,6 +467,34 @@ def test_update_auto_legacy_scale_uses_overlay_module_scale_fn(monkeypatch: pyte
     expected_diag = math.sqrt((0.5 * 0.5 + 0.25 * 0.25) / 2.0)
     assert math.isclose(surface._font_scale_diag, expected_diag, rel_tol=1e-6)
     assert surface._last_logged_scale is not None
+
+
+def test_shell_raster_render_size_override_is_scoped() -> None:
+    surface = _StubSurface()
+    surface._width = 46
+    surface._height = 173
+    surface._font_scale_diag = 0.18
+
+    assert surface._render_surface_logical_size() == (46, 173)
+    with surface._temporary_shell_raster_render_size((3440, 1440)):
+        assert surface._render_surface_logical_size() == (3440, 1440)
+        assert surface._font_scale_diag > 0.18
+
+    assert surface._render_surface_logical_size() == (46, 173)
+    assert surface._font_scale_diag == 0.18
+    assert not hasattr(surface, "_shell_raster_render_size_override")
+
+
+def test_legacy_render_context_uses_shell_raster_render_size_override() -> None:
+    surface = _StubSurface()
+    surface._width = 46
+    surface._height = 173
+
+    with surface._temporary_shell_raster_render_size((3440, 1440)):
+        context = surface._build_legacy_render_context()
+
+    assert context.width == 3440
+    assert context.height == 1440
 
 
 def test_measure_text_uses_injected_measurer_and_resets_context() -> None:

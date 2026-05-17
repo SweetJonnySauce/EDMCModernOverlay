@@ -398,6 +398,61 @@ class HelperTargetStatus:
 
 
 @dataclass(frozen=True, slots=True)
+class HelperRasterFrameRegionRequest:
+    """One cropped Shell-native raster region inside a presentation request."""
+
+    region_id: str
+    frame_version: str
+    target_token: str
+    target_rect: HelperRect
+    frame_rect: HelperRect
+    scale: float
+    image_path: str
+    checksum: str
+    byte_size: int
+    diagnostics: Mapping[str, object] | None = None
+
+    def to_payload(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "region_id": self.region_id,
+            "frame_version": self.frame_version,
+            "target_token": self.target_token,
+            "target_rect": self.target_rect.to_payload(),
+            "frame_rect": self.frame_rect.to_payload(),
+            "scale": self.scale,
+            "image_path": self.image_path,
+            "checksum": self.checksum,
+            "byte_size": self.byte_size,
+        }
+        if self.diagnostics is not None:
+            payload["diagnostics"] = dict(self.diagnostics)
+        return payload
+
+    def signature(self) -> tuple[object, ...]:
+        return (
+            self.region_id,
+            self.frame_version,
+            self.target_token,
+            (
+                self.target_rect.x,
+                self.target_rect.y,
+                self.target_rect.width,
+                self.target_rect.height,
+            ),
+            (
+                self.frame_rect.x,
+                self.frame_rect.y,
+                self.frame_rect.width,
+                self.frame_rect.height,
+            ),
+            round(float(self.scale), 3),
+            self.image_path,
+            self.checksum,
+            int(self.byte_size),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class HelperRasterFrameRequest:
     """Optional Shell-native raster frame payload for a helper presentation request."""
 
@@ -411,6 +466,7 @@ class HelperRasterFrameRequest:
     checksum: str
     byte_size: int
     stale_timeout_ms: int
+    regions: tuple[HelperRasterFrameRegionRequest, ...] = field(default_factory=tuple)
     allow_unfocused_target: bool = False
     diagnostics: Mapping[str, object] | None = None
 
@@ -429,6 +485,9 @@ class HelperRasterFrameRequest:
             "stale_timeout_ms": self.stale_timeout_ms,
             "allow_unfocused_target": self.allow_unfocused_target,
         }
+        if self.regions:
+            payload["shell_raster_regions"] = [region.to_payload() for region in self.regions]
+            payload["shell_raster_region_count"] = len(self.regions)
         if self.diagnostics is not None:
             payload["shell_raster_frame_diagnostics"] = dict(self.diagnostics)
         return payload
@@ -456,6 +515,7 @@ class HelperRasterFrameRequest:
             int(self.byte_size),
             int(self.stale_timeout_ms),
             bool(self.allow_unfocused_target),
+            tuple(region.signature() for region in self.regions),
         )
 
 

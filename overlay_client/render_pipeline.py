@@ -266,7 +266,7 @@ class LegacyRenderPipeline:
         self._legacy_cache_dirty = False
         return self._legacy_render_cache
 
-    def paint(self, painter: QPainter, context: RenderContext, snapshot: PayloadSnapshot) -> None:
+    def paint(self, painter: QPainter | None, context: RenderContext, snapshot: PayloadSnapshot) -> None:
         owner = self._owner
         owner._cycle_anchor_points = {}
         mapper = context.mapper

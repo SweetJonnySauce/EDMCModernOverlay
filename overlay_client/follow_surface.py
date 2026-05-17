@@ -138,6 +138,7 @@ class FollowSurfaceMixin:
                 keep_overlay_visible=bool(getattr(self, "_keep_overlay_visible", False)),
                 previous_surface_action=str(getattr(self, "_last_backend_presentation_surface_action", "")),
                 prepare_surface=self._prepare_backend_presentation_surface,
+                raster_frame_provider=getattr(self, "_build_backend_shell_raster_content_frame", None),
             )
         except Exception as exc:  # pragma: no cover - defensive runtime guard
             _CLIENT_LOGGER.warning("Backend presentation cycle failed: %s", exc)

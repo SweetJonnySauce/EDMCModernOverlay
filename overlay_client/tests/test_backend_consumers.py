@@ -453,10 +453,12 @@ def test_backend_presentation_cycle_wraps_gnome_helper_result_when_helper_availa
         keep_overlay_visible: bool = False,
         previous_surface_action: str = "",
         prepare_surface=None,
+        shell_raster_frame_provider=None,
     ) -> _FakeGnomePresentationResult:
         calls.append((standalone_mode, keep_overlay_visible))
         assert previous_surface_action == "mapped_visible"
         assert prepare_surface is None
+        assert shell_raster_frame_provider is None
         return _FakeGnomePresentationResult()
 
     result = run_backend_presentation_cycle(

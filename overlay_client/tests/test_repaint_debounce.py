@@ -67,6 +67,27 @@ def test_request_repaint_immediate_bypasses_timer(window: OverlayWindow):
     assert timer.started == 0
 
 
+def test_request_repaint_refreshes_backend_when_content_is_suppressed(window: OverlayWindow):
+    calls = []
+    window._backend_presentation_content_suppressed = True
+    window._refresh_backend_presentation = types.MethodType(lambda self: calls.append("refresh") or True, window)
+
+    window._request_repaint("ingest", immediate=True)
+
+    assert calls == ["refresh"]
+
+
+def test_debounced_repaint_refreshes_backend_when_content_is_suppressed(window: OverlayWindow):
+    calls = []
+    window._backend_presentation_content_suppressed = True
+    window._refresh_backend_presentation = types.MethodType(lambda self: calls.append("refresh") or True, window)
+
+    window._trigger_debounced_repaint()
+
+    assert calls == ["refresh"]
+    assert window._updated is True
+
+
 def test_request_repaint_uses_timer_when_enabled(window: OverlayWindow):
     timer = window._repaint_timer
     window._request_repaint("ingest", immediate=False)

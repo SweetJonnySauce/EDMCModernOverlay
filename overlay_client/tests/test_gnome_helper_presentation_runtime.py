@@ -45,6 +45,7 @@ from overlay_client.backend import (
     HelperPresentationRequest,
     HelperPresentationState,
     HelperRasterFrameRequest,
+    HelperRasterFrameRegionRequest,
     HelperRect,
 )
 from overlay_client.backend.bundles._gnome_shell_helper_presentation import (
@@ -55,6 +56,7 @@ from overlay_client.backend.bundles._gnome_shell_helper_presentation import (
     GNOME_HELPER_REASON_SURFACE_PREPARATION_FAILED,
     GNOME_HELPER_REASON_WRONG_MONITOR_APPLIED_RECT,
     GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV,
+    GNOME_HELPER_SHELL_RASTER_PROOF_ENV,
     GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV,
     GNOME_HELPER_SURFACE_PREPARATION_FULLSCREEN_MONITOR,
     GnomeHelperPresentationRuntimeState,
@@ -517,6 +519,21 @@ def test_shell_raster_bridge_is_env_gated(monkeypatch: pytest.MonkeyPatch) -> No
     assert calls[0].renderer == "pyqt"
 
     calls.clear()
+    monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, "1")
+
+    result = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_borderless_target()),
+        fetch_presentation=fetch_presentation,
+        clock=lambda: 102.0,
+    )
+
+    assert result.presentation_status is not None
+    assert calls
+    assert calls[0].shell_raster_frame is None
+    assert calls[0].renderer == "pyqt"
+
+    calls.clear()
     monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, "1")
 
     result = run_gnome_shell_helper_presentation_cycle(
@@ -537,6 +554,7 @@ def test_shell_raster_bridge_passes_debug_metrics_flag(
 ) -> None:
     monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, "1")
     monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, "1")
+    monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_PROOF_ENV, "1")
     monkeypatch.setenv(GNOME_HELPER_PRESENTATION_DIAGNOSTICS_ENV, "1")
     seen: dict[str, object] = {}
 
@@ -565,6 +583,7 @@ def test_shell_raster_bridge_sends_static_frame_when_eligible(
 ) -> None:
     monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, "1")
     monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, "1")
+    monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_PROOF_ENV, "1")
     frame_request = HelperRasterFrameRequest(
         action="update",
         frame_version="phase13-static-pyqt-proof-v1:test-session:abc123",
@@ -620,11 +639,174 @@ def test_shell_raster_bridge_sends_static_frame_when_eligible(
     assert calls[0].shell_raster_frame.stale_timeout_ms == 1500
 
 
+def test_shell_raster_bridge_sends_provider_real_content_when_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, "1")
+    monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, "1")
+    monkeypatch.setenv(GNOME_HELPER_PRESENTATION_DIAGNOSTICS_ENV, "1")
+    frame_request = HelperRasterFrameRequest(
+        action="update",
+        frame_version="phase14-real-content-cropped-v1:test-session:abc123",
+        target_token="meta:21",
+        target_rect=HelperRect(0, 0, 3440, 1440),
+        frame_rect=HelperRect(20, 32, 300, 120),
+        scale=1.0,
+        image_path="/run/user/1000/EDMCModernOverlay/shell-raster/real-content-cropped-overlay.png",
+        checksum="abc123",
+        byte_size=512,
+        stale_timeout_ms=SHELL_RASTER_FRAME_DEFAULT_TIMEOUT_MS,
+    )
+    seen: dict[str, object] = {}
+
+    def provider(target_status, request, include_diagnostics: bool) -> ShellRasterFrameBuildResult:
+        seen["target_status"] = target_status
+        seen["request"] = request
+        seen["include_diagnostics"] = include_diagnostics
+        return ShellRasterFrameBuildResult(request=frame_request, eligible=True)
+
+    calls: list[HelperPresentationRequest] = []
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        calls.append(request)
+        return _presentation_payload(
+            request,
+            applied_rect=frame_request.frame_rect.to_payload(),
+            renderer="gnome_shell_raster_frame",
+            shell_raster_frame={
+                "frame_version": frame_request.frame_version,
+                "frame_rect": frame_request.frame_rect.to_payload(),
+                "frame_dimensions": {"x": 0, "y": 0, "width": 300, "height": 120},
+            },
+        )
+
+    result = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_borderless_target()),
+        fetch_presentation=fetch_presentation,
+        shell_raster_frame_provider=provider,
+        clock=lambda: 100.0,
+    )
+
+    assert result.shell_raster_frame_presented is True
+    assert seen["include_diagnostics"] is True
+    assert calls[0].renderer == "gnome_shell_raster_frame"
+    assert calls[0].shell_raster_frame == frame_request
+
+
+def test_shell_raster_bridge_sends_provider_multi_region_real_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, "1")
+    monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, "1")
+    region_a = HelperRasterFrameRegionRequest(
+        region_id="region-01",
+        frame_version="phase14-real-content-cropped-v1-region-01:test-session:aaa",
+        target_token="meta:21",
+        target_rect=HelperRect(0, 0, 3440, 1440),
+        frame_rect=HelperRect(8, 8, 180, 40),
+        scale=1.0,
+        image_path="/run/user/1000/EDMCModernOverlay/shell-raster/real-content-region-region-01.png",
+        checksum="aaa",
+        byte_size=256,
+    )
+    region_b = HelperRasterFrameRegionRequest(
+        region_id="region-02",
+        frame_version="phase14-real-content-cropped-v1-region-02:test-session:bbb",
+        target_token="meta:21",
+        target_rect=HelperRect(0, 0, 3440, 1440),
+        frame_rect=HelperRect(3100, 16, 260, 48),
+        scale=1.0,
+        image_path="/run/user/1000/EDMCModernOverlay/shell-raster/real-content-region-region-02.png",
+        checksum="bbb",
+        byte_size=300,
+    )
+    frame_request = HelperRasterFrameRequest(
+        action="update",
+        frame_version="phase14-real-content-cropped-v1-multi:test-session:aggregate",
+        target_token="meta:21",
+        target_rect=HelperRect(0, 0, 3440, 1440),
+        frame_rect=HelperRect(8, 8, 3352, 56),
+        scale=1.0,
+        image_path=region_a.image_path,
+        checksum="aggregate",
+        byte_size=556,
+        stale_timeout_ms=SHELL_RASTER_FRAME_DEFAULT_TIMEOUT_MS,
+        regions=(region_a, region_b),
+    )
+
+    def provider(_target_status, _request, _include_diagnostics: bool) -> ShellRasterFrameBuildResult:
+        return ShellRasterFrameBuildResult(request=frame_request, eligible=True)
+
+    calls: list[HelperPresentationRequest] = []
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        calls.append(request)
+        return _presentation_payload(
+            request,
+            applied_rect=frame_request.frame_rect.to_payload(),
+            renderer="gnome_shell_raster_frame",
+            shell_raster_frame={
+                "frame_version": frame_request.frame_version,
+                "frame_rect": frame_request.frame_rect.to_payload(),
+                "frame_dimensions": {"x": 0, "y": 0, "width": 3352, "height": 56},
+                "regions": [region.to_payload() for region in frame_request.regions],
+            },
+        )
+
+    result = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_borderless_target()),
+        fetch_presentation=fetch_presentation,
+        shell_raster_frame_provider=provider,
+        clock=lambda: 100.0,
+    )
+
+    assert result.shell_raster_frame_presented is True
+    assert calls[0].renderer == "gnome_shell_raster_frame"
+    assert calls[0].shell_raster_frame is not None
+    assert calls[0].shell_raster_frame.regions == (region_a, region_b)
+    payload = calls[0].to_payload()
+    assert payload["shell_raster_region_count"] == 2
+    assert payload["shell_raster_regions"][1]["region_id"] == "region-02"
+
+
+@pytest.mark.parametrize("reason", ["no_visible_content", "frame_export_failed"])
+def test_shell_raster_bridge_keeps_pyqt_when_real_content_provider_has_no_frame(
+    monkeypatch: pytest.MonkeyPatch,
+    reason: str,
+) -> None:
+    monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, "1")
+    monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, "1")
+    calls: list[HelperPresentationRequest] = []
+
+    def provider(_target_status, _request, _include_diagnostics: bool) -> ShellRasterFrameBuildResult:
+        return ShellRasterFrameBuildResult(reason=reason)
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        calls.append(request)
+        return _presentation_payload(request)
+
+    result = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_borderless_target()),
+        fetch_presentation=fetch_presentation,
+        shell_raster_frame_provider=provider,
+        clock=lambda: 100.0,
+    )
+
+    assert result.shell_raster_frame_presented is False
+    assert result.should_show_overlay is True
+    assert calls[0].renderer == "pyqt"
+    assert calls[0].shell_raster_frame is None
+
+
 def test_shell_raster_bridge_exposes_debug_metrics_in_log_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, "1")
     monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, "1")
+    monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_PROOF_ENV, "1")
     frame_request = HelperRasterFrameRequest(
         action="update",
         frame_version="phase13-static-pyqt-proof-v1:test-session:abc123",
@@ -684,11 +866,123 @@ def test_shell_raster_bridge_exposes_debug_metrics_in_log_payload(
     assert helper_metrics["helper_apply_ms"] == 0.25
 
 
+def test_shell_raster_skipped_reused_payload_reports_noop_helper_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, "1")
+    monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, "1")
+    monkeypatch.setenv(GNOME_HELPER_PRESENTATION_DIAGNOSTICS_ENV, "1")
+    clock = _Clock()
+    state = GnomeHelperPresentationRuntimeState()
+    frame_kwargs = {
+        "action": "update",
+        "frame_version": "phase14-real-content-cropped-v1-multi:test-session:aggregate",
+        "target_token": "meta:21",
+        "target_rect": HelperRect(0, 0, 3440, 1440),
+        "frame_rect": HelperRect(0, 0, 3440, 1440),
+        "scale": 1.0,
+        "image_path": "/run/user/1000/EDMCModernOverlay/shell-raster/real-content-region-region-01.png",
+        "checksum": "aggregate",
+        "byte_size": 128,
+        "stale_timeout_ms": SHELL_RASTER_FRAME_DEFAULT_TIMEOUT_MS,
+    }
+    first_frame = HelperRasterFrameRequest(
+        **frame_kwargs,
+        diagnostics={
+            "schema": 1,
+            "update_reason": "real_content_multi_region_overlay",
+            "client_reused_region_count": 7,
+            "client_encoded_region_count": 1,
+            "client_payload_reused": False,
+        },
+    )
+    reused_frame = HelperRasterFrameRequest(
+        **frame_kwargs,
+        diagnostics={
+            "schema": 1,
+            "update_reason": "real_content_multi_region_overlay",
+            "client_reused_region_count": 8,
+            "client_encoded_region_count": 0,
+            "client_reused_all_regions": True,
+            "client_payload_reused": True,
+            "client_payload_reuse_skip_reason": "",
+        },
+    )
+    provider_calls = 0
+    presentation_calls: list[HelperPresentationRequest] = []
+
+    def provider(_target_status, _request, _include_diagnostics: bool) -> ShellRasterFrameBuildResult:
+        nonlocal provider_calls
+        provider_calls += 1
+        return ShellRasterFrameBuildResult(
+            request=first_frame if provider_calls == 1 else reused_frame,
+            eligible=True,
+        )
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        presentation_calls.append(request)
+        return _presentation_payload(
+            request,
+            applied_rect=first_frame.frame_rect.to_payload(),
+            renderer="gnome_shell_raster_frame",
+            shell_raster_frame={
+                "frame_version": first_frame.frame_version,
+                "frame_rect": first_frame.frame_rect.to_payload(),
+                "frame_dimensions": {"x": 0, "y": 0, "width": 3440, "height": 1440},
+                "diagnostics": {
+                    "schema": 1,
+                    "request": dict(first_frame.diagnostics or {}),
+                    "helper": {
+                        "helper_decode_ms": 1.25,
+                        "helper_apply_ms": 0.2,
+                        "helper_reused_frame": False,
+                        "helper_decode_skipped": False,
+                        "helper_update_reason": "decoded_changed_regions",
+                    },
+                },
+            },
+        )
+
+    run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_borderless_target()),
+        fetch_presentation=fetch_presentation,
+        shell_raster_frame_provider=provider,
+        clock=clock,
+        runtime_state=state,
+    )
+    clock.now += 0.5
+    skipped = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_borderless_target()),
+        fetch_presentation=fetch_presentation,
+        shell_raster_frame_provider=provider,
+        clock=clock,
+        runtime_state=state,
+    )
+
+    assert skipped.presentation_skipped is True
+    assert skipped.presentation_skip_reason == "fresh_matching_presentation"
+    assert provider_calls == 2
+    assert len(presentation_calls) == 1
+    metrics = skipped.to_log_payload()["shell_raster_metrics"]
+    assert isinstance(metrics, dict)
+    status_metrics = metrics["status"]
+    assert isinstance(status_metrics, dict)
+    helper_metrics = status_metrics["helper"]
+    assert helper_metrics["helper_update_reason"] == "client_reused_all_regions"
+    assert helper_metrics["helper_call_skipped"] is True
+    assert helper_metrics["helper_reused_frame"] is True
+    assert helper_metrics["helper_decode_skipped"] is True
+    assert helper_metrics["helper_decode_ms"] == 0
+
+
 def test_shell_raster_bridge_refreshes_before_short_lease_expires(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, "1")
     monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, "1")
+    monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_PROOF_ENV, "1")
     frame_request = HelperRasterFrameRequest(
         action="update",
         frame_version="phase13-static-pyqt-proof-v1:test-session:abc123",
@@ -762,6 +1056,7 @@ def test_shell_raster_focus_risk_degrade_keeps_managed_pyqt_suppressed(
 ) -> None:
     monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, "1")
     monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, "1")
+    monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_PROOF_ENV, "1")
     frame_request = HelperRasterFrameRequest(
         action="update",
         frame_version="phase13-static-pyqt-proof-v1:test-session:abc123",
@@ -823,6 +1118,7 @@ def test_shell_raster_bridge_allows_unfocused_target_when_keep_visible_enabled(
 ) -> None:
     monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, "1")
     monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, "1")
+    monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_PROOF_ENV, "1")
     frame_request = HelperRasterFrameRequest(
         action="update",
         frame_version="phase13-static-pyqt-proof-v1:test-session:abc123",
@@ -882,6 +1178,7 @@ def test_shell_raster_keep_visible_preference_changes_presentation_signature(
 ) -> None:
     monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, "1")
     monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, "1")
+    monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_PROOF_ENV, "1")
     frame_request = HelperRasterFrameRequest(
         action="update",
         frame_version="phase13-static-pyqt-proof-v1:test-session:abc123",
@@ -952,6 +1249,7 @@ def test_shell_raster_bridge_falls_back_to_pyqt_when_frame_not_built(
 ) -> None:
     monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, "1")
     monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, "1")
+    monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_PROOF_ENV, "1")
     monkeypatch.setattr(
         "overlay_client.backend.bundles._gnome_shell_helper_presentation.build_static_shell_raster_frame_request",
         lambda *_args, **_kwargs: ShellRasterFrameBuildResult(reason="frame_export_failed"),

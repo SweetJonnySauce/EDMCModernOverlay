@@ -37,6 +37,7 @@ from overlay_client.backend import (
 )
 from overlay_client.backend.shell_raster_frame import (
     SHELL_RASTER_FRAME_RENDERER,
+    ShellRasterFrameBuildResult,
     build_static_shell_raster_frame_request,
 )
 from overlay_client.backend.surface_preparation import BackendPresentationSurfacePreparation
@@ -55,6 +56,7 @@ GNOME_HELPER_PRESENTATION_DIAGNOSTICS_ENV = "EDMC_OVERLAY_GNOME_PRESENTATION_DIA
 GNOME_HELPER_BORDERLESS_FULLSCREEN_PREP_ENV = "EDMC_OVERLAY_GNOME_BORDERLESS_FULLSCREEN_PREP"
 GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV = "EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE"
 GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV = "EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE_RUNTIME"
+GNOME_HELPER_SHELL_RASTER_PROOF_ENV = "EDMC_OVERLAY_GNOME_SHELL_RASTER_PROOF"
 GNOME_HELPER_SHELL_RASTER_LEASE_REFRESH_FRACTION = 0.5
 GNOME_HELPER_SHELL_RASTER_MIN_REFRESH_SECONDS = 0.25
 GNOME_HELPER_PERSISTENT_MISMATCH_THRESHOLD = 2
@@ -298,6 +300,11 @@ def run_gnome_shell_helper_presentation_cycle(
     runtime_state: GnomeHelperPresentationRuntimeState | None = None,
     health_cache_jitter_seconds: Callable[[], float] | None = None,
     prepare_surface: Callable[[BackendPresentationSurfacePreparation], bool] | None = None,
+    shell_raster_frame_provider: Callable[
+        [HelperTargetStatus | None, HelperPresentationRequest | None, bool],
+        ShellRasterFrameBuildResult,
+    ]
+    | None = None,
 ) -> GnomeHelperPresentationCycleResult:
     """Fetch target state and apply bounded Shell-mediated presentation."""
 
@@ -367,6 +374,7 @@ def run_gnome_shell_helper_presentation_cycle(
             request,
             env=os.environ,
             allow_unfocused_target=keep_overlay_visible,
+            shell_raster_frame_provider=shell_raster_frame_provider,
         )
         surface_preparation = _borderless_fullscreen_surface_preparation(
             target_status,
@@ -387,13 +395,18 @@ def run_gnome_shell_helper_presentation_cycle(
         ):
             state.last_target_status = target_status
             state.last_request = request
+            presentation_status = _presentation_status_with_client_reused_shell_raster_status(
+                state.last_presentation_status,
+                request,
+            )
+            state.last_presentation_status = presentation_status
             if previous_surface_action == GNOME_HELPER_SURFACE_ACTION_MAPPED_SUPPRESSED:
                 state.next_suppressed_target_poll_at = now + GNOME_HELPER_SUPPRESSED_TARGET_POLL_SECONDS
             return GnomeHelperPresentationCycleResult(
                 health_status=health_status,
                 target_status=target_status,
                 request=request,
-                presentation_status=state.last_presentation_status,
+                presentation_status=presentation_status,
                 presentation_skipped=True,
                 presentation_skip_reason="fresh_matching_presentation",
                 health_cache_hit=health_cache_hit,
@@ -562,6 +575,11 @@ def _shell_raster_bridge_request(
     *,
     env: Mapping[str, str],
     allow_unfocused_target: bool = False,
+    shell_raster_frame_provider: Callable[
+        [HelperTargetStatus | None, HelperPresentationRequest | None, bool],
+        ShellRasterFrameBuildResult,
+    ]
+    | None = None,
 ) -> HelperPresentationRequest | None:
     if request is None:
         return None
@@ -569,12 +587,39 @@ def _shell_raster_bridge_request(
         return request
     if not _env_flag_enabled(env.get(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, "")):
         return request
+    include_diagnostics = _env_flag_enabled(env.get(GNOME_HELPER_PRESENTATION_DIAGNOSTICS_ENV, ""))
+    if shell_raster_frame_provider is not None:
+        result = shell_raster_frame_provider(
+            target_status,
+            request,
+            include_diagnostics,
+        )
+        return _request_with_shell_raster_frame(
+            request,
+            result,
+            allow_unfocused_target=allow_unfocused_target,
+        )
+    if not _env_flag_enabled(env.get(GNOME_HELPER_SHELL_RASTER_PROOF_ENV, "")):
+        return request
     result = build_static_shell_raster_frame_request(
         target_status,
         request,
         env=env,
-        include_diagnostics=_env_flag_enabled(env.get(GNOME_HELPER_PRESENTATION_DIAGNOSTICS_ENV, "")),
+        include_diagnostics=include_diagnostics,
     )
+    return _request_with_shell_raster_frame(
+        request,
+        result,
+        allow_unfocused_target=allow_unfocused_target,
+    )
+
+
+def _request_with_shell_raster_frame(
+    request: HelperPresentationRequest,
+    result: ShellRasterFrameBuildResult,
+    *,
+    allow_unfocused_target: bool,
+) -> HelperPresentationRequest:
     if result.request is None:
         return request
     shell_raster_frame = replace(
@@ -774,6 +819,48 @@ def _shell_raster_metrics_payload(
         "request": dict(request_metrics) if request_metrics is not None else None,
         "status": status_metrics,
     }
+
+
+def _presentation_status_with_client_reused_shell_raster_status(
+    status: HelperPresentationStatus | None,
+    request: HelperPresentationRequest,
+) -> HelperPresentationStatus | None:
+    frame = request.shell_raster_frame
+    if status is None or frame is None or frame.diagnostics is None:
+        return status
+    diagnostics = dict(frame.diagnostics)
+    if not diagnostics.get("client_payload_reused"):
+        return status
+    diagnostics["helper_call_skipped"] = True
+    helper_metrics = {
+        "helper_decode_ms": 0,
+        "helper_apply_ms": 0,
+        "helper_total_ms": 0,
+        "helper_reused_frame": True,
+        "helper_decode_skipped": True,
+        "helper_update_reason": "client_reused_all_regions",
+        "helper_call_skipped": True,
+    }
+    shell_raster_frame = dict(status.shell_raster_frame or {})
+    shell_raster_frame.update(
+        {
+            "frame_version": frame.frame_version,
+            "frame_rect": frame.frame_rect.to_payload(),
+            "frame_dimensions": {
+                "x": 0,
+                "y": 0,
+                "width": frame.frame_rect.width,
+                "height": frame.frame_rect.height,
+            },
+            "diagnostics": {
+                "schema": 1,
+                "request": diagnostics,
+                "helper": helper_metrics,
+                "helper_call_skipped": True,
+            },
+        }
+    )
+    return replace(status, shell_raster_frame=shell_raster_frame)
 
 
 def _should_skip_suppressed_target_poll(

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -112,3 +115,40 @@ def test_plugin_startup_clears_shell_raster_frame_when_enabled(
     assert load._clear_shell_raster_frame_on_startup() is True
 
     assert calls == ["clear"]
+
+
+def test_shell_raster_startup_clear_backend_import_does_not_require_pyqt6() -> None:
+    script = """
+import builtins
+import subprocess
+
+real_import = builtins.__import__
+
+def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+    if name == "PyQt6" or name.startswith("PyQt6."):
+        raise ModuleNotFoundError("No module named 'PyQt6'")
+    return real_import(name, globals, locals, fromlist, level)
+
+def fake_run(*args, **kwargs):
+    raise FileNotFoundError("gdbus")
+
+builtins.__import__ = guarded_import
+subprocess.run = fake_run
+
+import load
+
+assert load._clear_shell_raster_frame_via_backend() is False
+"""
+    repo_root = Path(__file__).resolve().parents[1]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(repo_root)
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, result.stderr

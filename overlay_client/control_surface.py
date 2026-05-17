@@ -663,13 +663,22 @@ class ControlSurfaceMixin:
         if effective_immediate:
             if timer is not None and timer.isActive():
                 timer.stop()
+            self._refresh_backend_presentation_for_repaint()
             self.update()
             return
         if not timer.isActive():
             timer.start()
 
     def _trigger_debounced_repaint(self) -> None:
+        self._refresh_backend_presentation_for_repaint()
         self.update()
+
+    def _refresh_backend_presentation_for_repaint(self) -> None:
+        if not getattr(self, "_backend_presentation_content_suppressed", False):
+            return
+        refresh = getattr(self, "_refresh_backend_presentation", None)
+        if callable(refresh):
+            refresh()
 
     @staticmethod
     def _should_bypass_debounce(payload: Mapping[str, Any]) -> bool:

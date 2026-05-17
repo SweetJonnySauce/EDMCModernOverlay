@@ -48,13 +48,14 @@ def test_viewport_state_defaults_ratio_and_logs(monkeypatch):
     window = type(
         "Stub",
         (),
-        {
-            "width": lambda self: 200,
-            "height": lambda self: 100,
-            "devicePixelRatioF": lambda self: (_ for _ in ()).throw(AttributeError("no dpr")),
-            "_viewport_state": OverlayWindow._viewport_state,
-        },
-    )()
+            {
+                "width": lambda self: 200,
+                "height": lambda self: 100,
+                "_render_surface_logical_size": lambda self: (200, 100),
+                "devicePixelRatioF": lambda self: (_ for _ in ()).throw(AttributeError("no dpr")),
+                "_viewport_state": OverlayWindow._viewport_state,
+            },
+        )()
     monkeypatch.setattr("overlay_client.overlay_client._CLIENT_LOGGER.debug", _debug)
 
     state = window._viewport_state()  # type: ignore[attr-defined]

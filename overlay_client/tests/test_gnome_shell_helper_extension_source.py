@@ -351,7 +351,7 @@ def test_extension_shell_raster_frame_is_non_reactive_and_cleans_up() -> None:
     assert "normalisedAction === 'clear'" in source
     assert "this._clearShellRasterFrame('explicit_clear')" in source
     assert "this._clearShellRasterFrame('invalid_frame')" in source
-    assert "const cleanupAction = this._clearShellRasterFrame(cleanupReason);" in source
+    assert "const cleanupAction = this._clearShellRasterFrame(cleanupReason) || regionsCleanupAction;" in source
     assert "_refreshShellRasterFrameTimeout(staleTimeoutMs)" in source
     assert "this._clearShellRasterFrame('stale_timeout')" in source
     assert "this._healthService?._clearShellRasterFrame?.('helper_disable')" in source
@@ -427,3 +427,35 @@ def test_extension_shell_raster_frame_reuse_reports_decode_skip_diagnostics() ->
     assert "helper_decode_skipped" in source
     assert "helper_update_reason" in source
     assert "update_reason: updateReason" in source
+
+
+def test_extension_shell_raster_multi_region_actors_are_keyed_reused_and_cleared() -> None:
+    source = _source()
+
+    assert "this._shellRasterRegions = new Map();" in source
+    assert "_shellRasterFrameRegionsFromPayload" in source
+    assert "_showShellRasterFrameRegions({" in source
+    assert "this._shellRasterRegions.set(region.regionId, record)" in source
+    assert "this._shellRasterRegions.get(region.regionId)" in source
+    assert "_reuseShellRasterRegionIfMatching({" in source
+    assert "_clearShellRasterRegionActors(reason)" in source
+    assert "_destroyShellRasterRegion(regionId" in source
+
+
+def test_extension_shell_raster_multi_region_validates_each_region_path_and_rect() -> None:
+    source = _source()
+
+    assert "_validateShellRasterFrameRegions(frameRegions, targetRect)" in source
+    assert "this._validateShellRasterFramePath(region.imagePath, region.byteSize)" in source
+    assert "region_frame_rect_mismatch" in source
+    assert "duplicate_region_id" in source
+
+
+def test_extension_shell_raster_multi_region_reports_region_diagnostics() -> None:
+    source = _source()
+
+    assert "regions: frameResult.regions || frameRegions" in source
+    assert "_shellRasterRegionStatusPayload(region" in source
+    assert "update_reason: 'reused_existing_region'" in source
+    assert "update_reason: 'decoded_new_region'" in source
+    assert "region_count" in source

@@ -2,16 +2,21 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
+import hashlib
+import json
 import math
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Sequence, Set, Tuple
 
 from PyQt6.QtCore import QPoint, QRect, Qt
 from PyQt6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter, QPen
 
 from overlay_client.anchor_helpers import CommandContext, build_baseline_bounds, compute_justification_offsets
+from overlay_client.backend.shell_raster_frame import ShellRasterCropContributor as _ShellRasterCropContributor
 from overlay_client.group_transform import GroupKey, GroupTransform
 from overlay_client.legacy_processor import TraceCallback
 from overlay_client.legacy_store import LegacyItem
@@ -109,7 +114,6 @@ class _MeasuredText:
     width: int
     ascent: int
     descent: int
-
 
 
 _LINE_WIDTH_DEFAULTS_FALLBACK: Dict[str, int] = {
@@ -385,12 +389,13 @@ class RenderSurfaceMixin:
             self._logged_group_bounds.clear()
             self._logged_group_transforms.clear()
 
-    def _paint_legacy(self, painter: QPainter) -> None:
+    def _build_legacy_render_context(self) -> RenderContext:
         mapper = self._compute_legacy_mapper()
         state = self._viewport_state()
-        context = RenderContext(
-            width=max(self.width(), 0),
-            height=max(self.height(), 0),
+        width, height = self._render_surface_logical_size()
+        return RenderContext(
+            width=width,
+            height=height,
             mapper=mapper,
             dev_mode=self._dev_mode_enabled,
             debug_bounds=self._debug_config.group_bounds_outline,
@@ -402,6 +407,10 @@ class RenderSurfaceMixin:
             ),
             grouping=self._grouping_adapter,
         )
+
+    def _paint_legacy(self, painter: QPainter) -> None:
+        context = self._build_legacy_render_context()
+        mapper = context.mapper
         snapshot = PayloadSnapshot(items_count=len(list(self._payload_model.store.items())))
         self._render_pipeline.paint(painter, context, snapshot)
         payload_results = getattr(self._render_pipeline, "_last_payload_results", None)
@@ -455,6 +464,631 @@ class RenderSurfaceMixin:
                 transform_by_group,
                 mapper,
             )
+
+    def _prepare_shell_raster_payload_results(self) -> Mapping[str, object]:
+        context = self._build_legacy_render_context()
+        snapshot = PayloadSnapshot(items_count=len(list(self._payload_model.store.items())))
+        self._render_pipeline.paint(None, context, snapshot)
+        payload_results = getattr(self._render_pipeline, "_last_payload_results", None)
+        return payload_results if isinstance(payload_results, Mapping) else {}
+
+    def _render_surface_logical_size(self) -> Tuple[int, int]:
+        override = getattr(self, "_shell_raster_render_size_override", None)
+        if isinstance(override, tuple) and len(override) >= 2:
+            try:
+                width = int(override[0])
+                height = int(override[1])
+            except (TypeError, ValueError):
+                width = 0
+                height = 0
+            if width > 0 and height > 0:
+                return width, height
+        return max(self.width(), 0), max(self.height(), 0)
+
+    def _shell_raster_target_render_size(self, target_status: Any | None, request: Any | None) -> Tuple[int, int] | None:
+        target = getattr(target_status, "target", None) if getattr(target_status, "found", False) else None
+        for rect in (
+            getattr(request, "content_rect", None),
+            getattr(target, "content_rect", None),
+            getattr(target, "monitor_rect", None),
+        ):
+            try:
+                width = int(getattr(rect, "width", 0))
+                height = int(getattr(rect, "height", 0))
+            except (TypeError, ValueError):
+                continue
+            if width > 0 and height > 0:
+                return width, height
+        return None
+
+    @contextmanager
+    def _temporary_shell_raster_render_size(self, size: Tuple[int, int] | None) -> Iterator[None]:
+        previous_override = getattr(self, "_shell_raster_render_size_override", None)
+        previous_font_scale = getattr(self, "_font_scale_diag", 0.0)
+        if size is None:
+            yield
+            return
+        width, height = size
+        if width <= 0 or height <= 0:
+            yield
+            return
+        self._shell_raster_render_size_override = (int(width), int(height))
+        try:
+            try:
+                mapper = self._compute_legacy_mapper()
+                state = self._viewport_state()
+                scale_x, scale_y = legacy_scale_components(mapper, state)
+                self._font_scale_diag = math.sqrt((scale_x * scale_x + scale_y * scale_y) / 2.0)
+            except Exception:
+                pass
+            yield
+        finally:
+            if previous_override is None:
+                try:
+                    delattr(self, "_shell_raster_render_size_override")
+                except AttributeError:
+                    pass
+            else:
+                self._shell_raster_render_size_override = previous_override
+            self._font_scale_diag = previous_font_scale
+
+    def _shell_raster_visible_content_bounds(self, payload_results: Mapping[str, object]) -> object | None:
+        content_bounds, _diagnostics = self._shell_raster_crop_snapshot(payload_results)
+        return content_bounds
+
+    def _shell_raster_crop_snapshot(
+        self,
+        payload_results: Mapping[str, object],
+    ) -> Tuple[Any | None, Dict[str, object]]:
+        from overlay_client.backend import HelperRect
+
+        contributors = self._shell_raster_crop_contributor_snapshot(payload_results)
+        if not contributors:
+            return None, self._shell_raster_crop_diagnostics([], None)
+
+        union = _ScreenBounds()
+        for contributor in contributors:
+            union.include_rect(*contributor.bounds)
+        if not union.is_valid():
+            return None, self._shell_raster_crop_diagnostics(contributors, None)
+        left_i = math.floor(union.min_x)
+        top_i = math.floor(union.min_y)
+        right_i = math.ceil(union.max_x)
+        bottom_i = math.ceil(union.max_y)
+        if right_i <= left_i or bottom_i <= top_i:
+            return None, self._shell_raster_crop_diagnostics(contributors, None)
+        content_bounds = HelperRect(x=left_i, y=top_i, width=right_i - left_i, height=bottom_i - top_i)
+        return content_bounds, self._shell_raster_crop_diagnostics(contributors, content_bounds)
+
+    def _shell_raster_crop_contributor_snapshot(
+        self,
+        payload_results: Mapping[str, object],
+    ) -> List[_ShellRasterCropContributor]:
+        commands = payload_results.get("commands") or []
+        if not isinstance(commands, (list, tuple)):
+            return []
+        anchor_translations = payload_results.get("anchor_translation_by_group") or {}
+        translations = payload_results.get("translations") or {}
+        translated_bounds_by_group = payload_results.get("translated_bounds_by_group") or {}
+        transform_by_group = payload_results.get("transform_by_group") or {}
+        if not (
+            isinstance(anchor_translations, Mapping)
+            and isinstance(translations, Mapping)
+            and isinstance(translated_bounds_by_group, Mapping)
+            and isinstance(transform_by_group, Mapping)
+        ):
+            return []
+        return self._shell_raster_crop_contributors(
+            commands,
+            anchor_translations,
+            translations,
+            translated_bounds_by_group,
+            transform_by_group,
+        )
+
+    def _shell_raster_crop_contributors(
+        self,
+        commands: Sequence[_LegacyPaintCommand],
+        anchor_translation_by_group: Mapping[Tuple[str, Optional[str]], Tuple[float, float]],
+        translations: Mapping[Tuple[str, Optional[str]], Tuple[int, int]],
+        translated_bounds_by_group: Mapping[Tuple[str, Optional[str]], _ScreenBounds],
+        transform_by_group: Mapping[Tuple[str, Optional[str]], Optional[GroupTransform]],
+    ) -> List[_ShellRasterCropContributor]:
+        contributors: List[_ShellRasterCropContributor] = []
+        for order, command in enumerate(commands):
+            contributor = self._shell_raster_command_crop_contributor(
+                command,
+                anchor_translation_by_group,
+                translations,
+                order=order,
+            )
+            if contributor is not None:
+                contributors.append(contributor)
+
+        visible_groups = {contributor.group_key for contributor in contributors}
+        if visible_groups:
+            next_order = max((contributor.order for contributor in contributors), default=-1) + 1
+            contributors.extend(
+                self._shell_raster_group_background_contributors(
+                    visible_groups,
+                    translated_bounds_by_group,
+                    translations,
+                    transform_by_group,
+                    order_offset=next_order,
+                )
+            )
+        return contributors
+
+    def _shell_raster_command_crop_contributor(
+        self,
+        command: _LegacyPaintCommand,
+        anchor_translation_by_group: Mapping[Tuple[str, Optional[str]], Tuple[float, float]],
+        translations: Mapping[Tuple[str, Optional[str]], Tuple[int, int]],
+        *,
+        order: int,
+    ) -> _ShellRasterCropContributor | None:
+        if not self._shell_raster_command_has_visible_pixels(command):
+            return None
+        key = command.group_key.as_tuple()
+        translation_x, translation_y = anchor_translation_by_group.get(key, (0.0, 0.0))
+        nudge_x, nudge_y = translations.get(key, (0, 0))
+        offset_x = float(translation_x) + float(getattr(command, "justification_dx", 0.0)) + float(nudge_x)
+        offset_y = float(translation_y) + float(nudge_y)
+        bounds = self._shell_raster_command_paint_bounds(command, offset_x, offset_y)
+        if bounds is None or not self._shell_raster_bounds_valid(bounds):
+            return None
+        item = getattr(command, "legacy_item", None)
+        plugin = str(getattr(item, "plugin", "") or "")
+        item_id = str(getattr(item, "item_id", "") or "")
+        return _ShellRasterCropContributor(
+            source=self._shell_raster_command_source(command),
+            plugin=plugin,
+            item_id=item_id,
+            group_key=key,
+            bounds=bounds,
+            order=order,
+            content_key=self._shell_raster_command_content_key(command, bounds),
+        )
+
+    def _shell_raster_command_paint_bounds(
+        self,
+        command: _LegacyPaintCommand,
+        offset_x: float,
+        offset_y: float,
+    ) -> Tuple[float, float, float, float] | None:
+        if isinstance(command, _RectPaintCommand):
+            left = float(command.x) + offset_x
+            top = float(command.y) + offset_y
+            right = left + float(command.width)
+            bottom = top + float(command.height)
+            pen_margin = 0.0
+            if self._shell_raster_pen_visible(command.pen):
+                try:
+                    pen_margin = max(1.0, float(command.pen.widthF())) / 2.0
+                except Exception:
+                    pen_margin = 0.5
+            return (left - pen_margin, top - pen_margin, right + pen_margin, bottom + pen_margin)
+        if isinstance(command, _VectorPaintCommand):
+            return self._shell_raster_vector_paint_bounds(command, offset_x, offset_y)
+        bounds = command.bounds
+        if not bounds:
+            return None
+        return (
+            float(bounds[0]) + offset_x,
+            float(bounds[1]) + offset_y,
+            float(bounds[2]) + offset_x,
+            float(bounds[3]) + offset_y,
+        )
+
+    def _shell_raster_vector_paint_bounds(
+        self,
+        command: _VectorPaintCommand,
+        offset_x: float,
+        offset_y: float,
+    ) -> Tuple[float, float, float, float] | None:
+        payload = command.vector_payload if isinstance(command.vector_payload, Mapping) else {}
+        points = list(payload.get("points") or [])
+        if not points:
+            return None
+        line_margin = max(1.0, float(self._line_width("vector_line"))) / 2.0
+        marker_margin = max(6.0 + float(self._line_width("vector_marker")), 6.0 + float(self._line_width("vector_cross")))
+        bounds = _ScreenBounds()
+        for point in points:
+            if not isinstance(point, Mapping):
+                continue
+            try:
+                x = float(point.get("x", 0.0)) * float(command.scale) + float(command.base_offset_x) + offset_x
+                y = float(point.get("y", 0.0)) * float(command.scale) + float(command.base_offset_y) + offset_y
+            except (TypeError, ValueError):
+                continue
+            bounds.include_rect(x - line_margin, y - line_margin, x + line_margin, y + line_margin)
+            marker = str(point.get("marker") or "").strip().lower()
+            if marker in {"circle", "cross"}:
+                bounds.include_rect(x - marker_margin, y - marker_margin, x + marker_margin, y + marker_margin)
+            text = str(point.get("text") or "")
+            if text.strip():
+                text_size = self._shell_raster_vector_text_size(payload, point)
+                width, height = self._shell_raster_measure_vector_text_block(text, text_size)
+                label_left = x + 8.0
+                label_top = self._shell_raster_vector_label_top(command, y, height)
+                bounds.include_rect(label_left, label_top, label_left + width, label_top + height)
+        if not bounds.is_valid():
+            return None
+        return bounds.min_x, bounds.min_y, bounds.max_x, bounds.max_y
+
+    def _shell_raster_vector_text_size(
+        self,
+        payload: Mapping[str, object],
+        point: Mapping[str, object],
+    ) -> str:
+        for source in (point.get("size"), payload.get("text_size"), payload.get("size")):
+            if isinstance(source, str):
+                token = source.strip().lower()
+                if token in {"small", "normal", "large", "huge"}:
+                    return token
+        return "normal"
+
+    def _shell_raster_vector_label_top(
+        self,
+        command: _VectorPaintCommand,
+        y: float,
+        text_height: int,
+    ) -> float:
+        position = "below"
+        transform = getattr(command, "group_transform", None)
+        if transform is not None:
+            raw = getattr(transform, "marker_label_position", None)
+            if isinstance(raw, str) and raw.strip().lower() in {"below", "above", "centered"}:
+                position = raw.strip().lower()
+        if position == "above":
+            return y - 7.0 - float(text_height)
+        if position == "centered":
+            return y - (float(text_height) / 2.0)
+        return y + 7.0
+
+    def _shell_raster_measure_vector_text_block(self, text: str, text_size: str) -> Tuple[int, int]:
+        try:
+            state = self._viewport_state()
+            mapper = self._compute_legacy_mapper()
+            point_size = self._legacy_preset_point_size(text_size, state, mapper)
+            width, ascent, descent = self._measure_text(text, point_size, self._font_family)
+            return max(0, int(width)), max(0, int(ascent + descent))
+        except Exception:
+            return max(0, len(str(text)) * 8), 16
+
+    def _shell_raster_group_background_contributors(
+        self,
+        visible_groups: Set[Tuple[str, Optional[str]]],
+        translated_bounds_by_group: Mapping[Tuple[str, Optional[str]], _ScreenBounds],
+        translations: Mapping[Tuple[str, Optional[str]], Tuple[int, int]],
+        transform_by_group: Mapping[Tuple[str, Optional[str]], Optional[GroupTransform]],
+        *,
+        order_offset: int,
+    ) -> List[_ShellRasterCropContributor]:
+        contributors: List[_ShellRasterCropContributor] = []
+        for index, key in enumerate(sorted(visible_groups, key=lambda item: (item[0], item[1] or ""))):
+            transform = transform_by_group.get(key)
+            if transform is None:
+                continue
+            fill_visible = self._shell_raster_background_visible(getattr(transform, "background_color", None))
+            border_visible = self._shell_raster_background_visible(getattr(transform, "background_border_color", None))
+            if not fill_visible and not border_visible:
+                continue
+            bounds = translated_bounds_by_group.get(key)
+            if bounds is None or not bounds.is_valid():
+                continue
+            try:
+                border_width = max(0, int(getattr(transform, "background_border_width", 0) or 0))
+            except Exception:
+                border_width = 0
+            nudge_x, nudge_y = translations.get(key, (0, 0))
+            left = float(bounds.min_x) + float(nudge_x)
+            right = float(bounds.max_x) + float(nudge_x)
+            top = float(bounds.min_y) + float(nudge_y)
+            bottom = float(bounds.max_y) + float(nudge_y)
+            left_px = float(int(round(left - border_width)))
+            top_px = float(int(round(top - border_width)))
+            width_px = float(int(round((right - left) + border_width * 2)))
+            height_px = float(int(round((bottom - top) + border_width * 2)))
+            if width_px <= 0.0 or height_px <= 0.0:
+                continue
+            bg_left = left_px
+            bg_top = top_px
+            bg_right = left_px + width_px
+            bg_bottom = top_px + height_px
+            if border_visible:
+                bg_left -= 1.0
+                bg_top -= 1.0
+                bg_right += 1.0
+                bg_bottom += 1.0
+            if not self._shell_raster_bounds_valid((bg_left, bg_top, bg_right, bg_bottom)):
+                continue
+            contributors.append(
+                _ShellRasterCropContributor(
+                    source="group_background",
+                    plugin=key[0],
+                    item_id="",
+                    group_key=key,
+                    bounds=(bg_left, bg_top, bg_right, bg_bottom),
+                    order=order_offset + index,
+                    content_key=self._shell_raster_group_background_content_key(transform, (bg_left, bg_top, bg_right, bg_bottom)),
+                )
+            )
+        return contributors
+
+    def _shell_raster_command_content_key(
+        self,
+        command: _LegacyPaintCommand,
+        bounds: Tuple[float, float, float, float],
+    ) -> str:
+        item = getattr(command, "legacy_item", None)
+        payload: Dict[str, object] = {
+            "kind": self._shell_raster_command_source(command),
+            "plugin": str(getattr(item, "plugin", "") or ""),
+            "item_id": str(getattr(item, "item_id", "") or ""),
+            "group_key": list(command.group_key.as_tuple()),
+            "bounds": self._shell_raster_rounded_tuple(bounds),
+            "opacity": int(self._payload_opacity_percent()),
+            "font_family": str(getattr(self, "_font_family", "") or ""),
+            "justification_dx": round(float(getattr(command, "justification_dx", 0.0) or 0.0), 3),
+        }
+        if isinstance(command, _MessagePaintCommand):
+            payload.update(
+                {
+                    "text": str(command.text),
+                    "color": self._shell_raster_qcolor_identity(command.color),
+                    "point_size": round(float(command.point_size), 3),
+                    "x": int(command.x),
+                    "baseline": int(command.baseline),
+                    "text_width": int(command.text_width),
+                    "ascent": int(command.ascent),
+                    "descent": int(command.descent),
+                    "line_spacing": int(command.line_spacing),
+                }
+            )
+        elif isinstance(command, _RectPaintCommand):
+            payload.update(
+                {
+                    "x": int(command.x),
+                    "y": int(command.y),
+                    "width": int(command.width),
+                    "height": int(command.height),
+                    "pen": self._shell_raster_qpen_identity(command.pen),
+                    "brush": self._shell_raster_qbrush_identity(command.brush),
+                }
+            )
+        elif isinstance(command, _VectorPaintCommand):
+            marker_label_position = ""
+            if command.group_transform is not None:
+                marker_label_position = str(getattr(command.group_transform, "marker_label_position", None) or "")
+            payload.update(
+                {
+                    "vector_payload": command.vector_payload,
+                    "scale": round(float(command.scale), 6),
+                    "base_offset_x": round(float(command.base_offset_x), 3),
+                    "base_offset_y": round(float(command.base_offset_y), 3),
+                    "marker_label_position": marker_label_position,
+                    "vector_line_width": int(self._line_width("vector_line")),
+                    "vector_marker_width": int(self._line_width("vector_marker")),
+                    "vector_cross_width": int(self._line_width("vector_cross")),
+                }
+            )
+        return self._shell_raster_stable_content_digest(payload)
+
+    def _shell_raster_group_background_content_key(
+        self,
+        transform: GroupTransform,
+        bounds: Tuple[float, float, float, float],
+    ) -> str:
+        payload = {
+            "kind": "group_background",
+            "bounds": self._shell_raster_rounded_tuple(bounds),
+            "background_color": str(getattr(transform, "background_color", None) or ""),
+            "background_border_color": str(getattr(transform, "background_border_color", None) or ""),
+            "background_border_width": int(getattr(transform, "background_border_width", 0) or 0),
+            "opacity": int(self._payload_opacity_percent()),
+        }
+        return self._shell_raster_stable_content_digest(payload)
+
+    @staticmethod
+    def _shell_raster_stable_content_digest(payload: Mapping[str, object]) -> str:
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _shell_raster_rounded_tuple(values: Sequence[float]) -> Tuple[float, ...]:
+        return tuple(round(float(value), 3) for value in values)
+
+    @staticmethod
+    def _shell_raster_qcolor_identity(color: QColor) -> Tuple[int, int, int, int]:
+        return (int(color.red()), int(color.green()), int(color.blue()), int(color.alpha()))
+
+    def _shell_raster_qpen_identity(self, pen: QPen) -> Dict[str, object]:
+        return {
+            "style": self._shell_raster_qt_enum_identity(pen.style()),
+            "width": round(float(pen.widthF()), 3),
+            "color": self._shell_raster_qcolor_identity(pen.color()),
+        }
+
+    def _shell_raster_qbrush_identity(self, brush: QBrush) -> Dict[str, object]:
+        return {
+            "style": self._shell_raster_qt_enum_identity(brush.style()),
+            "color": self._shell_raster_qcolor_identity(brush.color()),
+        }
+
+    @staticmethod
+    def _shell_raster_qt_enum_identity(value: object) -> object:
+        enum_value = getattr(value, "value", None)
+        return enum_value if enum_value is not None else str(value)
+
+    def _shell_raster_crop_diagnostics(
+        self,
+        contributors: Sequence[_ShellRasterCropContributor],
+        content_bounds: object | None,
+    ) -> Dict[str, object]:
+        largest = sorted(contributors, key=lambda contributor: contributor.area, reverse=True)[:5]
+        to_payload = getattr(content_bounds, "to_payload", None)
+        return {
+            "crop_source": "visible_paint_contributors",
+            "content_bounds": to_payload() if callable(to_payload) else None,
+            "crop_contributor_count": len(contributors),
+            "crop_largest_contributors": [contributor.to_diagnostics() for contributor in largest],
+        }
+
+    def _shell_raster_command_has_visible_pixels(self, command: _LegacyPaintCommand) -> bool:
+        if self._payload_opacity_percent() <= 0:
+            return False
+        if isinstance(command, _MessagePaintCommand):
+            text = str(getattr(command, "text", "") or "")
+            if not text.strip():
+                return False
+            if int(getattr(command, "text_width", 0) or 0) <= 0:
+                return False
+            return self._shell_raster_qcolor_visible(command.color)
+        if isinstance(command, _RectPaintCommand):
+            item = command.legacy_item.data
+            width = self._safe_float(item.get("w"), default=0.0)
+            height = self._safe_float(item.get("h"), default=0.0)
+            if width <= 0.0 or height <= 0.0:
+                return False
+            return self._shell_raster_pen_visible(command.pen) or self._shell_raster_brush_visible(command.brush)
+        if isinstance(command, _VectorPaintCommand):
+            points = command.vector_payload.get("points") if isinstance(command.vector_payload, Mapping) else None
+            if not points:
+                return False
+            return self._shell_raster_vector_has_visible_pixels(command.vector_payload)
+        return self._command_is_visible_for_target(command)
+
+    def _shell_raster_vector_has_visible_pixels(self, payload: Mapping[str, object]) -> bool:
+        points = list(payload.get("points") or [])
+        if not points:
+            return False
+        base_color_visible = self._shell_raster_color_spec_visible(payload.get("base_color"), invalid_visible=True)
+        if len(points) >= 2 and base_color_visible:
+            return True
+        for point in points:
+            if not isinstance(point, Mapping):
+                continue
+            marker = str(point.get("marker") or "").strip().lower()
+            text = str(point.get("text") or "")
+            if not marker and not text.strip():
+                continue
+            color = point.get("color", payload.get("base_color"))
+            if self._shell_raster_color_spec_visible(color, invalid_visible=True):
+                return True
+        return False
+
+    def _shell_raster_pen_visible(self, pen: QPen) -> bool:
+        try:
+            if pen.style() == Qt.PenStyle.NoPen:
+                return False
+            return self._shell_raster_qcolor_visible(pen.color())
+        except Exception:
+            return False
+
+    def _shell_raster_brush_visible(self, brush: QBrush) -> bool:
+        try:
+            if brush.style() == Qt.BrushStyle.NoBrush:
+                return False
+            return self._shell_raster_qcolor_visible(brush.color())
+        except Exception:
+            return False
+
+    def _shell_raster_background_visible(self, value: object) -> bool:
+        q_color = self._qcolor_from_background(value)
+        if q_color is None:
+            return False
+        return self._shell_raster_qcolor_visible(q_color)
+
+    def _shell_raster_color_spec_visible(self, value: object, *, invalid_visible: bool = False) -> bool:
+        if not isinstance(value, str):
+            return invalid_visible
+        token = value.strip()
+        if not token or token.lower() == "none":
+            return False
+        q_color = QColor(token)
+        if not q_color.isValid():
+            return invalid_visible
+        return self._shell_raster_qcolor_visible(q_color)
+
+    def _shell_raster_qcolor_visible(self, color: QColor) -> bool:
+        if not color.isValid():
+            return False
+        try:
+            effective = self._apply_payload_opacity_color(QColor(color))
+            return int(effective.alpha()) > 0
+        except Exception:
+            return int(color.alpha()) > 0
+
+    @staticmethod
+    def _shell_raster_command_source(command: _LegacyPaintCommand) -> str:
+        if isinstance(command, _MessagePaintCommand):
+            return "message"
+        if isinstance(command, _RectPaintCommand):
+            return "rect"
+        if isinstance(command, _VectorPaintCommand):
+            return "vector"
+        return "legacy"
+
+    @staticmethod
+    def _shell_raster_bounds_valid(bounds: Tuple[float, float, float, float]) -> bool:
+        left, top, right, bottom = bounds
+        return (
+            math.isfinite(left)
+            and math.isfinite(top)
+            and math.isfinite(right)
+            and math.isfinite(bottom)
+            and right > left
+            and bottom > top
+        )
+
+    def _build_backend_shell_raster_content_frame(
+        self,
+        target_status: Any | None,
+        request: Any | None,
+        include_diagnostics: bool = False,
+    ) -> object:
+        from PyQt6.QtGui import QImage
+
+        from overlay_client.backend.shell_raster_frame import (
+            ShellRasterFrameBuildResult,
+            build_multi_region_real_content_shell_raster_frame_request,
+        )
+
+        try:
+            render_size = self._shell_raster_target_render_size(target_status, request)
+            with self._temporary_shell_raster_render_size(render_size):
+                payload_results = self._prepare_shell_raster_payload_results()
+                contributors = self._shell_raster_crop_contributor_snapshot(payload_results)
+        except Exception as exc:
+            _CLIENT_LOGGER.debug("Shell raster content export preparation failed: %s", exc)
+            return ShellRasterFrameBuildResult(reason="frame_export_failed")
+        if not contributors:
+            return ShellRasterFrameBuildResult(reason="no_visible_content")
+
+        def write_frame(image_path: object, crop_rect: object, _region: object) -> None:
+            image_format = getattr(QImage.Format, "Format_ARGB32")
+            image = QImage(int(getattr(crop_rect, "width", 0)), int(getattr(crop_rect, "height", 0)), image_format)
+            image.fill(QColor(0, 0, 0, 0))
+            with self._temporary_shell_raster_render_size(render_size):
+                painter = QPainter(image)
+                try:
+                    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+                    painter.translate(-int(getattr(crop_rect, "x", 0)), -int(getattr(crop_rect, "y", 0)))
+                    self._paint_legacy(painter)
+                finally:
+                    painter.end()
+            if not image.save(str(image_path), "PNG"):
+                raise RuntimeError("real-content Shell raster PNG save failed")
+
+        return build_multi_region_real_content_shell_raster_frame_request(
+            target_status,
+            request,
+            contributors=contributors,
+            writer=write_frame,
+            env=os.environ,
+            include_diagnostics=include_diagnostics,
+        )
 
     def _apply_group_logging_payloads(
         self,
@@ -601,8 +1235,7 @@ class RenderSurfaceMixin:
         mapper: LegacyMapper,
     ) -> None:
         collect_debug_helpers = self._dev_mode_enabled and self._debug_config.group_bounds_outline
-        window_width = max(self.width(), 0)
-        window_height = max(self.height(), 0)
+        window_width, window_height = self._render_surface_logical_size()
         draw_vertex_markers = self._dev_mode_enabled and self._debug_config.payload_vertex_markers
         self._paint_group_backgrounds(
             painter,
