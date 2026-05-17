@@ -313,9 +313,12 @@ Record:
 | 9B | Borderless full-monitor work-area constraint fix | Managed PyQt Path Not Viable; Evidence Retained |
 | 10 | GNOME Shell-native borderless/fullscreen small proof | Active-Fullscreen Proof Passed; Phase 11 Unblocked |
 | 11 | GNOME Shell-native PyQt raster bridge architecture | Completed; Phase 12 Ready |
-| 12 | GNOME Shell-native PyQt raster bridge small production proof | Ready For Implementation |
-| 13 | GNOME Shell-native PyQt raster bridge hardening and support gate | Pending Phase 12 Implementation |
-| 14 | GNOME Shell-native PyQt raster parity/performance expansion | Pending Phase 13 Decision |
+| 12 | GNOME Shell-native PyQt raster bridge small production proof | Completed; Persistent Runtime Safety Deferred To Phase 13 |
+| 13 | GNOME Shell-native PyQt raster bridge lifecycle/focus hardening and support gate | Completed; Opt-In Experimental Proof Mode Only |
+| 14 | GNOME Shell-native PyQt raster parity/performance expansion | In Progress; Phase 14.4 Ready |
+| 15 | Productionization and GNOME support gate | Pending Phase 14 |
+| 16 | Deferred GNOME fallback cleanup | Pending Phase 15 Scope Decision |
+| 17 | Extended hardening and release validation | Pending Phase 15 |
 
 ## Phase Details
 
@@ -2865,23 +2868,165 @@ gdbus call --session \
 
 ### Phase 12: GNOME Shell-Native PyQt Raster Bridge Small Production Proof
 - Goal: implement the first selected PyQt raster bridge behind a dev/runtime gate, preserving managed PyQt helper presentation as the default for windowed, unsupported, and fallback paths.
-- Phase 12 should start with the smallest useful raster proof: one transparent PyQt-generated frame or cropped frame displayed by the Phase 10 target-window-actor path.
+- Phase 12 should start with the smallest useful raster proof: one static transparent PyQt-generated test frame or cropped frame displayed by the Phase 10 target-window-actor path.
 - Broad renderer parity is not in Phase 12. Larger visual parity, high-cadence transfer, richer cropping/damage tracking, and performance expansion move to Phase 14+.
 - Support wording remains degraded/experimental throughout Phase 12.
 
 #### Phase 12 Refactor Staging
 | Stage | Description | Status |
 | --- | --- | --- |
-| 12.1 | Extract helper-side Shell presentation controller/class from the Phase 10 proof code | Ready For Implementation |
-| 12.2 | Add backend-owned Shell frame models, request builders, response parsers, and optional helper capability fields | Ready For Implementation |
-| 12.3 | Implement frame/update/clear IPC in the helper with backward-compatible optional request/response fields | Ready For Implementation |
-| 12.4 | Implement the selected minimal PyQt raster bridge behind a dev/runtime gate, with explicit limits on frame dimensions, bytes, cadence, and supported transparency behavior | Ready For Implementation |
-| 12.5 | Wire runtime selection for GNOME borderless/fullscreen Shell-native presentation through backend-owned interfaces only | Ready For Implementation |
-| 12.6 | Preserve PyQt presentation for windowed mode and add visible fail-soft fallback for unsupported/failing Shell-native presentation | Ready For Implementation |
-| 12.7 | Add frame signatures/no-op suppression and bounded update cadence before enabling any runtime loop | Ready For Implementation |
-| 12.8 | Add headless unit/static/harness coverage for parser, policy, backend boundaries, fallback behavior, and regression slices from Phases 6A, 6B, 8, 9.9A, and 9B | Ready For Implementation |
-| 12.9 | Run targeted tests and `make check`; leave manual production validation to Phase 13 | Ready For Implementation |
-| 12.10 | Record unsupported renderer features and required Phase 14 parity work before Phase 12 closes | Ready For Implementation |
+| 12.1 | Extract helper-side Shell presentation controller/class from the Phase 10 proof code | Completed |
+| 12.2 | Add backend-owned Shell frame models, request builders, response parsers, and optional helper capability fields | Completed |
+| 12.3 | Implement frame/update/clear IPC in the helper with backward-compatible optional request/response fields | Completed |
+| 12.4 | Implement the selected minimal PyQt raster bridge behind a dev/runtime gate, with explicit limits on frame dimensions, bytes, cadence, and supported transparency behavior | Completed For Static PNG Proof |
+| 12.5 | Wire runtime selection for GNOME borderless/fullscreen Shell-native presentation through backend-owned interfaces only | Completed Behind `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1` |
+| 12.6 | Preserve PyQt presentation for windowed mode and add visible fail-soft fallback for unsupported/failing Shell-native presentation | Completed; no windowed-mode migration |
+| 12.7 | Add frame signatures/no-op suppression and bounded update cadence before enabling any runtime loop | Completed For Static Proof Signature; broader cadence hardening remains Phase 13 |
+| 12.8 | Add headless unit/static/harness coverage for parser, policy, backend boundaries, fallback behavior, and regression slices from Phases 6A, 6B, 8, 9.9A, and 9B | Completed |
+| 12.9 | Run targeted tests and `make check`; leave manual production validation to Phase 13 | Completed |
+| 12.10 | Record unsupported renderer features and required Phase 14 parity work before Phase 12 closes | Completed; real overlay parity remains Phase 14+ |
+| 12.11 | Fix Phase 12 raster lifecycle cleanup after EDMC/overlay-client shutdown so Shell actors cannot persist as orphaned proof surfaces | Completed; Persistent Runtime Retest Failed, Deferred To Phase 13 |
+| 12.12 | Suppress the managed PyQt overlay window after a successful Shell raster frame apply while preserving visible PyQt fallback on failure | Completed; Persistent Runtime Retest Failed, Deferred To Phase 13 |
+| 12.13 | Add an extra explicit dev gate for persistent Shell raster runtime after manual focus/overview instability, keeping Phase 12 proof behavior disabled by default even when the bridge flag is present | Completed; Safe-Flag Manual Retest Passed |
+
+#### Phase 12 Accepted Recommendations
+- Proof frame source: start with a static PyQt-generated transparent PNG test frame. Do not export or stream the full live overlay in Phase 12.
+- Real overlay content timing: defer actual overlay snapshots/cropped panels to Phase 14 after Phase 12 proves the frame pipeline and Phase 13 hardens runtime lifecycle. Pulling a tiny real-content slice into late Phase 12 is allowed only if the static proof is clean and the scope remains explicitly bounded.
+- Cache directory: use a per-user runtime/cache directory, preferably `$XDG_RUNTIME_DIR/EDMCModernOverlay/shell-raster/`, with a private `/tmp` fallback if needed. Directory permissions should be user-only, such as `0700`.
+- Image format: PNG RGBA only. Do not add JPEG, SVG, raw buffers, shared memory, or texture handles in Phase 12.
+- Frame limits: decoded dimensions must fit within the target rect; `frame_rect` must be inside the target rect; file size must be capped. Full-monitor PNGs are acceptable only for a specific proof/fallback case, not as the steady-state target.
+- Helper API shape: use optional fields on the existing helper request path. Do not require a helper protocol bump unless optional fields prove insufficient.
+- Helper implementation shape: extract or isolate a small helper-side Shell raster controller rather than adding production frame behavior into the Phase 10 proof marker path.
+- Runtime wiring: keep the path off by default. After Phase 12.13, `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1` alone is not sufficient to apply persistent Shell raster updates; live runtime presentation also requires the explicit dev gate `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE_RUNTIME=1`. This prevents accidental persistent fullscreen child actors while Phase 13 focus/lifecycle hardening is pending.
+- PyQt window suppression: keep suppression minimal. Suppress/hide the managed PyQt overlay only after the Shell frame path successfully applies, and restore or fall back visibly on failure.
+- No-op/cadence: implement checksum/signature suppression before repeated updates and avoid sending unchanged frames.
+
+#### Phase 12.1 Implementation Plan
+- Started: 2026-05-15.
+- Intended touch points:
+- `helpers/gnome_shell_extension/extension.js`: add an opt-in Shell raster frame controller path separate from the Phase 10 proof marker path, with image actor lifecycle, strict borderless/full-monitor eligibility, path/image guards, stale timeout, explicit clear, and normal `ApplyPresentation` preservation.
+- `overlay_client/backend/helper_ipc.py`: add backend-owned optional raster frame request/response models and parser fields.
+- `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py`: add GNOME-specific runtime gate, static PyQt PNG proof frame request construction, frame signatures/no-op behavior, and fail-soft handling behind backend-owned interfaces.
+- New backend-owned helper module if useful: static PyQt PNG proof frame creation, runtime/cache directory management, checksum/signature, and path validation helpers.
+- `overlay_client/tests/test_gnome_shell_helper_extension_source.py`: static/source coverage for helper raster opt-in, target-window-actor attachment, path validation, image load/decode failure handling, stale timeout, explicit clear, non-reactive actor behavior, helper-disable cleanup, and normal `ApplyPresentation` preservation.
+- Backend unit/runtime tests: frame model/cache/signature/path validation, request payload fields, response parsing, runtime gate/eligibility/no-op/fallback behavior, and backend-boundary preservation.
+- Test type selection:
+- Unit tests are required for backend frame model, checksum/signature, path validation, eligibility, no-op, and fallback decisions.
+- Static/source tests are required for helper-side Shell raster source because there is no JS runtime seam in headless tests.
+- Harness tests are required only if generic runtime selection or PyQt window suppression wiring changes.
+- Backend-boundary tests are required if backend/follow wiring changes. Generic `follow_surface.py` must not import GNOME helper implementation details or check raw helper protocol fields.
+- Support wording remains degraded/experimental. No `true_overlay` claim.
+
+#### Phase 12 Implementation Summary
+- Completed: 2026-05-15.
+- Helper-side implementation:
+- Added an isolated, opt-in `shell_raster_frame` path to `helpers/gnome_shell_extension/extension.js`.
+- Supported `shell_raster_frame_action="update"` and `"clear"` with optional backward-compatible request fields.
+- Attached the raster actor under the proven `target_window_actor_child` path.
+- Added strict borderless/full-monitor eligibility, PNG/RGBA decode validation, allowed-cache path validation, file-size checks, non-reactive actor behavior, stale timeout, explicit clear, and helper-disable cleanup.
+- Backend implementation:
+- Added `HelperRasterFrameRequest` and optional raster response parsing in `overlay_client/backend/helper_ipc.py`.
+- Added `overlay_client/backend/shell_raster_frame.py` for cache-dir construction, `0700` cache creation, path validation, checksum generation, static PyQt PNG test-frame export, and borderless/full-monitor request eligibility.
+- Wired the runtime gate in `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py` behind `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1`.
+- Preserved the existing PyQt path when the gate is off, when the target is not borderless/full-monitor, or when the static frame cannot be built.
+- Existing windowed mode remains on the managed PyQt presentation path. No generic `follow_surface.py` wiring changed.
+- Files changed:
+- `docs/refactoring/gnome_wayland_presentation_attachment.md`
+- `helpers/gnome_shell_extension/extension.js`
+- `overlay_client/backend/__init__.py`
+- `overlay_client/backend/helper_ipc.py`
+- `overlay_client/backend/shell_raster_frame.py`
+- `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py`
+- `overlay_client/tests/test_gnome_shell_helper_extension_source.py`
+- `overlay_client/tests/test_gnome_shell_helper_presentation_state.py`
+- `overlay_client/tests/test_gnome_helper_presentation_runtime.py`
+- `overlay_client/tests/test_shell_raster_frame.py`
+- Validation commands and outcomes:
+- `python3 -m py_compile overlay_client/backend/helper_ipc.py overlay_client/backend/shell_raster_frame.py overlay_client/backend/bundles/_gnome_shell_helper_presentation.py`: passed.
+- `python3 -m py_compile overlay_client/tests/test_shell_raster_frame.py overlay_client/tests/test_gnome_shell_helper_presentation_state.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_gnome_shell_helper_extension_source.py`: passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_shell_raster_frame.py`: 4 passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py`: 24 passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_presentation_state.py`: 24 passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_helper_presentation_runtime.py`: 41 passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_architecture_boundary.py`: 2 passed.
+- `git diff --check`: passed.
+- `make check`: ruff passed, mypy passed, full pytest passed with 1047 passed and 21 skipped.
+- Manual validation evidence:
+- 2026-05-16 user validation with EDMC launched using `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1`: the user saw `EDMC PyQt Raster Proof` in a green box in the upper-left corner while Elite had focus. This proves the static PyQt-generated PNG frame is visible above active Elite borderless fullscreen through the Shell raster path.
+- The user reported no titlebar for the proof frame, focus remained stable, and there was no black/opaque background or flashing.
+- Exact `y=0` offset remains visually inconclusive because the Phase 12 frame is intentionally a small cropped proof box, not a full-screen image.
+- Click-through directly under the proof box remains inconclusive because there was no clickable game control under the small proof frame. Click-through elsewhere still worked.
+- Stale-timeout behavior remains inconclusive while EDMC is running because the runtime refreshes the frame. The user reported the proof disappears after closing EDMC, which is useful cleanup evidence but is not yet a standalone stale-timeout proof.
+- 2026-05-16 follow-up validation patch scope: enlarge the static proof PNG to nearly the full target rect with a 10 px inset. This keeps the test as a cropped/static proof while making offset and click-through validation practical.
+- 2026-05-16 follow-up validation result: with the near-fullscreen 10 px inset proof frame, the user confirmed the green box is at true monitor origin with no `y=29` offset and confirmed click-through works into the game under the proof frame.
+- 2026-05-16 lifecycle bug report: after EDMC shutdown, the EDMC/overlay window surface did not close cleanly and the Shell raster proof remained visible even though the user could not find a remaining EDMC process to kill. This means Phase 12 needs an explicit shutdown clear path in addition to helper-side stale timeout and manual clear.
+- Phase 12.11 intended touch points:
+- `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py`: add a backend-owned best-effort Shell raster clear request helper for shutdown paths.
+- `overlay_client/launcher.py`: clear the Shell raster frame during overlay-client quit when `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1`.
+- `load.py`: clear the Shell raster frame during EDMC plugin stop when the Phase 12 gate is enabled.
+- Tests: unit tests for the backend clear request and launcher shutdown hook; harness test for plugin-stop cleanup wiring. Static helper tests remain unchanged unless helper JS is touched.
+- Phase 12.11 implementation result:
+- Added a backend-owned `build_shell_raster_frame_clear_request()` and `clear_gnome_shell_raster_frame_via_gdbus()` shutdown cleanup helper.
+- Added an overlay-client Qt shutdown hook that sends `shell_raster_frame_action="clear"` when `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1`.
+- Added an EDMC plugin-stop backup clear path, including the idempotent stop path.
+- Added tests:
+- `overlay_client/tests/test_gnome_helper_presentation_runtime.py`: shutdown clear request and fetcher coverage.
+- `overlay_client/tests/test_launcher_shell_raster_shutdown.py`: overlay-client env-gated shutdown clear coverage.
+- `tests/test_harness_plugin_hooks_contract.py`: plugin stop clear helper coverage under the harness.
+- Phase 12.11 validation commands and outcomes:
+- `python3 -m py_compile load.py overlay_client/backend/bundles/_gnome_shell_helper_presentation.py overlay_client/launcher.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_launcher_shell_raster_shutdown.py tests/test_harness_plugin_hooks_contract.py`: passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_launcher_shell_raster_shutdown.py tests/test_harness_plugin_hooks_contract.py`: 48 passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py overlay_client/tests/test_backend_architecture_boundary.py`: 26 passed.
+- `git diff --check`: passed.
+- `make check`: ruff passed, mypy passed, full pytest passed with 1052 passed and 21 skipped.
+- 2026-05-16 managed-window suppression bug report: after restart and rerun with `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1`, shutdown still left a visible `EDMC Modern Overlay` window actor. Helper group diagnostics showed a stale managed PyQt overlay window actor (`title="EDMC Modern Overlay"`, `wm_class="python3"`, bounds `0,29,640,480`) with no corresponding live process. Root cause: Phase 12 applied the Shell raster frame but still exposed `should_show_overlay=True` to the generic PyQt surface path, so the managed overlay window remained visible instead of being suppressed after successful Shell raster presentation.
+- Phase 12.12 intended touch points:
+- `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py`: return `should_show_overlay=False` only when the Shell raster frame path has successfully applied and matched the requested rect.
+- `overlay_client/backend/consumers.py` or related tests if backend result visibility expectations need coverage.
+- `overlay_client/tests/test_gnome_helper_presentation_runtime.py`: add/update runtime tests proving Shell raster success suppresses the managed PyQt overlay and Shell raster fallback/failure keeps PyQt visible.
+- Keep windowed mode on the existing managed PyQt path, and keep support wording degraded/experimental.
+- Phase 12.12 implementation result:
+- Added `shell_raster_frame_presented` to the GNOME helper presentation runtime result.
+- Changed `should_show_overlay` to return `False` only when the Shell raster frame renderer has successfully applied with a matching valid applied rect.
+- Preserved visible PyQt fallback when the Shell raster frame path is gated off, cannot build a frame, fails eligibility, or falls back to normal PyQt presentation.
+- Phase 12.12 validation commands and outcomes:
+- `python3 -m py_compile overlay_client/backend/bundles/_gnome_shell_helper_presentation.py overlay_client/tests/test_gnome_helper_presentation_runtime.py`: passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_launcher_shell_raster_shutdown.py tests/test_harness_plugin_hooks_contract.py`: 48 passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_backend_architecture_boundary.py`: 30 passed.
+- `git diff --check`: passed.
+- `make check`: ruff passed, mypy passed, full pytest passed with 1052 passed and 21 skipped.
+- Manual validation remains pending for:
+- Reload helper with `./scripts/dev_gnome_helper.sh reload --yes`.
+- Start EDMC normally with `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1` and without `EDMC_OVERLAY_GNOME_BORDERLESS_FULLSCREEN_PREP=1`.
+- Put Elite in GNOME Wayland windowed-borderless/full-monitor mode.
+- Confirm target state reports `fullscreen=true` and `contentRect == monitorRect`.
+- Confirm explicit clear, stale timeout after refresh stops, invalid path fail-soft, changed target token fail-soft, and windowed mode still using the existing PyQt path.
+- Confirm EDMC/overlay-client shutdown clears the Shell raster proof and does not leave a blank/stuck window surface.
+- Confirm a successful Shell raster frame no longer leaves a visible `EDMC Modern Overlay` managed PyQt window actor while Elite borderless/fullscreen is active.
+- 2026-05-16 focus/overview instability report: after logging out/in and retesting with `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1`, EDMC still did not shut down cleanly, the proof remained visible, and GNOME Shell Alt-Tab/Super overview behavior became inconsistent while EDMC was running. Immediate cleanup commands cleared both the `shell_raster_frame` actor and the Phase 10 `shell_actor_proof` actor, and `pgrep` found no remaining EDMC/overlay-client process. This means the persistent Phase 12 runtime path is too risky to leave behind the single bridge flag; the static proof remains valid, but persistent runtime presentation must move behind an additional explicit dev gate until Phase 13 lifecycle/focus hardening.
+- Phase 12.13 intended touch points:
+- `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py`: require a second explicit runtime gate before replacing normal PyQt presentation requests with Shell raster frame updates.
+- `overlay_client/tests/test_gnome_helper_presentation_runtime.py`: update gate coverage so `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1` alone preserves the PyQt path, and only the bridge flag plus the explicit runtime flag sends the static Shell raster frame.
+- `docs/refactoring/gnome_wayland_presentation_attachment.md`: record the manual failure, gate decision, and retest instructions.
+- Test type selection: unit tests for backend runtime gate behavior; no helper JS, generic follow/runtime, or harness changes expected. Manual GNOME validation remains required before any persistent runtime can be promoted beyond the extra dev gate.
+- Phase 12.13 implementation result:
+- Added `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE_RUNTIME=1` as a second explicit dev gate for backend-driven Shell raster frame updates.
+- Preserved shutdown/clear cleanup under the original `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1` gate so stale actors can still be cleared during plugin or overlay-client shutdown.
+- Updated runtime tests so the bridge flag alone keeps the existing PyQt path, while bridge plus runtime flags sends the static Shell raster frame.
+- Phase 12.13 validation commands and outcomes:
+- `python3 -m py_compile overlay_client/backend/bundles/_gnome_shell_helper_presentation.py overlay_client/tests/test_gnome_helper_presentation_runtime.py`: passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_helper_presentation_runtime.py`: 43 passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_launcher_shell_raster_shutdown.py tests/test_harness_plugin_hooks_contract.py overlay_client/tests/test_backend_architecture_boundary.py`: 7 passed.
+- `git diff --check`: passed.
+- `make check`: ruff passed, mypy passed, full pytest passed with 1052 passed and 21 skipped.
+- Manual retest expectation:
+- Launching EDMC with only `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1` should not show the Shell raster proof and should not affect Alt-Tab/Super overview behavior.
+- Do not use `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE_RUNTIME=1` for normal testing. That flag is now a dangerous proof-only runtime gate until Phase 13 hardens focus, overview, stale actor cleanup, and shutdown behavior.
+- 2026-05-16 manual retest result: launching EDMC with `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1` and without `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE_RUNTIME=1` showed no proof actor, Alt-Tab and Super overview worked normally, and EDMC shut down cleanly. This confirms Phase 12.13 mitigates the focus/overview/shutdown regression by disabling persistent Shell raster runtime under the single bridge flag.
+- Phase 12 closeout:
+- Phase 12 is complete as a small proof: PyQt can generate a transparent PNG, GNOME Shell can present it through `target_window_actor_child` above active Elite borderless fullscreen, the actor can appear at true monitor bounds without the `y=29` work-area offset, and click-through was manually confirmed with the enlarged proof frame.
+- Phase 12 does not close as production-ready persistent runtime. Persistent Shell raster updates exposed focus/overview/shutdown risks, so that work is explicitly deferred to Phase 13.
+- The safe Phase 12 exit state is: `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1` alone does not show the proof actor and does not affect Alt-Tab, Super overview, or EDMC shutdown; `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE_RUNTIME=1` remains proof-only and unsafe for normal use until Phase 13.
 
 #### Phase 12 Touch Points
 - `helpers/gnome_shell_extension/extension.js` or a helper-local module if the extension is split: Shell presentation controller, frame actor updates, cleanup, diagnostics.
@@ -2901,7 +3046,7 @@ gdbus call --session \
 - Start EDMC normally with `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1`.
 - Put Elite in GNOME Wayland windowed-borderless/full-monitor mode.
 - Confirm helper target state reports `fullscreen=true` and `contentRect == monitorRect`.
-- Trigger one transparent PyQt-generated PNG frame or cropped frame update.
+- Trigger one static transparent PyQt-generated PNG test frame or cropped frame update.
 - Confirm the frame appears above active Elite via the `target_window_actor_child` path.
 - Confirm actor/frame bounds match the requested rect with no `y=29` work-area offset.
 - Confirm transparency/no black background.
@@ -2931,6 +3076,7 @@ Before touching code:
 - Keep support/status wording degraded/experimental.
 - Do not claim `true_overlay`.
 - Do not implement full overlay parity.
+- Do not export or stream real overlay content in the default Phase 12 scope.
 - Do not enable Shell raster presentation by default.
 - Do not move rendering into GNOME Shell primitives.
 - Do not change windowed-mode presentation behavior.
@@ -2945,6 +3091,7 @@ Locked decisions:
 - Scope is GNOME Wayland windowed-borderless/full-monitor only.
 - Windowed Elite remains on the existing managed PyQt overlay path.
 - The first transport is local PNG files under a controlled EDMC overlay runtime/cache directory.
+- The Phase 12 frame source is a static PyQt-generated transparent PNG test frame.
 - Prefer cropped frames with `frame_rect` placement metadata.
 - Use event-driven updates only.
 - Add checksum/no-op suppression before compositor-facing frame update work.
@@ -2953,7 +3100,7 @@ Locked decisions:
 - Add explicit clear and stale timeout cleanup.
 - Visible fail-soft fallback is required.
 - All helper request/response fields must be optional and backward-compatible.
-- Do not add shared memory, raw buffers, direct texture transfer, high-rate streaming, Shell primitives, non-GNOME support, windowed-mode migration, support wording promotion, or `true_overlay`.
+- Do not add shared memory, raw buffers, direct texture transfer, high-rate streaming, Shell primitives, real overlay content export by default, non-GNOME support, windowed-mode migration, support wording promotion, or `true_overlay`.
 
 Implementation requirements:
 
@@ -3009,8 +3156,9 @@ In backend-owned code under `overlay_client/backend/`:
 
 4. PyQt PNG proof export
 - Add the smallest PyQt-rendered transparent PNG export needed for the proof.
-- It may be a static/cropped test frame if that is the smallest safe proof.
+- Use a static/cropped test frame first.
 - Do not implement full overlay visual parity.
+- Do not export or stream real overlay content unless explicitly scoped as a tiny post-proof slice.
 - Do not migrate windowed mode.
 - Do not enable high-rate frame streaming.
 
@@ -3076,31 +3224,61 @@ After implementation:
 - Do not mark Phase 13 support gates complete.
 ```
 
-### Phase 13: GNOME Shell-Native PyQt Raster Bridge Hardening And Support Gate
-- Goal: harden the Phase 12 minimal bridge, run the full manual matrix for the implemented subset, and update support wording only if every required gate passes for that subset.
-- Phase 13 owns production readiness for the minimal Shell-native PyQt raster path, not full renderer parity. It should not introduce major architecture changes or large rendering features; if Phase 13 exposes a design flaw, return to Phase 11 or 12 with a scoped follow-up.
-- If Phase 12 does not yet cover all existing overlay visuals, Phase 13 must clearly record the supported feature subset and leave full parity to Phase 14.
+### Phase 13: GNOME Shell-Native PyQt Raster Bridge Lifecycle/Focus Hardening And Support Gate
+- Goal: make the Phase 12 Shell raster path safe for persistent runtime before any real overlay content or support promotion work starts.
+- Current baseline: Phase 10 proved a Shell actor attached to `target_window_actor_child` can draw above active Elite borderless fullscreen at true monitor bounds. Phase 12 proved a PyQt-generated transparent PNG can be presented through that path with no `y=29` offset and click-through preserved in the manual proof.
+- Current blocker: persistent runtime presentation using the Shell raster actor caused GNOME Shell focus/overview instability. Manual evidence showed inconsistent Alt-Tab/Super overview behavior, unreliable shutdown cleanup, and a proof actor persisting until explicitly cleared. Phase 12.13 therefore made `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1` safe by itself and moved persistent runtime behind the additional proof-only gate `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE_RUNTIME=1`.
+- Phase 13 owns lifecycle/focus safety for the minimal Shell-native PyQt raster path, not full renderer parity. Do not start real overlay content export, high-rate streaming, support wording promotion, or `true_overlay` claims until persistent actor safety passes.
+- If Phase 13 proves persistent `target_window_actor_child` actors are not compatible with GNOME Shell overview/window switching, keep the feature proof-only and scope an alternate design before Phase 14.
 
 #### Phase 13 Refactor Staging
 | Stage | Description | Status |
 | --- | --- | --- |
-| 13.1 | Add lifecycle hardening: stale-frame timeout, target token/monitor/workspace validation, helper reload cleanup, EDMC shutdown cleanup, and visible fail-soft fallback | Pending Phase 12 |
-| 13.2 | Add performance hardening: bounded update cadence, no-op suppression, large-payload guards, diagnostics gating, and no compositor-facing churn for unchanged frames | Pending Phase 12 |
-| 13.3 | Add observability hardening: concise normal logs, gated diagnostic logs, frame version, actor bounds, update skip/apply reasons, and cleanup events | Pending Phase 12 |
-| 13.4 | Run full headless regression suite and `make check` after hardening | Pending Phase 12 |
-| 13.5 | Run manual production validation matrix on primary and secondary monitor borderless modes | Pending Phase 12 |
-| 13.6 | Decide whether the hardened minimal subset is shippable as an opt-in GNOME borderless mode or remains proof-only | Pending Validation |
-| 13.7 | Update support/status wording only if all `true_overlay` gates pass for the implemented subset; otherwise keep degraded/experimental wording and record remaining blockers | Pending Validation |
+| 13.1 | Scope lifecycle/focus safety invariants and diagnostics for persistent Shell raster actors, including Alt-Tab/Super overview behavior, shutdown cleanup, target-window child lifetime, and proof-only runtime gates | Completed |
+| 13.2 | Add safe actor lease/lifecycle controls: startup clear, clear-before-update, owner/session id or frame generation guard, target token/monitor/workspace/minimize validation, helper reload cleanup, EDMC shutdown cleanup, overlay-client shutdown cleanup, and stale timeout | Headless Implementation Complete; Manual Validation Pending |
+| 13.3 | Add GNOME focus/overview safety behavior: detect or conservatively clear/suspend raster actors during overview/window switching/focus transitions, then restore only after the target is valid and focused again | Headless Implementation Complete; Manual Validation Pending |
+| 13.4 | Replace persistent proof refresh with a safer runtime mode, starting with one-shot or short-lease frame application before any long-lived actor mode is reconsidered | Headless Implementation Complete; Manual Validation Pending |
+| 13.5 | Add observability and no-churn guards for the hardened path: concise normal logs, gated diagnostics, frame version, actor bounds, update skip/apply reasons, cleanup events, no-op suppression, and bounded cadence | Headless Implementation Complete; Manual Validation Pending |
+| 13.6 | Run targeted unit/static/harness coverage plus full `make check` after lifecycle/focus hardening | Completed |
+| 13.7 | Run manual validation matrix on primary and secondary monitor borderless modes, including Alt-Tab/Super overview responsiveness and clean EDMC shutdown | Manual Validation Failed; 13.7A Planned |
+| 13.7A | Prevent managed PyQt fallback remap during Shell raster focus/overview-risk clears so the proof path fails soft without flashing or exposing a managed titlebar | Core Manual Validation Passed |
+| 13.7B | Validate Shell raster applied actor bounds against the proof frame rect so inset proof frames do not falsely trigger managed PyQt fallback remap | Core Manual Validation Passed |
+| 13.7C | Refresh unchanged Shell raster proof frames before the short helper lease expires while keeping managed PyQt no-op suppression behavior unchanged | Core Manual Validation Passed |
+| 13.7D | Honor `keep_overlay_visible=true` for Shell raster focus loss by allowing an unfocused but visible target while preserving overview/workspace safety clears | Core Manual Validation Passed |
+| 13.8 | Decide whether the hardened minimal subset is shippable as an opt-in GNOME borderless mode or remains proof-only | Completed; Opt-In Experimental Proof Mode Only |
+| 13.9 | Update support/status wording only if all gates pass for the implemented subset; otherwise keep degraded/experimental wording and record remaining blockers | Completed; Keep Degraded/Experimental, No `true_overlay` Claim |
 
 #### Phase 13 Production Hardening Plan
+#### Phase 13 Accepted Recommendations
+- Runtime style: start Phase 13 with short-lease / one-shot Shell raster frames, not persistent forever actors.
+- Actor lifecycle: clear before every new update in the first hardened proof, clear on startup, clear on EDMC shutdown, clear on overlay-client shutdown, clear on target loss, and clear on stale timeout.
+- Focus/overview behavior: clear or suspend the Shell raster actor during GNOME overview/window switching/focus-risk transitions, then restore only after Elite is valid again. If reliable overview detection is not available, prefer conservative short leases and clear-on-risk behavior.
+- Default flag behavior: `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1` remains safe and non-presenting by itself.
+- Runtime proof flag behavior: `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE_RUNTIME=1` remains proof-only until Phase 13 passes the lifecycle/focus manual matrix.
+- First stale timeout target: start around `1500-2000 ms`, shorter than the Phase 12 `5s` proof timeout.
+- First update strategy: prefer clear-before-update over in-place actor mutation until lifecycle safety is proven.
+- Phase 13 scope: harden the static PyQt raster proof path only. Real overlay content export, broad renderer parity, high-rate streaming, and support wording promotion remain Phase 14+.
+- Phase 13.1 pass criteria: proof appears above Elite, clears on timeout, Alt-Tab works, Super overview works, EDMC shuts down cleanly, and no stale actor remains.
+- Phase 13.1 fail criteria: broken Alt-Tab/Super behavior, stuck actor, EDMC shutdown hang, persistent stale actor, wrong target/layer attachment, or any regression to windowed PyQt behavior.
+
+- Starting invariant:
+- `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1` alone must remain safe and must not show persistent Shell raster actors.
+- Persistent runtime remains behind `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE_RUNTIME=1` until Phase 13 proves Alt-Tab, Super overview, stale cleanup, and shutdown safety.
+- Phase 13.1 must explicitly decide whether the first hardened runtime proof uses a short lease/one-shot actor instead of a continuously refreshed actor.
 - Eligibility:
 - Shell-native production path is eligible only for GNOME Wayland helper mode, borderless/fullscreen targets, valid target `contentRect`, `contentRect` matching monitor bounds, current workspace, not minimized, helper protocol/capability support, and an enabled runtime/dev gate until support is promoted.
 - Fallback:
 - If the Shell-native path is unavailable, fails target validation, fails frame apply, or returns stale/mismatched target token, fallback must leave the overlay visible under the current policy and use the existing degraded PyQt helper path where appropriate.
 - Failure must be concise in normal logs and detailed only with diagnostics enabled.
 - Lifecycle:
-- Clear Shell actors on target loss, target token change, monitor/workspace mismatch, minimize, helper disable/reload, EDMC shutdown, overlay client shutdown, and stale frame timeout.
+- Clear Shell actors on startup before first update, target loss, target token change, monitor/workspace mismatch, minimize, helper disable/reload, EDMC shutdown, overlay client shutdown, stale frame timeout, and any detected unsafe GNOME overview/window-switching transition.
 - A stale frame timeout is required so a crashed client cannot leave a permanent Shell actor on screen.
+- Runtime actor ownership must be explicit enough to avoid clearing unrelated proof actors while still cleaning stale EDMC actors after crashes/restarts.
+- Clear operations must be idempotent and safe when the helper is unavailable.
+- Focus/overview safety:
+- Persistent Shell raster actors must not interfere with Alt-Tab, Super overview, window switching, focus return, or EDMC shutdown.
+- If GNOME overview/window-switching state cannot be reliably detected from the extension, the first hardened path should conservatively use short actor leases and clear-on-focus-transition behavior instead of a long-lived actor.
+- Manual validation must include using Alt-Tab and Super repeatedly while EDMC is running with the runtime gate enabled.
 - Performance:
 - Do not send frame updates every follow tick if the frame and target signature are unchanged.
 - Add frame signatures or versioned no-op suppression before any production runtime mode is enabled.
@@ -3112,38 +3290,402 @@ After implementation:
 - Compatibility:
 - The helper protocol must remain backward-compatible. New request/response fields must be optional until a new protocol version is intentionally required.
 - The existing PyQt helper presentation path must remain available for windowed mode and as a fallback while Shell-native support is being proven.
+- Scope control:
+- No real overlay content export, renderer parity, high-rate frame streaming, shared memory, raw buffers, Shell primitives, non-GNOME support, support promotion, or `true_overlay` claim in Phase 13. Those remain Phase 14+ or later after lifecycle/focus safety is proven.
+
+#### Phase 13.1 Implementation Plan
+- Started: 2026-05-16.
+- Scope: first lifecycle/focus hardening slice for the static PyQt PNG proof only. Keep `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1` safe and non-presenting by itself; keep `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE_RUNTIME=1` as the explicit proof-only runtime gate.
+- Intended touch points:
+- `overlay_client/backend/shell_raster_frame.py`: change the proof lease timeout to `1500 ms`, include a process/session generation component in `frame_version`, and keep static PNG proof generation unchanged otherwise.
+- `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py`: preserve the two-stage runtime gate and use the short-lease proof request.
+- `helpers/gnome_shell_extension/extension.js`: enforce helper-side clear-before-update, track the frame session/generation from `frame_version`, clear on session mismatch, clear/suspend on GNOME overview/focus-risk conditions, and keep explicit/stale/helper-disable cleanup intact.
+- `overlay_client/launcher.py`: add startup clear in addition to existing Qt shutdown clear when the bridge flag is set.
+- `load.py`: add EDMC plugin startup clear in addition to existing plugin-stop clear when the bridge flag is set.
+- Tests: update backend raster frame/unit tests, GNOME helper runtime tests, GNOME extension source/static tests, launcher lifecycle tests, plugin harness lifecycle tests, and backend-boundary tests if generic wiring changes.
+- Test type selection:
+- Unit tests for backend short lease, session/generation `frame_version`, runtime gate behavior, and fallback/no-op policy.
+- Static/source tests for helper clear-before-update, session mismatch cleanup, stale timeout, overview/focus-risk cleanup, and normal `ApplyPresentation` preservation.
+- Harness tests for EDMC plugin startup/stop cleanup because `load.py` lifecycle wiring is touched.
+- Launcher lifecycle tests for startup/shutdown cleanup because `overlay_client/launcher.py` is touched.
+- Manual GNOME validation remains required for Alt-Tab, Super overview, focus, click-through, stale timeout, and clean shutdown behavior.
+- Support wording remains degraded/experimental; no `true_overlay` claim.
+
+#### Phase 13.1 Implementation Summary
+- Completed headless implementation on 2026-05-16. Manual GNOME validation remains pending, and support/status wording stays degraded/experimental.
+- Runtime gates:
+- Preserved the two-stage runtime gate. `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1` alone remains non-presenting; runtime proof updates still require `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE_RUNTIME=1`.
+- The Shell raster runtime remains proof-only and static. No real overlay content export, full renderer parity, high-rate streaming, or default Shell raster runtime was added.
+- Backend short lease/session behavior:
+- Changed the static raster proof lease to `1500 ms`.
+- Added a process/session generation component to the Shell raster `frame_version`, formatted as the Phase 13 static proof version, session id, and checksum digest.
+- Kept the existing no-op/signature behavior so unchanged successful frames do not continuously re-enter compositor-facing presentation.
+- Helper actor lifecycle:
+- The helper now treats Shell raster actors as short-lease actors, with stale-timeout cleanup at the requested lease.
+- The helper clears before applying a new raster frame. Decode, dimension, target-actor, eligibility, and path failures clear the existing Shell actor and allow the managed PyQt fallback to remain visible.
+- The helper records the session id from `frame_version` and reports `session_id` in the raster diagnostics payload. A new frame from a different session clears with `session_generation_mismatch`.
+- Explicit clear, stale timeout, target loss, target token mismatch through replacement, workspace mismatch, minimized target, invalid frame, helper disable/reload, and session mismatch all route through best-effort cleanup.
+- Focus/overview safety:
+- The helper imports GNOME overview state, clears/suspends raster actors when overview state is active, and connects overview signals to clear existing actors.
+- If the target payload reports `hasFocus=false`, the raster actor is cleared and the request degrades with `target_not_focused`, leaving the existing PyQt fallback path available.
+- Overview signal handlers are disconnected during helper disable.
+- Startup/shutdown cleanup:
+- Added overlay-client startup clear and retained overlay-client Qt shutdown clear when the bridge flag is set.
+- Added EDMC plugin startup clear and retained plugin-stop clear when the bridge flag is set.
+- Clear calls are best-effort, idempotent, and safe if helper DBus is unavailable.
+- Backend boundary:
+- Generic `follow_surface.py` was not touched. GNOME-specific raster behavior remains behind backend/helper-owned code, preserving the `fix219` boundary.
+- Files changed for the Phase 13 slice:
+- `docs/refactoring/gnome_wayland_presentation_attachment.md`
+- `helpers/gnome_shell_extension/extension.js`
+- `load.py`
+- `overlay_client/launcher.py`
+- `overlay_client/backend/shell_raster_frame.py`
+- `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py`
+- `overlay_client/tests/test_shell_raster_frame.py`
+- `overlay_client/tests/test_gnome_helper_presentation_runtime.py`
+- `overlay_client/tests/test_gnome_shell_helper_extension_source.py`
+- `overlay_client/tests/test_launcher_shell_raster_shutdown.py`
+- `tests/test_harness_plugin_hooks_contract.py`
+- Test evidence:
+- `python3 -m py_compile overlay_client/backend/shell_raster_frame.py overlay_client/backend/bundles/_gnome_shell_helper_presentation.py overlay_client/launcher.py load.py overlay_client/tests/test_shell_raster_frame.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_gnome_shell_helper_extension_source.py overlay_client/tests/test_launcher_shell_raster_shutdown.py tests/test_harness_plugin_hooks_contract.py`: passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_shell_raster_frame.py overlay_client/tests/test_gnome_helper_presentation_runtime.py`: 48 passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py`: 25 passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_launcher_shell_raster_shutdown.py tests/test_harness_plugin_hooks_contract.py`: 8 passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_architecture_boundary.py`: 2 passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_presentation_policy.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_follow_surface_mixin.py overlay_client/tests/test_backend_architecture_boundary.py overlay_client/tests/test_gnome_shell_helper_target_state.py overlay_client/tests/test_gnome_shell_helper_presentation_state.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_interaction_controller.py overlay_client/tests/test_platform_controller_backend_status.py overlay_client/tests/test_setup_surface.py tests/test_gnome_shell_extension_manifest.py overlay_client/tests/test_gnome_shell_helper_extension_source.py overlay_client/tests/test_shell_raster_frame.py overlay_client/tests/test_launcher_shell_raster_shutdown.py tests/test_harness_plugin_hooks_contract.py`: 192 passed, 4 skipped. Skips were existing PyQt-marked setup tests without `PYQT_TESTS=1` in the targeted command.
+- `git diff --check`: passed.
+- `make check`: passed. Ruff passed, mypy passed, and `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest` passed with 1057 passed and 21 skipped.
+- Manual validation still pending:
+- Reload helper with `./scripts/dev_gnome_helper.sh reload --yes`, restart EDMC, and run with both `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1` and `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE_RUNTIME=1`.
+- Confirm proof appears above active Elite borderless/full-monitor with no `y=29` offset, transparency preserved, and click-through preserved.
+- Confirm the proof actor clears after the `1500 ms` lease when not refreshed, Alt-Tab works repeatedly, Super overview works repeatedly, EDMC shuts down cleanly, and no proof actor remains after shutdown.
+- Confirm stale target token, target loss, minimize, workspace switch, helper reload/disable, and focus/overview transitions clear/fail soft.
+- Confirm launching with only `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1` still shows no proof and remains safe.
+- Confirm windowed mode still uses the existing managed PyQt path.
+
+#### Phase 13.7 Manual Validation Evidence
+- Captured on 2026-05-16 after Phase 13.1 headless implementation.
+- Safe single-flag validation with only `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1` passed:
+- No proof appeared.
+- Alt-Tab worked.
+- Super overview worked.
+- EDMC shut down cleanly.
+- There was no proof actor left to remove.
+- Runtime proof validation with both bridge gates partially passed:
+- `GetTargetState '{}'` returned `status=target_found`, `targetToken=meta:18`, `contentRect={"x":0,"y":0,"width":3440,"height":1440}`, `monitorRect={"x":0,"y":0,"width":3440,"height":1440}`, `fullscreen=true`, `showingOnWorkspace=true`, `minimized=false`, and `hasFocus=false`.
+- The proof appeared above active Elite.
+- There was no `y=29` offset.
+- Transparency was preserved.
+- Click-through worked.
+- Super overview appeared improved, but the user was not fully confident it is fixed.
+- Runtime proof validation failed:
+- Alt-Tab did not work in some cases.
+- When Alt-Tabbing back to the game, the proof flashed and occasionally exposed a titlebar.
+- EDMC shutdown and target-loss/minimize/workspace/helper-reload cases were not completed because the focus/titlebar failure blocked continued validation.
+- Interpretation:
+- The safe bridge flag remains acceptable.
+- The both-gate proof runtime is still not safe enough for persistent validation.
+- The flashing/titlebar symptom is consistent with the backend returning to the managed PyQt fallback when the Shell raster helper clears/degrades for focus or overview risk. For borderless Shell raster proof mode, focus/overview-risk clears should remove the Shell actor and fail soft without remapping the managed PyQt top-level.
+
+#### Phase 13.7A Implementation Plan
+- Scope: adjust the proof-only Shell raster runtime fallback policy for focus/overview-risk clears.
+- Touch point:
+- `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py`: when the helper returns Shell raster renderer degradation for `target_not_focused` or `gnome_overview_active`, keep the managed PyQt overlay suppressed instead of treating the degradation as a visible PyQt fallback.
+- Tests:
+- Add unit coverage proving Shell raster focus/overview-risk degradation clears/suppresses without `should_show_overlay=True`.
+- Existing fallback behavior for frame export/build failure should remain visible PyQt fallback.
+- Re-run targeted GNOME helper runtime tests and backend-boundary checks.
+
+#### Phase 13.7A Implementation Summary
+- Implemented on 2026-05-16.
+- Added backend-owned focus/overview-risk fallback suppression for Shell raster proof mode.
+- When the Shell raster helper degrades with `target_not_focused` or `gnome_overview_active`, runtime now keeps `should_show_overlay=False` instead of remapping the managed PyQt fallback window.
+- Frame export/build failure still keeps visible PyQt fallback behavior, preserving the intended fail-soft path for real raster build/apply failures.
+- Generic `follow_surface.py` remains untouched and the `fix219` backend boundary remains preserved.
+- Test evidence:
+- `python3 -m py_compile overlay_client/backend/bundles/_gnome_shell_helper_presentation.py overlay_client/tests/test_gnome_helper_presentation_runtime.py`: passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_helper_presentation_runtime.py`: 45 passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_architecture_boundary.py`: 2 passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_presentation_policy.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_follow_surface_mixin.py overlay_client/tests/test_backend_architecture_boundary.py overlay_client/tests/test_gnome_shell_helper_target_state.py overlay_client/tests/test_gnome_shell_helper_presentation_state.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_interaction_controller.py overlay_client/tests/test_platform_controller_backend_status.py overlay_client/tests/test_setup_surface.py tests/test_gnome_shell_extension_manifest.py overlay_client/tests/test_gnome_shell_helper_extension_source.py overlay_client/tests/test_shell_raster_frame.py overlay_client/tests/test_launcher_shell_raster_shutdown.py tests/test_harness_plugin_hooks_contract.py`: 194 passed, 4 skipped. Skips were existing PyQt-marked setup tests without `PYQT_TESTS=1` in the targeted command.
+- `git diff --check`: passed.
+- `make check`: passed. Ruff passed, mypy passed, and `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest` passed with 1059 passed and 21 skipped.
+- Manual revalidation still pending:
+- Rerun both-gate proof validation and specifically retest Alt-Tab back to Elite.
+- Expected: Shell proof may clear/suspend on focus risk, but the managed PyQt window should not flash in with a titlebar.
+- Continue to require clean EDMC shutdown and no stale actor before advancing Phase 13 support gates.
+
+#### Phase 13.7B Manual Failure Evidence
+- Captured on 2026-05-16 after Phase 13.7A headless implementation.
+- Runtime still flashed in the both-gate Shell raster proof mode.
+- Logs showed the Shell raster proof actor applying the expected inset proof frame, e.g. `applied={'x': 10, 'y': 10, 'width': 3420, 'height': 1420}`, while the backend still compared that applied rect against the full target request `requested={'x': 0, 'y': 0, 'width': 3440, 'height': 1440}`.
+- That produced `delta=[10, 10, -20, -20]`, `rect_match=False`, `state=presentation_degraded`, and `reasons=['applied_rect_mismatch']`.
+- Because the status was degraded, runtime entered the managed PyQt remap path with `visibility_reason=target_focused_remap_warmup`, logged `primed Qt map geometry`, then logged `Overlay visibility set to visible`. Shortly after, focus-risk degradation hid the PyQt window again. This repeated and exposed the managed window/titlebar flash.
+- Interpretation: Phase 13.7A suppressed fallback for explicit focus/overview-risk clears, but a separate false mismatch still caused fallback. Shell raster `rect_match` must validate compositor-applied actor bounds against the raster `frame_rect`, not the full target `content_rect`.
+
+#### Phase 13.7B Implementation Summary
+- Implemented on 2026-05-16.
+- The helper IPC validator now keeps `requested_rect` as the target presentation rect for diagnostics, but validates Shell raster applied bounds against the expected raster `frame_rect`.
+- `rect_delta` and `rect_match` for Shell raster responses now describe actor-frame readback correctness. The real proof-frame case `requested=(0,0,3440,1440)` plus `applied=(10,10,3420,1420)` now matches when the `shell_raster_frame.frame_rect` is `(10,10,3420,1420)`.
+- Shell raster proof statuses are still blocked from `true_overlay_ready`, even when the proof frame applies and all compositor gates pass. Phase 13 remains proof-only and degraded/experimental.
+- The runtime Shell raster success test now mimics the manual logs by returning an inset `applied_rect` matching the proof `frame_rect`; it asserts the managed PyQt overlay remains suppressed.
+- Generic `follow_surface.py` remains untouched and the `fix219` backend boundary remains preserved.
+- Test evidence:
+- `python3 -m py_compile overlay_client/backend/helper_ipc.py overlay_client/tests/test_gnome_shell_helper_presentation_state.py overlay_client/tests/test_gnome_helper_presentation_runtime.py`: passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_presentation_state.py overlay_client/tests/test_gnome_helper_presentation_runtime.py`: 69 passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_architecture_boundary.py`: 2 passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_presentation_policy.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_follow_surface_mixin.py overlay_client/tests/test_backend_architecture_boundary.py overlay_client/tests/test_gnome_shell_helper_target_state.py overlay_client/tests/test_gnome_shell_helper_presentation_state.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_interaction_controller.py overlay_client/tests/test_platform_controller_backend_status.py overlay_client/tests/test_setup_surface.py tests/test_gnome_shell_extension_manifest.py overlay_client/tests/test_gnome_shell_helper_extension_source.py overlay_client/tests/test_shell_raster_frame.py overlay_client/tests/test_launcher_shell_raster_shutdown.py tests/test_harness_plugin_hooks_contract.py`: 194 passed, 4 skipped. Skips were existing PyQt-marked setup tests without `PYQT_TESTS=1` in the targeted command.
+- `git diff --check`: passed.
+- `make check`: passed. Ruff passed, mypy passed, and `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest` passed with 1059 passed and 21 skipped.
+- Manual revalidation still pending:
+- Restart EDMC/overlay client because backend Python changed. Helper reload is not required for this backend-only fix unless the helper extension is not already on the Phase 13 code.
+- Run both gates again: `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1` and `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE_RUNTIME=1`.
+- Expected: inset proof-frame applies should no longer produce `applied_rect_mismatch`; `Overlay visibility set to visible/hidden` should not loop for the managed PyQt window; the proof may still clear/suspend on focus/overview risk.
+- Continue to require Alt-Tab, Super overview, clean EDMC shutdown, and no stale actor before advancing Phase 13 support gates.
+
+#### Phase 13.7C Manual Failure Evidence
+- Captured on 2026-05-16 after Phase 13.7B.
+- The false mismatch was fixed: logs showed `applied={'x': 10, 'y': 10, 'width': 3420, 'height': 1420}`, `delta=[0, 0, 0, 0]`, `rect_match=True`, `state=presentation_applied`, and empty `reasons=[]`.
+- The proof still disappeared a few seconds after Elite regained focus.
+- Runtime then logged repeated skipped cycles with `attempts=0`, `presentation_skipped=True`, and `skip_reason=fresh_matching_presentation`.
+- Interpretation: the helper actor uses a short `1500 ms` stale lease, but the backend no-op policy skipped unchanged Shell raster updates indefinitely after a matching apply. That allowed the helper stale timeout to clear the proof actor even though the target and frame signature remained valid.
+
+#### Phase 13.7C Implementation Summary
+- Implemented on 2026-05-16.
+- Added a Shell-raster-specific lease refresh gate to the backend no-op policy.
+- Managed PyQt presentation keeps the Phase 8 event-driven no-op behavior. Only Shell raster `update` requests bypass no-op suppression once enough time has elapsed since the last matching success.
+- The initial refresh deadline is half of the helper stale timeout, with a small minimum refresh interval. With the current `1500 ms` proof lease, unchanged frames may skip briefly but should refresh before the helper can clear the actor as stale.
+- Added runtime coverage proving an unchanged Shell raster frame skips an early cycle, then refreshes before the short lease expires.
+- Test evidence:
+- `python3 -m py_compile overlay_client/backend/bundles/_gnome_shell_helper_presentation.py overlay_client/tests/test_gnome_helper_presentation_runtime.py`: passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_helper_presentation_runtime.py`: 46 passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_presentation_policy.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_follow_surface_mixin.py overlay_client/tests/test_backend_architecture_boundary.py overlay_client/tests/test_gnome_shell_helper_target_state.py overlay_client/tests/test_gnome_shell_helper_presentation_state.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_interaction_controller.py overlay_client/tests/test_platform_controller_backend_status.py overlay_client/tests/test_setup_surface.py tests/test_gnome_shell_extension_manifest.py overlay_client/tests/test_gnome_shell_helper_extension_source.py overlay_client/tests/test_shell_raster_frame.py overlay_client/tests/test_launcher_shell_raster_shutdown.py tests/test_harness_plugin_hooks_contract.py`: 195 passed, 4 skipped. Skips were existing PyQt-marked setup tests without `PYQT_TESTS=1` in the targeted command.
+- `git diff --check`: passed.
+- `make check`: passed. Ruff passed, mypy passed, and `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest` passed with 1060 passed and 21 skipped.
+- Manual revalidation on 2026-05-16:
+- The proof stayed visible for at least 20 seconds after Elite gained focus.
+- A focused log sample showed `state=presentation_applied`, `rect_match=True`, `delta=[0, 0, 0, 0]`, `applied={'x': 10, 'y': 10, 'width': 3420, 'height': 1420}`, and empty `reasons=[]`.
+- Runtime showed the intended short-lease cadence: `attempts=1` refresh, then `attempts=0` with `presentation_skipped=True` and `skip_reason=fresh_matching_presentation`, then another `attempts=1` refresh before the proof disappeared.
+- Alt-Tab worked reliably.
+- Alt-Tab back to Elite returned cleanly, without flashing a titlebar or managed PyQt fallback window.
+- Super overview opened normally.
+- Returning from Super overview to Elite recovered cleanly.
+- Click-through through the proof area worked.
+- EDMC shut down cleanly and the proof disappeared.
+- Follow-up managed PyQt suppression validation passed on 2026-05-16. During two Alt-Tab away/back cycles, logs showed clean Shell raster applies with `rect_match=True`, no `applied_rect_mismatch`, no `Overlay visibility` lines, no `primed Qt map geometry`, no `target_focused_remap_warmup`, and no `presentation_warmup` lines after Shell raster success. The user observed no titlebar or flashing.
+- Target loss/relaunch validation passed on 2026-05-16. Exiting Elite cleared the proof, EDMC stayed running, relaunching Elite restored the proof, and logs showed clean reacquire on `token=meta:105`. The user reported no stale proof, titlebar, or managed PyQt flash during exit/relaunch.
+- Secondary-monitor validation passed on 2026-05-16 after manually moving Elite to the second monitor. The same previously validated proof behavior passed on that monitor: correct proof placement over Elite, no `y=29` offset, no titlebar/managed PyQt flash, click-through, Alt-Tab/Super behavior, and shutdown cleanup. Caveat: Elite starts on the primary monitor in this environment, so this validates runtime behavior after manual move rather than startup monitor selection.
+- Helper disable/enable validation passed on 2026-05-16 using `./scripts/dev_gnome_helper.sh disable --yes`, `sleep 3`, `./scripts/dev_gnome_helper.sh enable --yes`, and `status`. Runtime logged `target=helper_unhealthy` with `reasons=['missing_service']` while the helper was disabled, then recovered after enable with target sequence reset to `1` and returned to `state=presentation_applied`, `rect_match=True`, `delta=[0, 0, 0, 0]`, and empty `reasons=[]` for `token=meta:107`. No `Overlay visibility`, remap, or `applied_rect_mismatch` lines appeared in the supplied reload capture. The user confirmed the proof visibly disappeared while the helper was disabled, so no stale proof remained during the disabled interval.
+- Workspace validation passed on 2026-05-16. User reported matrix checks 1 through 6 passed, and the workspace return case had no titlebar and no flashing.
+- Keep-visible validation failed on 2026-05-16. With `Keep overlay visible when Elite Dangerous is not the foreground window` set to true, the Shell raster proof disappeared when the game lost focus. This is the first explicit Phase 13 test of the keep-visible preference against the Shell raster focus-risk path.
+- Interpretation: Phase 13.7C stabilized the short-lease proof path for normal focus return, workspace switching, helper disable/enable, target relaunch, and managed PyQt suppression. The remaining bug is preference plumbing: Shell raster focus-risk handling still treats `target_not_focused` as a hard clear even when `keep_overlay_visible=true`. `gnome_overview_active`, off-workspace, minimized, helper-unhealthy, and target-loss clears must remain hard safety gates.
+
+#### Phase 13.7D Implementation Summary
+- Implemented headless on 2026-05-16. Manual GNOME revalidation remains pending, and support/status wording stays degraded/experimental.
+- Backend/runtime preference plumbing:
+- `overlay_client/follow_surface.py` now passes the current `_keep_overlay_visible` setting into the backend-owned presentation consumer.
+- `overlay_client/backend/consumers.py` carries the neutral `keep_overlay_visible` argument into the GNOME presentation runner without exposing GNOME helper implementation details to generic follow/runtime code.
+- `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py` maps `keep_overlay_visible=true` to a Shell-raster request flag named `allow_unfocused_target`.
+- Shell raster request/protocol behavior:
+- `HelperRasterFrameRequest` now includes optional `allow_unfocused_target`, emits it in the helper payload, and includes it in the request signature so toggling the preference forces a fresh helper apply instead of reusing a stale no-op decision.
+- `helpers/gnome_shell_extension/extension.js` accepts `allow_unfocused_target` / `allowUnfocusedTarget`. When true, an unfocused target no longer triggers `target_not_focused` cleanup for Shell raster frames.
+- GNOME overview remains a hard safety clear. The new flag does not bypass `gnome_overview_active`, target loss, off-workspace, minimized, helper disable, invalid frame, or stale/session cleanup.
+- Helper diagnostics now preserve `allow_unfocused_target` in the Shell raster payload so opt-in captures can distinguish keep-visible focus behavior from normal focus-risk clears.
+- Test type selection:
+- Unit/runtime tests cover deterministic backend policy: keep-visible propagation, unfocused Shell raster apply, request signature invalidation when the preference toggles, and the default `keep_overlay_visible=false` focus-risk clear.
+- Static/source tests cover the helper-side optional request field and focus-risk guard because there is no JS runtime seam in headless tests.
+- Existing parser/model tests cover request payload emission and response payload preservation.
+- No new harness test was required because `load.py` orchestration, plugin startup/shutdown, and EDMC hook wiring were not touched in this slice.
+- Files changed for Phase 13.7D:
+- `helpers/gnome_shell_extension/extension.js`
+- `overlay_client/backend/helper_ipc.py`
+- `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py`
+- `overlay_client/backend/consumers.py`
+- `overlay_client/follow_surface.py`
+- `overlay_client/tests/test_gnome_helper_presentation_runtime.py`
+- `overlay_client/tests/test_backend_consumers.py`
+- `overlay_client/tests/test_follow_surface_mixin.py`
+- `overlay_client/tests/test_gnome_shell_helper_extension_source.py`
+- `overlay_client/tests/test_gnome_shell_helper_presentation_state.py`
+- `overlay_client/tests/test_shell_raster_frame.py`
+- Test evidence:
+- `python3 -m py_compile overlay_client/backend/helper_ipc.py overlay_client/backend/bundles/_gnome_shell_helper_presentation.py overlay_client/backend/consumers.py overlay_client/follow_surface.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_follow_surface_mixin.py overlay_client/tests/test_gnome_shell_helper_extension_source.py overlay_client/tests/test_gnome_shell_helper_presentation_state.py overlay_client/tests/test_shell_raster_frame.py`: passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_follow_surface_mixin.py overlay_client/tests/test_gnome_shell_helper_extension_source.py overlay_client/tests/test_gnome_shell_helper_presentation_state.py overlay_client/tests/test_shell_raster_frame.py`: 146 passed.
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_presentation_policy.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_follow_surface_mixin.py overlay_client/tests/test_backend_architecture_boundary.py overlay_client/tests/test_gnome_shell_helper_target_state.py overlay_client/tests/test_gnome_shell_helper_presentation_state.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_interaction_controller.py overlay_client/tests/test_platform_controller_backend_status.py overlay_client/tests/test_setup_surface.py tests/test_gnome_shell_extension_manifest.py overlay_client/tests/test_gnome_shell_helper_extension_source.py overlay_client/tests/test_shell_raster_frame.py overlay_client/tests/test_launcher_shell_raster_shutdown.py tests/test_harness_plugin_hooks_contract.py`: 197 passed, 4 skipped. Skips were existing PyQt-marked setup tests without `PYQT_TESTS=1` in the targeted command.
+- `git diff --check`: passed.
+- `make check`: passed. Ruff passed, mypy passed, and `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest` passed with 1062 passed and 21 skipped.
+- Manual revalidation pending:
+- Reload helper with `./scripts/dev_gnome_helper.sh reload --yes` because `helpers/gnome_shell_extension/extension.js` changed.
+- Restart EDMC/overlay client because backend Python changed.
+- Launch with both `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1` and `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE_RUNTIME=1`.
+- Set `Keep overlay visible when Elite Dangerous is not the foreground window` to true.
+- With Elite borderless/full-monitor and visible on the current workspace, Alt-Tab to another window. Expected: the Shell raster proof remains visible and attached; logs should not degrade with `target_not_focused`; no managed PyQt titlebar or flash appears.
+- Press Super / enter GNOME overview. Expected: the proof clears or suspends for `gnome_overview_active` and returns cleanly after Elite is valid again.
+- Set `Keep overlay visible when Elite Dangerous is not the foreground window` back to false and repeat a focus-loss cycle. Expected: existing Phase 13.7C behavior remains: no managed PyQt flash/titlebar, and the proof may clear or suppress while Elite is not foreground.
+- Keep workspace/off-workspace, minimize, target exit/relaunch, helper disable/enable, and shutdown safety gates in the Phase 13 matrix until rechecked after this helper/backend change.
+- Manual revalidation on 2026-05-16:
+- Keep-visible true focus loss passed. The Shell raster proof remained visible when Elite lost focus.
+- Super overview passed. Overview cleared/suspended and recovered cleanly.
+- Keep-visible false focus loss/return passed. No managed PyQt titlebar or flash was observed.
+- Minimize/unminimize was skipped because Elite could not be minimized/maximized in the tested mode.
+- Borderless resolution changes passed. The proof updated correctly while Elite remained borderless/full-monitor.
+- Switching from borderless to windowed cleared the Shell raster proof as expected, but the managed PyQt/windowed overlay did not appear correctly sized to the game window. This needs separate windowed fallback classification because Phase 13 Shell raster mode is intentionally borderless/full-monitor only.
+- Follow-up evidence for the borderless-to-windowed switch:
+- Runtime logs immediately before the switch still showed the borderless Shell raster path with `targetToken=meta:21`, `fullscreen` implied by `content_rect`, `frame_rect={"x":0,"y":0,"width":3440,"height":1440}`, `rect_source=content_rect`, `applied={"x":10,"y":10,"width":3420,"height":1420}`, `rect_match=True`, `renderer=gnome_shell_raster_frame`, `keep_overlay_visible=True`, and managed PyQt hidden.
+- No new `GNOME helper presentation` log appeared in the supplied capture when switching from borderless to windowed, even though a direct helper query immediately afterward returned `fullscreen=false`, `contentRect=null`, and `frameRect={"x":920,"y":283,"width":1600,"height":937}` for the same `targetToken=meta:21`.
+- Interpretation: the Shell helper correctly sees the windowed target and the raster proof correctly becomes ineligible. The suspicious part is the runtime/fallback transition: the overlay client should log a new frame-rect-fallback presentation cycle and prime the managed PyQt window to the helper `frameRect`. If no runtime cycle appears, or if the PyQt surface remains at the prior borderless/fullscreen size after becoming visible, treat this as a Phase 13 fallback transition regression until proven otherwise.
+- Follow-up classification: when EDMC starts while Elite is already windowed, the managed PyQt overlay is correctly sized and follows the game window. This means the windowed sizing/follow path still works on a clean windowed startup. The bad sizing is therefore specific to the borderless-to-windowed transition/state reset, not a general windowed sizing regression.
+- Remaining windowed behavior issue: in windowed GNOME Wayland mode, the managed PyQt overlay still behaves like a standalone/top-level app even when `standalone_mode=false`, and the titlebar compensation setting has no visible effect. This is not fixed by Phase 13 because Shell raster mode is borderless/full-monitor only. It remains a separate chrome/standalone/windowed fallback issue, also constrained by the helper reporting `contentRect=null` and `decorationInsets=null` for windowed Elite.
+- Deferred follow-ups to avoid losing track:
+- `Phase 13.F1`: after the Phase 13 borderless/fullscreen support decision, fix the borderless-to-windowed fallback transition. Expected fix shape: when the target changes from Shell-raster-eligible `fullscreen=true/content_rect` to windowed `fullscreen=false/frame_rect_fallback`, explicitly clear Shell raster state and reset the managed PyQt surface out of fullscreen/hidden-suppressed mode before showing the fallback. This is deferred because clean windowed startup works and the current Phase 13 decision should stay focused on borderless/fullscreen.
+- `Phase 13.F2`: after `13.F1`, revisit the older GNOME windowed managed-PyQt chrome/standalone limitation. Normal overlay mode still appears standalone-like in windowed GNOME Wayland, and titlebar compensation cannot be validated while the helper reports `contentRect=null` and `decorationInsets=null`.
+- EDMC shutdown passed cleanly.
+- Safe single-flag validation passed again after Phase 13.7D. Launching with `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1` and without `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE_RUNTIME=1` showed no proof actor, Alt-Tab/Super behaved normally, and shutdown was clean.
+- Idle churn/performance sanity passed on 2026-05-16 with `keep_overlay_visible=true`. The proof remained visible and stable for the sampled idle window. Logs alternated between bounded refreshes (`attempts=1`) and no-op skips (`attempts=0`, `presentation_skipped=True`, `skip_reason=fresh_matching_presentation`) while keeping `state=presentation_applied`, `rect_match=True`, `delta=[0,0,0,0]`, and empty `reasons=[]`. No `applied_rect_mismatch`, repeated `presentation_degraded`, or managed `Overlay visibility` loop appeared in the supplied sample.
+
+#### Phase 13.8 Decision
+- Decided on 2026-05-16.
+- Lifecycle/focus safety for the Phase 13 borderless/fullscreen Shell raster proof path is accepted as passed for the tested GNOME Wayland environment.
+- Support status remains opt-in experimental/proof mode only. Do not promote this to normal GNOME support, do not claim `true_overlay`, and do not remove the explicit runtime proof gate yet.
+- Reason: the hardened path is still a static PyQt raster proof frame, not real overlay content/parity. Phase 14 owns real overlay raster export, parity, transfer/performance work, and any future support wording promotion.
+- Deferred issues `Phase 13.F1` and `Phase 13.F2` are tracked and do not block the Phase 13 borderless/fullscreen decision. They must be resolved before release/support promotion that involves windowed fallback behavior.
+- Phase 14 is unblocked for planning.
 
 #### Phase 13 Production Validation Matrix
 1. Borderless fullscreen on primary monitor: actor appears at full-monitor bounds, no `y=29` offset, no titlebar, no Alt-Tab/taskbar entry.
 2. Borderless fullscreen on secondary monitor: actor follows target monitor and stays above Elite.
 3. Click-through: pointer/keyboard focus remains with Elite when interacting through the overlay area.
 4. Focus loss/return: mapped-visible/mapped-suppressed behavior remains stable and does not flash.
-5. Target loss/relaunch: actor clears on loss and reacquires only for the new target token.
-6. Workspace switch: actor hides or clears when Elite is not on the current workspace and returns cleanly when appropriate.
-7. Minimize/unminimize: actor hides on minimize and restores only after target state is valid.
-8. Resolution/mode change: actor updates bounds after borderless resolution changes and does not leave stale geometry.
-9. Helper reload/disable: actor is removed and runtime falls back visibly without hanging.
-10. EDMC shutdown/crash simulation: actor clears by explicit shutdown or stale-frame timeout.
-11. Performance: no recurring compositor-visible placement churn for unchanged target/frame; GNOME Shell responsiveness remains acceptable.
-12. Regression: windowed `frame_rect_fallback`, Phase 6A mapped suppression, Phase 6B clamp, Phase 8 no-op suppression, and Phase 9.9A churn guard still pass.
+5. GNOME Shell controls: Alt-Tab and Super overview remain responsive and accurate while EDMC is running with the runtime proof gate enabled.
+6. Target loss/relaunch: actor clears on loss and reacquires only for the new target token.
+7. Workspace switch: actor hides or clears when Elite is not on the current workspace and returns cleanly when appropriate.
+8. Minimize/unminimize: actor hides on minimize and restores only after target state is valid.
+9. Resolution/mode change: actor updates bounds after borderless resolution changes and does not leave stale geometry.
+10. Helper reload/disable: actor is removed and runtime falls back visibly without hanging.
+11. EDMC shutdown/crash simulation: actor clears by explicit shutdown or stale-frame timeout.
+12. Safe bridge flag: `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1` without `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE_RUNTIME=1` shows no proof actor and keeps EDMC shutdown plus GNOME Shell controls normal.
+13. Performance: no recurring compositor-visible placement churn for unchanged target/frame; GNOME Shell responsiveness remains acceptable.
+14. Regression: windowed `frame_rect_fallback`, Phase 6A mapped suppression, Phase 6B clamp, Phase 8 no-op suppression, and Phase 9.9A churn guard still pass.
 
 ### Phase 14: GNOME Shell-Native PyQt Raster Parity And Performance Expansion
 - Goal: expand the Shell-native PyQt raster bridge from the hardened minimal subset toward current overlay visual/functionality parity while keeping PyQt as the renderer.
-- Phase 14 starts only after Phase 13 decides the minimal path is architecturally sound. If Phase 13 keeps the feature proof-only, Phase 14 should not start until the blocking production-readiness issues are resolved.
+- Phase 14 starts after Phase 13's lifecycle/focus decision. Phase 13 kept the current implementation opt-in experimental/proof-only, so Phase 14 must plan real overlay parity and production-readiness gates before any support promotion.
 - Phase 14 scope depends on the Phase 12 raster subset and Phase 13 performance evidence.
 - Raster bridge path: harden frame generation, transfer mechanism, texture lifetime, cropping/damage strategy, update cadence, memory limits, and stale-frame cleanup.
 - If Phase 13 proves raster transfer is too expensive for some content, Phase 14 may split additional sub-phases for transfer optimization or a narrowly justified hybrid optimization. Do not reintroduce Shell primitives as the primary renderer without a new explicit decision.
 - Phase 14 may need multiple sub-phases. Do not force all renderer parity into one patch if the bridge choice makes that large or risky.
 
+#### Phase 14 Accepted Planning Decisions
+- First real-content slice: target BGS-Tally first, then use EDMC-LogEventMiner as the second representative validation source before attempting broad parity.
+- Initial parity target includes text with correct font, lines, colors, transparency/alpha, opacity, scaling, transforms, payload updates, group visibility, and any other visual state required to match current overlay behavior.
+- Updates must be event-driven. Do not drive content changes from a polling repaint loop. Lease/health refreshes may continue only when they are no-op suppressed and do not create compositor-visible churn.
+- Real content must use cropped raster frames around the changed overlay content. Full-monitor or near-fullscreen frames are allowed for proof/debug cases only.
+- Transparency and click-through are mandatory before any real-content slice is considered successful.
+- Fallback behavior must stay conservative: Shell-raster failures clear the Shell actor and return to the visible PyQt fallback without managed-PyQt titlebar flash during focus, overview, or helper transitions.
+- Debug diagnostics should include frame dimensions, byte size, checksum or equivalent identity, encode/decode/apply timing, update reason, skip reason, apply result, cadence, and dropped/throttled frame counts. Keep this debug-gated.
+- Keep both Phase 13 environment gates through Phase 14. Do not add UI/settings exposure or support wording until Phase 15.
+
+#### Phase 14 Transfer And Performance Decision Notes
+- A PNG path under `$XDG_RUNTIME_DIR` would normally avoid persistent disk because that directory is memory-backed on GNOME/Linux systems, but it still uses filesystem semantics and still pays encode/decode/open/read/update overhead.
+- Because Phase 13 proof mode already shows jerky movement/pauses on the test machine, Phase 14 must not assume filesystem transport is acceptable for real overlay content.
+- Measure the current PNG/tmpfs proof path first, then decide whether to switch transport before expanding parity.
+- Preferred no-filesystem transport candidate 1: DBus Unix FD passing with `memfd` or an equivalent anonymous in-memory file descriptor carrying encoded PNG or raw RGBA bytes.
+- Preferred no-filesystem transport candidate 2: AF_UNIX local socket stream for frame bytes if FD passing is not practical from GJS/Gio.
+- Preferred no-filesystem transport candidate 3: shared-memory/raw buffer transport only if simpler encoded transfer cannot meet performance or responsiveness targets.
+- Starting performance targets are conservative until measured: no compositor-visible churn for unchanged frames, no repeated `presentation_degraded` retries while stable, no `Overlay visibility` loop, no `applied_rect_mismatch` churn, and no visible GNOME Shell responsiveness loss.
+- First real-content slice should start at a low event-driven content rate, provisionally no more than 2 content frames per second unless a real overlay event requires a burst. Increase only after timing and manual responsiveness are acceptable.
+- Record encode time, transfer time where observable, helper decode/apply time, frame dimensions, byte count, and skip/throttle decisions for each performance test.
+
 #### Phase 14 Refactor Staging
 | Stage | Description | Status |
 | --- | --- | --- |
-| 14.1 | Inventory current overlay visual/features against the Phase 12 supported Shell-native subset | Pending Phase 13 |
-| 14.2 | Split raster parity and performance work into independently testable slices based on the Phase 12/13 evidence | Pending Phase 13 |
-| 14.3 | Implement the first missing parity slice behind the existing Shell-native gate | Pending Phase 13 |
-| 14.4 | Add unit/static/harness coverage for the parity slice and run targeted manual validation | Pending Phase 13 |
-| 14.5 | Repeat parity slices until the supported GNOME Shell-native overlay feature set is explicitly complete or remaining gaps are documented | Pending Phase 13 |
-| 14.6 | Update support/status wording only after parity and production gates both pass | Pending Validation |
+| 14.1 | Inventory current overlay visual/features against BGS-Tally first, then EDMC-LogEventMiner, plus the Phase 12 supported Shell-native subset | Completed |
+| 14.2 | Measure the current PNG/tmpfs proof path and decide whether the first real-content slice needs no-filesystem transport first | Completed |
+| 14.3 | Split raster parity and performance work into independently testable cropped-frame slices based on the Phase 12/13/14.2 evidence | Completed |
+| 14.4 | Implement the first real-content parity slice behind the existing Shell-native gates | Ready |
+| 14.5 | Add unit/static/harness coverage for the parity slice and run targeted manual validation | Pending 14.4 |
+| 14.6 | Repeat parity slices until the supported GNOME Shell-native overlay feature set is explicitly complete or remaining gaps are documented | Pending 14.5 |
+| 14.7 | Hand off real-content parity/performance evidence, remaining gaps, and support blockers to Phase 15 | Pending 14.6 |
+
+#### Phase 14.1 Inventory Results
+- Status: Completed on 2026-05-16.
+- Test type decision: read-only inventory; no tests required for the inventory itself. Follow-up instrumentation uses unit/static tests because it touches pure frame-building helpers, helper IPC payload shape, backend diagnostic payloads, and static GNOME extension source contracts. No `load.py` or EDMC hook lifecycle paths were changed, so no harness test is required for this slice.
+- BGS-Tally is the first real-content target. Its overlay path exercises ModernOverlay message lines plus shape payloads: text with plugin-defined sizes and colors, title/highlight colors, TTL, fit-to-text sizing, grouped frame/background rectangles, indicator rectangles, progress-bar segments, and centered/right/bottom anchoring through group placement.
+- EDMC-LogEventMiner is the second validation target. It exercises group backgrounds with alpha, event/status text lines, font-size tokens, per-line alpha fade, animated Y-offset movement, and higher-frequency redraw behavior. It should validate performance/cadence after BGS-Tally parity is grounded.
+- Phase 12/13 Shell-native subset remains a static cropped PNG proof frame under strict borderless/full-monitor eligibility, attached to the target window actor, with clear/stale-timeout/fallback safety. It is still proof-only and still gated by both `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1` and `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE_RUNTIME=1`.
+
+#### Phase 14.2 Measurement Instrumentation
+- Status: Completed on 2026-05-16.
+- Added debug-gated client-side metrics for the current PNG/tmpfs proof path: frame dimensions, byte count, checksum prefix, transport identity, update reason, encode time, validation time, checksum time, total build time, cache hit, transfer observability, and dropped/throttled counters.
+- Added helper-side timing diagnostics in the GNOME Shell extension for raster decode, actor apply, and total helper handling time. These are reported in the `shell_raster_frame.diagnostics` status payload when request diagnostics are present.
+- Added backend logging of `shell_raster_metrics` only when presentation diagnostics are enabled, so release/no-diagnostics paths stay quiet and unchanged frames continue to be no-op suppressed by the existing presentation signature path.
+- Added in-process static proof frame reuse so unchanged proof frames do not repeatedly invoke the PyQt PNG writer or checksum path. This is not the final real-content cache strategy; it exists to make Phase 14.2 measurement less noisy.
+- First live measurement evidence from 2026-05-16: stable proof frames reported client-side cached PNG work as cheap (`cache_hit=True`, `encode_ms=0`, `checksum_ms=0`, and `build_ms` generally below 1 ms), while helper-side PNG decode was repeatedly expensive at roughly `65-96 ms`. Helper apply was cheap at roughly `0.06-0.17 ms`. This identifies helper-side unchanged-frame decode/replacement as the immediate bottleneck, not Python-side proof generation.
+- Added a helper-side same-frame reuse fast path before PNG decode/replacement. If the existing Shell raster actor already matches `frameVersion`, `checksum`, `imagePath`, `byteSize`, `targetToken`, `targetRect`, `frameRect`, and parent target actor, the helper now refreshes the stale timeout, shows/raises the existing actor, and reports `helper_reused_frame=true`, `helper_decode_skipped=true`, `helper_decode_ms=0`, and `helper_update_reason="reused_existing_frame"` instead of reloading the PNG.
+- Post-reuse live measurement from 2026-05-16: first apply decoded normally (`helper_decode_ms=94.964`, `helper_reused_frame=false`, `helper_update_reason="decoded_new_frame"`), then repeated stable proof frames reused the existing actor with `helper_reused_frame=true`, `helper_decode_skipped=true`, `helper_decode_ms=0`, and `helper_update_reason="reused_existing_frame"`. Helper total time for reused frames dropped to roughly `0.15-0.45 ms`, while client-side cached build work remained sub-ms. The same sample showed no `applied_rect_mismatch` or `Overlay visibility` churn. A later `presentation_degraded` with `target_not_focused` was expected because `keep_overlay_visible=false`.
+- Transport decision for Phase 14.4: keep PNG/tmpfs for the first narrow BGS-Tally real-content slice. The unchanged-frame decode bottleneck has been removed, and there is not yet measured evidence that filesystem transport blocks the first low-rate cropped-content slice. No-filesystem transport remains a Phase 14 contingency if real-content metrics regress, especially if changed cropped frames show helper decode, transfer, or Shell responsiveness costs that are visible to the user.
+- Manual measurement command shape for real-content slices: restart with both Shell raster gates and `EDMC_OVERLAY_GNOME_PRESENTATION_DIAGNOSTICS=1`, then watch for `shell raster metrics` lines in `overlay_client.log` while validating borderless/fullscreen focus, Alt-Tab/Super overview, keep-visible true/false, helper reload/disable, and EDMC shutdown. Stable unchanged content should continue to report `helper_reused_frame=true`, `helper_decode_skipped=true`, and `helper_decode_ms=0`; changed cropped frames may decode, but should stay bounded in dimensions, byte count, and visible responsiveness.
+
+#### Phase 14.3 Cropped Real-Content Slice Plan
+- Status: Completed on 2026-05-16.
+- Test type decision: Phase 14.3 is a documentation/planning step, so no code tests are required for this step. Phase 14.4 must add unit tests for any pure crop/bounds/frame-export helpers, focused runtime tests for backend/provider wiring, and static GNOME extension tests only if helper source changes.
+- First implementation slice remains generic even though BGS-Tally is the first manual validation source. Do not add BGS-Tally-specific branches, payload IDs, or producer heuristics.
+- Slice 1: add a backend-owned raster-frame provider seam so the GNOME helper presentation bundle can request either the existing static proof frame or a client-generated cropped overlay-content PNG without generic follow/runtime code importing GNOME-specific implementation directly.
+- Slice 2: implement cropped PyQt overlay-content export from the existing render command path. The crop rect must be the union of visible payload/group-background bounds plus a small paint-margin for line widths and antialiasing. Empty payload state falls back to the existing proof/fallback behavior rather than sending a full-monitor transparent frame.
+- Slice 3: start with BGS-Tally-compatible primitives already present in the legacy renderer: message text with the configured font, colors/alpha, group backgrounds, rectangles, vector lines/markers/text, global payload opacity, and click-through. Do not attempt broad overlay parity beyond these existing render commands in the first code patch.
+- Slice 4: keep updates event-driven. Ingest, purge, override, and geometry changes may produce a new content frame; unchanged content must continue to be no-op/reuse suppressed, and rapid updates should coalesce to the latest frame rather than queue stale frames.
+- Slice 5: collect diagnostics for changed real-content frames: crop/global frame rect, frame dimensions, byte count, checksum identity, build/encode/checksum time, helper decode/apply time, update reason, skip/reuse reason, and dropped/throttled counts.
+- Slice 6: manually validate with BGS-Tally in borderless/fullscreen first. EDMC-LogEventMiner remains the second validation source after BGS-Tally metrics are acceptable.
+
+### Phase 15: Productionization And GNOME Support Gate
+- Goal: decide whether any GNOME Wayland Shell raster mode can move from opt-in proof/experimental status toward supported behavior.
+- Phase 15 starts only after Phase 14 proves enough real overlay content parity and performance to evaluate user-facing support honestly.
+- Do not promote support wording, remove proof gates, or claim `true_overlay` until Phase 15 explicitly passes its support gate.
+- Expected decisions:
+- Whether the Shell raster path remains behind explicit environment/dev gates, becomes a settings-gated experimental option, or becomes the preferred GNOME Wayland borderless path.
+- Support/status wording for helper health, backend status, diagnostics, release notes, and user-facing preferences.
+- Whether remaining windowed fallback issues block any support wording or can stay documented as unsupported/degraded cases.
+- Whether Phase 16 cleanup must happen before any release or can be staged afterward.
+
+#### Phase 15 Refactor Staging
+| Stage | Description | Status |
+| --- | --- | --- |
+| 15.1 | Review Phase 14 parity/performance evidence and classify support blockers | Pending Phase 14 |
+| 15.2 | Decide runtime gating/default behavior for GNOME Shell raster mode | Pending 15.1 |
+| 15.3 | Update backend status/support wording, diagnostics, settings UI, and release notes only if support gates pass | Pending 15.2 |
+| 15.4 | Add or update unit/harness/manual validation for any productionization behavior changes | Pending 15.2 |
+| 15.5 | Decide whether Phase 16 fallback cleanup blocks release/support promotion | Pending 15.1 |
+
+### Phase 16: Deferred GNOME Fallback Cleanup
+- Goal: resolve deferred fallback issues discovered during Phase 13 without mixing them into the borderless/fullscreen Shell raster proof decision.
+- Phase 16 owns `Phase 13.F1` and `Phase 13.F2` unless Phase 15 decides one or both must be pulled earlier as release blockers.
+- `Phase 13.F1`: borderless-to-windowed fallback transition reset. When target state changes from Shell-raster-eligible `fullscreen=true/content_rect` to windowed `fullscreen=false/frame_rect_fallback`, runtime must clear Shell raster state and reset the managed PyQt surface out of fullscreen/hidden-suppressed mode before showing fallback.
+- `Phase 13.F2`: GNOME windowed managed-PyQt standalone/titlebar behavior. Normal overlay mode still appears standalone-like in windowed GNOME Wayland, and titlebar compensation cannot currently be proven because helper target state reports `contentRect=null` and `decorationInsets=null`.
+- Clean windowed startup currently sizes and follows the game correctly, so Phase 16 should preserve that invariant while fixing transitions and chrome/identity behavior.
+
+#### Phase 16 Refactor Staging
+| Stage | Description | Status |
+| --- | --- | --- |
+| 16.1 | Reproduce and unit-test borderless-to-windowed fallback transition state reset | Pending Phase 15 Decision |
+| 16.2 | Implement Shell-raster-to-managed-PyQt surface reset without regressing clean windowed startup | Pending 16.1 |
+| 16.3 | Re-evaluate GNOME windowed standalone/titlebar compensation limits with helper diagnostics | Pending 16.2 |
+| 16.4 | Implement any validated windowed chrome/identity fixes or document unsupported limits | Pending 16.3 |
+| 16.5 | Run focused manual validation for borderless-to-windowed, clean windowed startup, and normal borderless mode | Pending 16.2 |
+
+### Phase 17: Extended Hardening And Release Validation
+- Goal: run longer-duration validation against real-world GNOME Wayland workflows after parity, productionization, and fallback cleanup decisions are known.
+- Phase 17 is the soak/release-hardening phase, not a feature-expansion phase.
+- Validation should include game relaunches, EDMC restarts/shutdowns, helper reload/disable, GNOME overview/Alt-Tab cycles, monitor moves, resolution/mode changes, workspace changes, stale-frame cleanup, and performance under real overlay updates.
+- Release support must remain conservative if Phase 17 finds stale actors, focus traps, Shell churn, bad shutdown cleanup, or windowed fallback regressions.
+
+#### Phase 17 Refactor Staging
+| Stage | Description | Status |
+| --- | --- | --- |
+| 17.1 | Define the final manual/automated release validation matrix from Phases 14-16 outcomes | Pending Phase 15 |
+| 17.2 | Run extended GNOME Wayland soak with real overlay updates and diagnostics sampling | Pending 17.1 |
+| 17.3 | Validate helper reload/disable, EDMC shutdown/crash cleanup, game relaunch, monitor/workspace/mode changes | Pending 17.1 |
+| 17.4 | Resolve any release-blocking regressions or downgrade support wording | Pending 17.2 |
+| 17.5 | Finalize support docs, troubleshooting notes, and release checklist | Pending 17.4 |
 
 ## Execution Log
 - Plan created on 2026-05-11.

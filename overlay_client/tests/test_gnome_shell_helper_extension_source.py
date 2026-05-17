@@ -286,3 +286,144 @@ def test_extension_shell_actor_proof_cleans_up_and_times_out() -> None:
     assert "this._healthService?._clearShellActorProof?.('helper_disable')" in source
     assert "parent.remove_child(proof.actor)" in source
     assert "proof?.actor?.destroy?.()" in source
+
+
+def test_extension_shell_raster_frame_path_is_opt_in_and_keeps_normal_apply_path() -> None:
+    source = _source()
+
+    assert "shell_raster_frame" in source
+    assert "shellRasterFrame" in source
+    assert "shell_raster_frame_action" in source
+    assert "shellRasterFrameAction" in source
+    assert "if (shellRasterFrameRequested || shellRasterFrameAction) {" in source
+    assert "this._handleShellRasterFrame({" in source
+    assert "const result = this._applyOverlayPresentation(" in source
+
+
+def test_extension_shell_raster_frame_uses_target_window_actor_attachment() -> None:
+    source = _source()
+
+    assert "const SHELL_RASTER_FRAME_PARENT = 'target_window_actor_child';" in source
+    assert "_showShellRasterFrame({" in source
+    assert "const targetActor = this._targetWindowActorForToken(targetPayload?.targetToken || '');" in source
+    assert "targetActor.add_child(textureActor);" in source
+    assert "actor_parent: actorParent || this._shellRasterFrame?.actorParent || ''" in source
+    assert "Main.layoutManager.addChrome" not in source
+
+
+def test_extension_shell_raster_frame_validates_path_and_png_constraints() -> None:
+    source = _source()
+
+    assert "_validateShellRasterFramePath(imagePath, byteSize)" in source
+    assert "GLib.path_is_absolute(path)" in source
+    assert "path.includes('/../')" in source
+    assert "path.toLowerCase().endsWith('.png')" in source
+    assert "_shellRasterAllowedCacheDirs()" in source
+    assert "path_outside_allowed_cache_dir" in source
+    assert "Gio.FileType.REGULAR" in source
+    assert "SHELL_RASTER_FRAME_MAX_BYTES" in source
+    assert "contentType && contentType !== 'image/png'" in source
+    assert "PNG frame must be RGBA" in source
+    assert "GdkPixbuf.Pixbuf.new_from_file(imagePath)" in source
+
+
+def test_extension_shell_raster_frame_uses_strict_borderless_fullscreen_gate() -> None:
+    source = _source()
+
+    assert "_shellRasterFrameEligibility(targetPayload, targetRect, frameRect, rectTolerance)" in source
+    assert "target_not_fullscreen" in source
+    assert "target_not_on_current_workspace" in source
+    assert "target_minimized" in source
+    assert "missing_target_content_rect" in source
+    assert "missing_target_monitor_rect" in source
+    assert "target_not_borderless_full_monitor" in source
+    assert "target_rect_mismatch" in source
+    assert "frame_rect_mismatch" in source
+    assert "_rectContains(targetRect, frameRect)" in source
+
+
+def test_extension_shell_raster_frame_is_non_reactive_and_cleans_up() -> None:
+    source = _source()
+
+    assert "const SHELL_RASTER_FRAME_TIMEOUT_MS_DEFAULT = 1500;" in source
+    assert "reactive: false" in source
+    assert "textureActor.set_reactive?.(false)" in source
+    assert "normalisedAction === 'clear'" in source
+    assert "this._clearShellRasterFrame('explicit_clear')" in source
+    assert "this._clearShellRasterFrame('invalid_frame')" in source
+    assert "const cleanupAction = this._clearShellRasterFrame(cleanupReason);" in source
+    assert "_refreshShellRasterFrameTimeout(staleTimeoutMs)" in source
+    assert "this._clearShellRasterFrame('stale_timeout')" in source
+    assert "this._healthService?._clearShellRasterFrame?.('helper_disable')" in source
+    assert "this._healthService?._disconnectShellRasterOverviewSignals?.()" in source
+    assert "parent.remove_child(frame.actor)" in source
+    assert "frame?.actor?.destroy?.()" in source
+
+
+def test_extension_shell_raster_frame_tracks_session_and_overview_safety() -> None:
+    source = _source()
+
+    assert "import * as Main from 'resource:///org/gnome/shell/ui/main.js';" in source
+    assert "_shellRasterSessionIdFromVersion(frameVersion)" in source
+    assert "session_generation_mismatch" in source
+    assert "session_id:" in source
+    assert "_shellRasterFrameFocusRiskReason(targetPayload, allowUnfocusedTarget)" in source
+    assert "'allow_unfocused_target'" in source
+    assert "'allowUnfocusedTarget'" in source
+    assert "!allowUnfocusedTarget && targetPayload && targetPayload.hasFocus === false" in source
+    assert "allow_unfocused_target: Boolean(allowUnfocusedTarget)" in source
+    assert "gnome_overview_active" in source
+    assert "target_not_focused" in source
+    assert "_connectShellRasterOverviewSignals()" in source
+    assert "_disconnectShellRasterOverviewSignals()" in source
+    assert "overview.connect(signalName" in source
+
+
+def test_extension_shell_raster_frame_reports_debug_timing_diagnostics() -> None:
+    source = _source()
+
+    assert "'shell_raster_frame_diagnostics'" in source
+    assert "'shellRasterFrameDiagnostics'" in source
+    assert "_requestObject(payload" in source
+    assert "_shellRasterFrameDiagnostics(requestDiagnostics, helperTiming)" in source
+    assert "helper_decode_ms" in source
+    assert "helper_apply_ms" in source
+    assert "helper_total_ms" in source
+    assert "timing: this._shellRasterHelperTiming(totalStartedUs" in source
+
+
+def test_extension_shell_raster_frame_reuses_unchanged_frame_before_decode() -> None:
+    source = _source()
+
+    reuse_call = source.index("const reusableFrame = this._reuseShellRasterFrameIfMatching({")
+    clear_existing = source.index("const cleanupReason = this._shellRasterFrame?.sessionId")
+    decode_load = source.index("const loaded = this._loadShellRasterTextureActor(imagePath);")
+    assert reuse_call < clear_existing < decode_load
+    assert "if (reusableFrame) {" in source
+    assert "return reusableFrame;" in source
+    assert "_shellRasterFrameIdentityMatches(frame" in source
+
+
+def test_extension_shell_raster_frame_identity_requires_same_frame_and_rects() -> None:
+    source = _source()
+
+    assert "String(frame.frameVersion || '') === String(frameVersion || '')" in source
+    assert "String(frame.checksum || '') === String(checksum || '')" in source
+    assert "String(frame.imagePath || '') === String(imagePath || '')" in source
+    assert "Number(frame.byteSize || 0) === Number(byteSize || 0)" in source
+    assert "String(frame.targetToken || '') === String(targetToken || '')" in source
+    assert "this._rectsMatchWithinTolerance(frame.targetRect, targetRect, 0)" in source
+    assert "this._rectsMatchWithinTolerance(frame.frameRect, frameRect, 0)" in source
+    assert "frame.actor.get_parent() !== targetActor" in source
+
+
+def test_extension_shell_raster_frame_reuse_reports_decode_skip_diagnostics() -> None:
+    source = _source()
+
+    assert "updateReason: 'reused_existing_frame'" in source
+    assert "decodeSkipped: true" in source
+    assert "reusedFrame: true" in source
+    assert "helper_reused_frame" in source
+    assert "helper_decode_skipped" in source
+    assert "helper_update_reason" in source
+    assert "update_reason: updateReason" in source

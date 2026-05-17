@@ -27,12 +27,17 @@ from overlay_client.backend import (
     HelperPresentationRequest,
     HelperPresentationState,
     HelperPresentationStatus,
+    HelperRasterFrameRequest,
     HelperRect,
     HelperTargetStatus,
     build_gnome_shell_helper_presentation_request,
     probe_gnome_shell_helper_health,
     probe_gnome_shell_helper_presentation,
     probe_gnome_shell_helper_target,
+)
+from overlay_client.backend.shell_raster_frame import (
+    SHELL_RASTER_FRAME_RENDERER,
+    build_static_shell_raster_frame_request,
 )
 from overlay_client.backend.surface_preparation import BackendPresentationSurfacePreparation
 
@@ -48,12 +53,24 @@ GNOME_HELPER_SURFACE_ACTION_MAPPED_SUPPRESSED = "mapped_suppressed"
 GNOME_HELPER_GEOMETRY_DIAGNOSTICS_ENV = "EDMC_OVERLAY_GNOME_GEOMETRY_DIAGNOSTICS"
 GNOME_HELPER_PRESENTATION_DIAGNOSTICS_ENV = "EDMC_OVERLAY_GNOME_PRESENTATION_DIAGNOSTICS"
 GNOME_HELPER_BORDERLESS_FULLSCREEN_PREP_ENV = "EDMC_OVERLAY_GNOME_BORDERLESS_FULLSCREEN_PREP"
+GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV = "EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE"
+GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV = "EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE_RUNTIME"
+GNOME_HELPER_SHELL_RASTER_LEASE_REFRESH_FRACTION = 0.5
+GNOME_HELPER_SHELL_RASTER_MIN_REFRESH_SECONDS = 0.25
 GNOME_HELPER_PERSISTENT_MISMATCH_THRESHOLD = 2
 GNOME_HELPER_REASON_APPLIED_RECT_MISMATCH = "applied_rect_mismatch"
 GNOME_HELPER_REASON_WRONG_MONITOR_APPLIED_RECT = "wrong_monitor_applied_rect"
 GNOME_HELPER_REASON_PERSISTENT_APPLIED_RECT_MISMATCH = "persistent_applied_rect_mismatch"
 GNOME_HELPER_REASON_SURFACE_PREPARATION_FAILED = "surface_preparation_failed"
+GNOME_HELPER_REASON_SHELL_RASTER_OVERVIEW_ACTIVE = "gnome_overview_active"
+GNOME_HELPER_REASON_SHELL_RASTER_TARGET_NOT_FOCUSED = "target_not_focused"
 GNOME_HELPER_SURFACE_PREPARATION_FULLSCREEN_MONITOR = "fullscreen_monitor"
+GNOME_HELPER_SHELL_RASTER_SUPPRESS_FALLBACK_REASONS = frozenset(
+    (
+        GNOME_HELPER_REASON_SHELL_RASTER_OVERVIEW_ACTIVE,
+        GNOME_HELPER_REASON_SHELL_RASTER_TARGET_NOT_FOCUSED,
+    )
+)
 GNOME_HELPER_EXPECTED_DEGRADE_REASONS = frozenset(
     (
         GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK,
@@ -88,6 +105,7 @@ class GnomeHelperPresentationSignature:
     include_presentation_diagnostics: bool
     surface_preparation_mode: str
     request_degrade_reasons: tuple[str, ...]
+    shell_raster_frame_signature: tuple[object, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,7 +172,32 @@ class GnomeHelperPresentationCycleResult:
         return self.presentation_status is not None and self.presentation_status.true_overlay_ready
 
     @property
+    def shell_raster_frame_presented(self) -> bool:
+        status = self.presentation_status
+        return (
+            status is not None
+            and status.renderer == SHELL_RASTER_FRAME_RENDERER
+            and status.state is HelperPresentationState.APPLIED
+            and status.rect_match
+            and status.applied_rect is not None
+            and status.applied_rect.valid
+        )
+
+    @property
+    def shell_raster_frame_suspended_for_focus_risk(self) -> bool:
+        status = self.presentation_status
+        return (
+            status is not None
+            and status.renderer == SHELL_RASTER_FRAME_RENDERER
+            and bool(set(status.degrade_reasons) & GNOME_HELPER_SHELL_RASTER_SUPPRESS_FALLBACK_REASONS)
+        )
+
+    @property
     def should_show_overlay(self) -> bool:
+        if self.shell_raster_frame_presented:
+            return False
+        if self.shell_raster_frame_suspended_for_focus_risk:
+            return False
         return (
             self.target_found
             and self.request is not None
@@ -228,12 +271,24 @@ class GnomeHelperPresentationCycleResult:
                 else None
             ),
             "surface_preparation_failed": self.surface_preparation_failed,
+            "shell_raster_frame": (
+                self.request.shell_raster_frame.to_payload()
+                if self.request is not None and self.request.shell_raster_frame is not None
+                else None
+            ),
+            "shell_raster_status": (
+                dict(self.presentation_status.shell_raster_frame)
+                if self.presentation_status is not None and self.presentation_status.shell_raster_frame is not None
+                else None
+            ),
+            "shell_raster_metrics": _shell_raster_metrics_payload(self.request, self.presentation_status),
         }
 
 
 def run_gnome_shell_helper_presentation_cycle(
     *,
     standalone_mode: bool = False,
+    keep_overlay_visible: bool = False,
     previous_surface_action: str = "",
     fetch_health: Callable[[], object] | None = None,
     fetch_target: Callable[[], object] | None = None,
@@ -307,6 +362,12 @@ def run_gnome_shell_helper_presentation_cycle(
             standalone_mode=standalone_mode,
             include_presentation_diagnostics=include_presentation_diagnostics,
         )
+        request = _shell_raster_bridge_request(
+            target_status,
+            request,
+            env=os.environ,
+            allow_unfocused_target=keep_overlay_visible,
+        )
         surface_preparation = _borderless_fullscreen_surface_preparation(
             target_status,
             request,
@@ -322,6 +383,7 @@ def run_gnome_shell_helper_presentation_cycle(
             state,
             signature,
             request,
+            now_monotonic=now,
         ):
             state.last_target_status = target_status
             state.last_request = request
@@ -445,10 +507,84 @@ def fetch_gnome_shell_helper_presentation_via_gdbus(request: HelperPresentationR
     return _call_gnome_shell_helper_method(GNOME_SHELL_HELPER_DBUS_PRESENTATION_METHOD, payload)
 
 
+def build_shell_raster_frame_clear_request() -> HelperPresentationRequest:
+    """Build a helper request that only clears the Shell raster frame actor."""
+
+    dummy_rect = HelperRect(0, 0, 1, 1)
+    return HelperPresentationRequest(
+        action=HelperPresentationAction.DEGRADE,
+        target_token="",
+        content_rect=None,
+        renderer=SHELL_RASTER_FRAME_RENDERER,
+        require_placement=False,
+        require_chrome_free=False,
+        require_stacking=False,
+        require_click_through=False,
+        require_focus_safe=False,
+        shell_raster_frame=HelperRasterFrameRequest(
+            action="clear",
+            frame_version="shutdown-clear",
+            target_token="",
+            target_rect=dummy_rect,
+            frame_rect=dummy_rect,
+            scale=1.0,
+            image_path="",
+            checksum="",
+            byte_size=0,
+            stale_timeout_ms=0,
+        ),
+    )
+
+
+def clear_gnome_shell_raster_frame_via_gdbus(
+    fetch_presentation: Callable[[HelperPresentationRequest], object] | None = None,
+) -> bool:
+    """Best-effort shutdown cleanup for Phase 12 Shell raster frame actors."""
+
+    fetcher = fetch_presentation or fetch_gnome_shell_helper_presentation_via_gdbus
+    try:
+        fetcher(build_shell_raster_frame_clear_request())
+    except Exception:
+        return False
+    return True
+
+
 def _should_retry_presentation(status: HelperPresentationStatus) -> bool:
     return (
         status.state is HelperPresentationState.DEGRADED
         and GNOME_HELPER_REASON_APPLIED_RECT_MISMATCH in status.degrade_reasons
+    )
+
+
+def _shell_raster_bridge_request(
+    target_status: HelperTargetStatus | None,
+    request: HelperPresentationRequest | None,
+    *,
+    env: Mapping[str, str],
+    allow_unfocused_target: bool = False,
+) -> HelperPresentationRequest | None:
+    if request is None:
+        return None
+    if not _env_flag_enabled(env.get(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, "")):
+        return request
+    if not _env_flag_enabled(env.get(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, "")):
+        return request
+    result = build_static_shell_raster_frame_request(
+        target_status,
+        request,
+        env=env,
+        include_diagnostics=_env_flag_enabled(env.get(GNOME_HELPER_PRESENTATION_DIAGNOSTICS_ENV, "")),
+    )
+    if result.request is None:
+        return request
+    shell_raster_frame = replace(
+        result.request,
+        allow_unfocused_target=bool(allow_unfocused_target),
+    )
+    return replace(
+        request,
+        renderer=SHELL_RASTER_FRAME_RENDERER,
+        shell_raster_frame=shell_raster_frame,
     )
 
 
@@ -461,6 +597,8 @@ def _borderless_fullscreen_surface_preparation(
     if not _env_flag_enabled(env.get(GNOME_HELPER_BORDERLESS_FULLSCREEN_PREP_ENV, "")):
         return None
     if target_status is None or request is None or request.action is not HelperPresentationAction.ATTACH:
+        return None
+    if request.shell_raster_frame is not None:
         return None
     target = target_status.target if target_status.found else None
     if target is None or not target.fullscreen:
@@ -616,6 +754,28 @@ def _env_flag_enabled(value: str) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on", "debug"}
 
 
+def _shell_raster_metrics_payload(
+    request: HelperPresentationRequest | None,
+    presentation_status: HelperPresentationStatus | None,
+) -> dict[str, object] | None:
+    request_metrics = None
+    if request is not None and request.shell_raster_frame is not None:
+        request_metrics = request.shell_raster_frame.diagnostics
+    status_metrics = None
+    if presentation_status is not None and presentation_status.shell_raster_frame is not None:
+        shell_raster_frame = presentation_status.shell_raster_frame
+        if isinstance(shell_raster_frame, Mapping):
+            raw_metrics = shell_raster_frame.get("diagnostics")
+            if isinstance(raw_metrics, Mapping):
+                status_metrics = dict(raw_metrics)
+    if request_metrics is None and status_metrics is None:
+        return None
+    return {
+        "request": dict(request_metrics) if request_metrics is not None else None,
+        "status": status_metrics,
+    }
+
+
 def _should_skip_suppressed_target_poll(
     state: GnomeHelperPresentationRuntimeState,
     *,
@@ -638,13 +798,38 @@ def _should_skip_presentation_apply(
     state: GnomeHelperPresentationRuntimeState,
     signature: GnomeHelperPresentationSignature | None,
     request: HelperPresentationRequest,
+    *,
+    now_monotonic: float,
 ) -> bool:
     if signature is None or state.last_signature != signature:
+        return False
+    if _shell_raster_frame_refresh_due(state, request, now_monotonic=now_monotonic):
         return False
     return _cached_presentation_is_matching_success(
         state,
         request=request,
     )
+
+
+def _shell_raster_frame_refresh_due(
+    state: GnomeHelperPresentationRuntimeState,
+    request: HelperPresentationRequest,
+    *,
+    now_monotonic: float,
+) -> bool:
+    frame = request.shell_raster_frame
+    if frame is None or frame.action != "update":
+        return False
+    if state.last_success_at <= 0:
+        return False
+    stale_timeout_seconds = max(0.0, float(frame.stale_timeout_ms) / 1000.0)
+    if stale_timeout_seconds <= 0:
+        return True
+    refresh_after = max(
+        GNOME_HELPER_SHELL_RASTER_MIN_REFRESH_SECONDS,
+        stale_timeout_seconds * GNOME_HELPER_SHELL_RASTER_LEASE_REFRESH_FRACTION,
+    )
+    return (float(now_monotonic) - float(state.last_success_at)) >= refresh_after
 
 
 def _should_skip_persistent_mismatch_apply(
@@ -912,6 +1097,9 @@ def _presentation_signature(
         include_presentation_diagnostics=bool(request.include_presentation_diagnostics),
         surface_preparation_mode=surface_preparation.mode if surface_preparation is not None else "",
         request_degrade_reasons=tuple(request.degrade_reasons),
+        shell_raster_frame_signature=(
+            request.shell_raster_frame.signature() if request.shell_raster_frame is not None else None
+        ),
     )
 
 

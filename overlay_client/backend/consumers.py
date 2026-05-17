@@ -61,6 +61,7 @@ class BackendPresentationCycleResult:
             str(payload.get("surface_preparation_rect")),
             payload.get("surface_preparation_failed"),
             payload.get("legacy_geometry_policy"),
+            str(payload.get("shell_raster_metrics")),
         )
 
 
@@ -245,6 +246,7 @@ def run_backend_presentation_cycle(
     status: Optional[BackendSelectionStatus],
     *,
     standalone_mode: bool = False,
+    keep_overlay_visible: bool = False,
     previous_surface_action: str = "",
     gnome_runner: GnomePresentationCycleRunner | None = None,
     prepare_surface: BackendPresentationSurfacePreparer | None = None,
@@ -257,6 +259,7 @@ def run_backend_presentation_cycle(
     return _backend_result_from_gnome_helper_result(
         runner(
             standalone_mode=standalone_mode,
+            keep_overlay_visible=keep_overlay_visible,
             previous_surface_action=previous_surface_action,
             prepare_surface=prepare_surface,
         )

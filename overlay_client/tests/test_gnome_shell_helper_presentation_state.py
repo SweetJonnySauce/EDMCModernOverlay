@@ -16,6 +16,7 @@ from overlay_client.backend import (
     HelperPresentationAction,
     HelperPresentationRequest,
     HelperPresentationState,
+    HelperRasterFrameRequest,
     HelperRect,
     HelperTargetState,
     build_gnome_shell_helper_presentation_request,
@@ -347,6 +348,74 @@ def test_validate_presentation_accepts_applied_rect_within_tolerance() -> None:
     assert status.rect_match is True
     assert status.rect_delta == (2, -2, 1, -2)
     assert status.true_overlay_ready is True
+
+
+def test_validate_presentation_accepts_shell_raster_renderer_when_requested() -> None:
+    target = _target_status(
+        target=_target_window(
+            frameRect={"x": 0, "y": 0, "width": 3440, "height": 1440},
+            bufferRect={"x": 0, "y": 0, "width": 3440, "height": 1440},
+            contentRect={"x": 0, "y": 0, "width": 3440, "height": 1440},
+            decorationInsets={"left": 0, "top": 0, "right": 0, "bottom": 0},
+            monitorRect={"x": 0, "y": 0, "width": 3440, "height": 1440},
+            fullscreen=True,
+        )
+    )
+    frame_rect = HelperRect(24, 24, 520, 128)
+    request = HelperPresentationRequest(
+        action=HelperPresentationAction.ATTACH,
+        target_token="meta:21",
+        content_rect=HelperRect(0, 0, 3440, 1440),
+        renderer="gnome_shell_raster_frame",
+        shell_raster_frame=HelperRasterFrameRequest(
+            action="update",
+            frame_version="v1",
+            target_token="meta:21",
+            target_rect=HelperRect(0, 0, 3440, 1440),
+            frame_rect=frame_rect,
+            scale=1.0,
+            image_path="/run/user/1000/EDMCModernOverlay/shell-raster/frame.png",
+            checksum="abc123",
+            byte_size=128,
+            stale_timeout_ms=5000,
+            allow_unfocused_target=True,
+        ),
+    )
+    request_payload = request.to_payload()
+    assert request_payload["allow_unfocused_target"] is True
+
+    status = validate_gnome_shell_helper_presentation_payload(
+        _presentation_payload(
+            requested_rect={"x": 0, "y": 0, "width": 3440, "height": 1440},
+            applied_rect=frame_rect.to_payload(),
+            renderer="gnome_shell_raster_frame",
+            shell_raster_frame={
+                "frame_version": "v1",
+                "frame_rect": frame_rect.to_payload(),
+                "frame_dimensions": {"x": 0, "y": 0, "width": 520, "height": 128},
+                "cleanup_action": "",
+                "allow_unfocused_target": True,
+            },
+        ),
+        health_status=_health_status(),
+        target_status=target,
+        request=request,
+        observed_at_monotonic=210.0,
+        now_monotonic=210.0,
+    )
+
+    assert status.state is HelperPresentationState.APPLIED
+    assert status.pyqt_renderer_preserved is True
+    assert status.requested_rect == HelperRect(0, 0, 3440, 1440)
+    assert status.applied_rect == frame_rect
+    assert status.rect_match is True
+    assert status.rect_delta == (0, 0, 0, 0)
+    assert status.true_overlay_ready is False
+    assert status.shell_raster_frame is not None
+    assert status.shell_raster_frame["allow_unfocused_target"] is True
+    assert status.frame_version == "v1"
+    assert status.frame_rect == frame_rect
+    assert status.frame_dimensions == HelperRect(0, 0, 520, 128)
 
 
 def test_validate_presentation_degrades_frame_rect_fallback_even_when_applied_rect_matches() -> None:

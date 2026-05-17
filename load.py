@@ -200,6 +200,7 @@ PLUGIN_VERSION = MODERN_OVERLAY_VERSION
 DEV_BUILD = is_dev_build(MODERN_OVERLAY_VERSION)
 LOGGER_NAME = PLUGIN_NAME
 LOG_TAG = PLUGIN_NAME
+GNOME_SHELL_RASTER_BRIDGE_ENV = "EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE"
 
 DEFAULT_WINDOW_BASE_WIDTH = 1280
 DEFAULT_WINDOW_BASE_HEIGHT = 960
@@ -261,6 +262,45 @@ def _env_flag(name: str) -> Optional[bool]:
     if token in {"0", "false", "no", "off"}:
         return False
     return None
+
+
+def _clear_shell_raster_frame_via_backend() -> bool:
+    if __package__:
+        from .overlay_client.backend.bundles._gnome_shell_helper_presentation import (
+            clear_gnome_shell_raster_frame_via_gdbus,
+        )
+    else:  # pragma: no cover - EDMC loads as top-level module
+        from overlay_client.backend.bundles._gnome_shell_helper_presentation import (
+            clear_gnome_shell_raster_frame_via_gdbus,
+        )
+
+    return bool(clear_gnome_shell_raster_frame_via_gdbus())
+
+
+def _clear_shell_raster_frame_on_stop() -> bool:
+    if _env_flag(GNOME_SHELL_RASTER_BRIDGE_ENV) is not True:
+        return False
+    try:
+        cleared = _clear_shell_raster_frame_via_backend()
+    except Exception as exc:
+        LOGGER.debug("Failed to clear GNOME Shell raster frame on plugin stop: %s", exc, exc_info=exc)
+        return False
+    if cleared:
+        LOGGER.debug("Cleared GNOME Shell raster frame on plugin stop")
+    return cleared
+
+
+def _clear_shell_raster_frame_on_startup() -> bool:
+    if _env_flag(GNOME_SHELL_RASTER_BRIDGE_ENV) is not True:
+        return False
+    try:
+        cleared = _clear_shell_raster_frame_via_backend()
+    except Exception as exc:
+        LOGGER.debug("Failed to clear GNOME Shell raster frame on plugin startup: %s", exc, exc_info=exc)
+        return False
+    if cleared:
+        LOGGER.debug("Cleared GNOME Shell raster frame on plugin startup")
+    return cleared
 
 
 def _load_edmc_config_module() -> Optional[Any]:
@@ -671,6 +711,7 @@ class _PluginRuntime:
         if not self._running:
             return PLUGIN_NAME
 
+        _clear_shell_raster_frame_on_startup()
         self._start_prefs_worker()
         self._start_keep_overlay_visible_monitor_if_needed()
         self._start_version_status_check()
@@ -687,12 +728,14 @@ class _PluginRuntime:
             if not self._running:
                 self._hotkeys.stop()
                 self._stop_prefs_worker()
+                _clear_shell_raster_frame_on_stop()
                 return
             self._running = False
         self._hotkeys.stop()
         unregister_publisher()
         unregister_grouping_store()
         _log("Plugin stopping")
+        _clear_shell_raster_frame_on_stop()
         self._cancel_config_timers()
         self._cancel_version_notice_timers()
         self._stop_legacy_tcp_server()

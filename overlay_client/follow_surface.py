@@ -135,6 +135,7 @@ class FollowSurfaceMixin:
             result = run_backend_presentation_cycle(
                 getattr(self, "_client_backend_status", None),
                 standalone_mode=False,
+                keep_overlay_visible=bool(getattr(self, "_keep_overlay_visible", False)),
                 previous_surface_action=str(getattr(self, "_last_backend_presentation_surface_action", "")),
                 prepare_surface=self._prepare_backend_presentation_surface,
             )
@@ -389,6 +390,13 @@ class FollowSurfaceMixin:
                 "%s geometry diagnostics: %s",
                 result.log_prefix,
                 geometry_diagnostics,
+            )
+        shell_raster_metrics = payload.get("shell_raster_metrics")
+        if shell_raster_metrics:
+            _CLIENT_LOGGER.debug(
+                "%s shell raster metrics: %s",
+                result.log_prefix,
+                shell_raster_metrics,
             )
 
     def _convert_native_rect_to_qt(

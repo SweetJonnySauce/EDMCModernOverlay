@@ -4,7 +4,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 import json
 import logging
@@ -17,6 +17,10 @@ from overlay_client.client_config import InitialClientSettings, load_initial_set
 from overlay_client.data_client import OverlayDataClient
 from overlay_client.debug_config import DEBUG_CONFIG_ENABLED, load_dev_settings, load_troubleshooting_config
 from overlay_client.developer_helpers import DeveloperHelperController
+from overlay_client.backend.bundles._gnome_shell_helper_presentation import (
+    GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV,
+    clear_gnome_shell_raster_frame_via_gdbus,
+)
 from overlay_client.plugin_group_clear import parse_clear_targets
 from overlay_client.plugin_group_filter import PluginGroupVisibilityFilter
 from overlay_client.overlay_client import CLIENT_DIR, DEV_MODE_ENV_VAR, OverlayWindow, _CLIENT_LOGGER, apply_log_level_hint
@@ -74,6 +78,46 @@ def _diagnostics_enabled(initial: InitialClientSettings) -> bool:
     except (TypeError, ValueError):
         return False
     return numeric <= logging.DEBUG
+
+
+def _flag_enabled(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _clear_shell_raster_frame_on_shutdown(
+    *,
+    env: Mapping[str, str] | None = None,
+    clear_func=clear_gnome_shell_raster_frame_via_gdbus,
+) -> bool:
+    source = env if env is not None else os.environ
+    if not _flag_enabled(source.get(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV)):
+        return False
+    try:
+        cleared = bool(clear_func())
+    except Exception as exc:  # pragma: no cover - defensive shutdown path
+        _CLIENT_LOGGER.debug("Failed to clear GNOME Shell raster frame on shutdown: %s", exc, exc_info=exc)
+        return False
+    if cleared:
+        _CLIENT_LOGGER.debug("Cleared GNOME Shell raster frame on overlay client shutdown")
+    return cleared
+
+
+def _clear_shell_raster_frame_on_startup(
+    *,
+    env: Mapping[str, str] | None = None,
+    clear_func=clear_gnome_shell_raster_frame_via_gdbus,
+) -> bool:
+    source = env if env is not None else os.environ
+    if not _flag_enabled(source.get(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV)):
+        return False
+    try:
+        cleared = bool(clear_func())
+    except Exception as exc:  # pragma: no cover - defensive startup path
+        _CLIENT_LOGGER.debug("Failed to clear GNOME Shell raster frame on startup: %s", exc, exc_info=exc)
+        return False
+    if cleared:
+        _CLIENT_LOGGER.debug("Cleared GNOME Shell raster frame on overlay client startup")
+    return cleared
 
 
 def resolve_log_level_hint(port_file: Path) -> tuple[Optional[int], Optional[str], str]:
@@ -295,10 +339,25 @@ def main(argv: Optional[list[str]] = None) -> int:
     data_client.message_received.connect(_build_payload_handler(helper, window, group_filter=group_filter))
     data_client.status_changed.connect(window.set_status_text)
 
+    _clear_shell_raster_frame_on_startup()
     window.show()
     data_client.start()
 
-    exit_code = app.exec()
-    data_client.stop()
+    raster_shutdown_clear_attempted = False
+
+    def _clear_raster_once() -> None:
+        nonlocal raster_shutdown_clear_attempted
+        if raster_shutdown_clear_attempted:
+            return
+        raster_shutdown_clear_attempted = True
+        _clear_shell_raster_frame_on_shutdown()
+
+    app.aboutToQuit.connect(_clear_raster_once)
+
+    try:
+        exit_code = app.exec()
+    finally:
+        _clear_raster_once()
+        data_client.stop()
     _CLIENT_LOGGER.info("Overlay client exiting with code %s", exit_code)
     return int(exit_code)

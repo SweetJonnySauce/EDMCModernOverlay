@@ -82,3 +82,33 @@ def test_plugin_stop_clears_globals_and_hooks_become_noop(harness_runtime: tuple
         state={"ShipID": 42},
     )
     load.dashboard_entry(cmdr="HookCmdr", is_beta=False, entry={"Flags": 1, "ShipID": 42})
+
+
+def test_plugin_stop_clears_shell_raster_frame_when_enabled(
+    harness_runtime: tuple[object, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _harness, _runtime = harness_runtime
+    calls: list[str] = []
+
+    monkeypatch.setenv(load.GNOME_SHELL_RASTER_BRIDGE_ENV, "1")
+    monkeypatch.setattr(load, "_clear_shell_raster_frame_via_backend", lambda: calls.append("clear") or True)
+
+    assert load._clear_shell_raster_frame_on_stop() is True
+
+    assert calls == ["clear"]
+
+
+def test_plugin_startup_clears_shell_raster_frame_when_enabled(
+    harness_runtime: tuple[object, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _harness, _runtime = harness_runtime
+    calls: list[str] = []
+
+    monkeypatch.setenv(load.GNOME_SHELL_RASTER_BRIDGE_ENV, "1")
+    monkeypatch.setattr(load, "_clear_shell_raster_frame_via_backend", lambda: calls.append("clear") or True)
+
+    assert load._clear_shell_raster_frame_on_startup() is True
+
+    assert calls == ["clear"]

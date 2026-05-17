@@ -494,17 +494,24 @@ def test_refresh_follow_geometry_uses_gnome_helper_presentation_and_skips_legacy
     stub = _FollowSurfaceStub()
     stub._client_backend_status = _backend_status(helper_available=True)
     result = _fake_backend_presentation_result()
-    calls: list[tuple[bool, str]] = []
+    calls: list[tuple[bool, bool, str]] = []
 
-    def fake_cycle(_status, *, standalone_mode: bool = False, previous_surface_action: str = "", **_kwargs):
-        calls.append((standalone_mode, previous_surface_action))
+    def fake_cycle(
+        _status,
+        *,
+        standalone_mode: bool = False,
+        keep_overlay_visible: bool = False,
+        previous_surface_action: str = "",
+        **_kwargs,
+    ):
+        calls.append((standalone_mode, keep_overlay_visible, previous_surface_action))
         return result
 
     monkeypatch.setattr("overlay_client.follow_surface.run_backend_presentation_cycle", fake_cycle)
 
     stub._refresh_follow_geometry()
 
-    assert calls == [(False, "")]
+    assert calls == [(False, False, "")]
     assert stub._follow_controller.refresh_called == 0
     assert stub._last_backend_presentation is result
     assert stub._last_backend_presentation_surface_action == "mapped_visible"
@@ -740,12 +747,18 @@ def test_refresh_follow_geometry_keeps_backend_presentation_visible_when_setting
     stub = _FollowSurfaceStub()
     stub._keep_overlay_visible = True
     result = _fake_backend_presentation_result(target_has_focus=False)
+    keep_flags: list[bool] = []
 
-    monkeypatch.setattr("overlay_client.follow_surface.run_backend_presentation_cycle", lambda *_args, **_kwargs: result)
+    def fake_cycle(*_args, **kwargs):
+        keep_flags.append(bool(kwargs["keep_overlay_visible"]))
+        return result
+
+    monkeypatch.setattr("overlay_client.follow_surface.run_backend_presentation_cycle", fake_cycle)
 
     stub._refresh_follow_geometry()
     stub._refresh_follow_geometry()
 
+    assert keep_flags == [True, True]
     assert stub._follow_controller.refresh_called == 0
     assert stub._visibility_helper.calls == [True, True]
 

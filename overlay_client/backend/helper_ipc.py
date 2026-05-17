@@ -398,6 +398,68 @@ class HelperTargetStatus:
 
 
 @dataclass(frozen=True, slots=True)
+class HelperRasterFrameRequest:
+    """Optional Shell-native raster frame payload for a helper presentation request."""
+
+    action: str
+    frame_version: str
+    target_token: str
+    target_rect: HelperRect
+    frame_rect: HelperRect
+    scale: float
+    image_path: str
+    checksum: str
+    byte_size: int
+    stale_timeout_ms: int
+    allow_unfocused_target: bool = False
+    diagnostics: Mapping[str, object] | None = None
+
+    def to_payload(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "shell_raster_frame": True,
+            "shell_raster_frame_action": self.action,
+            "frame_version": self.frame_version,
+            "target_token": self.target_token,
+            "target_rect": self.target_rect.to_payload(),
+            "frame_rect": self.frame_rect.to_payload(),
+            "scale": self.scale,
+            "image_path": self.image_path,
+            "checksum": self.checksum,
+            "byte_size": self.byte_size,
+            "stale_timeout_ms": self.stale_timeout_ms,
+            "allow_unfocused_target": self.allow_unfocused_target,
+        }
+        if self.diagnostics is not None:
+            payload["shell_raster_frame_diagnostics"] = dict(self.diagnostics)
+        return payload
+
+    def signature(self) -> tuple[object, ...]:
+        return (
+            self.action,
+            self.frame_version,
+            self.target_token,
+            (
+                self.target_rect.x,
+                self.target_rect.y,
+                self.target_rect.width,
+                self.target_rect.height,
+            ),
+            (
+                self.frame_rect.x,
+                self.frame_rect.y,
+                self.frame_rect.width,
+                self.frame_rect.height,
+            ),
+            round(float(self.scale), 3),
+            self.image_path,
+            self.checksum,
+            int(self.byte_size),
+            int(self.stale_timeout_ms),
+            bool(self.allow_unfocused_target),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class HelperPresentationRequest:
     """Client request for Shell-mediated presentation of the PyQt overlay."""
 
@@ -418,6 +480,7 @@ class HelperPresentationRequest:
     require_focus_safe: bool = True
     include_presentation_diagnostics: bool = False
     degrade_reasons: tuple[str, ...] = field(default_factory=tuple)
+    shell_raster_frame: HelperRasterFrameRequest | None = None
 
     def to_payload(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -444,6 +507,8 @@ class HelperPresentationRequest:
         }
         if self.include_presentation_diagnostics:
             payload["include_presentation_diagnostics"] = True
+        if self.shell_raster_frame is not None:
+            payload.update(self.shell_raster_frame.to_payload())
         return payload
 
 
@@ -480,6 +545,11 @@ class HelperPresentationStatus:
     observed_at_monotonic: float = 0.0
     stale_after_seconds: float = GNOME_SHELL_HELPER_PRESENTATION_STALE_SECONDS
     presentation_diagnostics: Mapping[str, object] | None = None
+    shell_raster_frame: Mapping[str, object] | None = None
+    frame_version: str = ""
+    frame_rect: HelperRect | None = None
+    frame_dimensions: HelperRect | None = None
+    cleanup_action: str = ""
     detail: str = ""
 
     @property
@@ -491,6 +561,8 @@ class HelperPresentationStatus:
         return (
             self.applied
             and self.action is HelperPresentationAction.ATTACH
+            and self.shell_raster_frame is None
+            and self.renderer != "gnome_shell_raster_frame"
             and self.placement
             and self.rect_match
             and self.chrome_free
@@ -543,6 +615,13 @@ class HelperPresentationStatus:
             "presentation_diagnostics": dict(self.presentation_diagnostics)
             if self.presentation_diagnostics is not None
             else None,
+            "shell_raster_frame": dict(self.shell_raster_frame)
+            if self.shell_raster_frame is not None
+            else None,
+            "frame_version": self.frame_version,
+            "frame_rect": self.frame_rect.to_payload() if self.frame_rect is not None else None,
+            "frame_dimensions": self.frame_dimensions.to_payload() if self.frame_dimensions is not None else None,
+            "cleanup_action": self.cleanup_action,
             "detail": self.detail,
         }
 
@@ -1457,8 +1536,6 @@ def validate_gnome_shell_helper_presentation_payload(
     rect_source = _payload_text(payload, "rect_source") or request.rect_source
     requested_rect = _payload_rect(payload.get("requestedRect", payload.get("requested_rect"))) or request.content_rect
     applied_rect = _payload_rect(payload.get("appliedRect", payload.get("applied_rect")))
-    rect_delta = _rect_delta(requested_rect, applied_rect)
-    rect_match = _rect_matches(requested_rect, applied_rect, tolerance=request.rect_tolerance)
     renderer = _payload_text(payload, "renderer") or request.renderer
     unsupported_features = _payload_string_tuple(payload.get("unsupported_features", payload.get("unsupportedFeatures")))
     degrade_reasons = _payload_string_tuple(payload.get("degrade_reasons", payload.get("degradeReasons")))
@@ -1468,10 +1545,32 @@ def validate_gnome_shell_helper_presentation_payload(
     click_through = _mapping_bool(payload, "click_through", "clickThrough")
     focus_safe = _mapping_bool(payload, "focus_safe", "focusSafe")
     standalone_mode = _mapping_bool(payload, "standalone_mode", "standaloneMode") or request.standalone_mode
-    pyqt_renderer_preserved = renderer == "pyqt"
+    pyqt_renderer_preserved = renderer == "pyqt" or (
+        request.shell_raster_frame is not None and renderer == "gnome_shell_raster_frame"
+    )
     presentation_diagnostics = _payload_mapping(
         payload.get("presentation_diagnostics", payload.get("presentationDiagnostics")),
     )
+    shell_raster_frame = _payload_mapping(payload.get("shell_raster_frame", payload.get("shellRasterFrame")))
+    frame_version = _payload_text(payload, "frame_version")
+    frame_rect = _payload_rect(payload.get("frameRect", payload.get("frame_rect")))
+    frame_dimensions = _payload_rect(payload.get("frameDimensions", payload.get("frame_dimensions")))
+    cleanup_action = _payload_text(payload, "cleanup_action")
+    if shell_raster_frame is not None:
+        frame_version = frame_version or _mapping_text(shell_raster_frame, "frame_version", "frameVersion")
+        frame_rect = frame_rect or _payload_rect(shell_raster_frame.get("frame_rect", shell_raster_frame.get("frameRect")))
+        frame_dimensions = frame_dimensions or _payload_rect(
+            shell_raster_frame.get("frame_dimensions", shell_raster_frame.get("frameDimensions"))
+        )
+        cleanup_action = cleanup_action or _mapping_text(shell_raster_frame, "cleanup_action", "cleanupAction")
+    expected_applied_rect = _expected_applied_rect_for_request(
+        request,
+        renderer=renderer,
+        requested_rect=requested_rect,
+        frame_rect=frame_rect,
+    )
+    rect_delta = _rect_delta(expected_applied_rect, applied_rect)
+    rect_match = _rect_matches(expected_applied_rect, applied_rect, tolerance=request.rect_tolerance)
 
     if presentation_state is HelperPresentationState.APPLIED:
         missing_gate_reasons = _missing_presentation_gate_reasons(
@@ -1484,6 +1583,7 @@ def validate_gnome_shell_helper_presentation_payload(
             renderer=renderer,
             standalone_mode=standalone_mode,
             applied_rect=applied_rect,
+            expected_applied_rect=expected_applied_rect,
         )
         missing_gate_reasons = tuple(dict.fromkeys(request.degrade_reasons + missing_gate_reasons))
         if action is not HelperPresentationAction.ATTACH:
@@ -1518,6 +1618,11 @@ def validate_gnome_shell_helper_presentation_payload(
                 observed_at_monotonic=observed_at,
                 stale_after_seconds=stale_after_seconds,
                 presentation_diagnostics=presentation_diagnostics,
+                shell_raster_frame=shell_raster_frame,
+                frame_version=frame_version,
+                frame_rect=frame_rect,
+                frame_dimensions=frame_dimensions,
+                cleanup_action=cleanup_action,
                 detail=_payload_text(payload, "detail"),
             )
 
@@ -1564,6 +1669,11 @@ def validate_gnome_shell_helper_presentation_payload(
         observed_at_monotonic=observed_at,
         stale_after_seconds=stale_after_seconds,
         presentation_diagnostics=presentation_diagnostics,
+        shell_raster_frame=shell_raster_frame,
+        frame_version=frame_version,
+        frame_rect=frame_rect,
+        frame_dimensions=frame_dimensions,
+        cleanup_action=cleanup_action,
         detail=_payload_text(payload, "detail"),
     )
 
@@ -1732,6 +1842,11 @@ def _helper_presentation_status(
     observed_at_monotonic: float = 0.0,
     stale_after_seconds: float = GNOME_SHELL_HELPER_PRESENTATION_STALE_SECONDS,
     presentation_diagnostics: Mapping[str, object] | None = None,
+    shell_raster_frame: Mapping[str, object] | None = None,
+    frame_version: str = "",
+    frame_rect: HelperRect | None = None,
+    frame_dimensions: HelperRect | None = None,
+    cleanup_action: str = "",
     detail: str = "",
 ) -> HelperPresentationStatus:
     return HelperPresentationStatus(
@@ -1764,6 +1879,11 @@ def _helper_presentation_status(
         observed_at_monotonic=observed_at_monotonic,
         stale_after_seconds=stale_after_seconds,
         presentation_diagnostics=presentation_diagnostics,
+        shell_raster_frame=shell_raster_frame,
+        frame_version=frame_version,
+        frame_rect=frame_rect,
+        frame_dimensions=frame_dimensions,
+        cleanup_action=cleanup_action,
         detail=detail,
     )
 
@@ -2060,12 +2180,13 @@ def _missing_presentation_gate_reasons(
     renderer: str,
     standalone_mode: bool,
     applied_rect: HelperRect | None,
+    expected_applied_rect: HelperRect | None,
 ) -> tuple[str, ...]:
     reasons: list[str] = []
     if request.require_placement and (not placement or applied_rect is None or not applied_rect.valid):
         reasons.append("placement_unproven")
     elif request.require_placement and not _rect_matches(
-        request.content_rect,
+        expected_applied_rect,
         applied_rect,
         tolerance=request.rect_tolerance,
     ):
@@ -2078,11 +2199,26 @@ def _missing_presentation_gate_reasons(
         reasons.append("click_through_unproven")
     if request.require_focus_safe and not focus_safe:
         reasons.append("focus_safe_unproven")
-    if renderer != "pyqt":
+    renderer_preserves_pyqt = renderer == "pyqt" or (
+        request.shell_raster_frame is not None and renderer == "gnome_shell_raster_frame"
+    )
+    if not renderer_preserves_pyqt:
         reasons.append("renderer_changed")
     if standalone_mode:
         reasons.append("standalone_mode_enabled")
     return tuple(reasons)
+
+
+def _expected_applied_rect_for_request(
+    request: HelperPresentationRequest,
+    *,
+    renderer: str,
+    requested_rect: HelperRect | None,
+    frame_rect: HelperRect | None,  # noqa: ARG001 - retained for call-site symmetry with parsed diagnostics.
+) -> HelperRect | None:
+    if request.shell_raster_frame is not None and renderer == "gnome_shell_raster_frame":
+        return request.shell_raster_frame.frame_rect
+    return requested_rect
 
 
 def _rect_delta(left: HelperRect | None, right: HelperRect | None) -> tuple[int, int, int, int]:

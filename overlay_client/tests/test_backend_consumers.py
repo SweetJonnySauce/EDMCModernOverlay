@@ -450,10 +450,11 @@ def test_backend_presentation_cycle_wraps_gnome_helper_result_when_helper_availa
     def fake_runner(
         *,
         standalone_mode: bool = False,
+        keep_overlay_visible: bool = False,
         previous_surface_action: str = "",
         prepare_surface=None,
     ) -> _FakeGnomePresentationResult:
-        calls.append(standalone_mode)
+        calls.append((standalone_mode, keep_overlay_visible))
         assert previous_surface_action == "mapped_visible"
         assert prepare_surface is None
         return _FakeGnomePresentationResult()
@@ -461,12 +462,13 @@ def test_backend_presentation_cycle_wraps_gnome_helper_result_when_helper_availa
     result = run_backend_presentation_cycle(
         status,
         standalone_mode=False,
+        keep_overlay_visible=True,
         previous_surface_action="mapped_visible",
         gnome_runner=fake_runner,
     )
 
     assert isinstance(result, BackendPresentationCycleResult)
-    assert calls == [False]
+    assert calls == [(False, True)]
     assert result.should_show_overlay is True
     assert result.scale_size == (300, 200)
     assert result.prime_rect == (10, 20, 300, 200)

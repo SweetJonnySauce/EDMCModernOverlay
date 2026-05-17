@@ -1,8 +1,12 @@
+import Clutter from 'gi://Clutter';
+import Cogl from 'gi://Cogl';
 import Gio from 'gi://Gio';
+import GdkPixbuf from 'gi://GdkPixbuf';
 import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {
     HELPER_CAPABILITIES,
@@ -48,6 +52,10 @@ const DISPLAY_CONFIG_GET_CURRENT_STATE_METHOD = 'GetCurrentState';
 const DISPLAY_CONFIG_MONITOR_CACHE_TTL_US = 1000000;
 const DISPLAY_CONFIG_DBUS_TIMEOUT_MS = 250;
 const SHELL_ACTOR_PROOF_TIMEOUT_MS = 5000;
+const SHELL_RASTER_FRAME_TIMEOUT_MS_DEFAULT = 1500;
+const SHELL_RASTER_FRAME_MAX_BYTES = 8 * 1024 * 1024;
+const SHELL_RASTER_FRAME_RENDERER = 'gnome_shell_raster_frame';
+const SHELL_RASTER_FRAME_PARENT = 'target_window_actor_child';
 const SHELL_ACTOR_GROUP_DIAGNOSTIC_CHILD_LIMIT = 12;
 const SHELL_ACTOR_PROOF_PARENT = 'target_window_actor_child';
 const SHELL_ACTOR_GROUP_DIAGNOSTIC_NAMES = [
@@ -78,6 +86,10 @@ class HelperHealthService {
         this._displayConfigMonitorCacheExpiresUs = 0;
         this._shellActorProof = null;
         this._shellActorProofTimeoutId = 0;
+        this._shellRasterFrame = null;
+        this._shellRasterFrameTimeoutId = 0;
+        this._shellRasterOverviewSignalIds = [];
+        this._connectShellRasterOverviewSignals();
     }
 
     Hello(_client) {
@@ -169,6 +181,12 @@ class HelperHealthService {
             'shell_actor_proof_action',
             'shellActorProofAction',
         );
+        const shellRasterFrameRequested = this._requestBool(payload, 'shell_raster_frame', 'shellRasterFrame');
+        const shellRasterFrameAction = this._requestString(
+            payload,
+            'shell_raster_frame_action',
+            'shellRasterFrameAction',
+        );
         const base = {
             action,
             targetToken,
@@ -177,6 +195,15 @@ class HelperHealthService {
             generatedAtUnixMs,
             generatedAtMonotonicUs,
         };
+
+        if (shellRasterFrameRequested || shellRasterFrameAction) {
+            return JSON.stringify(this._handleShellRasterFrame({
+                ...base,
+                payload,
+                frameAction: shellRasterFrameAction || 'update',
+                rectTolerance,
+            }));
+        }
 
         if (shellActorProofRequested || shellActorProofAction) {
             return JSON.stringify(this._handleShellActorProof({
@@ -831,6 +858,11 @@ class HelperHealthService {
         generatedAtMonotonicUs = GLib.get_monotonic_time(),
         presentationDiagnostics = null,
         shellActorProof = null,
+        shellRasterFrame = null,
+        frameVersion = '',
+        frameRect = null,
+        frameDimensions = null,
+        cleanupAction = '',
         detail = '',
     }) {
         const payload = {
@@ -858,13 +890,794 @@ class HelperHealthService {
             generated_at_monotonic_us: generatedAtMonotonicUs,
             detail,
         };
+        if (frameVersion) {
+            payload.frame_version = frameVersion;
+        }
+        if (frameRect) {
+            payload.frame_rect = frameRect;
+        }
+        if (frameDimensions) {
+            payload.frame_dimensions = frameDimensions;
+        }
+        if (cleanupAction) {
+            payload.cleanup_action = cleanupAction;
+        }
         if (presentationDiagnostics) {
             payload.presentation_diagnostics = presentationDiagnostics;
         }
         if (shellActorProof) {
             payload.shell_actor_proof = shellActorProof;
         }
+        if (shellRasterFrame) {
+            payload.shell_raster_frame = shellRasterFrame;
+        }
         return payload;
+    }
+
+    _handleShellRasterFrame({
+        action,
+        targetToken,
+        requestedRect,
+        standaloneMode,
+        generatedAtUnixMs,
+        generatedAtMonotonicUs,
+        payload,
+        frameAction,
+        rectTolerance,
+    }) {
+        const normalisedAction = String(frameAction || 'update').trim().toLowerCase();
+        if (normalisedAction === 'clear') {
+            const cleanupAction = this._clearShellRasterFrame('explicit_clear');
+            return this._presentationPayload({
+                status: 'shell_raster_frame_cleared',
+                action,
+                targetToken,
+                requestedRect,
+                standaloneMode,
+                generatedAtUnixMs,
+                generatedAtMonotonicUs,
+                renderer: SHELL_RASTER_FRAME_RENDERER,
+                cleanupAction,
+                shellRasterFrame: this._shellRasterFramePayload({
+                    requestedAction: normalisedAction,
+                    visible: false,
+                    targetToken,
+                    requestedRect,
+                    cleanupAction,
+                }),
+            });
+        }
+        if (normalisedAction !== 'update') {
+            return this._presentationPayload({
+                status: 'malformed_payload',
+                action: 'degrade',
+                targetToken,
+                requestedRect,
+                standaloneMode,
+                generatedAtUnixMs,
+                generatedAtMonotonicUs,
+                renderer: SHELL_RASTER_FRAME_RENDERER,
+                degradeReasons: ['unsupported_shell_raster_frame_action'],
+                detail: `unsupported shell raster frame action=${normalisedAction}`,
+                shellRasterFrame: this._shellRasterFramePayload({
+                    requestedAction: normalisedAction,
+                    visible: Boolean(this._shellRasterFrame?.actor),
+                    targetToken,
+                    requestedRect,
+                    eligible: false,
+                    eligibilityReasons: ['unsupported_shell_raster_frame_action'],
+                }),
+            });
+        }
+
+        const targetRect = this._requestRect(payload, 'target_rect', 'targetRect') || requestedRect;
+        const frameRect = this._requestRect(payload, 'frame_rect', 'frameRect');
+        const frameVersion = this._requestString(payload, 'frame_version', 'frameVersion');
+        const imagePath = this._requestString(payload, 'image_path', 'imagePath');
+        const checksum = this._requestString(payload, 'checksum');
+        const byteSize = this._requestInt(payload, 0, 'byte_size', 'byteSize');
+        const allowUnfocusedTarget = this._requestBool(
+            payload,
+            'allow_unfocused_target',
+            'allowUnfocusedTarget',
+        );
+        const staleTimeoutMs = Math.max(
+            1000,
+            this._requestInt(payload, SHELL_RASTER_FRAME_TIMEOUT_MS_DEFAULT, 'stale_timeout_ms', 'staleTimeoutMs'),
+        );
+        const requestDiagnostics = this._requestObject(
+            payload,
+            'shell_raster_frame_diagnostics',
+            'shellRasterFrameDiagnostics',
+        );
+
+        const windows = this._enumerateWindowEntries();
+        const targetEntry = windows.find(entry => entry.payload.targetToken === targetToken);
+        const targetPayload = targetEntry?.payload || null;
+        const focusRiskReason = this._shellRasterFrameFocusRiskReason(targetPayload, allowUnfocusedTarget);
+        if (focusRiskReason) {
+            const cleanupAction = this._clearShellRasterFrame(focusRiskReason);
+            return this._presentationPayload({
+                status: 'presentation_degraded',
+                action,
+                targetToken,
+                requestedRect: targetRect,
+                appliedRect: null,
+                standaloneMode,
+                generatedAtUnixMs,
+                generatedAtMonotonicUs,
+                renderer: SHELL_RASTER_FRAME_RENDERER,
+                degradeReasons: [focusRiskReason],
+                cleanupAction,
+                detail: 'shell raster frame suspended for focus/overview safety',
+                shellRasterFrame: this._shellRasterFramePayload({
+                    requestedAction: normalisedAction,
+                    visible: false,
+                    requestedRect: targetRect,
+                    frameRect,
+                    targetToken,
+                    targetPayload,
+                    frameVersion,
+                    imagePath,
+                    checksum,
+                    byteSize,
+                    eligible: false,
+                    eligibilityReasons: [focusRiskReason],
+                    cleanupAction,
+                    staleTimeoutMs,
+                    sessionId: this._shellRasterSessionIdFromVersion(frameVersion),
+                    focusRiskReason,
+                    allowUnfocusedTarget,
+                    requestDiagnostics,
+                }),
+            });
+        }
+        const eligibility = this._shellRasterFrameEligibility(targetPayload, targetRect, frameRect, rectTolerance);
+        const pathValidation = this._validateShellRasterFramePath(imagePath, byteSize);
+        const reasons = [...eligibility.reasons, ...pathValidation.reasons];
+        if (reasons.length) {
+            const cleanupAction = this._clearShellRasterFrame('invalid_frame');
+            return this._presentationPayload({
+                status: targetPayload ? 'presentation_degraded' : 'target_unavailable',
+                action,
+                targetToken,
+                requestedRect: targetRect,
+                appliedRect: null,
+                standaloneMode,
+                generatedAtUnixMs,
+                generatedAtMonotonicUs,
+                renderer: SHELL_RASTER_FRAME_RENDERER,
+                degradeReasons: reasons,
+                cleanupAction,
+                detail: 'shell raster frame eligibility failed',
+                shellRasterFrame: this._shellRasterFramePayload({
+                    requestedAction: normalisedAction,
+                    visible: false,
+                    requestedRect: targetRect,
+                    frameRect,
+                    targetToken,
+                    targetPayload,
+                    frameVersion,
+                    imagePath,
+                    checksum,
+                    byteSize,
+                    eligible: false,
+                    eligibilityReasons: reasons,
+                    cleanupAction,
+                    staleTimeoutMs,
+                    sessionId: this._shellRasterSessionIdFromVersion(frameVersion),
+                    allowUnfocusedTarget,
+                    requestDiagnostics,
+                }),
+            });
+        }
+
+        const frameResult = this._showShellRasterFrame({
+            targetPayload,
+            targetRect,
+            frameRect,
+            frameVersion,
+            imagePath,
+            checksum,
+            byteSize,
+            staleTimeoutMs,
+        });
+        const degradeReasons = frameResult.visible ? [] : frameResult.reasons;
+        return this._presentationPayload({
+            status: frameResult.visible ? 'presentation_applied' : 'presentation_degraded',
+            action,
+            targetToken,
+            requestedRect: targetRect,
+            appliedRect: frameResult.visible ? frameRect : null,
+            renderer: SHELL_RASTER_FRAME_RENDERER,
+            placement: frameResult.visible,
+            chromeFree: frameResult.visible,
+            stacking: frameResult.visible,
+            clickThrough: frameResult.visible,
+            focusSafe: frameResult.visible,
+            standaloneMode,
+            generatedAtUnixMs,
+            generatedAtMonotonicUs,
+            degradeReasons,
+            frameVersion,
+            frameRect,
+            frameDimensions: frameResult.frameDimensions,
+            cleanupAction: frameResult.cleanupAction,
+            detail: frameResult.visible ? '' : 'shell raster frame unavailable',
+            shellRasterFrame: this._shellRasterFramePayload({
+                requestedAction: normalisedAction,
+                visible: frameResult.visible,
+                requestedRect: targetRect,
+                appliedRect: frameResult.visible ? frameRect : null,
+                frameRect,
+                targetToken,
+                targetPayload,
+                actorParent: frameResult.actorParent,
+                frameVersion,
+                imagePath,
+                checksum,
+                byteSize,
+                eligible: true,
+                eligibilityReasons: degradeReasons,
+                staleTimeoutMs,
+                frameDimensions: frameResult.frameDimensions,
+                cleanupAction: frameResult.cleanupAction,
+                sessionId: frameResult.sessionId,
+                allowUnfocusedTarget,
+                requestDiagnostics,
+                helperTiming: frameResult.timing,
+                updateReason: frameResult.updateReason,
+            }),
+        });
+    }
+
+    _shellRasterFrameFocusRiskReason(targetPayload, allowUnfocusedTarget = false) {
+        const overview = Main?.overview || null;
+        if (overview) {
+            if (overview.visible || overview._shown || overview._shownTransition || overview.animationInProgress) {
+                return 'gnome_overview_active';
+            }
+        }
+        if (!allowUnfocusedTarget && targetPayload && targetPayload.hasFocus === false) {
+            return 'target_not_focused';
+        }
+        return '';
+    }
+
+    _shellRasterFrameEligibility(targetPayload, targetRect, frameRect, rectTolerance) {
+        const reasons = [];
+        if (!targetPayload) {
+            reasons.push('target_unavailable');
+            return { eligible: false, reasons };
+        }
+        if (!targetPayload.fullscreen) {
+            reasons.push('target_not_fullscreen');
+        }
+        if (!targetPayload.showingOnWorkspace) {
+            reasons.push('target_not_on_current_workspace');
+        }
+        if (targetPayload.minimized) {
+            reasons.push('target_minimized');
+        }
+        if (!this._rectIsValid(targetPayload.contentRect)) {
+            reasons.push('missing_target_content_rect');
+        }
+        if (!this._rectIsValid(targetPayload.monitorRect)) {
+            reasons.push('missing_target_monitor_rect');
+        }
+        if (!this._rectIsValid(targetRect)) {
+            reasons.push('invalid_target_rect');
+        }
+        if (!this._rectIsValid(frameRect)) {
+            reasons.push('invalid_frame_rect');
+        }
+        if (
+            this._rectIsValid(targetPayload.contentRect) &&
+            this._rectIsValid(targetPayload.monitorRect) &&
+            !this._rectsMatchWithinTolerance(targetPayload.contentRect, targetPayload.monitorRect, rectTolerance)
+        ) {
+            reasons.push('target_not_borderless_full_monitor');
+        }
+        if (
+            this._rectIsValid(targetPayload.contentRect) &&
+            this._rectIsValid(targetRect) &&
+            !this._rectsMatchWithinTolerance(targetRect, targetPayload.contentRect, rectTolerance)
+        ) {
+            reasons.push('target_rect_mismatch');
+        }
+        if (
+            this._rectIsValid(frameRect) &&
+            this._rectIsValid(targetRect) &&
+            !this._rectContains(targetRect, frameRect)
+        ) {
+            reasons.push('frame_rect_mismatch');
+        }
+        return {
+            eligible: reasons.length === 0,
+            reasons,
+        };
+    }
+
+    _validateShellRasterFramePath(imagePath, byteSize) {
+        const reasons = [];
+        const path = String(imagePath || '').trim();
+        if (!path || !GLib.path_is_absolute(path)) {
+            reasons.push('invalid_path');
+            return { ok: false, reasons, path: '' };
+        }
+        if (path.includes('/../') || path.endsWith('/..')) {
+            reasons.push('path_traversal');
+        }
+        if (!path.toLowerCase().endsWith('.png')) {
+            reasons.push('invalid_image_format');
+        }
+        const canonicalPath = GLib.canonicalize_filename(path, null);
+        const allowed = this._shellRasterAllowedCacheDirs()
+            .map(dir => GLib.canonicalize_filename(dir, null));
+        if (!allowed.some(dir => canonicalPath === dir || canonicalPath.startsWith(`${dir}/`))) {
+            reasons.push('path_outside_allowed_cache_dir');
+        }
+        const expectedBytes = Number(byteSize) || 0;
+        if (expectedBytes <= 0) {
+            reasons.push('invalid_byte_size');
+        }
+        if (expectedBytes > SHELL_RASTER_FRAME_MAX_BYTES) {
+            reasons.push('file_too_large');
+        }
+        try {
+            const file = Gio.File.new_for_path(canonicalPath);
+            const info = file.query_info(
+                'standard::type,standard::size,standard::content-type',
+                Gio.FileQueryInfoFlags.NONE,
+                null,
+            );
+            if (info.get_file_type() !== Gio.FileType.REGULAR) {
+                reasons.push('not_regular_file');
+            }
+            const actualBytes = Number(info.get_size()) || 0;
+            if (actualBytes <= 0) {
+                reasons.push('file_missing');
+            }
+            if (actualBytes > SHELL_RASTER_FRAME_MAX_BYTES) {
+                reasons.push('file_too_large');
+            }
+            if (expectedBytes > 0 && actualBytes !== expectedBytes) {
+                reasons.push('byte_size_mismatch');
+            }
+            const contentType = String(info.get_content_type?.() || '').toLowerCase();
+            if (contentType && contentType !== 'image/png') {
+                reasons.push('invalid_image_format');
+            }
+        } catch (_error) {
+            reasons.push('file_missing');
+        }
+        return {
+            ok: reasons.length === 0,
+            reasons: [...new Set(reasons)],
+            path: canonicalPath,
+        };
+    }
+
+    _shellRasterAllowedCacheDirs() {
+        const dirs = [];
+        const runtimeDir = String(GLib.getenv('XDG_RUNTIME_DIR') || GLib.get_user_runtime_dir?.() || '').trim();
+        if (runtimeDir) {
+            dirs.push(GLib.build_filenamev([runtimeDir, 'EDMCModernOverlay', 'shell-raster']));
+        }
+        dirs.push(GLib.build_filenamev([
+            GLib.get_tmp_dir(),
+            `EDMCModernOverlay-shell-raster-${GLib.get_user_name()}`,
+        ]));
+        return dirs;
+    }
+
+    _showShellRasterFrame({
+        targetPayload,
+        targetRect,
+        frameRect,
+        frameVersion,
+        imagePath,
+        checksum,
+        byteSize,
+        staleTimeoutMs,
+    }) {
+        const totalStartedUs = GLib.get_monotonic_time();
+        const sessionId = this._shellRasterSessionIdFromVersion(frameVersion);
+        const targetActor = this._targetWindowActorForToken(targetPayload?.targetToken || '');
+        if (!targetActor || typeof targetActor.add_child !== 'function') {
+            const cleanupAction = this._clearShellRasterFrame('missing_target_window_actor');
+            return {
+                visible: false,
+                actorParent: SHELL_RASTER_FRAME_PARENT,
+                frameDimensions: null,
+                cleanupAction,
+                reasons: ['target_window_actor_unavailable'],
+                timing: this._shellRasterHelperTiming(totalStartedUs),
+            };
+        }
+        const reusableFrame = this._reuseShellRasterFrameIfMatching({
+            targetActor,
+            targetPayload,
+            targetRect,
+            frameRect,
+            frameVersion,
+            imagePath,
+            checksum,
+            byteSize,
+            staleTimeoutMs,
+            startedUs: totalStartedUs,
+        });
+        if (reusableFrame) {
+            return reusableFrame;
+        }
+        const cleanupReason = this._shellRasterFrame?.sessionId &&
+            sessionId &&
+            this._shellRasterFrame.sessionId !== sessionId
+            ? 'session_generation_mismatch'
+            : 'replace_existing';
+        const cleanupAction = this._clearShellRasterFrame(cleanupReason);
+        let textureActor = null;
+        let dimensions = null;
+        let decodeMs = 0;
+        try {
+            const decodeStartedUs = GLib.get_monotonic_time();
+            const loaded = this._loadShellRasterTextureActor(imagePath);
+            decodeMs = this._elapsedMs(decodeStartedUs);
+            textureActor = loaded.actor;
+            dimensions = loaded.dimensions;
+            if (dimensions.width > frameRect.width || dimensions.height > frameRect.height) {
+                textureActor.destroy?.();
+                return {
+                    visible: false,
+                    actorParent: SHELL_RASTER_FRAME_PARENT,
+                    frameDimensions: dimensions,
+                    cleanupAction,
+                    reasons: ['frame_dimensions_exceed_rect'],
+                    timing: this._shellRasterHelperTiming(totalStartedUs, { decodeMs }),
+                };
+            }
+        } catch (_error) {
+            decodeMs = this._elapsedMs(totalStartedUs);
+            return {
+                visible: false,
+                actorParent: SHELL_RASTER_FRAME_PARENT,
+                frameDimensions: null,
+                cleanupAction,
+                reasons: ['decode_load_failed'],
+                timing: this._shellRasterHelperTiming(totalStartedUs, { decodeMs }),
+            };
+        }
+
+        const localX = frameRect.x - targetRect.x;
+        const localY = frameRect.y - targetRect.y;
+        const applyStartedUs = GLib.get_monotonic_time();
+        let applyMs = 0;
+        textureActor.set_reactive?.(false);
+        textureActor.set_position(localX, localY);
+        textureActor.set_size(frameRect.width, frameRect.height);
+        try {
+            targetActor.add_child(textureActor);
+        } catch (_error) {
+            applyMs = this._elapsedMs(applyStartedUs);
+            textureActor.destroy?.();
+            return {
+                visible: false,
+                actorParent: SHELL_RASTER_FRAME_PARENT,
+                frameDimensions: dimensions,
+                cleanupAction,
+                reasons: ['texture_apply_failed'],
+                timing: this._shellRasterHelperTiming(totalStartedUs, { decodeMs, applyMs }),
+            };
+        }
+        textureActor.show?.();
+        textureActor.raise_top?.();
+        applyMs = this._elapsedMs(applyStartedUs);
+        this._shellRasterFrame = {
+            actor: textureActor,
+            targetToken: targetPayload.targetToken,
+            targetRect,
+            frameRect,
+            frameVersion,
+            imagePath,
+            checksum,
+            byteSize,
+            sessionId,
+            actorParent: SHELL_RASTER_FRAME_PARENT,
+            frameDimensions: dimensions,
+        };
+        this._refreshShellRasterFrameTimeout(staleTimeoutMs);
+        return {
+            visible: true,
+            actorParent: SHELL_RASTER_FRAME_PARENT,
+            frameDimensions: dimensions,
+            cleanupAction,
+            sessionId,
+            updateReason: 'decoded_new_frame',
+            reasons: [],
+            timing: this._shellRasterHelperTiming(totalStartedUs, {
+                decodeMs,
+                applyMs,
+                updateReason: 'decoded_new_frame',
+            }),
+        };
+    }
+
+    _reuseShellRasterFrameIfMatching({
+        targetActor,
+        targetPayload,
+        targetRect,
+        frameRect,
+        frameVersion,
+        imagePath,
+        checksum,
+        byteSize,
+        staleTimeoutMs,
+        startedUs,
+    }) {
+        const frame = this._shellRasterFrame;
+        if (!frame?.actor) {
+            return null;
+        }
+        if (!this._shellRasterFrameIdentityMatches(frame, {
+            targetToken: targetPayload?.targetToken || '',
+            targetRect,
+            frameRect,
+            frameVersion,
+            imagePath,
+            checksum,
+            byteSize,
+        })) {
+            return null;
+        }
+        if (typeof frame.actor.get_parent === 'function' && frame.actor.get_parent() !== targetActor) {
+            return null;
+        }
+
+        const applyStartedUs = GLib.get_monotonic_time();
+        frame.actor.show?.();
+        frame.actor.raise_top?.();
+        this._refreshShellRasterFrameTimeout(staleTimeoutMs);
+        return {
+            visible: true,
+            actorParent: frame.actorParent || SHELL_RASTER_FRAME_PARENT,
+            frameDimensions: frame.frameDimensions,
+            cleanupAction: '',
+            sessionId: frame.sessionId,
+            updateReason: 'reused_existing_frame',
+            reasons: [],
+            timing: this._shellRasterHelperTiming(startedUs, {
+                decodeMs: 0,
+                applyMs: this._elapsedMs(applyStartedUs),
+                reusedFrame: true,
+                decodeSkipped: true,
+                updateReason: 'reused_existing_frame',
+            }),
+        };
+    }
+
+    _shellRasterFrameIdentityMatches(frame, {
+        targetToken,
+        targetRect,
+        frameRect,
+        frameVersion,
+        imagePath,
+        checksum,
+        byteSize,
+    }) {
+        return String(frame.frameVersion || '') === String(frameVersion || '') &&
+            String(frame.checksum || '') === String(checksum || '') &&
+            String(frame.imagePath || '') === String(imagePath || '') &&
+            Number(frame.byteSize || 0) === Number(byteSize || 0) &&
+            String(frame.targetToken || '') === String(targetToken || '') &&
+            this._rectsMatchWithinTolerance(frame.targetRect, targetRect, 0) &&
+            this._rectsMatchWithinTolerance(frame.frameRect, frameRect, 0);
+    }
+
+    _shellRasterSessionIdFromVersion(frameVersion) {
+        const parts = String(frameVersion || '').split(':').map(part => part.trim()).filter(part => part);
+        return parts.length >= 3 ? parts[1] : '';
+    }
+
+    _loadShellRasterTextureActor(imagePath) {
+        const pixbuf = GdkPixbuf.Pixbuf.new_from_file(imagePath);
+        const width = Number(pixbuf.get_width?.() || 0);
+        const height = Number(pixbuf.get_height?.() || 0);
+        const hasAlpha = Boolean(pixbuf.get_has_alpha?.());
+        const channels = Number(pixbuf.get_n_channels?.() || 0);
+        if (width <= 0 || height <= 0 || !hasAlpha || channels !== 4) {
+            throw new Error('PNG frame must be RGBA');
+        }
+        const image = new Clutter.Image();
+        image.set_data(
+            pixbuf.get_pixels(),
+            Cogl.PixelFormat.RGBA_8888,
+            width,
+            height,
+            Number(pixbuf.get_rowstride?.() || width * 4),
+        );
+        const actor = new Clutter.Actor({
+            reactive: false,
+            visible: true,
+        });
+        actor.set_content(image);
+        return {
+            actor,
+            dimensions: { x: 0, y: 0, width, height },
+        };
+    }
+
+    _shellRasterFramePayload({
+        requestedAction,
+        visible,
+        requestedRect = null,
+        appliedRect = null,
+        frameRect = null,
+        targetToken = '',
+        targetPayload = null,
+        actorParent = '',
+        frameVersion = '',
+        imagePath = '',
+        checksum = '',
+        byteSize = 0,
+        eligible = true,
+        eligibilityReasons = [],
+        cleanupAction = '',
+        staleTimeoutMs = SHELL_RASTER_FRAME_TIMEOUT_MS_DEFAULT,
+        frameDimensions = null,
+        sessionId = '',
+        focusRiskReason = '',
+        allowUnfocusedTarget = false,
+        requestDiagnostics = null,
+        helperTiming = null,
+        updateReason = '',
+    }) {
+        const framePayload = {
+            schema: 1,
+            requested: Boolean(requestedAction),
+            action: requestedAction,
+            actor_visible: Boolean(visible),
+            target_token: targetToken,
+            target_monitor: targetPayload?.monitor ?? null,
+            target_monitor_rect: targetPayload?.monitorRect || null,
+            target_rect: requestedRect,
+            frame_rect: frameRect,
+            applied_actor_bounds: appliedRect,
+            actor_parent: actorParent || this._shellRasterFrame?.actorParent || '',
+            frame_version: frameVersion,
+            frame_dimensions: frameDimensions,
+            image_path: imagePath,
+            checksum,
+            byte_size: byteSize,
+            session_id: sessionId || this._shellRasterFrame?.sessionId || '',
+            eligible,
+            eligibility_reasons: eligibilityReasons,
+            stale_timeout_ms: staleTimeoutMs,
+            cleanup_action: cleanupAction,
+            focus_risk_reason: focusRiskReason,
+            allow_unfocused_target: Boolean(allowUnfocusedTarget),
+            update_reason: updateReason,
+        };
+        const diagnostics = this._shellRasterFrameDiagnostics(requestDiagnostics, helperTiming);
+        if (diagnostics) {
+            framePayload.diagnostics = diagnostics;
+        }
+        return framePayload;
+    }
+
+    _shellRasterFrameDiagnostics(requestDiagnostics, helperTiming) {
+        if (!requestDiagnostics && !helperTiming) {
+            return null;
+        }
+        return {
+            schema: 1,
+            request: requestDiagnostics || null,
+            helper: helperTiming || null,
+        };
+    }
+
+    _shellRasterHelperTiming(
+        startedUs,
+        {
+            decodeMs = 0,
+            applyMs = 0,
+            reusedFrame = false,
+            decodeSkipped = false,
+            updateReason = '',
+        } = {},
+    ) {
+        return {
+            helper_decode_ms: Number(decodeMs) || 0,
+            helper_apply_ms: Number(applyMs) || 0,
+            helper_total_ms: this._elapsedMs(startedUs),
+            helper_reused_frame: Boolean(reusedFrame),
+            helper_decode_skipped: Boolean(decodeSkipped),
+            helper_update_reason: updateReason,
+        };
+    }
+
+    _elapsedMs(startedUs) {
+        const started = Number(startedUs) || 0;
+        if (started <= 0) {
+            return 0;
+        }
+        return Math.round(((GLib.get_monotonic_time() - started) / 1000) * 1000) / 1000;
+    }
+
+    _refreshShellRasterFrameTimeout(timeoutMs = SHELL_RASTER_FRAME_TIMEOUT_MS_DEFAULT) {
+        if (this._shellRasterFrameTimeoutId) {
+            GLib.source_remove(this._shellRasterFrameTimeoutId);
+            this._shellRasterFrameTimeoutId = 0;
+        }
+        this._shellRasterFrameTimeoutId = GLib.timeout_add(
+            GLib.PRIORITY_DEFAULT,
+            Math.max(1000, Number(timeoutMs) || SHELL_RASTER_FRAME_TIMEOUT_MS_DEFAULT),
+            () => {
+                this._clearShellRasterFrame('stale_timeout');
+                return GLib.SOURCE_REMOVE;
+            },
+        );
+    }
+
+    _clearShellRasterFrame(reason = 'clear') {
+        const hadActor = Boolean(this._shellRasterFrame?.actor);
+        const frame = this._shellRasterFrame;
+        if (this._shellRasterFrameTimeoutId) {
+            GLib.source_remove(this._shellRasterFrameTimeoutId);
+            this._shellRasterFrameTimeoutId = 0;
+        }
+        this._shellRasterFrame = null;
+        try {
+            const parent = frame?.actor?.get_parent?.();
+            if (parent && typeof parent.remove_child === 'function') {
+                parent.remove_child(frame.actor);
+            }
+        } catch (_error) {
+            // Best-effort cleanup only; diagnostics report the requested cleanup reason.
+        }
+        try {
+            frame?.actor?.destroy?.();
+        } catch (_error) {
+            // Best-effort cleanup only; diagnostics report the requested cleanup reason.
+        }
+        return hadActor ? reason : '';
+    }
+
+    _connectShellRasterOverviewSignals() {
+        const overview = Main?.overview || null;
+        if (!overview || typeof overview.connect !== 'function') {
+            return;
+        }
+        for (const signalName of ['showing', 'shown', 'hiding']) {
+            try {
+                const signalId = overview.connect(signalName, () => {
+                    this._clearShellRasterFrame('gnome_overview_active');
+                });
+                this._shellRasterOverviewSignalIds.push([overview, signalId]);
+            } catch (_error) {
+                // Some GNOME Shell versions may not expose every overview signal.
+            }
+        }
+    }
+
+    _disconnectShellRasterOverviewSignals() {
+        for (const [overview, signalId] of this._shellRasterOverviewSignalIds) {
+            try {
+                overview.disconnect(signalId);
+            } catch (_error) {
+                // Best-effort cleanup on helper disable.
+            }
+        }
+        this._shellRasterOverviewSignalIds = [];
+    }
+
+    _rectContains(outerRect, innerRect) {
+        if (!this._rectIsValid(outerRect) || !this._rectIsValid(innerRect)) {
+            return false;
+        }
+        return innerRect.x >= outerRect.x &&
+            innerRect.y >= outerRect.y &&
+            innerRect.x + innerRect.width <= outerRect.x + outerRect.width &&
+            innerRect.y + innerRect.height <= outerRect.y + outerRect.height;
     }
 
     _handleShellActorProof({
@@ -2118,6 +2931,16 @@ class HelperHealthService {
         return [];
     }
 
+    _requestObject(payload, ...names) {
+        for (const name of names) {
+            const value = payload?.[name];
+            if (value && typeof value === 'object' && !Array.isArray(value)) {
+                return value;
+            }
+        }
+        return null;
+    }
+
     _requestRect(payload, ...names) {
         for (const name of names) {
             const rect = this._rectPayload(payload?.[name]);
@@ -2166,6 +2989,8 @@ export default class EdmcModernOverlayHelperExtension extends Extension {
             this._busOwnerId = 0;
         }
         this._healthService?._clearShellActorProof?.('helper_disable');
+        this._healthService?._clearShellRasterFrame?.('helper_disable');
+        this._healthService?._disconnectShellRasterOverviewSignals?.();
         this._unexportDbusObject();
         this._healthService = null;
         this._helperIdentity = null;
