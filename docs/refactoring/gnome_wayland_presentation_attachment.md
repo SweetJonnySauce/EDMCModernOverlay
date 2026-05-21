@@ -3730,13 +3730,14 @@ After implementation:
 - Performance evidence: high-usage overlays including BioScan, BGS-Tally, EDMC-LogEventMiner, NavRoute, and Pioneer validate the 8-region path. Stable no-op frames now avoid PNG encode and helper decode (`client_payload_reused=true`, `encode_ms=0`, `build_ms≈8 ms`, `helper_decode_ms=0`, `helper_total_ms=0`). Changed frames stay bounded to changed regions, with recent 3-region and 4-region updates measuring roughly `49-58 ms` build time and `1-2 ms` helper total time. No dropped/throttled frames or presentation/visibility churn were observed in the latest validation.
 - Transport decision: keep PNG/tmpfs for now. The performance bottleneck moved from full-monitor frames and helper decode to changed-region PyQt render/PNG encode cost. Do not switch to DBus FD, AF_UNIX socket, shared memory, or raw-buffer transport before Phase 15 unless changed-region pauses become visible. If they do, first tune dirty-region/cadence and latest-frame coalescing, then follow the documented no-filesystem transport contingency sequence.
 - Known limitations and unsupported status: GNOME Shell raster remains opt-in and experimental. Both `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1` and `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE_RUNTIME=1` are still required. Diagnostics remain gated by `EDMC_OVERLAY_GNOME_PRESENTATION_DIAGNOSTICS=1`. No settings UI, release/support wording, default behavior change, or supported-GNOME claim belongs in Phase 14.
-- Testing status: focused Shell raster/runtime/render/backend/follow/debounce checks passed during implementation stages. The latest full `make check` still has an unrelated release-quality blocker in `overlay_client/tests/test_exception_scoping.py::test_viewport_state_defaults_ratio_and_logs`, where the test stub lacks `_render_surface_logical_size`; this is outside Shell raster Phase 14 behavior but must be fixed before a clean release-quality check.
-- Phase 15 support-gate questions: decide whether this remains environment-gated only, becomes a settings-gated experimental option, or can ever become the preferred GNOME Wayland borderless path; decide support/status wording; decide whether PNG/tmpfs metrics are good enough for any user-facing exposure; decide whether the unrelated full-check blocker must be fixed before support promotion; decide whether Phase 16 fallback cleanup blocks release/support wording.
+- Testing status: focused Shell raster/runtime/render/backend/follow/debounce checks passed during implementation stages. The unrelated `overlay_client/tests/test_exception_scoping.py::test_viewport_state_defaults_ratio_and_logs` full-check blocker was fixed by updating the test stub to match the current `_viewport_state()` render-surface size contract. The latest full `make check` now passes.
+- Phase 15 support-gate questions: decide whether this remains environment-gated only, becomes a settings-gated experimental option, or can ever become the preferred GNOME Wayland borderless path; decide support/status wording; decide whether PNG/tmpfs metrics are good enough for any user-facing exposure; decide whether the now-clean `make check` result is sufficient for support-gate review; decide whether Phase 16 fallback cleanup blocks release/support wording.
 
 ### Phase 15: Productionization And GNOME Support Gate
 - Goal: decide whether any GNOME Wayland Shell raster mode can move from opt-in proof/experimental status toward supported behavior.
 - Phase 15 starts only after Phase 14 proves enough real overlay content parity and performance to evaluate user-facing support honestly.
 - Do not promote support wording, remove proof gates, or claim `true_overlay` until Phase 15 explicitly passes its support gate.
+- Accepted direction so far: use the existing overlay backend selection surface for user exposure, but represent Shell raster as an explicit experimental GNOME Wayland raster mode/backend. Do not silently make the existing GNOME/managed-PyQt backend switch to Shell raster, and do not keep the broken managed-PyQt GNOME Wayland path as a user-facing/default GNOME Wayland option.
 - Expected decisions:
 - Whether the Shell raster path remains behind explicit environment/dev gates, becomes a settings-gated experimental option, or becomes the preferred GNOME Wayland borderless path.
 - Support/status wording for helper health, backend status, diagnostics, release notes, and user-facing preferences.
@@ -3758,6 +3759,7 @@ After implementation:
 - Phase 16 owns `Phase 13.F1` and `Phase 13.F2` unless Phase 15 decides one or both must be pulled earlier as release blockers.
 - `Phase 13.F1`: borderless-to-windowed fallback transition reset. When target state changes from Shell-raster-eligible `fullscreen=true/content_rect` to windowed `fullscreen=false/frame_rect_fallback`, runtime must clear Shell raster state and reset the managed PyQt surface out of fullscreen/hidden-suppressed mode before showing fallback.
 - `Phase 13.F2`: GNOME windowed managed-PyQt standalone/titlebar behavior. Normal overlay mode still appears standalone-like in windowed GNOME Wayland, and titlebar compensation cannot currently be proven because helper target state reports `contentRect=null` and `decorationInsets=null`.
+- `Phase 16.C1`: GNOME Wayland managed-PyQt code cleanup. After Phase 15 settles the user-facing backend/support model, remove or quarantine the obsolete user-facing/default GNOME Wayland managed-PyQt path while preserving non-GNOME behavior and any explicitly documented fallback/degraded-mode contracts.
 - Clean windowed startup currently sizes and follows the game correctly, so Phase 16 should preserve that invariant while fixing transitions and chrome/identity behavior.
 
 #### Phase 16 Refactor Staging
@@ -3768,6 +3770,7 @@ After implementation:
 | 16.3 | Re-evaluate GNOME windowed standalone/titlebar compensation limits with helper diagnostics | Pending 16.2 |
 | 16.4 | Implement any validated windowed chrome/identity fixes or document unsupported limits | Pending 16.3 |
 | 16.5 | Run focused manual validation for borderless-to-windowed, clean windowed startup, and normal borderless mode | Pending 16.2 |
+| 16.6 | Remove or quarantine obsolete user-facing GNOME Wayland managed-PyQt backend/default path after Phase 15 support decisions | Pending Phase 15 Decision |
 
 ### Phase 17: Extended Hardening And Release Validation
 - Goal: run longer-duration validation against real-world GNOME Wayland workflows after parity, productionization, and fallback cleanup decisions are known.
