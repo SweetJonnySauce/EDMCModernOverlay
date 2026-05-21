@@ -425,7 +425,13 @@ class BackgroundWidget(tk.Frame):
     def _bind_tab_navigation(self, widget: tk.Widget) -> None:  # type: ignore[name-defined]
         widget.bind("<Tab>", self._handle_tab, add="+")
         widget.bind("<Shift-Tab>", self._handle_shift_tab, add="+")
-        widget.bind("<ISO_Left_Tab>", self._handle_shift_tab, add="+")
+        self._bind_optional_tab_navigation(widget, "<ISO_Left_Tab>")
+
+    def _bind_optional_tab_navigation(self, widget: tk.Widget, sequence: str) -> None:  # type: ignore[name-defined]
+        try:
+            widget.bind(sequence, self._handle_shift_tab, add="+")
+        except tk.TclError:
+            pass
 
     def _handle_tab(self, _event: tk.Event[tk.Misc]) -> str:  # type: ignore[name-defined]
         if not self._enabled:
