@@ -236,4 +236,26 @@ def test_background_widget_traps_tab_navigation_on_all_controls(background_widge
     for widget in widgets:
         assert widget.bind("<Tab>") not in ("", None)
         assert widget.bind("<Shift-Tab>") not in ("", None)
-        assert widget.bind("<ISO_Left_Tab>") not in ("", None)
+
+
+def test_background_widget_ignores_unsupported_optional_tab_sequence():
+    import tkinter as tk
+
+    from overlay_controller.widgets.background import BackgroundWidget
+
+    class UnsupportedIsoLeftTabWidget:
+        def __init__(self) -> None:
+            self.bound: list[str] = []
+
+        def bind(self, sequence, callback=None, add=None):  # noqa: ANN001
+            if sequence == "<ISO_Left_Tab>":
+                raise tk.TclError('bad event type or keysym "ISO_Left_Tab"')
+            self.bound.append(str(sequence))
+            return "binding"
+
+    fake_widget = UnsupportedIsoLeftTabWidget()
+    background_widget = object.__new__(BackgroundWidget)
+
+    BackgroundWidget._bind_tab_navigation(background_widget, fake_widget)
+
+    assert fake_widget.bound == ["<Tab>", "<Shift-Tab>"]
