@@ -305,6 +305,8 @@ def run_gnome_shell_helper_presentation_cycle(
         ShellRasterFrameBuildResult,
     ]
     | None = None,
+    shell_raster_runtime_enabled: bool = False,
+    suppress_pyqt_fallback_on_shell_raster_failure: bool = False,
 ) -> GnomeHelperPresentationCycleResult:
     """Fetch target state and apply bounded Shell-mediated presentation."""
 
@@ -375,6 +377,8 @@ def run_gnome_shell_helper_presentation_cycle(
             env=os.environ,
             allow_unfocused_target=keep_overlay_visible,
             shell_raster_frame_provider=shell_raster_frame_provider,
+            shell_raster_runtime_enabled=shell_raster_runtime_enabled,
+            suppress_pyqt_fallback_on_shell_raster_failure=suppress_pyqt_fallback_on_shell_raster_failure,
         )
         surface_preparation = _borderless_fullscreen_surface_preparation(
             target_status,
@@ -580,12 +584,15 @@ def _shell_raster_bridge_request(
         ShellRasterFrameBuildResult,
     ]
     | None = None,
+    shell_raster_runtime_enabled: bool = False,
+    suppress_pyqt_fallback_on_shell_raster_failure: bool = False,
 ) -> HelperPresentationRequest | None:
     if request is None:
         return None
-    if not _env_flag_enabled(env.get(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, "")):
+    env_bridge_enabled = _env_flag_enabled(env.get(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, ""))
+    if not (shell_raster_runtime_enabled or env_bridge_enabled):
         return request
-    if not _env_flag_enabled(env.get(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, "")):
+    if not shell_raster_runtime_enabled and not _env_flag_enabled(env.get(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, "")):
         return request
     include_diagnostics = _env_flag_enabled(env.get(GNOME_HELPER_PRESENTATION_DIAGNOSTICS_ENV, ""))
     if shell_raster_frame_provider is not None:
@@ -594,11 +601,22 @@ def _shell_raster_bridge_request(
             request,
             include_diagnostics,
         )
-        return _request_with_shell_raster_frame(
+        bridged_request = _request_with_shell_raster_frame(
             request,
             result,
             allow_unfocused_target=allow_unfocused_target,
         )
+        if (
+            bridged_request is request
+            and shell_raster_runtime_enabled
+            and suppress_pyqt_fallback_on_shell_raster_failure
+        ):
+            return _shell_raster_degraded_clear_request(request, result.reason or "shell_raster_frame_unavailable")
+        return bridged_request
+    if shell_raster_runtime_enabled:
+        if suppress_pyqt_fallback_on_shell_raster_failure:
+            return _shell_raster_degraded_clear_request(request, "shell_raster_provider_unavailable")
+        return request
     if not _env_flag_enabled(env.get(GNOME_HELPER_SHELL_RASTER_PROOF_ENV, "")):
         return request
     result = build_static_shell_raster_frame_request(
@@ -611,6 +629,25 @@ def _shell_raster_bridge_request(
         request,
         result,
         allow_unfocused_target=allow_unfocused_target,
+    )
+
+
+def _shell_raster_degraded_clear_request(
+    request: HelperPresentationRequest,
+    reason: str,
+) -> HelperPresentationRequest:
+    clear_request = build_shell_raster_frame_clear_request()
+    merged_reasons = tuple(dict.fromkeys(request.degrade_reasons + (str(reason or "shell_raster_unavailable"),)))
+    shell_raster_frame = clear_request.shell_raster_frame
+    if shell_raster_frame is not None:
+        shell_raster_frame = replace(shell_raster_frame, target_token=request.target_token)
+    return replace(
+        clear_request,
+        target_token=request.target_token,
+        standalone_mode=request.standalone_mode,
+        include_presentation_diagnostics=request.include_presentation_diagnostics,
+        degrade_reasons=merged_reasons,
+        shell_raster_frame=shell_raster_frame,
     )
 
 

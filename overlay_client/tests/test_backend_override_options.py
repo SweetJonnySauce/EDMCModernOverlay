@@ -45,6 +45,51 @@ def test_backend_override_options_for_x11_status_include_native_x11_only():
     assert tuple(option.value for option in options) == (BackendInstance.NATIVE_X11.value,)
 
 
+def test_backend_override_options_for_gnome_wayland_offer_raster_not_legacy_helper():
+    options = backend_override_options_for_status(
+        {
+            "probe": {
+                "operating_system": "linux",
+                "session_type": "wayland",
+                "compositor": "gnome-shell",
+            },
+            "selected_backend": {
+                "family": "compositor_helper",
+                "instance": "gnome_shell_wayland",
+            },
+        }
+    )
+
+    assert tuple(option.value for option in options) == (
+        BackendInstance.XWAYLAND_COMPAT.value,
+        BackendInstance.GNOME_SHELL_RASTER.value,
+    )
+    assert all(option.restart_required is False for option in options if option.value != BackendInstance.XWAYLAND_COMPAT.value)
+
+
+def test_backend_override_options_preserve_saved_legacy_gnome_wayland_value():
+    options = backend_override_options_for_status(
+        {
+            "probe": {
+                "operating_system": "linux",
+                "session_type": "wayland",
+                "compositor": "gnome-shell",
+            },
+            "selected_backend": {
+                "family": "compositor_helper",
+                "instance": "gnome_shell_wayland",
+            },
+        },
+        current_value=BackendInstance.GNOME_SHELL_WAYLAND.value,
+    )
+
+    assert tuple(option.value for option in options) == (
+        BackendInstance.GNOME_SHELL_WAYLAND.value,
+        BackendInstance.XWAYLAND_COMPAT.value,
+        BackendInstance.GNOME_SHELL_RASTER.value,
+    )
+
+
 def test_backend_override_options_preserve_current_unknown_value_for_ui_roundtrip():
     options = backend_override_options_for_status(
         {

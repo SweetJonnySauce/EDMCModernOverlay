@@ -87,3 +87,25 @@ def test_manual_xwayland_override_updates_restart_env_without_live_runtime_resel
     assert sent_configs == []
     assert watchdog_envs
     assert watchdog_envs[-1]["QT_QPA_PLATFORM"] == "xcb"
+
+
+def test_manual_gnome_shell_raster_override_persists_without_xwayland_restart_env(
+    runtime_for_backend_override: object,
+) -> None:
+    runtime = runtime_for_backend_override
+    sent_configs: list[str] = []
+    watchdog_envs: list[dict[str, str]] = []
+
+    runtime._send_overlay_config = lambda: sent_configs.append("sent")
+    runtime.watchdog = type(
+        "_Watchdog",
+        (),
+        {"set_environment": lambda self, env: watchdog_envs.append(dict(env or {}))},
+    )()
+
+    runtime.set_manual_backend_override_preference("gnome_shell_raster")
+
+    assert runtime._preferences.manual_backend_override == "gnome_shell_raster"
+    assert sent_configs == ["sent"]
+    assert watchdog_envs
+    assert watchdog_envs[-1]["QT_QPA_PLATFORM"] != "xcb"

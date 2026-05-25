@@ -30,6 +30,7 @@ from overlay_plugin.plugin_group_resolver import PluginGroupResolver
 APP_NAME = "EDMC Modern Overlay"
 APP_ICON_TEXT = "MO"
 APP_ICON_PATH = CLIENT_DIR / "assets" / "EDMCModernOverlay.ico"
+GNOME_SHELL_RASTER_BACKEND_VALUE = "gnome_shell_raster"
 
 
 def _build_app_icon(text: str = APP_ICON_TEXT) -> QIcon:
@@ -84,13 +85,24 @@ def _flag_enabled(value: str | None) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _shell_raster_cleanup_enabled(
+    *,
+    env: Mapping[str, str],
+    manual_backend_override: str = "",
+) -> bool:
+    if _flag_enabled(env.get(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV)):
+        return True
+    return str(manual_backend_override or "").strip().lower() == GNOME_SHELL_RASTER_BACKEND_VALUE
+
+
 def _clear_shell_raster_frame_on_shutdown(
     *,
     env: Mapping[str, str] | None = None,
+    manual_backend_override: str = "",
     clear_func=clear_gnome_shell_raster_frame_via_gdbus,
 ) -> bool:
     source = env if env is not None else os.environ
-    if not _flag_enabled(source.get(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV)):
+    if not _shell_raster_cleanup_enabled(env=source, manual_backend_override=manual_backend_override):
         return False
     try:
         cleared = bool(clear_func())
@@ -105,10 +117,11 @@ def _clear_shell_raster_frame_on_shutdown(
 def _clear_shell_raster_frame_on_startup(
     *,
     env: Mapping[str, str] | None = None,
+    manual_backend_override: str = "",
     clear_func=clear_gnome_shell_raster_frame_via_gdbus,
 ) -> bool:
     source = env if env is not None else os.environ
-    if not _flag_enabled(source.get(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV)):
+    if not _shell_raster_cleanup_enabled(env=source, manual_backend_override=manual_backend_override):
         return False
     try:
         cleared = bool(clear_func())
@@ -339,7 +352,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     data_client.message_received.connect(_build_payload_handler(helper, window, group_filter=group_filter))
     data_client.status_changed.connect(window.set_status_text)
 
-    _clear_shell_raster_frame_on_startup()
+    _clear_shell_raster_frame_on_startup(manual_backend_override=initial_settings.manual_backend_override)
     window.show()
     data_client.start()
 
@@ -350,7 +363,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         if raster_shutdown_clear_attempted:
             return
         raster_shutdown_clear_attempted = True
-        _clear_shell_raster_frame_on_shutdown()
+        _clear_shell_raster_frame_on_shutdown(manual_backend_override=initial_settings.manual_backend_override)
 
     app.aboutToQuit.connect(_clear_raster_once)
 

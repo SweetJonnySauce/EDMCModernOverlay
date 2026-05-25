@@ -256,6 +256,75 @@ def test_backend_status_downgrades_gnome_true_overlay_until_validation_gate_pass
     )
 
 
+def test_backend_status_labels_gnome_shell_raster_as_experimental_degraded_mode():
+    payload = {
+        "selected_backend": {"family": "compositor_helper", "instance": "gnome_shell_raster"},
+        "classification": "true_overlay",
+        "manual_override": "gnome_shell_raster",
+        "shadow_mode": False,
+        "gnome_helper_experimental": True,
+        "helper_states": [
+            {
+                "helper": "gnome_shell_extension",
+                "required": True,
+                "installed": True,
+                "enabled": True,
+                "approved": True,
+                "version": "1.0.0",
+            }
+        ],
+        "review_required": False,
+        "review_reasons": [],
+    }
+
+    report = build_status_report(payload)
+
+    assert report["classification"] == "degraded_overlay"
+    assert report["gnome_helper_experimental"] is True
+    assert format_status_ui_summary(payload) == (
+        "Backend: GNOME Shell Raster | Mode: Degraded overlay | Source: Live runtime | "
+        "Overlay backend: GNOME Shell Raster | Helper: GNOME Shell extension available"
+    )
+    assert format_status_ui_warning(payload) == (
+        "Warning: Overlay backend is set to GNOME Shell Raster.; "
+        "Some overlay guarantees are reduced in this mode."
+    )
+
+
+def test_backend_status_reports_gnome_shell_raster_helper_unavailable_concisely():
+    payload = {
+        "selected_backend": {"family": "compositor_helper", "instance": "gnome_shell_raster"},
+        "classification": "degraded_overlay",
+        "fallback_from": {"family": "compositor_helper", "instance": "gnome_shell_raster"},
+        "fallback_reason": "missing_helper",
+        "manual_override": "gnome_shell_raster",
+        "shadow_mode": False,
+        "helper_states": [
+            {
+                "helper": "gnome_shell_extension",
+                "required": True,
+                "installed": False,
+                "enabled": False,
+                "approved": False,
+                "version": "",
+            }
+        ],
+        "review_required": False,
+        "review_reasons": [],
+    }
+
+    assert format_status_ui_summary(payload) == (
+        "Backend: GNOME Shell Raster | Mode: Degraded overlay | Source: Live runtime | "
+        "Overlay backend: GNOME Shell Raster | Helper: GNOME Shell extension inactive"
+    )
+    assert format_status_ui_warning(payload) == (
+        "Warning: Overlay backend is set to GNOME Shell Raster.; "
+        "Some overlay guarantees are reduced in this mode.; "
+        "A required helper for compositor_helper / gnome_shell_raster is not available. "
+        "Re-run the Linux installer while logged into GNOME Wayland to install or repair it."
+    )
+
+
 def test_backend_status_ui_helpers_label_plugin_hint_and_inactive_helpers():
     status = BackendSelectionStatus(
         probe=_probe(),

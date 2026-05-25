@@ -454,11 +454,15 @@ def test_backend_presentation_cycle_wraps_gnome_helper_result_when_helper_availa
         previous_surface_action: str = "",
         prepare_surface=None,
         shell_raster_frame_provider=None,
+        shell_raster_runtime_enabled: bool = False,
+        suppress_pyqt_fallback_on_shell_raster_failure: bool = False,
     ) -> _FakeGnomePresentationResult:
         calls.append((standalone_mode, keep_overlay_visible))
         assert previous_surface_action == "mapped_visible"
         assert prepare_surface is None
         assert shell_raster_frame_provider is None
+        assert shell_raster_runtime_enabled is False
+        assert suppress_pyqt_fallback_on_shell_raster_failure is False
         return _FakeGnomePresentationResult()
 
     result = run_backend_presentation_cycle(
@@ -484,6 +488,81 @@ def test_backend_presentation_cycle_wraps_gnome_helper_result_when_helper_availa
     assert result.visibility_snapshot.presentation_attachable is True
     assert result.visibility_snapshot.overlay_window_found is True
     assert result.visibility_snapshot.presentation_rect_match is True
+
+
+def test_backend_presentation_cycle_enables_shell_raster_when_selected():
+    status = BackendSelectionStatus(
+        probe=PlatformProbeResult(
+            operating_system=OperatingSystem.LINUX,
+            session_type=SessionType.WAYLAND,
+            qt_platform_name="wayland",
+            compositor="gnome-shell",
+        ),
+        selected_backend=BackendDescriptor(
+            BackendFamily.COMPOSITOR_HELPER,
+            BackendInstance.GNOME_SHELL_RASTER,
+        ),
+        classification=CapabilityClassification.DEGRADED_OVERLAY,
+        helper_states=(
+            HelperCapabilityState(
+                helper=HelperKind.GNOME_SHELL_EXTENSION,
+                required=True,
+                installed=True,
+                enabled=True,
+                approved=True,
+            ),
+        ),
+    )
+    observed: dict[str, object] = {}
+
+    def fake_runner(**kwargs) -> _FakeGnomePresentationResult:
+        observed.update(kwargs)
+        return _FakeGnomePresentationResult()
+
+    result = run_backend_presentation_cycle(status, gnome_runner=fake_runner)
+
+    assert result is not None
+    assert observed["shell_raster_runtime_enabled"] is True
+    assert observed["suppress_pyqt_fallback_on_shell_raster_failure"] is True
+
+
+def test_backend_presentation_cycle_selected_shell_raster_without_helper_consumes_follow_path():
+    status = BackendSelectionStatus(
+        probe=PlatformProbeResult(
+            operating_system=OperatingSystem.LINUX,
+            session_type=SessionType.WAYLAND,
+            qt_platform_name="wayland",
+            compositor="gnome-shell",
+        ),
+        selected_backend=BackendDescriptor(
+            BackendFamily.COMPOSITOR_HELPER,
+            BackendInstance.GNOME_SHELL_RASTER,
+        ),
+        classification=CapabilityClassification.DEGRADED_OVERLAY,
+        helper_states=(
+            HelperCapabilityState(
+                helper=HelperKind.GNOME_SHELL_EXTENSION,
+                required=True,
+                installed=False,
+                enabled=False,
+                approved=False,
+            ),
+        ),
+    )
+    calls: list[str] = []
+
+    result = run_backend_presentation_cycle(
+        status,
+        gnome_runner=lambda **_: calls.append("called") or _FakeGnomePresentationResult(),
+    )
+
+    assert calls == []
+    assert result is not None
+    assert result.should_show_overlay is False
+    assert result.visibility_snapshot.target_available is True
+    assert result.visibility_snapshot.presentation_available is False
+    assert result.diagnostics["presentation_state"] == "helper_unavailable"
+    assert result.diagnostics["presentation_reasons"] == ["gnome_shell_helper_unavailable"]
 
 
 def test_backend_presentation_cycle_passes_surface_preparer_to_gnome_runner():
@@ -542,6 +621,33 @@ def test_focus_safe_overlay_flags_are_required_for_available_gnome_helper():
         selected_backend=BackendDescriptor(
             BackendFamily.NATIVE_WAYLAND,
             BackendInstance.GNOME_SHELL_WAYLAND,
+        ),
+        classification=CapabilityClassification.DEGRADED_OVERLAY,
+        helper_states=(
+            HelperCapabilityState(
+                helper=HelperKind.GNOME_SHELL_EXTENSION,
+                required=True,
+                installed=True,
+                enabled=True,
+                approved=True,
+            ),
+        ),
+    )
+
+    assert requires_focus_safe_overlay_flags(status) is True
+
+
+def test_focus_safe_overlay_flags_are_required_for_selected_gnome_shell_raster():
+    status = BackendSelectionStatus(
+        probe=PlatformProbeResult(
+            operating_system=OperatingSystem.LINUX,
+            session_type=SessionType.WAYLAND,
+            qt_platform_name="wayland",
+            compositor="gnome-shell",
+        ),
+        selected_backend=BackendDescriptor(
+            BackendFamily.COMPOSITOR_HELPER,
+            BackendInstance.GNOME_SHELL_RASTER,
         ),
         classification=CapabilityClassification.DEGRADED_OVERLAY,
         helper_states=(
@@ -726,6 +832,28 @@ def test_derive_linux_backend_status_infers_gnome_and_generic_wayland_paths_from
     assert generic_status.selected_backend.instance is BackendInstance.COSMIC
     assert gnome_bundle.descriptor.instance is BackendInstance.GNOME_SHELL_WAYLAND
     assert generic_bundle.descriptor.instance is BackendInstance.WAYLAND_LAYER_SHELL_GENERIC
+
+
+def test_resolve_linux_bundle_from_status_preserves_selected_gnome_shell_raster_bundle():
+    status = BackendSelectionStatus(
+        probe=PlatformProbeResult(
+            operating_system=OperatingSystem.LINUX,
+            session_type=SessionType.WAYLAND,
+            qt_platform_name="wayland",
+            compositor="gnome-shell",
+        ),
+        selected_backend=BackendDescriptor(
+            BackendFamily.COMPOSITOR_HELPER,
+            BackendInstance.GNOME_SHELL_RASTER,
+        ),
+        classification=CapabilityClassification.DEGRADED_OVERLAY,
+    )
+
+    bundle = resolve_linux_bundle_from_status(status)
+
+    assert bundle.descriptor.family is BackendFamily.COMPOSITOR_HELPER
+    assert bundle.descriptor.instance is BackendInstance.GNOME_SHELL_RASTER
+    assert platform_label_for_bundle(bundle) == "GNOME Shell Raster"
 
 
 def test_resolve_linux_bundle_from_status_preserves_selected_xwayland_bundle():

@@ -316,9 +316,9 @@ Record:
 | 12 | GNOME Shell-native PyQt raster bridge small production proof | Completed; Persistent Runtime Safety Deferred To Phase 13 |
 | 13 | GNOME Shell-native PyQt raster bridge lifecycle/focus hardening and support gate | Completed; Opt-In Experimental Proof Mode Only |
 | 14 | GNOME Shell-native PyQt raster parity/performance expansion | Completed |
-| 15 | Productionization and GNOME support gate | Pending Phase 14 Handoff Review |
-| 16 | Deferred GNOME fallback cleanup | Pending Phase 15 Scope Decision |
-| 17 | Extended hardening and release validation | Pending Phase 15 |
+| 15 | Productionization and GNOME support gate | Borderless/Fullscreen Manual Validation Complete; Experimental Support Gate Held For Phase 16 |
+| 16 | Deferred GNOME fallback cleanup | Ready; Blocks Windowed/Fallback Support Promotion |
+| 17 | Extended hardening and release validation | Pending Phase 16 |
 
 ## Phase Details
 
@@ -3738,39 +3738,104 @@ After implementation:
 - Phase 15 starts only after Phase 14 proves enough real overlay content parity and performance to evaluate user-facing support honestly.
 - Do not promote support wording, remove proof gates, or claim `true_overlay` until Phase 15 explicitly passes its support gate.
 - Accepted direction so far: use the existing overlay backend selection surface for user exposure, but represent Shell raster as an explicit experimental GNOME Wayland raster mode/backend. Do not silently make the existing GNOME/managed-PyQt backend switch to Shell raster, and do not keep the broken managed-PyQt GNOME Wayland path as a user-facing/default GNOME Wayland option.
-- Expected decisions:
-- Whether the Shell raster path remains behind explicit environment/dev gates, becomes a settings-gated experimental option, or becomes the preferred GNOME Wayland borderless path.
-- Support/status wording for helper health, backend status, diagnostics, release notes, and user-facing preferences.
-- Whether remaining windowed fallback issues block any support wording or can stay documented as unsupported/degraded cases.
-- Whether Phase 14's PNG/tmpfs transport remains acceptable for any support wording, or whether the Phase 14 Performance Contingency Path must be pulled forward before support promotion.
-- Whether Phase 16 cleanup must happen before any release or can be staged afterward.
+- Accepted Phase 15 decisions:
+  - Settings selection replaces the two Shell raster runtime environment gates for normal use. Keep `EDMC_OVERLAY_GNOME_PRESENTATION_DIAGNOSTICS=1` or an equivalent debug gate for verbose diagnostics.
+  - `Auto` must not silently choose the experimental Shell raster path. Users must explicitly select the GNOME Shell raster mode/backend.
+  - If Shell raster fails for GNOME Wayland borderless/fullscreen, clear Shell actors and report degraded/unsupported instead of remapping a broken managed-PyQt or `xwayland-compat` overlay window over the game.
+  - Because Phase 15 is targeting a stronger supported option, Phase 16 fallback cleanup is a release/support blocker rather than a post-release cleanup.
+  - PNG/tmpfs remains acceptable for Phase 15 unless changed-region updates cause visible pauses; if they do, use the Phase 14 Performance Contingency Path before changing transport.
+  - Performance gates: stable unchanged frames must reuse/no-op (`client_payload_reused=true`, `client_encoded_region_count=0`, `encode_ms=0`, `helper_decode_ms=0`), stable fully reused `build_ms` should stay near the current `~8-10 ms` baseline, changed frames must stay region-bounded and normally under the current `~60 ms` high-usage build baseline, no backlog/churn should appear, and manual validation must show no visible pauses/titlebar flashes/stale actors.
+  - Backend option name: `GNOME Shell Raster`, labelled/status-qualified as experimental until the support gate passes.
+  - Settings location: use the existing backend selector, not a separate checkbox.
+  - Config value: add a stable backend value such as `gnome_shell_raster`; do not overload existing `gnome_wayland`, `auto`, or `xwayland_compat` values.
+  - Helper missing/unhealthy behavior: report a concise degraded status such as `GNOME Shell helper unavailable`, keep verbose diagnostics debug-gated, and do not remap a managed-PyQt borderless/fullscreen overlay.
+  - Windowed/non-borderless behavior: use managed PyQt only after Phase 16 transition cleanup proves raster-to-PyQt fallback works. Until then, report degraded/unsupported for Shell-raster-selected windowed transitions.
+  - Support wording after Phase 16: claim support only for tested GNOME Wayland borderless/fullscreen configurations; do not imply all GNOME versions, layouts, or window modes are covered.
+  - Final manual matrix: high-usage overlays, primary/secondary monitor, monitor move, Keep Visible toggle, focus loss/return, Alt-Tab/Super overview, helper reload/disable, EDMC shutdown, and borderless/windowed flips in both directions.
 
 #### Phase 15 Refactor Staging
 | Stage | Description | Status |
 | --- | --- | --- |
-| 15.1 | Review Phase 14 parity/performance evidence and classify support blockers | Pending Phase 14.7 Handoff Review |
-| 15.2 | Decide runtime gating/default behavior for GNOME Shell raster mode | Pending 15.1 |
-| 15.3 | Update backend status/support wording, diagnostics, settings UI, and release notes only if support gates pass | Pending 15.2 |
-| 15.4 | Add or update unit/harness/manual validation for any productionization behavior changes | Pending 15.2 |
-| 15.5 | Decide whether Phase 16 fallback cleanup blocks release/support promotion | Pending 15.1 |
+| 15.1 | Review Phase 14 parity/performance evidence and classify support blockers | Completed |
+| 15.2 | Decide runtime gating/default behavior for GNOME Shell raster mode | Completed |
+| 15.3 | Update backend status/support wording, diagnostics, settings UI, and release notes only if support gates pass | Implementation Complete; Keep Experimental Pending Phase 16 |
+| 15.4 | Add or update unit/harness/manual validation for any productionization behavior changes | Headless Tests Added; Borderless/Fullscreen Manual Matrix Complete |
+| 15.5 | Decide whether Phase 16 fallback cleanup blocks release/support promotion | Completed; Phase 16 Remains Blocking |
+| 15.6 | Validate borderless-to-windowed and windowed-to-borderless transitions, including Shell raster to rendered managed-PyQt fallback and back | Pending Phase 16 Cleanup |
+
+#### Phase 15.1 Evidence And Support Gate Classification
+- Test type decision: documentation/status review plus focused unit/harness tests for implementation follow-ups. Phase 14 evidence is sufficient to expose a user-selected experimental backend, not sufficient to make it Auto/default or broadly supported.
+- Phase 14 evidence accepted for Phase 15: real-content multi-region Shell raster works in GNOME Wayland borderless/fullscreen, high-usage overlays validated, stable no-op frames skip client encode/helper decode, and no recent `applied_rect_mismatch`, `presentation_degraded`, or `Overlay visibility` churn was observed.
+- Support blockers retained: Phase 16 fallback cleanup, windowed/non-borderless transitions, helper missing/unhealthy UX, and final manual validation across monitor moves, Keep Visible, focus, overview, helper reload/disable, and shutdown.
+
+#### Phase 15.2 Runtime Gating Decision
+- Implemented direction: add an explicit backend/config value `gnome_shell_raster` labelled `GNOME Shell Raster`.
+- `Auto` remains conservative and does not select Shell raster.
+- Selecting `GNOME Shell Raster` through the existing backend selector enables the Shell raster runtime path without requiring `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1` or `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE_RUNTIME=1`.
+- Backend selection changes require an EDMC restart before validation or normal use. The selected backend is consumed by startup/runtime wiring, so users should be told to restart EDMC after changing `Overlay backend`.
+- Existing environment gates remain as developer/proof compatibility paths. Verbose raster diagnostics remain debug-gated with `EDMC_OVERLAY_GNOME_PRESENTATION_DIAGNOSTICS=1`.
+
+#### Phase 15.3 Headless Implementation Notes
+- Added `BackendInstance.GNOME_SHELL_RASTER` and exposed it through backend selector/status/override-option code as `GNOME Shell Raster`.
+- GNOME Shell raster is available only as an explicit manual backend option on GNOME Wayland; it is not offered by `Auto` and is not substituted for `gnome_shell_wayland`, `xwayland_compat`, or any non-GNOME backend.
+- Runtime presentation now treats selected `gnome_shell_raster` as the production Shell raster gate and suppresses managed-PyQt fallback on Shell raster frame/export failure by sending a clear/degrade helper request instead.
+- Startup/shutdown Shell raster cleanup now runs when `gnome_shell_raster` is selected, even without the old bridge environment flag.
+- Helper missing/unhealthy remains degraded, with user-facing status routed through existing backend status reporting and verbose detail left in diagnostics.
+
+#### Phase 15.4 Test Coverage
+- Added/updated unit tests for backend selection, override options, status labels/warnings, backend consumers, and GNOME helper runtime Shell raster gating/failure behavior.
+- Added/updated harness tests for backend override persistence and plugin startup/shutdown Shell raster cleanup when the selected backend is `gnome_shell_raster`.
+- Manual validation still required: select `GNOME Shell Raster`, restart EDMC without the two runtime env flags, validate high-usage overlays on GNOME Wayland borderless/fullscreen, move the game between monitors, toggle Keep Visible, test focus/Alt-Tab/Super, helper reload/disable, shutdown cleanup, and borderless/windowed flips.
+
+#### Phase 15 Manual Validation Log
+- 2026-05-25, item 1: Passed. With the backend selector on `Auto` and EDMC started without `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE=1` or `EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE_RUNTIME=1`, the live runtime status reported `Backend: GNOME Shell helper | Mode: Degraded overlay | Source: Live runtime | Helper: GNOME Shell extension available`, not `GNOME Shell Raster`. This confirms `Auto` does not silently choose Shell raster.
+- 2026-05-25, item 2: Passed. After selecting `GNOME Shell Raster` and restarting EDMC without the two Shell raster runtime environment gates, the status reported `Backend: GNOME Shell Raster | Mode: Degraded overlay | Source: Live runtime | Overlay backend: GNOME Shell Raster | Helper: GNOME Shell extension available`. Logs showed `GNOME helper presentation shell raster metrics` with `renderer='gnome_shell_raster_frame'`, `update_reason='real_content_multi_region_overlay'`, `transport='png_path'`, `region_count=2`, `client_encoded_region_count=0`, `client_payload_reused=true`, and `encode_ms=0`. This confirms settings selection alone starts the Shell raster runtime path.
+- 2026-05-25, item 3: Passed. With `GNOME Shell Raster` selected and Elite running in borderless/fullscreen, real overlay content appeared over the game. User-visible validation confirmed no titlebar, no separate standalone overlay window, and click-through behavior remained correct.
+- 2026-05-25, item 4: Passed. Stable unchanged high-content frame metrics showed `region_count=3`, `client_reused_region_count=3`, `client_encoded_region_count=0`, `client_reused_all_regions=true`, `client_payload_reused=true`, `encode_ms=0`, `checksum_ms=0`, `build_ms≈3.96 ms`, `dropped_frames=0`, and `throttled_frames=0`. Helper-side reuse also worked on the sampled helper call with `helper_reused_frame=true`, `helper_decode_skipped=true`, `helper_decode_ms=0`, and `helper_total_ms≈0.194 ms`. A later `target_not_focused` degraded sample appeared after focus moved away during logging/copying and is not treated as focused-stable churn.
+- 2026-05-25, item 5: Passed after rerun. Changed overlay updates stayed region-bounded and within the Phase 15 high-usage baseline during focused presentation. The clean rerun showed 11 changed frames, 10 while `presentation_applied`, `target_focus=True`, and `rect_match=True`; focused changed-frame `build_ms` min/avg/max was `7.079/17.075/27.600`, with `dropped_frames=0` and `throttled_frames=0`. An earlier isolated focused spike reached `build_ms=128.070 ms`, but it did not reproduce and no visible pause was reported.
+- 2026-05-25, item 6: Passed. Monitor-follow validation showed Shell raster presentation moving from monitor `0` to monitor `1` and back to monitor `0`, with `presentation_applied`, `target_focus=True`, and `rect_match=True`. Manual validation confirmed overlay content followed the monitor, no stale actors remained on the old monitor, no titlebar or separate PyQt window appeared, and click-through still worked.
+- 2026-05-25, item 7: Passed. Keep Visible toggle validation exercised `keep_overlay_visible=True` and `keep_overlay_visible=False`. With Keep Visible on, unfocused samples stayed `presentation_applied`, `reasons=[]`, and `rect_match=True`; with Keep Visible off, unfocused samples degraded cleanly with `reasons=['target_not_focused']`. No `applied_rect_mismatch`, errors, dropped frames, or throttled frames were observed.
+- 2026-05-25, item 8: Passed. Focus loss/return validation with Keep Visible off showed repeated clean transitions from `target_focus=False`, `presentation_degraded`, `reasons=['target_not_focused']` back to `target_focus=True`, `presentation_applied`, `reasons=[]`, and `rect_match=True`. No flashing, titlebar, stale actor, separate PyQt window, errors, or frame churn were observed.
+- 2026-05-25, item 9: Passed. Alt-Tab and GNOME Super overview validation produced expected `gnome_overview_active` degraded samples and clean recovery to `presentation_applied`, `target_focus=True`, `reasons=[]`, and `rect_match=True`. Manual validation found no overview instability, stale actors, titlebar, separate PyQt window, or focus/input issue.
+- 2026-05-25, item 10: Passed. Helper reload/disable validation observed helper interruption as `health=missing_service`, `target=unknown`, `state=not_attempted`, and `visibility_reason=target_unavailable`, then recovered to `health=healthy` and `presentation_applied` with `rect_match=True`. No managed-PyQt fallback window, stale actor, `applied_rect_mismatch`, errors, dropped frames, or throttled frames were observed.
+- 2026-05-25, item 11: Passed with diagnostic note. EDMC shutdown cleanup validation confirmed EDMC quit cleanly, the overlay disappeared, no stale actors or windows remained, and `pgrep -af 'overlay_client|EDMCModernOverlay|EDMarketConnector'` returned nothing. The last client log included one hidden `state=malformed_payload` sample with `requested=None`; because `visibility=hidden`, `surface_action=hidden`, and there was no stale visible actor, this is recorded as a shutdown diagnostic note rather than a validation failure.
+- Phase 15 borderless/fullscreen manual matrix conclusion: explicit `GNOME Shell Raster` is validated as an experimental GNOME Wayland borderless/fullscreen path. Do not promote it to Auto/default or broad supported GNOME behavior until Phase 16 resolves windowed/fallback cleanup and Phase 17 completes extended hardening.
+
+#### Phase 15.5 Phase 16 Blocker Decision
+- Phase 16 remains blocking for stronger support/default promotion. Until Phase 16 proves raster-to-managed-PyQt transition cleanup, selected Shell raster should remain experimental/support-gated and windowed/non-borderless transitions should report degraded/unsupported rather than remapping broken managed PyQt over the game.
+
+#### Phase 15 Managed-PyQt Suppression Notes For Future Gate
+- Current behavior: when `GNOME Shell Raster` is selected and Shell raster successfully owns presentation, the managed PyQt overlay top-level is intentionally hidden. The overlay client process remains alive and continues to own state, rendering, export, input policy, and diagnostics, but the visible overlay content is presented by GNOME Shell raster actors rather than by the PyQt window.
+- Why this was done: the managed PyQt GNOME Wayland window could appear as a standalone app/window with chrome/titlebar-like behavior. Hiding the PyQt top-level after successful Shell raster presentation removed the user-visible titlebar/standalone-window regression while preserving the client-side render/export pipeline.
+- Runtime path to preserve: `overlay_client/follow_surface.py` calls `run_backend_presentation_cycle(...)` before legacy follow geometry. `overlay_client/backend/consumers.py` passes `shell_raster_runtime_enabled=True` and `suppress_pyqt_fallback_on_shell_raster_failure=True` when the selected backend is `BackendInstance.GNOME_SHELL_RASTER`. A successful raster presentation makes `GnomeHelperPresentationCycleResult.should_show_overlay` return `False`, which becomes `presentation_attachable=False` in the backend-neutral visibility snapshot. `overlay_client/backend/presentation_policy.py` then returns `show=False`, `visibility_reason="presentation_not_attachable"`, `surface_action="hidden"`, and `content_visible=False`, and `overlay_client/follow_surface.py` applies that by calling `self.hide()` on the managed PyQt top-level. This hidden state is expected and does not indicate Shell raster failure.
+- Failure path to preserve through Phase 16: if Shell raster export/provider/apply fails while `GNOME Shell Raster` is selected, `_shell_raster_bridge_request(...)` builds a degrade/clear request instead of remapping managed PyQt over the game. This keeps stale Shell actors cleared and avoids resurrecting the broken PyQt overlay path in borderless/fullscreen GNOME Wayland.
+- Diagnostic signature: expected successful-raster/hidden-PyQt logs include `visibility=hidden`, `visibility_reason=presentation_not_attachable`, `surface_action=hidden`, and `content_visible=False` while Shell raster metrics continue to report real content frames. This means the managed PyQt window is suppressed because Shell raster is presenting content.
+- Future gate option A, safer fallback-only gate: allow managed PyQt to show only after Shell raster failure, and only after Phase 16 proves raster-to-managed-PyQt cleanup without titlebar, stale actor, focus, or monitor regressions. The primary hook is the `suppress_pyqt_fallback_on_shell_raster_failure` decision in `overlay_client/backend/consumers.py`.
+- Future gate option B, riskier debug/side-by-side gate: allow the managed PyQt window to remain visible even while Shell raster succeeds. This would deliberately reverse the current titlebar/standalone-window fix and must be gated as a developer/debug feature, not a user default. It would need an explicit override around `GnomeHelperPresentationCycleResult.should_show_overlay`, plus visibility-policy and runtime tests proving no focus steal, titlebar flash, monitor jump, or stale content actor regression.
+- Recommended future order: implement and validate fallback-only first if needed; avoid side-by-side PyQt visibility unless there is a concrete debugging or support need.
 
 ### Phase 16: Deferred GNOME Fallback Cleanup
 - Goal: resolve deferred fallback issues discovered during Phase 13 without mixing them into the borderless/fullscreen Shell raster proof decision.
-- Phase 16 owns `Phase 13.F1` and `Phase 13.F2` unless Phase 15 decides one or both must be pulled earlier as release blockers.
+- Phase 16 owns `Phase 13.F1` and `Phase 13.F2`; Phase 15 decided these are blockers for broader GNOME support promotion.
 - `Phase 13.F1`: borderless-to-windowed fallback transition reset. When target state changes from Shell-raster-eligible `fullscreen=true/content_rect` to windowed `fullscreen=false/frame_rect_fallback`, runtime must clear Shell raster state and reset the managed PyQt surface out of fullscreen/hidden-suppressed mode before showing fallback.
 - `Phase 13.F2`: GNOME windowed managed-PyQt standalone/titlebar behavior. Normal overlay mode still appears standalone-like in windowed GNOME Wayland, and titlebar compensation cannot currently be proven because helper target state reports `contentRect=null` and `decorationInsets=null`.
 - `Phase 16.C1`: GNOME Wayland managed-PyQt code cleanup. After Phase 15 settles the user-facing backend/support model, remove or quarantine the obsolete user-facing/default GNOME Wayland managed-PyQt path while preserving non-GNOME behavior and any explicitly documented fallback/degraded-mode contracts.
 - Clean windowed startup currently sizes and follows the game correctly, so Phase 16 should preserve that invariant while fixing transitions and chrome/identity behavior.
+- Locked support target: GNOME Wayland windowed mode is supported. Do not document windowed mode away as unsupported/degraded for `GNOME Shell Raster`; Phase 16 must provide a production-safe windowed path.
+- Locked windowed path decision: use managed PyQt for GNOME Wayland windowed mode unless implementation evidence proves Shell raster should cover windowed mode too.
+- Locked transition contract: borderless/fullscreen uses Shell raster; when the target becomes windowed/non-borderless, clear Shell raster actors, reset hidden/suppressed PyQt state, and show the managed PyQt windowed path only after it is correctly sized, positioned, focus-safe, and click-through.
+- Locked acceptance gate: clean windowed startup, borderless-to-windowed, and windowed-to-borderless must pass with no stale actors, no titlebar or separate PyQt window, no focus steal, correct monitor placement, click-through intact, and stable Alt-Tab/Super overview behavior.
+- Test type decision: use unit tests for pure transition/visibility/surface-state policy; use focused runtime/backend tests for Shell-raster-to-PyQt reset contracts; use harness tests if Phase 16 touches `load.py`, startup/shutdown, preferences, or EDMC hook flow; use manual GNOME validation for titlebar/chrome, focus, click-through, monitor placement, Alt-Tab/Super, and stale-actor behavior.
 
 #### Phase 16 Refactor Staging
 | Stage | Description | Status |
 | --- | --- | --- |
-| 16.1 | Reproduce and unit-test borderless-to-windowed fallback transition state reset | Pending Phase 15 Decision |
+| 16.1 | Reproduce and unit-test borderless-to-windowed fallback transition state reset | Pending Phase 16 Start |
 | 16.2 | Implement Shell-raster-to-managed-PyQt surface reset without regressing clean windowed startup | Pending 16.1 |
 | 16.3 | Re-evaluate GNOME windowed standalone/titlebar compensation limits with helper diagnostics | Pending 16.2 |
-| 16.4 | Implement any validated windowed chrome/identity fixes or document unsupported limits | Pending 16.3 |
-| 16.5 | Run focused manual validation for borderless-to-windowed, clean windowed startup, and normal borderless mode | Pending 16.2 |
-| 16.6 | Remove or quarantine obsolete user-facing GNOME Wayland managed-PyQt backend/default path after Phase 15 support decisions | Pending Phase 15 Decision |
+| 16.4 | Implement windowed chrome/identity fixes needed for supported managed-PyQt windowed mode | Pending 16.3 |
+| 16.5 | Run focused manual validation for borderless-to-windowed, windowed-to-borderless, clean windowed startup, normal borderless mode, click-through, monitor placement, and Alt-Tab/Super | Pending 16.2 |
+| 16.6 | Remove or quarantine obsolete user-facing GNOME Wayland managed-PyQt backend/default path after Phase 15 support decisions | Pending 16.1-16.5 Outcome |
 
 ### Phase 17: Extended Hardening And Release Validation
 - Goal: run longer-duration validation against real-world GNOME Wayland workflows after parity, productionization, and fallback cleanup decisions are known.
@@ -3781,7 +3846,7 @@ After implementation:
 #### Phase 17 Refactor Staging
 | Stage | Description | Status |
 | --- | --- | --- |
-| 17.1 | Define the final manual/automated release validation matrix from Phases 14-16 outcomes | Pending Phase 15 |
+| 17.1 | Define the final manual/automated release validation matrix from Phases 14-16 outcomes | Pending Phase 16 |
 | 17.2 | Run extended GNOME Wayland soak with real overlay updates and diagnostics sampling | Pending 17.1 |
 | 17.3 | Validate helper reload/disable, EDMC shutdown/crash cleanup, game relaunch, monitor/workspace/mode changes | Pending 17.1 |
 | 17.4 | Resolve any release-blocking regressions or downgrade support wording | Pending 17.2 |

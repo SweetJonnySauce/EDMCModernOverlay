@@ -201,6 +201,7 @@ DEV_BUILD = is_dev_build(MODERN_OVERLAY_VERSION)
 LOGGER_NAME = PLUGIN_NAME
 LOG_TAG = PLUGIN_NAME
 GNOME_SHELL_RASTER_BRIDGE_ENV = "EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE"
+GNOME_SHELL_RASTER_BACKEND_VALUE = "gnome_shell_raster"
 
 DEFAULT_WINDOW_BASE_WIDTH = 1280
 DEFAULT_WINDOW_BASE_HEIGHT = 960
@@ -277,8 +278,19 @@ def _clear_shell_raster_frame_via_backend() -> bool:
     return bool(clear_gnome_shell_raster_frame_via_gdbus())
 
 
+def _shell_raster_cleanup_enabled(preferences: Any = None) -> bool:
+    if _env_flag(GNOME_SHELL_RASTER_BRIDGE_ENV) is True:
+        return True
+    subject = preferences if preferences is not None else _preferences
+    manual_backend_override = _normalise_manual_backend_override(
+        getattr(subject, "manual_backend_override", "") if subject is not None else "",
+        "",
+    )
+    return manual_backend_override == GNOME_SHELL_RASTER_BACKEND_VALUE
+
+
 def _clear_shell_raster_frame_on_stop() -> bool:
-    if _env_flag(GNOME_SHELL_RASTER_BRIDGE_ENV) is not True:
+    if not _shell_raster_cleanup_enabled():
         return False
     try:
         cleared = _clear_shell_raster_frame_via_backend()
@@ -291,7 +303,7 @@ def _clear_shell_raster_frame_on_stop() -> bool:
 
 
 def _clear_shell_raster_frame_on_startup() -> bool:
-    if _env_flag(GNOME_SHELL_RASTER_BRIDGE_ENV) is not True:
+    if not _shell_raster_cleanup_enabled():
         return False
     try:
         cleared = _clear_shell_raster_frame_via_backend()

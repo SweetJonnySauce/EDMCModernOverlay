@@ -50,6 +50,7 @@ class BackendInstance(str, Enum):
     WAYLAND_LAYER_SHELL_GENERIC = "wayland_layer_shell_generic"
     KWIN_WAYLAND = "kwin_wayland"
     GNOME_SHELL_WAYLAND = "gnome_shell_wayland"
+    GNOME_SHELL_RASTER = "gnome_shell_raster"
     SWAY_WAYFIRE_WLROOTS = "sway_wayfire_wlroots"
     HYPRLAND = "hyprland"
     COSMIC = "cosmic"

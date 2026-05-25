@@ -33,7 +33,9 @@ class BackendSelector:
         descriptor = self._descriptor_for_override(override_instance, probe, auto_descriptor)
         classification = self._strict_classification(descriptor, probe)
         fallback_context = self._fallback_context(descriptor, probe)
-        if override_instance is not None and descriptor != auto_descriptor:
+        if override_instance is not None and fallback_context[1] is FallbackReason.MISSING_HELPER:
+            fallback_from, fallback_reason = fallback_context
+        elif override_instance is not None and descriptor != auto_descriptor:
             fallback_from, fallback_reason = auto_descriptor, FallbackReason.MANUAL_OVERRIDE
         elif override_instance is not None and fallback_context[1] is not FallbackReason.MISSING_HELPER:
             fallback_from, fallback_reason = None, None
@@ -59,6 +61,7 @@ class BackendSelector:
             review_reasons=review_reasons,
             notes=self.stable_notes + notes,
             shadow_mode=self.shadow_mode,
+            gnome_helper_experimental=descriptor.instance is BackendInstance.GNOME_SHELL_RASTER,
         )
 
     def _select_descriptor(self, probe: PlatformProbeResult) -> BackendDescriptor:
@@ -111,7 +114,10 @@ class BackendSelector:
         if probe.operating_system is not OperatingSystem.LINUX:
             return frozenset()
         if probe.session_type is SessionType.WAYLAND:
-            return frozenset({auto_descriptor.instance, BackendInstance.XWAYLAND_COMPAT})
+            instances = {auto_descriptor.instance, BackendInstance.XWAYLAND_COMPAT}
+            if probe.compositor == "gnome-shell":
+                instances.add(BackendInstance.GNOME_SHELL_RASTER)
+            return frozenset(instances)
         if probe.session_type is SessionType.X11 or probe.qt_platform_name.startswith("xcb"):
             return frozenset({BackendInstance.NATIVE_X11})
         return frozenset({auto_descriptor.instance})
@@ -149,6 +155,8 @@ class BackendSelector:
             return BackendDescriptor(BackendFamily.NATIVE_X11, BackendInstance.NATIVE_X11)
         if override_instance is BackendInstance.XWAYLAND_COMPAT:
             return BackendDescriptor(BackendFamily.XWAYLAND_COMPAT, BackendInstance.XWAYLAND_COMPAT)
+        if override_instance is BackendInstance.GNOME_SHELL_RASTER:
+            return BackendDescriptor(BackendFamily.COMPOSITOR_HELPER, BackendInstance.GNOME_SHELL_RASTER)
         if override_instance is BackendInstance.GNOME_SHELL_WAYLAND:
             family = (
                 BackendFamily.COMPOSITOR_HELPER
@@ -167,7 +175,7 @@ class BackendSelector:
             return CapabilityClassification.UNSUPPORTED
         if descriptor.instance is BackendInstance.XWAYLAND_COMPAT and probe.session_type is SessionType.WAYLAND:
             return CapabilityClassification.DEGRADED_OVERLAY
-        if descriptor.instance is BackendInstance.GNOME_SHELL_WAYLAND:
+        if descriptor.instance in {BackendInstance.GNOME_SHELL_WAYLAND, BackendInstance.GNOME_SHELL_RASTER}:
             return CapabilityClassification.DEGRADED_OVERLAY
         return CapabilityClassification.TRUE_OVERLAY
 
@@ -178,11 +186,11 @@ class BackendSelector:
     ) -> tuple[Optional[BackendDescriptor], Optional[FallbackReason]]:
         if descriptor.instance is BackendInstance.XWAYLAND_COMPAT and probe.session_type is SessionType.WAYLAND:
             return self._select_wayland_descriptor(probe), FallbackReason.XWAYLAND_COMPAT_ONLY
-        if descriptor.instance is BackendInstance.GNOME_SHELL_WAYLAND and not probe.has_helper(
+        if descriptor.instance in {BackendInstance.GNOME_SHELL_WAYLAND, BackendInstance.GNOME_SHELL_RASTER} and not probe.has_helper(
             HelperKind.GNOME_SHELL_EXTENSION
         ):
             return (
-                BackendDescriptor(BackendFamily.COMPOSITOR_HELPER, BackendInstance.GNOME_SHELL_WAYLAND),
+                BackendDescriptor(BackendFamily.COMPOSITOR_HELPER, descriptor.instance),
                 FallbackReason.MISSING_HELPER,
             )
         return None, None
@@ -214,7 +222,13 @@ class BackendSelector:
             notes.append(f"invalid_manual_override:{override_error}")
         if descriptor.instance is BackendInstance.XWAYLAND_COMPAT and probe.session_type is SessionType.WAYLAND:
             notes.append("wayland_session_uses_xwayland_compat")
-        if descriptor.instance is BackendInstance.GNOME_SHELL_WAYLAND and not probe.has_helper(
+        if descriptor.instance is BackendInstance.GNOME_SHELL_RASTER:
+            notes.append("shell_raster_experimental:support_gate_pending")
+            if not probe.has_helper(HelperKind.GNOME_SHELL_EXTENSION):
+                notes.append("helper_required:gnome_shell_extension")
+            else:
+                notes.append("shell_raster_helper_ready:true_overlay_pending_phase16")
+        elif descriptor.instance is BackendInstance.GNOME_SHELL_WAYLAND and not probe.has_helper(
             HelperKind.GNOME_SHELL_EXTENSION
         ):
             notes.append("helper_recommended:gnome_shell_extension")
@@ -240,8 +254,20 @@ class BackendSelector:
         descriptor: BackendDescriptor,
         probe: PlatformProbeResult,
     ) -> tuple[HelperCapabilityState, ...]:
-        if descriptor.instance is BackendInstance.GNOME_SHELL_WAYLAND:
+        if descriptor.instance in {BackendInstance.GNOME_SHELL_WAYLAND, BackendInstance.GNOME_SHELL_RASTER}:
             helper_available = probe.has_helper(HelperKind.GNOME_SHELL_EXTENSION)
+            if descriptor.instance is BackendInstance.GNOME_SHELL_RASTER:
+                detail = (
+                    "required_for_gnome_shell_raster_experimental"
+                    if not helper_available
+                    else "gnome_shell_raster_experimental_phase16_pending"
+                )
+            else:
+                detail = (
+                    "health_only_true_overlay_pending_validation"
+                    if helper_available
+                    else "required_for_true_overlay"
+                )
             return (
                 HelperCapabilityState(
                     helper=HelperKind.GNOME_SHELL_EXTENSION,
@@ -249,11 +275,7 @@ class BackendSelector:
                     installed=helper_available,
                     enabled=helper_available,
                     approved=helper_available,
-                    detail=(
-                        "health_only_true_overlay_pending_validation"
-                        if helper_available
-                        else "required_for_true_overlay"
-                    ),
+                    detail=detail,
                 ),
             )
         if descriptor.instance is BackendInstance.KWIN_WAYLAND:

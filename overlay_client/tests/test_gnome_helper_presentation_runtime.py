@@ -1274,6 +1274,98 @@ def test_shell_raster_bridge_falls_back_to_pyqt_when_frame_not_built(
     assert calls[0].shell_raster_frame is None
 
 
+def test_selected_shell_raster_runtime_uses_provider_without_env_gates(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, raising=False)
+    monkeypatch.delenv(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, raising=False)
+    calls: list[HelperPresentationRequest] = []
+
+    def provider(
+        _target_status,
+        request: HelperPresentationRequest | None,
+        _include_diagnostics: bool,
+    ) -> ShellRasterFrameBuildResult:
+        assert request is not None
+        rect = request.content_rect
+        assert rect is not None
+        return ShellRasterFrameBuildResult(
+            request=HelperRasterFrameRequest(
+                action="update",
+                frame_version="test-selected-raster",
+                target_token=request.target_token,
+                target_rect=rect,
+                frame_rect=HelperRect(rect.x + 10, rect.y + 10, rect.width - 20, rect.height - 20),
+                scale=1.0,
+                image_path="/tmp/test-selected-raster.png",
+                checksum="abc123",
+                byte_size=123,
+                stale_timeout_ms=SHELL_RASTER_FRAME_DEFAULT_TIMEOUT_MS,
+                diagnostics={"update_reason": "test_selected_raster"},
+            )
+        )
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        calls.append(request)
+        assert request.shell_raster_frame is not None
+        frame_rect = request.shell_raster_frame.frame_rect.to_payload()
+        return _presentation_payload(
+            request,
+            requested_rect=frame_rect,
+            applied_rect=frame_rect,
+            renderer="gnome_shell_raster_frame",
+            shell_raster_frame={
+                "frame_version": request.shell_raster_frame.frame_version,
+                "frame_rect": frame_rect,
+            },
+        )
+
+    result = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_borderless_target()),
+        fetch_presentation=fetch_presentation,
+        shell_raster_frame_provider=provider,
+        shell_raster_runtime_enabled=True,
+        clock=lambda: 100.0,
+    )
+
+    assert result.shell_raster_frame_presented is True
+    assert result.should_show_overlay is False
+    assert calls[0].renderer == "gnome_shell_raster_frame"
+    assert calls[0].shell_raster_frame is not None
+
+
+def test_selected_shell_raster_failure_clears_and_does_not_fallback_to_pyqt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, raising=False)
+    monkeypatch.delenv(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, raising=False)
+    calls: list[HelperPresentationRequest] = []
+
+    def provider(*_args, **_kwargs) -> ShellRasterFrameBuildResult:
+        return ShellRasterFrameBuildResult(reason="frame_export_failed")
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        calls.append(request)
+        return {"status": "shell_raster_frame_cleared"}
+
+    result = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_borderless_target()),
+        fetch_presentation=fetch_presentation,
+        shell_raster_frame_provider=provider,
+        shell_raster_runtime_enabled=True,
+        suppress_pyqt_fallback_on_shell_raster_failure=True,
+        clock=lambda: 100.0,
+    )
+
+    assert result.should_show_overlay is False
+    assert result.request is not None
+    assert result.request.action.value == "degrade"
+    assert "frame_export_failed" in result.request.degrade_reasons
+    assert calls[0].renderer == "gnome_shell_raster_frame"
+    assert calls[0].shell_raster_frame is not None
+    assert calls[0].shell_raster_frame.action == "clear"
+
+
 def test_shell_raster_clear_request_is_shutdown_only_payload() -> None:
     request = build_shell_raster_frame_clear_request()
 

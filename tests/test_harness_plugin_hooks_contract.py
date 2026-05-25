@@ -102,6 +102,22 @@ def test_plugin_stop_clears_shell_raster_frame_when_enabled(
     assert calls == ["clear"]
 
 
+def test_plugin_stop_clears_shell_raster_frame_when_backend_selected(
+    harness_runtime: tuple[object, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _harness, runtime = harness_runtime
+    calls: list[str] = []
+
+    runtime._preferences.manual_backend_override = "gnome_shell_raster"
+    monkeypatch.delenv(load.GNOME_SHELL_RASTER_BRIDGE_ENV, raising=False)
+    monkeypatch.setattr(load, "_clear_shell_raster_frame_via_backend", lambda: calls.append("clear") or True)
+
+    assert load._clear_shell_raster_frame_on_stop() is True
+
+    assert calls == ["clear"]
+
+
 def test_plugin_startup_clears_shell_raster_frame_when_enabled(
     harness_runtime: tuple[object, Any],
     monkeypatch: pytest.MonkeyPatch,
@@ -110,6 +126,22 @@ def test_plugin_startup_clears_shell_raster_frame_when_enabled(
     calls: list[str] = []
 
     monkeypatch.setenv(load.GNOME_SHELL_RASTER_BRIDGE_ENV, "1")
+    monkeypatch.setattr(load, "_clear_shell_raster_frame_via_backend", lambda: calls.append("clear") or True)
+
+    assert load._clear_shell_raster_frame_on_startup() is True
+
+    assert calls == ["clear"]
+
+
+def test_plugin_startup_clears_shell_raster_frame_when_backend_selected(
+    harness_runtime: tuple[object, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _harness, runtime = harness_runtime
+    calls: list[str] = []
+
+    runtime._preferences.manual_backend_override = "gnome_shell_raster"
+    monkeypatch.delenv(load.GNOME_SHELL_RASTER_BRIDGE_ENV, raising=False)
     monkeypatch.setattr(load, "_clear_shell_raster_frame_via_backend", lambda: calls.append("clear") or True)
 
     assert load._clear_shell_raster_frame_on_startup() is True

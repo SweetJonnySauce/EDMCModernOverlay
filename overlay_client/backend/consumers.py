@@ -187,6 +187,10 @@ def _build_linux_bundle_for_instance(instance: BackendInstance) -> BackendBundle
         from overlay_client.backend.bundles.gnome_shell_wayland import build_gnome_shell_wayland_bundle
 
         return build_gnome_shell_wayland_bundle()
+    if instance is BackendInstance.GNOME_SHELL_RASTER:
+        from overlay_client.backend.bundles.gnome_shell_wayland import build_gnome_shell_raster_bundle
+
+        return build_gnome_shell_raster_bundle()
     if instance is BackendInstance.SWAY_WAYFIRE_WLROOTS:
         from overlay_client.backend.bundles.sway_wayfire_wlroots import build_sway_wayfire_wlroots_bundle
 
@@ -261,6 +265,8 @@ def run_backend_presentation_cycle(
     """Run a backend-owned runtime presentation cycle when the selected backend exposes one."""
 
     if not _gnome_shell_helper_presentation_available(status):
+        if _gnome_shell_raster_selected(status):
+            return _gnome_shell_raster_unavailable_result(status)
         return None
     runner = gnome_runner or _gnome_shell_helper_presentation_runner()
     return _backend_result_from_gnome_helper_result(
@@ -270,18 +276,52 @@ def run_backend_presentation_cycle(
             previous_surface_action=previous_surface_action,
             prepare_surface=prepare_surface,
             shell_raster_frame_provider=raster_frame_provider,
+            shell_raster_runtime_enabled=_gnome_shell_raster_selected(status),
+            suppress_pyqt_fallback_on_shell_raster_failure=_gnome_shell_raster_selected(status),
         )
     )
 
 
 def _gnome_shell_helper_presentation_available(status: Optional[BackendSelectionStatus]) -> bool:
     selected_backend = getattr(status, "selected_backend", None)
-    if getattr(selected_backend, "instance", None) is not BackendInstance.GNOME_SHELL_WAYLAND:
+    if getattr(selected_backend, "instance", None) not in {
+        BackendInstance.GNOME_SHELL_WAYLAND,
+        BackendInstance.GNOME_SHELL_RASTER,
+    }:
         return False
     for helper_state in getattr(status, "helper_states", ()):
         if getattr(helper_state, "helper", None) is HelperKind.GNOME_SHELL_EXTENSION and helper_state.available:
             return True
     return False
+
+
+def _gnome_shell_raster_selected(status: Optional[BackendSelectionStatus]) -> bool:
+    selected_backend = getattr(status, "selected_backend", None)
+    return getattr(selected_backend, "instance", None) is BackendInstance.GNOME_SHELL_RASTER
+
+
+def _gnome_shell_raster_unavailable_result(
+    status: Optional[BackendSelectionStatus],
+) -> BackendPresentationCycleResult:
+    del status
+    return BackendPresentationCycleResult(
+        should_show_overlay=False,
+        diagnostics={
+            "helper_health": "unavailable",
+            "target_state": "unknown",
+            "presentation_state": "helper_unavailable",
+            "presentation_reasons": ["gnome_shell_helper_unavailable"],
+            "presentation_available": False,
+            "presentation_attachable": False,
+            "target_available": True,
+        },
+        visibility_snapshot=BackendPresentationVisibilitySnapshot(
+            target_available=True,
+            presentation_available=False,
+            presentation_attachable=False,
+        ),
+        log_prefix="GNOME helper presentation",
+    )
 
 
 def _gnome_shell_helper_presentation_runner() -> GnomePresentationCycleRunner:

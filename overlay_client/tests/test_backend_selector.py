@@ -171,6 +171,86 @@ def test_selector_uses_compositor_helper_family_when_gnome_helper_exists():
     assert "helper_health_only:true_overlay_pending_validation" in status.notes
 
 
+def test_selector_does_not_choose_shell_raster_for_auto_gnome_wayland():
+    selector = BackendSelector()
+    status = selector.select(
+        PlatformProbeResult(
+            operating_system=OperatingSystem.LINUX,
+            session_type=SessionType.WAYLAND,
+            qt_platform_name="wayland",
+            compositor="gnome-shell",
+            available_helpers=frozenset({HelperKind.GNOME_SHELL_EXTENSION}),
+        )
+    )
+
+    assert status.selected_backend.instance is BackendInstance.GNOME_SHELL_WAYLAND
+    assert status.manual_override is None
+    assert status.gnome_helper_experimental is False
+    assert BackendInstance.GNOME_SHELL_RASTER.value not in status.notes
+
+
+def test_selector_applies_manual_gnome_shell_raster_override_when_helper_exists():
+    selector = BackendSelector()
+    status = selector.select(
+        PlatformProbeResult(
+            operating_system=OperatingSystem.LINUX,
+            session_type=SessionType.WAYLAND,
+            qt_platform_name="wayland",
+            compositor="gnome-shell",
+            available_helpers=frozenset({HelperKind.GNOME_SHELL_EXTENSION}),
+        ),
+        manual_override="gnome_shell_raster",
+    )
+
+    assert status.selected_backend.family is BackendFamily.COMPOSITOR_HELPER
+    assert status.selected_backend.instance is BackendInstance.GNOME_SHELL_RASTER
+    assert status.classification is CapabilityClassification.DEGRADED_OVERLAY
+    assert status.manual_override is BackendInstance.GNOME_SHELL_RASTER
+    assert status.fallback_from == BackendDescriptor(BackendFamily.COMPOSITOR_HELPER, BackendInstance.GNOME_SHELL_WAYLAND)
+    assert status.fallback_reason is FallbackReason.MANUAL_OVERRIDE
+    assert status.gnome_helper_experimental is True
+    assert status.helper_states[0].available is True
+    assert status.helper_states[0].detail == "gnome_shell_raster_experimental_phase16_pending"
+    assert "shell_raster_experimental:support_gate_pending" in status.notes
+
+
+def test_selector_reports_missing_helper_for_manual_gnome_shell_raster_override():
+    selector = BackendSelector()
+    status = selector.select(
+        PlatformProbeResult(
+            operating_system=OperatingSystem.LINUX,
+            session_type=SessionType.WAYLAND,
+            qt_platform_name="wayland",
+            compositor="gnome-shell",
+        ),
+        manual_override="gnome_shell_raster",
+    )
+
+    assert status.selected_backend.family is BackendFamily.COMPOSITOR_HELPER
+    assert status.selected_backend.instance is BackendInstance.GNOME_SHELL_RASTER
+    assert status.fallback_from == BackendDescriptor(BackendFamily.COMPOSITOR_HELPER, BackendInstance.GNOME_SHELL_RASTER)
+    assert status.fallback_reason is FallbackReason.MISSING_HELPER
+    assert status.helper_states[0].available is False
+    assert status.helper_states[0].detail == "required_for_gnome_shell_raster_experimental"
+
+
+def test_selector_rejects_gnome_shell_raster_override_outside_gnome_wayland():
+    selector = BackendSelector()
+    status = selector.select(
+        PlatformProbeResult(
+            operating_system=OperatingSystem.LINUX,
+            session_type=SessionType.WAYLAND,
+            qt_platform_name="wayland",
+            compositor="kwin",
+        ),
+        manual_override="gnome_shell_raster",
+    )
+
+    assert status.selected_backend.instance is BackendInstance.KWIN_WAYLAND
+    assert status.manual_override is None
+    assert status.override_error == "gnome_shell_raster"
+
+
 def test_selector_marks_backlog_wayland_targets_unsupported():
     selector = BackendSelector()
     status = selector.select(

@@ -436,10 +436,10 @@ def _gnome_helper_blocks_true_overlay(
     fallback_reason: str,
     helper_unavailable: list[str],
 ) -> bool:
-    if instance != BackendInstance.GNOME_SHELL_WAYLAND.value:
+    if instance not in {BackendInstance.GNOME_SHELL_WAYLAND.value, BackendInstance.GNOME_SHELL_RASTER.value}:
         return False
     # Phase 4 helper health is necessary evidence, but it is not enough to
-    # claim GNOME Wayland true-overlay support before Q10 validation.
+    # claim broad GNOME Wayland true-overlay support before the support gate.
     return True
 
 
@@ -461,6 +461,8 @@ def _ui_backend_label(report: Mapping[str, object]) -> str:
         ("compositor_helper", "kwin_wayland"): "KWin helper",
         ("native_wayland", "gnome_shell_wayland"): "GNOME Wayland",
         ("compositor_helper", "gnome_shell_wayland"): "GNOME Shell helper",
+        ("compositor_helper", "gnome_shell_raster"): "GNOME Shell Raster",
+        ("native_wayland", "gnome_shell_raster"): "GNOME Shell Raster",
         ("native_wayland", "sway_wayfire_wlroots"): "wlroots Wayland",
         ("native_wayland", "hyprland"): "Hyprland",
         ("native_wayland", "cosmic"): "COSMIC Wayland",
@@ -481,6 +483,7 @@ def _ui_backend_override_label(value: str) -> str:
         "wayland_layer_shell_generic": "Generic Wayland",
         "kwin_wayland": "KWin Wayland",
         "gnome_shell_wayland": "GNOME Wayland",
+        "gnome_shell_raster": "GNOME Shell Raster",
         "sway_wayfire_wlroots": "wlroots Wayland",
         "hyprland": "Hyprland",
         "cosmic": "COSMIC Wayland",
@@ -540,7 +543,7 @@ def _ui_fallback_message(*, fallback_reason: str, fallback_from: str, manual_ove
     if fallback_reason == FallbackReason.MISSING_HELPER.value:
         if fallback_from:
             message = f"A required helper for {fallback_from} is not available."
-            if "gnome_shell_wayland" in fallback_from:
+            if "gnome_shell_wayland" in fallback_from or "gnome_shell_raster" in fallback_from:
                 message += " Re-run the Linux installer while logged into GNOME Wayland to install or repair it."
             return message
         return "A required compositor helper is not available."

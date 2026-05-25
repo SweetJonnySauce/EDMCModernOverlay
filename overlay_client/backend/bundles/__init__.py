@@ -6,6 +6,7 @@ from importlib import import_module
 from typing import Any
 
 _BUNDLE_BUILDERS = {
+    "build_gnome_shell_raster_bundle": ("gnome_shell_wayland", "build_gnome_shell_raster_bundle"),
     "build_gnome_shell_wayland_bundle": ("gnome_shell_wayland", "build_gnome_shell_wayland_bundle"),
     "build_hyprland_bundle": ("hyprland", "build_hyprland_bundle"),
     "build_kwin_wayland_bundle": ("kwin_wayland", "build_kwin_wayland_bundle"),
@@ -22,6 +23,7 @@ _BUNDLE_BUILDERS = {
 }
 
 __all__ = [
+    "build_gnome_shell_raster_bundle",
     "build_gnome_shell_wayland_bundle",
     "build_hyprland_bundle",
     "build_kwin_wayland_bundle",

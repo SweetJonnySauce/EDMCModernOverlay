@@ -27,6 +27,19 @@ def test_shell_raster_startup_clear_calls_backend_when_enabled() -> None:
     assert calls == ["clear"]
 
 
+def test_shell_raster_startup_clear_calls_backend_when_backend_selected() -> None:
+    calls: list[str] = []
+
+    cleared = launcher._clear_shell_raster_frame_on_startup(
+        env={},
+        manual_backend_override="gnome_shell_raster",
+        clear_func=lambda: calls.append("clear") or True,
+    )
+
+    assert cleared is True
+    assert calls == ["clear"]
+
+
 def test_shell_raster_shutdown_clear_is_env_gated() -> None:
     calls: list[str] = []
 
@@ -44,6 +57,19 @@ def test_shell_raster_shutdown_clear_calls_backend_when_enabled() -> None:
 
     cleared = launcher._clear_shell_raster_frame_on_shutdown(
         env={launcher.GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV: "1"},
+        clear_func=lambda: calls.append("clear") or True,
+    )
+
+    assert cleared is True
+    assert calls == ["clear"]
+
+
+def test_shell_raster_shutdown_clear_calls_backend_when_backend_selected() -> None:
+    calls: list[str] = []
+
+    cleared = launcher._clear_shell_raster_frame_on_shutdown(
+        env={},
+        manual_backend_override="gnome_shell_raster",
         clear_func=lambda: calls.append("clear") or True,
     )
 

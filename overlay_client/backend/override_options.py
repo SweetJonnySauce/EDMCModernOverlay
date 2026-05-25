@@ -24,6 +24,9 @@ _REGISTERED_OVERRIDE_OPTIONS: dict[str, BackendOverrideOption] = {
     BackendInstance.GNOME_SHELL_WAYLAND.value: BackendOverrideOption(
         value=BackendInstance.GNOME_SHELL_WAYLAND.value,
     ),
+    BackendInstance.GNOME_SHELL_RASTER.value: BackendOverrideOption(
+        value=BackendInstance.GNOME_SHELL_RASTER.value,
+    ),
     BackendInstance.SWAY_WAYFIRE_WLROOTS.value: BackendOverrideOption(
         value=BackendInstance.SWAY_WAYFIRE_WLROOTS.value,
     ),
@@ -86,8 +89,11 @@ def backend_override_options_for_status(
         seen.add(option.value)
         options.append(option)
 
+    selected_instance = ""
     if isinstance(selected_backend, Mapping):
-        _add(selected_backend.get("instance"))
+        selected_instance = str(selected_backend.get("instance") or "")
+        if selected_instance != BackendInstance.GNOME_SHELL_WAYLAND.value or current_value == selected_instance:
+            _add(selected_instance)
     if isinstance(probe, Mapping):
         operating_system = str(probe.get("operating_system") or "")
         session_type = str(probe.get("session_type") or "")
@@ -102,7 +108,7 @@ def backend_override_options_for_status(
                 if compositor == "kwin":
                     _add(BackendInstance.KWIN_WAYLAND.value)
                 elif compositor == "gnome-shell":
-                    _add(BackendInstance.GNOME_SHELL_WAYLAND.value)
+                    _add(BackendInstance.GNOME_SHELL_RASTER.value)
                 elif compositor == "hyprland":
                     _add(BackendInstance.HYPRLAND.value)
                 elif compositor in {"sway", "wayfire", "wlroots"}:
