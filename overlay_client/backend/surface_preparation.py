@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+BACKEND_PRESENTATION_SURFACE_PREPARATION_FULLSCREEN_MONITOR = "fullscreen_monitor"
+BACKEND_PRESENTATION_SURFACE_PREPARATION_MANAGED_WINDOWED = "managed_windowed"
+
 
 @dataclass(frozen=True, slots=True)
 class BackendPresentationSurfacePreparation:
@@ -14,4 +17,3 @@ class BackendPresentationSurfacePreparation:
     reason: str
     target_token: str = ""
     rect_source: str = ""
-

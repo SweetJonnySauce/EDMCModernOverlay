@@ -25,6 +25,8 @@ class BackendPresentationVisibilitySnapshot:
     presentation_attachable: bool = False
     overlay_window_found: bool = False
     presentation_rect_match: bool = False
+    prepared_surface_requires_mapping: bool = False
+    prepared_surface_allows_unfocused_content: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,6 +174,33 @@ def decide_backend_presentation_visibility(
                 remap_warmup_started_monotonic=float(now_monotonic),
             ),
             remap_warmup_status="started",
+        )
+    if (
+        snapshot.prepared_surface_allows_unfocused_content
+        and snapshot.overlay_window_found
+        and snapshot.presentation_rect_match
+    ):
+        return BackendPresentationVisibilityDecision(
+            True,
+            "prepared_surface_focus_unreliable_visible",
+            reset_state,
+        )
+    if not currently_visible and snapshot.prepared_surface_requires_mapping:
+        samples = previous_state.focus_loss_samples + 1
+        lost_since = previous_state.focus_lost_since_monotonic
+        if lost_since is None:
+            lost_since = float(now_monotonic)
+        elapsed = max(0.0, float(now_monotonic) - lost_since)
+        return BackendPresentationVisibilityDecision(
+            True,
+            "prepared_surface_focus_lost_suppressed",
+            BackendPresentationVisibilityState(
+                focus_loss_samples=samples,
+                focus_lost_since_monotonic=lost_since,
+            ),
+            elapsed,
+            surface_action=BACKEND_PRESENTATION_SURFACE_MAPPED_SUPPRESSED,
+            content_visible=False,
         )
     if snapshot.target_has_focus:
         return BackendPresentationVisibilityDecision(True, "target_focused", reset_state)

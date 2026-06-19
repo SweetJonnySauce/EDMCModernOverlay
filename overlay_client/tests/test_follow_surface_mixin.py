@@ -274,6 +274,7 @@ class _FollowSurfaceStub(FollowSurfaceMixin):
         self._transient_parent_window = None
         self._transient_parent_id = None
         self._visible = False
+        self._window_state = 1
         self._geometry_calls = []
         self._event_order = []
         self._update_calls = 0
@@ -349,6 +350,17 @@ class _FollowSurfaceStub(FollowSurfaceMixin):
     def showFullScreen(self) -> None:
         self._visible = True
         self._event_order.append("showFullScreen")
+
+    def showNormal(self) -> None:
+        self._visible = True
+        self._event_order.append("showNormal")
+
+    def windowState(self):
+        return self._window_state
+
+    def setWindowState(self, state) -> None:
+        self._window_state = state
+        self._event_order.append("setWindowState")
 
     def hide(self) -> None:
         self._visible = False
@@ -493,8 +505,10 @@ def test_refresh_follow_geometry_uses_gnome_helper_presentation_and_skips_legacy
 ) -> None:
     stub = _FollowSurfaceStub()
     stub._client_backend_status = _backend_status(helper_available=True)
+    stub._title_bar_enabled = True
+    stub._title_bar_height = 30
     result = _fake_backend_presentation_result()
-    calls: list[tuple[bool, bool, str]] = []
+    calls: list[tuple[bool, bool, str, bool, int]] = []
 
     def fake_cycle(
         _status,
@@ -502,16 +516,26 @@ def test_refresh_follow_geometry_uses_gnome_helper_presentation_and_skips_legacy
         standalone_mode: bool = False,
         keep_overlay_visible: bool = False,
         previous_surface_action: str = "",
+        title_bar_compensation_enabled: bool = False,
+        title_bar_compensation_height: int = 0,
         **_kwargs,
     ):
-        calls.append((standalone_mode, keep_overlay_visible, previous_surface_action))
+        calls.append(
+            (
+                standalone_mode,
+                keep_overlay_visible,
+                previous_surface_action,
+                title_bar_compensation_enabled,
+                title_bar_compensation_height,
+            )
+        )
         return result
 
     monkeypatch.setattr("overlay_client.follow_surface.run_backend_presentation_cycle", fake_cycle)
 
     stub._refresh_follow_geometry()
 
-    assert calls == [(False, False, "")]
+    assert calls == [(False, False, "", True, 30)]
     assert stub._follow_controller.refresh_called == 0
     assert stub._last_backend_presentation is result
     assert stub._last_backend_presentation_surface_action == "mapped_visible"
@@ -587,6 +611,37 @@ def test_backend_fullscreen_surface_preparation_sets_screen_geometry_and_fullscr
         "prepareWindowFlags",
         "setGeometry",
         "showFullScreen",
+        "platformPrepare",
+        "platformClickThrough",
+    ]
+
+
+def test_backend_managed_windowed_surface_preparation_resets_fullscreen_state_without_showing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _FollowSurfaceStub()
+    screen = type("Screen", (), {"geometry": lambda self: type("Rect", (), {"intersects": lambda *_: True})()})()
+    monkeypatch.setattr("overlay_client.follow_surface.QGuiApplication.screenAt", lambda _point: screen)
+
+    prepared = stub._prepare_backend_presentation_surface(
+        BackendPresentationSurfacePreparation(
+            mode="managed_windowed",
+            rect=(1080, 216, 1280, 997),
+            reason="test",
+            target_token="meta:21",
+            rect_source="frame_rect_fallback",
+        )
+    )
+
+    assert prepared is True
+    assert stub.windowHandle().screen() is screen
+    assert stub._geometry_calls[-1] == (1080, 216, 1280, 997)
+    assert stub._visible is False
+    assert "showNormal" not in stub._event_order
+    assert stub._event_order[:5] == [
+        "prepareWindowFlags",
+        "setWindowState",
+        "setGeometry",
         "platformPrepare",
         "platformClickThrough",
     ]

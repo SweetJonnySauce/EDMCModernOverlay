@@ -10,6 +10,18 @@ export const HELPER_DBUS_HEALTH_METHOD = 'GetHealth';
 export const HELPER_DBUS_TARGET_METHOD = 'GetTargetState';
 export const HELPER_DBUS_PRESENTATION_METHOD = 'ApplyPresentation';
 export const HELPER_COORDINATE_SPACE = 'gnome_shell_global_logical';
+export const HELPER_DEV_MODE_CONFIG_DIR = 'EDMCModernOverlay';
+export const HELPER_DEV_MODE_CONFIG_FILE = 'gnome_helper_dev_mode.json';
+export const HELPER_DEV_MODE_DEFAULT = 'full_helper';
+export const HELPER_DEV_MODE_NAMES = Object.freeze([
+    'lifecycle_only',
+    'dbus_health_only',
+    'target_query_enabled',
+    'overview_hooks_enabled',
+    'raster_code_enabled_no_actor',
+    'raster_actor_enabled',
+    'full_helper',
+]);
 export const HELPER_CAPABILITIES = Object.freeze([
     'hello',
     'health',

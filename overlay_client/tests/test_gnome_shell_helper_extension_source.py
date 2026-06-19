@@ -19,6 +19,122 @@ def test_extension_uses_display_config_monitor_inventory_with_legacy_fallback() 
     assert "return this._legacyMonitorForIndex(index) || this._displayConfigMonitorForIndex(index);" in source
 
 
+def test_extension_loads_dev_mode_feature_gate_from_user_config_on_enable() -> None:
+    source = _source()
+
+    assert "HELPER_DEV_MODE_CONFIG_DIR" in source
+    assert "HELPER_DEV_MODE_CONFIG_FILE" in source
+    assert "GLib.get_user_config_dir()" in source
+    assert "EDMC_MODERN_OVERLAY_GNOME_HELPER_DEV_CONFIG" in source
+    assert "_loadFeatureGate()" in source
+    assert "JSON.parse(new TextDecoder('utf-8').decode(contents))" in source
+    assert "helperConfigBool(" in source
+    assert "dev_mode" in source
+    assert "diagnostics_enabled" in source
+    assert "invalid_mode:" in source
+    assert "malformed_config" in source
+
+
+def test_extension_defines_ordered_helper_feature_gate_modes() -> None:
+    source = _source()
+
+    assert "const HELPER_MODE_FEATURES = Object.freeze({" in source
+    expected_modes = (
+        "lifecycle_only",
+        "dbus_health_only",
+        "target_query_enabled",
+        "overview_hooks_enabled",
+        "raster_code_enabled_no_actor",
+        "raster_actor_enabled",
+        "full_helper",
+    )
+    for mode in expected_modes:
+        assert f"{mode}: Object.freeze({{" in source
+    assert "dbusEnabled: false" in source
+    assert "targetQueryEnabled: false" in source
+    assert "presentationEnabled: false" in source
+    assert "overviewHooksEnabled: false" in source
+    assert "rasterCodeEnabled: false" in source
+    assert "rasterActorEnabled: false" in source
+
+
+def test_extension_skips_dbus_export_in_lifecycle_only_mode() -> None:
+    source = _source()
+
+    assert "if (!this._featureGate.dbusEnabled) {" in source
+    assert "dbus_export_skipped" in source
+    assert "reason: 'disabled_by_mode'" in source
+    assert "return;" in source
+    assert "this._healthService = new HelperHealthService(this._featureGate);" in source
+    assert "Gio.bus_own_name(" in source
+
+
+def test_extension_reports_mode_reduced_health_capabilities() -> None:
+    source = _source()
+
+    assert "const HELPER_BASE_DBUS_CAPABILITIES = Object.freeze([" in source
+    assert "_helperCapabilities()" in source
+    assert "if (this._featureGate.targetQueryEnabled) {" in source
+    assert "capabilities.push('target_state');" in source
+    assert "if (this._featureGate.presentationEnabled) {" in source
+    assert "capabilities.push('presentation_state');" in source
+    assert "if (this._featureGate.mode === HELPER_DEV_MODE_DEFAULT) {" in source
+    assert "return HELPER_CAPABILITIES;" in source
+    assert "feature_gate: helperFeatureGatePayload(this._featureGate)" in source
+
+
+def test_extension_blocks_target_and_presentation_methods_when_mode_disables_them() -> None:
+    source = _source()
+
+    assert "if (!this._featureGate.targetQueryEnabled) {" in source
+    assert "target_query_blocked_by_mode" in source
+    assert "status: 'target_query_disabled_by_mode'" in source
+    assert "detail: 'target query disabled by helper mode'" in source
+    assert "if (!this._featureGate.presentationEnabled) {" in source
+    assert "presentation_blocked_by_mode" in source
+    assert "degradeReasons: ['presentation_disabled_by_mode']" in source
+    assert "detail: 'presentation disabled by helper mode'" in source
+
+
+def test_extension_gates_overview_hooks_and_raster_actor_creation_by_mode() -> None:
+    source = _source()
+
+    assert "if (this._featureGate.overviewHooksEnabled) {" in source
+    assert "this._connectShellRasterOverviewSignals();" in source
+    assert "overview_hooks_skipped" in source
+    assert "if (!this._featureGate.rasterCodeEnabled) {" in source
+    assert "raster_code_blocked_by_mode" in source
+    assert "raster_code_disabled_by_mode" in source
+    assert "if (!this._featureGate.rasterActorEnabled) {" in source
+    assert "raster_actor_blocked_by_mode" in source
+    assert "raster_actor_disabled_by_mode" in source
+    assert "shell_actor_proof_blocked_by_mode" in source
+
+
+def test_extension_emits_structured_dev_mode_diagnostics() -> None:
+    source = _source()
+
+    assert "function helperDiagnosticLog(enabled, event, fields = {})" in source
+    assert "component: 'edmc_modern_overlay_gnome_helper'" in source
+    assert "console.log(`${HELPER_UUID} ${JSON.stringify(payload)}`)" in source
+    for event in (
+        "helper_enable",
+        "helper_disable",
+        "dbus_export_requested",
+        "dbus_exported",
+        "dbus_unexported",
+        "target_query_started",
+        "overview_hook_attached",
+        "raster_actor_create_decision",
+        "raster_actor_apply_decision",
+        "raster_actor_destroy_decision",
+        "helper_exception",
+    ):
+        assert event in source
+    assert "_shellActorCounts()" in source
+    assert "shell_raster_region_count" in source
+
+
 def test_extension_skips_redundant_move_resize_when_frame_already_matches() -> None:
     source = _source()
 
@@ -202,20 +318,30 @@ def test_extension_shell_actor_proof_creates_non_reactive_transparent_marker() -
 def test_extension_shell_actor_proof_records_single_parent_layer() -> None:
     source = _source()
 
-    assert "_shellActorProofParent(targetPayload)" in source
-    assert "const SHELL_ACTOR_PROOF_PARENT = 'target_window_actor_child';" in source
-    assert "_shellActorProofParent(targetPayload)" in source
-    assert "const targetActor = this._targetWindowActorForToken(targetPayload?.targetToken || '');" in source
-    assert "container: targetActor" in source
-    assert "mode: 'target_window_actor_child'" in source
+    assert "_showShellActorProof(targetPayload, requestedRect, targetActor)" in source
+    assert "const SHELL_ACTOR_PROOF_PARENT = 'target_window_actor_sibling';" in source
+    assert "const targetActor = targetEntry?.actor || null;" in source
+    assert "_shellActorProofParent(targetPayload, targetActor)" in source
+    assert "_targetWindowActorSiblingParent(targetPayload, SHELL_ACTOR_PROOF_PARENT, targetActor)" in source
+    assert "mode: 'target_window_actor_sibling'" in source
+    assert "sibling: targetActor" in source
+    assert "const windowGroup = this._globalActorByName('global.window_group');" in source
+    assert "const windowGroupTargetIndex = this._actorIndexInParent(windowGroup, targetActor);" in source
+    assert "const windowGroupParent = windowGroupTargetIndex === null ? null : windowGroup;" in source
+    assert "const parentActor = directParent || windowGroupParent;" in source
+    assert "parentSource" in source
+    assert "actor: entry.actor" in source
     assert "_targetWindowActorForToken(targetToken = '')" in source
     assert "global.get_window_actors?.() || []" in source
     assert "this._metaWindowForActor(actor)" in source
     assert "this._targetToken(window) === targetToken" in source
+    assert "targetActor = targetActor || this._targetWindowActorForToken(targetPayload?.targetToken || '')" in source
     assert "parent.container.add_child(actor)" in source
+    assert "parent.container.set_child_above_sibling(actor, parent.sibling)" in source
     assert "actor_parent" in source
     assert "knownParents" not in source
     assert "for (const parent" not in source
+    assert "targetActor.add_child(actor)" not in source
     assert "const SHELL_ACTOR_PROOF_PARENT = 'Main.uiGroup';" not in source
     assert "mode: 'main_ui_group'" not in source
     assert "const SHELL_ACTOR_PROOF_PARENT = 'global.top_window_group';" not in source
@@ -300,15 +426,67 @@ def test_extension_shell_raster_frame_path_is_opt_in_and_keeps_normal_apply_path
     assert "const result = this._applyOverlayPresentation(" in source
 
 
-def test_extension_shell_raster_frame_uses_target_window_actor_attachment() -> None:
+def test_extension_shell_raster_frame_uses_target_window_sibling_attachment() -> None:
     source = _source()
 
-    assert "const SHELL_RASTER_FRAME_PARENT = 'target_window_actor_child';" in source
+    assert "const SHELL_RASTER_FRAME_PARENT = 'target_window_actor_sibling';" in source
+    assert "const SHELL_RASTER_STACKING_REFRESH_DELAYS_MS = Object.freeze([50, 150, 300]);" in source
     assert "_showShellRasterFrame({" in source
-    assert "const targetActor = this._targetWindowActorForToken(targetPayload?.targetToken || '');" in source
-    assert "targetActor.add_child(textureActor);" in source
+    assert "const targetActor = targetEntry?.actor || null;" in source
+    assert "const frameParent = this._shellRasterFrameParent(targetPayload, targetActor);" in source
+    assert "_targetWindowActorSiblingParent(targetPayload, SHELL_RASTER_FRAME_PARENT, targetActor)" in source
+    assert "targetActor = targetActor || this._targetWindowActorForToken(targetPayload?.targetToken || '')" in source
+    assert "const directParent = this._actorParent(targetActor);" in source
+    assert "const windowGroup = this._globalActorByName('global.window_group');" in source
+    assert "const windowGroupTargetIndex = this._actorIndexInParent(windowGroup, targetActor);" in source
+    assert "const windowGroupParent = windowGroupTargetIndex === null ? null : windowGroup;" in source
+    assert "const parentActor = directParent || windowGroupParent;" in source
+    assert "actor_parent_source: frameParent.parentSource" in source
+    assert "window_group_target_index: frameParent.windowGroupTargetIndex" in source
+    assert "this._addShellActorToParent(textureActor, frameParent)" in source
+    assert "parent.container.set_child_above_sibling(actor, parent.sibling)" in source
+    assert "target_actor_found: Boolean(frameParent.sibling)" in source
+    assert "const localRect = this._shellActorLocalRect(frameRect, targetRect, frameParent);" in source
+    assert "textureActor.set_position(localRect.x, localRect.y)" in source
+    assert "targetActor.add_child(textureActor);" not in source
+    assert "textureActor.raise_top?.()" not in source
     assert "actor_parent: actorParent || this._shellRasterFrame?.actorParent || ''" in source
     assert "Main.layoutManager.addChrome" not in source
+
+
+def test_extension_shell_raster_multi_region_uses_scoped_target_child_attachment() -> None:
+    source = _source()
+
+    assert "const SHELL_RASTER_REGION_PARENT = 'target_window_actor_child';" in source
+    assert "const frameParent = this._shellRasterRegionParent(targetPayload, targetActor);" in source
+    assert "_targetWindowActorChildParent(targetPayload, SHELL_RASTER_REGION_PARENT, targetActor)" in source
+    assert "mode: 'target_window_actor_child'" in source
+    assert "parentSource: targetActor ? 'target_window_actor' : ''" in source
+    assert "parent.mode === 'target_window_actor_child'" in source
+    assert "parent.container.add_child(actor)" in source
+    assert "const localRect = this._shellActorLocalRect(region.frameRect, targetRect, frameParent);" in source
+    assert "parent?.mode === 'target_window_actor_child'" in source
+    assert "x: Number(frameRect?.x || 0) - Number(targetRect?.x || 0)" in source
+    assert "y: Number(frameRect?.y || 0) - Number(targetRect?.y || 0)" in source
+    assert "actor_parent: frameParent.name" in source
+
+
+def test_extension_shell_raster_refreshes_stacking_after_fullscreen_updates() -> None:
+    source = _source()
+
+    assert "_scheduleShellRasterStackingRefresh(frameParent, targetPayload.targetToken, 'single_frame_applied')" in source
+    assert "_scheduleShellRasterStackingRefresh(frameParent, targetPayload.targetToken, 'multi_region_update')" in source
+    assert "_scheduleShellRasterStackingRefresh(parent, targetPayload.targetToken, 'reused_existing_frame')" in source
+    assert "_scheduleShellRasterStackingRefresh(parent, targetToken = '', reason = 'refresh')" in source
+    assert "for (const delayMs of SHELL_RASTER_STACKING_REFRESH_DELAYS_MS)" in source
+    assert "this._raiseShellRasterActorsWithinParent(parent, targetToken)" in source
+    assert "_raiseShellRasterActorsWithinParent(parent, targetToken = '')" in source
+    assert "for (const record of this._shellRasterActorRecords(targetToken))" in source
+    assert "record.actor.get_parent() !== parent.container" in source
+    assert "this._raiseShellActorWithinParent(record.actor, parent)" in source
+    assert "_shellRasterActorRecords(targetToken = '')" in source
+    assert "String(this._shellRasterFrame.targetToken || '') === expectedToken" in source
+    assert "String(record.targetToken || '') === expectedToken" in source
 
 
 def test_extension_shell_raster_frame_validates_path_and_png_constraints() -> None:
@@ -414,7 +592,7 @@ def test_extension_shell_raster_frame_identity_requires_same_frame_and_rects() -
     assert "String(frame.targetToken || '') === String(targetToken || '')" in source
     assert "this._rectsMatchWithinTolerance(frame.targetRect, targetRect, 0)" in source
     assert "this._rectsMatchWithinTolerance(frame.frameRect, frameRect, 0)" in source
-    assert "frame.actor.get_parent() !== targetActor" in source
+    assert "frame.actor.get_parent() !== parent.container" in source
 
 
 def test_extension_shell_raster_frame_reuse_reports_decode_skip_diagnostics() -> None:

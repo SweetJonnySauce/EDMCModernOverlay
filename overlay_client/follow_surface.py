@@ -15,6 +15,10 @@ from overlay_client.backend.presentation_policy import (
     BackendPresentationVisibilityDecision,
     decide_backend_presentation_visibility,
 )
+from overlay_client.backend.surface_preparation import (
+    BACKEND_PRESENTATION_SURFACE_PREPARATION_FULLSCREEN_MONITOR,
+    BACKEND_PRESENTATION_SURFACE_PREPARATION_MANAGED_WINDOWED,
+)
 from overlay_client.follow_geometry import (
     ScreenInfo,
     _apply_aspect_guard,
@@ -137,6 +141,8 @@ class FollowSurfaceMixin:
                 standalone_mode=False,
                 keep_overlay_visible=bool(getattr(self, "_keep_overlay_visible", False)),
                 previous_surface_action=str(getattr(self, "_last_backend_presentation_surface_action", "")),
+                title_bar_compensation_enabled=bool(getattr(self, "_title_bar_enabled", False)),
+                title_bar_compensation_height=int(getattr(self, "_title_bar_height", 0) or 0),
                 prepare_surface=self._prepare_backend_presentation_surface,
                 raster_frame_provider=getattr(self, "_build_backend_shell_raster_content_frame", None),
             )
@@ -164,8 +170,6 @@ class FollowSurfaceMixin:
 
     def _prepare_backend_presentation_surface(self, preparation: object) -> bool:
         mode = str(getattr(preparation, "mode", "") or "")
-        if mode != "fullscreen_monitor":
-            return False
         rect = getattr(preparation, "rect", None)
         try:
             x, y, width, height = (int(rect[0]), int(rect[1]), int(rect[2]), int(rect[3]))
@@ -173,6 +177,18 @@ class FollowSurfaceMixin:
             return False
         if width <= 0 or height <= 0:
             return False
+        if mode == BACKEND_PRESENTATION_SURFACE_PREPARATION_FULLSCREEN_MONITOR:
+            return self._prepare_backend_fullscreen_surface(preparation, (x, y, width, height))
+        if mode == BACKEND_PRESENTATION_SURFACE_PREPARATION_MANAGED_WINDOWED:
+            return self._prepare_backend_managed_windowed_surface(preparation, (x, y, width, height))
+        return False
+
+    def _prepare_backend_fullscreen_surface(
+        self,
+        preparation: object,
+        target: tuple[int, int, int, int],
+    ) -> bool:
+        x, y, width, height = target
         screen = self._screen_for_backend_presentation_rect((x, y, width, height))
         if screen is None:
             _CLIENT_LOGGER.debug(
@@ -192,7 +208,6 @@ class FollowSurfaceMixin:
             window = self.windowHandle()
             if window is not None and hasattr(window, "setScreen"):
                 window.setScreen(screen)
-            target = (x, y, width, height)
             self._last_set_geometry = target
             self.setGeometry(QRect(*target))
             show_fullscreen()
@@ -211,6 +226,71 @@ class FollowSurfaceMixin:
         except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
             _CLIENT_LOGGER.debug("Backend fullscreen surface preparation failed: %s", exc)
             return False
+
+    def _prepare_backend_managed_windowed_surface(
+        self,
+        preparation: object,
+        target: tuple[int, int, int, int],
+    ) -> bool:
+        x, y, width, height = target
+        screen = self._screen_for_backend_presentation_rect((x, y, width, height))
+        if screen is None:
+            _CLIENT_LOGGER.debug(
+                "Backend windowed surface preparation failed: no Qt screen for rect=%s reason=%s",
+                (x, y, width, height),
+                getattr(preparation, "reason", ""),
+            )
+            return False
+        try:
+            self._interaction_controller.prepare_window_flags_for_click_through(
+                True,
+                reason="backend_presentation_windowed_prepare",
+            )
+            window = self.windowHandle()
+            if window is not None and hasattr(window, "setScreen"):
+                window.setScreen(screen)
+            if not self._reset_backend_managed_windowed_state():
+                return False
+            self._last_set_geometry = target
+            self.setGeometry(QRect(*target))
+            window = self.windowHandle()
+            if window is not None:
+                self._platform_controller.prepare_window(window)
+            self._platform_controller.apply_click_through(True)
+            _CLIENT_LOGGER.debug(
+                "Prepared backend managed-windowed surface rect=%s screen=%s reason=%s; %s",
+                target,
+                self._describe_screen(screen),
+                getattr(preparation, "reason", ""),
+                self.format_scale_debug(),
+            )
+            return True
+        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+            _CLIENT_LOGGER.debug("Backend managed-windowed surface preparation failed: %s", exc)
+            return False
+
+    def _reset_backend_managed_windowed_state(self) -> bool:
+        window_state = getattr(self, "windowState", None)
+        set_window_state = getattr(self, "setWindowState", None)
+        fullscreen_state = getattr(getattr(Qt, "WindowState", object), "WindowFullScreen", None)
+        if callable(window_state) and callable(set_window_state) and fullscreen_state is not None:
+            current_state = window_state()
+            try:
+                next_state = current_state & ~fullscreen_state
+            except TypeError:
+                try:
+                    fullscreen_value = getattr(fullscreen_state, "value", fullscreen_state)
+                    current_value = getattr(current_state, "value", current_state)
+                    next_state = int(current_value) & ~int(fullscreen_value)
+                except (TypeError, ValueError):
+                    return False
+            set_window_state(next_state)
+            return True
+        show_normal = getattr(self, "showNormal", None)
+        if callable(show_normal) and self.isVisible():
+            show_normal()
+            return True
+        return False
 
     def _screen_for_backend_presentation_rect(self, rect: tuple[int, int, int, int]) -> QScreen | None:
         x, y, width, height = rect

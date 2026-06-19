@@ -81,6 +81,24 @@ def test_gnome_shell_extension_capabilities_match_client_contract() -> None:
         assert f"'{capability}'" in source
 
 
+def test_gnome_shell_extension_declares_dev_mode_feature_gate_constants() -> None:
+    source = (HELPER_DIR / "constants.js").read_text(encoding="utf-8")
+
+    assert "HELPER_DEV_MODE_CONFIG_DIR = 'EDMCModernOverlay'" in source
+    assert "HELPER_DEV_MODE_CONFIG_FILE = 'gnome_helper_dev_mode.json'" in source
+    assert "HELPER_DEV_MODE_DEFAULT = 'full_helper'" in source
+    for mode in (
+        "lifecycle_only",
+        "dbus_health_only",
+        "target_query_enabled",
+        "overview_hooks_enabled",
+        "raster_code_enabled_no_actor",
+        "raster_actor_enabled",
+        "full_helper",
+    ):
+        assert f"'{mode}'" in source
+
+
 def test_extension_source_exposes_health_target_and_presentation_dbus_runtime() -> None:
     source = (HELPER_DIR / "extension.js").read_text(encoding="utf-8")
 

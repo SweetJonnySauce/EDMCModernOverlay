@@ -40,7 +40,11 @@ from overlay_client.backend.shell_raster_frame import (
     ShellRasterFrameBuildResult,
     build_static_shell_raster_frame_request,
 )
-from overlay_client.backend.surface_preparation import BackendPresentationSurfacePreparation
+from overlay_client.backend.surface_preparation import (
+    BACKEND_PRESENTATION_SURFACE_PREPARATION_FULLSCREEN_MONITOR,
+    BACKEND_PRESENTATION_SURFACE_PREPARATION_MANAGED_WINDOWED,
+    BackendPresentationSurfacePreparation,
+)
 
 GNOME_HELPER_PRESENTATION_MAX_ATTEMPTS = 2
 GNOME_HELPER_PRESENTATION_DBUS_TIMEOUT_SECONDS = 0.75
@@ -66,11 +70,17 @@ GNOME_HELPER_REASON_PERSISTENT_APPLIED_RECT_MISMATCH = "persistent_applied_rect_
 GNOME_HELPER_REASON_SURFACE_PREPARATION_FAILED = "surface_preparation_failed"
 GNOME_HELPER_REASON_SHELL_RASTER_OVERVIEW_ACTIVE = "gnome_overview_active"
 GNOME_HELPER_REASON_SHELL_RASTER_TARGET_NOT_FOCUSED = "target_not_focused"
-GNOME_HELPER_SURFACE_PREPARATION_FULLSCREEN_MONITOR = "fullscreen_monitor"
+GNOME_HELPER_REASON_SHELL_RASTER_PARENT_UNAVAILABLE = "shell_raster_parent_unavailable"
+GNOME_HELPER_REASON_SHELL_RASTER_TO_MANAGED_PYQT_CLEAR = "shell_raster_to_managed_pyqt_clear"
+GNOME_HELPER_REASON_SHELL_RASTER_TO_MANAGED_PYQT_CLEAR_FAILED = "shell_raster_to_managed_pyqt_clear_failed"
+GNOME_HELPER_REASON_WINDOWED_MANAGED_PYQT = "shell_raster_windowed_managed_pyqt"
+GNOME_HELPER_SURFACE_PREPARATION_FULLSCREEN_MONITOR = BACKEND_PRESENTATION_SURFACE_PREPARATION_FULLSCREEN_MONITOR
+GNOME_HELPER_SURFACE_PREPARATION_MANAGED_WINDOWED = BACKEND_PRESENTATION_SURFACE_PREPARATION_MANAGED_WINDOWED
 GNOME_HELPER_SHELL_RASTER_SUPPRESS_FALLBACK_REASONS = frozenset(
     (
         GNOME_HELPER_REASON_SHELL_RASTER_OVERVIEW_ACTIVE,
         GNOME_HELPER_REASON_SHELL_RASTER_TARGET_NOT_FOCUSED,
+        GNOME_HELPER_REASON_SHELL_RASTER_PARENT_UNAVAILABLE,
     )
 )
 GNOME_HELPER_EXPECTED_DEGRADE_REASONS = frozenset(
@@ -160,6 +170,9 @@ class GnomeHelperPresentationCycleResult:
     persistent_mismatch_backoff: bool = False
     surface_preparation: BackendPresentationSurfacePreparation | None = None
     surface_preparation_failed: bool = False
+    shell_raster_transition_clear_requested: bool = False
+    shell_raster_transition_clear_succeeded: bool = False
+    shell_raster_transition_clear_reason: str = ""
 
     @property
     def helper_healthy(self) -> bool:
@@ -196,6 +209,8 @@ class GnomeHelperPresentationCycleResult:
 
     @property
     def should_show_overlay(self) -> bool:
+        if self.shell_raster_transition_clear_requested and not self.shell_raster_transition_clear_succeeded:
+            return False
         if self.shell_raster_frame_presented:
             return False
         if self.shell_raster_frame_suspended_for_focus_risk:
@@ -273,6 +288,9 @@ class GnomeHelperPresentationCycleResult:
                 else None
             ),
             "surface_preparation_failed": self.surface_preparation_failed,
+            "shell_raster_transition_clear_requested": self.shell_raster_transition_clear_requested,
+            "shell_raster_transition_clear_succeeded": self.shell_raster_transition_clear_succeeded,
+            "shell_raster_transition_clear_reason": self.shell_raster_transition_clear_reason,
             "shell_raster_frame": (
                 self.request.shell_raster_frame.to_payload()
                 if self.request is not None and self.request.shell_raster_frame is not None
@@ -292,6 +310,8 @@ def run_gnome_shell_helper_presentation_cycle(
     standalone_mode: bool = False,
     keep_overlay_visible: bool = False,
     previous_surface_action: str = "",
+    title_bar_compensation_enabled: bool = False,
+    title_bar_compensation_height: int = 0,
     fetch_health: Callable[[], object] | None = None,
     fetch_target: Callable[[], object] | None = None,
     fetch_presentation: Callable[[HelperPresentationRequest], object] | None = None,
@@ -358,6 +378,9 @@ def run_gnome_shell_helper_presentation_cycle(
     presentation_status: HelperPresentationStatus | None = None
     surface_preparation: BackendPresentationSurfacePreparation | None = None
     surface_preparation_failed = False
+    shell_raster_transition_clear_requested = False
+    shell_raster_transition_clear_succeeded = False
+    shell_raster_transition_clear_reason = ""
     retry_reasons: list[str] = []
     attempts = 0
     for attempt in range(1, attempts_allowed + 1):
@@ -371,19 +394,65 @@ def run_gnome_shell_helper_presentation_cycle(
             standalone_mode=standalone_mode,
             include_presentation_diagnostics=include_presentation_diagnostics,
         )
+        allow_unfocused_shell_raster_target = (
+            keep_overlay_visible
+            or _shell_raster_runtime_allows_unfocused_fullscreen_target(
+                target_status,
+                request,
+                shell_raster_runtime_enabled=shell_raster_runtime_enabled,
+            )
+        )
         request = _shell_raster_bridge_request(
             target_status,
             request,
             env=os.environ,
-            allow_unfocused_target=keep_overlay_visible,
+            allow_unfocused_target=allow_unfocused_shell_raster_target,
             shell_raster_frame_provider=shell_raster_frame_provider,
             shell_raster_runtime_enabled=shell_raster_runtime_enabled,
             suppress_pyqt_fallback_on_shell_raster_failure=suppress_pyqt_fallback_on_shell_raster_failure,
         )
-        surface_preparation = _borderless_fullscreen_surface_preparation(
+        request = _request_with_windowed_title_bar_compensation(
+            target_status,
+            request,
+            enabled=title_bar_compensation_enabled,
+            height=title_bar_compensation_height,
+        )
+        transition_clear_reason = _managed_pyqt_shell_raster_transition_clear_reason(
+            state,
+            target_status,
+            request,
+            shell_raster_runtime_enabled=shell_raster_runtime_enabled,
+        )
+        if transition_clear_reason and not shell_raster_transition_clear_requested:
+            shell_raster_transition_clear_requested = True
+            shell_raster_transition_clear_reason = transition_clear_reason
+            shell_raster_transition_clear_succeeded = _clear_shell_raster_frame_for_managed_pyqt_transition(
+                presentation_fetcher,
+                request,
+                reason=transition_clear_reason,
+            )
+            if not shell_raster_transition_clear_succeeded:
+                presentation_status = _shell_raster_transition_clear_failed_status(
+                    target_status,
+                    request,
+                    reason=transition_clear_reason,
+                    now_monotonic=now,
+                )
+                return GnomeHelperPresentationCycleResult(
+                    health_status=health_status,
+                    target_status=target_status,
+                    request=request,
+                    presentation_status=presentation_status,
+                    health_cache_hit=health_cache_hit,
+                    shell_raster_transition_clear_requested=shell_raster_transition_clear_requested,
+                    shell_raster_transition_clear_succeeded=shell_raster_transition_clear_succeeded,
+                    shell_raster_transition_clear_reason=shell_raster_transition_clear_reason,
+                )
+        surface_preparation = _surface_preparation_for_request(
             target_status,
             request,
             env=os.environ,
+            shell_raster_runtime_enabled=shell_raster_runtime_enabled,
         )
         signature = _presentation_signature(
             target_status,
@@ -415,6 +484,9 @@ def run_gnome_shell_helper_presentation_cycle(
                 presentation_skip_reason="fresh_matching_presentation",
                 health_cache_hit=health_cache_hit,
                 surface_preparation=surface_preparation,
+                shell_raster_transition_clear_requested=shell_raster_transition_clear_requested,
+                shell_raster_transition_clear_succeeded=shell_raster_transition_clear_succeeded,
+                shell_raster_transition_clear_reason=shell_raster_transition_clear_reason,
             )
         if attempt == 1 and _should_skip_persistent_mismatch_apply(state, signature):
             state.last_target_status = target_status
@@ -431,6 +503,9 @@ def run_gnome_shell_helper_presentation_cycle(
                 persistent_mismatch_count=state.persistent_mismatch_count,
                 persistent_mismatch_backoff=True,
                 surface_preparation=surface_preparation,
+                shell_raster_transition_clear_requested=shell_raster_transition_clear_requested,
+                shell_raster_transition_clear_succeeded=shell_raster_transition_clear_succeeded,
+                shell_raster_transition_clear_reason=shell_raster_transition_clear_reason,
             )
         if attempt == 1 and surface_preparation is not None:
             if not _apply_surface_preparation(surface_preparation, prepare_surface):
@@ -499,6 +574,9 @@ def run_gnome_shell_helper_presentation_cycle(
         ),
         surface_preparation=surface_preparation,
         surface_preparation_failed=surface_preparation_failed,
+        shell_raster_transition_clear_requested=shell_raster_transition_clear_requested,
+        shell_raster_transition_clear_succeeded=shell_raster_transition_clear_succeeded,
+        shell_raster_transition_clear_reason=shell_raster_transition_clear_reason,
     )
 
 
@@ -611,10 +689,14 @@ def _shell_raster_bridge_request(
             and shell_raster_runtime_enabled
             and suppress_pyqt_fallback_on_shell_raster_failure
         ):
+            if _shell_raster_runtime_allows_windowed_managed_pyqt(target_status, request):
+                return request
             return _shell_raster_degraded_clear_request(request, result.reason or "shell_raster_frame_unavailable")
         return bridged_request
     if shell_raster_runtime_enabled:
         if suppress_pyqt_fallback_on_shell_raster_failure:
+            if _shell_raster_runtime_allows_windowed_managed_pyqt(target_status, request):
+                return request
             return _shell_raster_degraded_clear_request(request, "shell_raster_provider_unavailable")
         return request
     if not _env_flag_enabled(env.get(GNOME_HELPER_SHELL_RASTER_PROOF_ENV, "")):
@@ -670,6 +752,187 @@ def _request_with_shell_raster_frame(
     )
 
 
+def _shell_raster_runtime_allows_windowed_managed_pyqt(
+    target_status: HelperTargetStatus | None,
+    request: HelperPresentationRequest | None,
+) -> bool:
+    if request is None or request.action is not HelperPresentationAction.ATTACH:
+        return False
+    target = target_status.target if target_status is not None and target_status.found else None
+    return target is not None and not target.fullscreen
+
+
+def _shell_raster_runtime_allows_unfocused_fullscreen_target(
+    target_status: HelperTargetStatus | None,
+    request: HelperPresentationRequest | None,
+    *,
+    shell_raster_runtime_enabled: bool,
+) -> bool:
+    if not shell_raster_runtime_enabled:
+        return False
+    if request is None or request.action is not HelperPresentationAction.ATTACH:
+        return False
+    target = target_status.target if target_status is not None and target_status.found else None
+    if target is None or not target.fullscreen:
+        return False
+    if target.minimized or not target.showing_on_workspace:
+        return False
+    if target.content_rect is None or target.monitor_rect is None or request.content_rect is None:
+        return False
+    if not target.content_rect.valid or not target.monitor_rect.valid or not request.content_rect.valid:
+        return False
+    tolerance = int(max(0, request.rect_tolerance))
+    return _helper_rects_match(
+        target.content_rect,
+        target.monitor_rect,
+        tolerance=tolerance,
+    ) and _helper_rects_match(
+        request.content_rect,
+        target.monitor_rect,
+        tolerance=tolerance,
+    )
+
+
+def _request_with_windowed_title_bar_compensation(
+    target_status: HelperTargetStatus | None,
+    request: HelperPresentationRequest | None,
+    *,
+    enabled: bool,
+    height: int,
+) -> HelperPresentationRequest | None:
+    if not enabled:
+        return request
+    try:
+        offset = int(height)
+    except (TypeError, ValueError):
+        return request
+    if offset <= 0 or request is None:
+        return request
+    if request.action is not HelperPresentationAction.ATTACH:
+        return request
+    if request.rect_source != GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK:
+        return request
+    if request.content_rect is None or not request.content_rect.valid:
+        return request
+    if request.shell_raster_frame is not None or request.renderer == SHELL_RASTER_FRAME_RENDERER:
+        return request
+    target = target_status.target if target_status is not None and target_status.found else None
+    if target is None or target.fullscreen:
+        return request
+    rect = request.content_rect
+    offset = min(offset, max(0, rect.height - 1))
+    if offset <= 0:
+        return request
+    return replace(
+        request,
+        content_rect=HelperRect(rect.x, rect.y + offset, rect.width, max(1, rect.height - offset)),
+    )
+
+
+def _managed_pyqt_shell_raster_transition_clear_reason(
+    state: GnomeHelperPresentationRuntimeState,
+    target_status: HelperTargetStatus | None,
+    request: HelperPresentationRequest | None,
+    *,
+    shell_raster_runtime_enabled: bool,
+) -> str:
+    if not shell_raster_runtime_enabled:
+        return ""
+    if not _shell_raster_runtime_allows_windowed_managed_pyqt(target_status, request):
+        return ""
+    if request is None or request.shell_raster_frame is not None or request.renderer == SHELL_RASTER_FRAME_RENDERER:
+        return ""
+    if not _runtime_state_has_shell_raster_presentation(state):
+        return ""
+    return GNOME_HELPER_REASON_SHELL_RASTER_TO_MANAGED_PYQT_CLEAR
+
+
+def _runtime_state_has_shell_raster_presentation(state: GnomeHelperPresentationRuntimeState) -> bool:
+    request = state.last_request
+    if request is not None and (
+        request.renderer == SHELL_RASTER_FRAME_RENDERER or request.shell_raster_frame is not None
+    ):
+        return True
+    status = state.last_presentation_status
+    if status is not None and (
+        status.renderer == SHELL_RASTER_FRAME_RENDERER or status.shell_raster_frame is not None
+    ):
+        return True
+    return False
+
+
+def _clear_shell_raster_frame_for_managed_pyqt_transition(
+    fetch_presentation: Callable[[HelperPresentationRequest], object],
+    request: HelperPresentationRequest | None,
+    *,
+    reason: str,
+) -> bool:
+    if request is None:
+        return False
+    try:
+        fetch_presentation(_shell_raster_degraded_clear_request(request, reason))
+    except Exception:
+        return False
+    return True
+
+
+def _shell_raster_transition_clear_failed_status(
+    target_status: HelperTargetStatus | None,
+    request: HelperPresentationRequest | None,
+    *,
+    reason: str,
+    now_monotonic: float,
+) -> HelperPresentationStatus:
+    target_token = request.target_token if request is not None else ""
+    target = target_status.target if target_status is not None else None
+    if target is not None and not target_token:
+        target_token = target.target_token
+    request_reasons = request.degrade_reasons if request is not None else ()
+    return HelperPresentationStatus(
+        state=HelperPresentationState.DEGRADED,
+        action=HelperPresentationAction.DEGRADE,
+        helper_protocol=HELPER_PROTOCOL,
+        target_token=target_token,
+        rect_source=request.rect_source if request is not None else "",
+        requested_rect=request.content_rect if request is not None else None,
+        renderer=request.renderer if request is not None else "pyqt",
+        standalone_mode=request.standalone_mode if request is not None else False,
+        pyqt_renderer_preserved=True,
+        degrade_reasons=tuple(
+            dict.fromkeys(
+                request_reasons
+                + (
+                    reason or GNOME_HELPER_REASON_SHELL_RASTER_TO_MANAGED_PYQT_CLEAR,
+                    GNOME_HELPER_REASON_SHELL_RASTER_TO_MANAGED_PYQT_CLEAR_FAILED,
+                )
+            )
+        ),
+        observed_at_monotonic=now_monotonic,
+        detail="Shell raster clear failed before managed PyQt windowed transition",
+    )
+
+
+def _surface_preparation_for_request(
+    target_status: HelperTargetStatus | None,
+    request: HelperPresentationRequest | None,
+    *,
+    env: Mapping[str, str],
+    shell_raster_runtime_enabled: bool,
+) -> BackendPresentationSurfacePreparation | None:
+    fullscreen_preparation = _borderless_fullscreen_surface_preparation(
+        target_status,
+        request,
+        env=env,
+    )
+    if fullscreen_preparation is not None:
+        return fullscreen_preparation
+    return _managed_windowed_surface_preparation(
+        target_status,
+        request,
+        shell_raster_runtime_enabled=shell_raster_runtime_enabled,
+    )
+
+
 def _borderless_fullscreen_surface_preparation(
     target_status: HelperTargetStatus | None,
     request: HelperPresentationRequest | None,
@@ -708,6 +971,33 @@ def _borderless_fullscreen_surface_preparation(
         mode=GNOME_HELPER_SURFACE_PREPARATION_FULLSCREEN_MONITOR,
         rect=rect,
         reason="gnome_borderless_full_monitor",
+        target_token=request.target_token,
+        rect_source=request.rect_source,
+    )
+
+
+def _managed_windowed_surface_preparation(
+    target_status: HelperTargetStatus | None,
+    request: HelperPresentationRequest | None,
+    *,
+    shell_raster_runtime_enabled: bool,
+) -> BackendPresentationSurfacePreparation | None:
+    if not shell_raster_runtime_enabled:
+        return None
+    if target_status is None or request is None or request.action is not HelperPresentationAction.ATTACH:
+        return None
+    if request.shell_raster_frame is not None or request.renderer == SHELL_RASTER_FRAME_RENDERER:
+        return None
+    target = target_status.target if target_status.found else None
+    if target is None or target.fullscreen:
+        return None
+    rect = _rect_signature(request.content_rect)
+    if rect is None:
+        return None
+    return BackendPresentationSurfacePreparation(
+        mode=GNOME_HELPER_SURFACE_PREPARATION_MANAGED_WINDOWED,
+        rect=rect,
+        reason=GNOME_HELPER_REASON_WINDOWED_MANAGED_PYQT,
         target_token=request.target_token,
         rect_source=request.rect_source,
     )

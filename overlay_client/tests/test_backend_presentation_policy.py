@@ -16,7 +16,12 @@ from overlay_client.backend.presentation_policy import (
 )
 
 
-def _valid_snapshot(*, focused: bool = True) -> BackendPresentationVisibilitySnapshot:
+def _valid_snapshot(
+    *,
+    focused: bool = True,
+    prepared_surface_requires_mapping: bool = False,
+    prepared_surface_allows_unfocused_content: bool = False,
+) -> BackendPresentationVisibilitySnapshot:
     return BackendPresentationVisibilitySnapshot(
         target_available=True,
         target_has_focus=focused,
@@ -26,6 +31,8 @@ def _valid_snapshot(*, focused: bool = True) -> BackendPresentationVisibilitySna
         presentation_attachable=True,
         overlay_window_found=True,
         presentation_rect_match=True,
+        prepared_surface_requires_mapping=prepared_surface_requires_mapping,
+        prepared_surface_allows_unfocused_content=prepared_surface_allows_unfocused_content,
     )
 
 
@@ -154,6 +161,44 @@ def test_backend_presentation_visibility_keeps_hidden_overlay_hidden_until_focus
     assert decision.content_visible is False
     assert decision.state.focus_loss_samples == 1
     assert decision.state.focus_lost_since_monotonic == 10.0
+
+
+def test_backend_presentation_visibility_maps_prepared_surface_suppressed_until_focus_returns() -> None:
+    decision = decide_backend_presentation_visibility(
+        _valid_snapshot(focused=False, prepared_surface_requires_mapping=True),
+        keep_overlay_visible=False,
+        currently_visible=False,
+        now_monotonic=10.0,
+    )
+
+    assert decision.show is True
+    assert decision.reason == "prepared_surface_focus_lost_suppressed"
+    assert decision.surface_action == BACKEND_PRESENTATION_SURFACE_MAPPED_SUPPRESSED
+    assert decision.content_visible is False
+    assert decision.content_suppressed is True
+    assert decision.state.focus_loss_samples == 1
+    assert decision.state.focus_lost_since_monotonic == 10.0
+
+
+def test_backend_presentation_visibility_shows_matched_prepared_surface_when_focus_is_unreliable() -> None:
+    decision = decide_backend_presentation_visibility(
+        _valid_snapshot(
+            focused=False,
+            prepared_surface_requires_mapping=True,
+            prepared_surface_allows_unfocused_content=True,
+        ),
+        keep_overlay_visible=False,
+        currently_visible=True,
+        previous=BackendPresentationVisibilityState(focus_loss_samples=3, focus_lost_since_monotonic=10.0),
+        now_monotonic=20.0,
+    )
+
+    assert decision.show is True
+    assert decision.reason == "prepared_surface_focus_unreliable_visible"
+    assert decision.surface_action == BACKEND_PRESENTATION_SURFACE_MAPPED_VISIBLE
+    assert decision.content_visible is True
+    assert decision.content_suppressed is False
+    assert decision.state == BackendPresentationVisibilityState()
 
 
 def test_backend_presentation_visibility_keeps_visible_until_focus_loss_time_threshold() -> None:

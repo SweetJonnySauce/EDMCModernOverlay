@@ -53,6 +53,29 @@ def test_validate_gnome_shell_helper_health_accepts_valid_json_string() -> None:
     assert status.state is HelperHealthState.HEALTHY
 
 
+def test_validate_gnome_shell_helper_health_accepts_dev_feature_gate_diagnostics() -> None:
+    status = validate_gnome_shell_helper_health_payload(
+        _health_payload(
+            feature_gate={
+                "schema": 1,
+                "mode": "dbus_health_only",
+                "dev_mode_enabled": True,
+                "diagnostics_enabled": True,
+                "dbus_enabled": True,
+                "target_query_enabled": False,
+                "presentation_enabled": False,
+                "overview_hooks_enabled": False,
+                "raster_code_enabled": False,
+                "raster_actor_enabled": False,
+            },
+        ),
+        observed_at_monotonic=100.0,
+        now_monotonic=100.0,
+    )
+
+    assert status.state is HelperHealthState.HEALTHY
+
+
 def test_validate_gnome_shell_helper_health_accepts_single_value_dbus_tuple() -> None:
     status = validate_gnome_shell_helper_health_payload(
         (json.dumps(_health_payload()),),

@@ -11,7 +11,10 @@ from overlay_client.backend.presentation_policy import BackendPresentationVisibi
 from overlay_client.backend.probe import ProbeInputs, ProbeSource, collect_platform_probe
 from overlay_client.backend.selector import BackendSelector
 from overlay_client.backend.status import BackendSelectionStatus
-from overlay_client.backend.surface_preparation import BackendPresentationSurfacePreparation
+from overlay_client.backend.surface_preparation import (
+    BACKEND_PRESENTATION_SURFACE_PREPARATION_MANAGED_WINDOWED,
+    BackendPresentationSurfacePreparation,
+)
 
 if TYPE_CHECKING:
     from overlay_client.backend import HelperPresentationRequest, HelperTargetStatus
@@ -62,6 +65,8 @@ class BackendPresentationCycleResult:
             payload.get("surface_preparation"),
             str(payload.get("surface_preparation_rect")),
             payload.get("surface_preparation_failed"),
+            payload.get("prepared_surface_requires_mapping"),
+            payload.get("prepared_surface_allows_unfocused_content"),
             payload.get("legacy_geometry_policy"),
             str(payload.get("shell_raster_metrics")),
         )
@@ -258,6 +263,8 @@ def run_backend_presentation_cycle(
     standalone_mode: bool = False,
     keep_overlay_visible: bool = False,
     previous_surface_action: str = "",
+    title_bar_compensation_enabled: bool = False,
+    title_bar_compensation_height: int = 0,
     gnome_runner: GnomePresentationCycleRunner | None = None,
     prepare_surface: BackendPresentationSurfacePreparer | None = None,
     raster_frame_provider: BackendRasterFrameProvider | None = None,
@@ -274,6 +281,8 @@ def run_backend_presentation_cycle(
             standalone_mode=standalone_mode,
             keep_overlay_visible=keep_overlay_visible,
             previous_surface_action=previous_surface_action,
+            title_bar_compensation_enabled=title_bar_compensation_enabled,
+            title_bar_compensation_height=title_bar_compensation_height,
             prepare_surface=prepare_surface,
             shell_raster_frame_provider=raster_frame_provider,
             shell_raster_runtime_enabled=_gnome_shell_raster_selected(status),
@@ -365,6 +374,10 @@ def _diagnostics_from_gnome_helper_result(
             "presentation_rect_match": bool(
                 result.presentation_status is not None and result.presentation_status.rect_match
             ),
+            "prepared_surface_requires_mapping": _prepared_surface_requires_mapping_from_gnome_helper_result(result),
+            "prepared_surface_allows_unfocused_content": (
+                _prepared_surface_allows_unfocused_content_from_gnome_helper_result(result)
+            ),
         }
     )
     return payload
@@ -383,7 +396,28 @@ def _visibility_snapshot_from_gnome_helper_result(
         presentation_attachable=bool(result.should_show_overlay and result.presentation_status is not None),
         overlay_window_found=bool(result.presentation_status is not None and result.presentation_status.overlay_token),
         presentation_rect_match=bool(result.presentation_status is not None and result.presentation_status.rect_match),
+        prepared_surface_requires_mapping=_prepared_surface_requires_mapping_from_gnome_helper_result(result),
+        prepared_surface_allows_unfocused_content=_prepared_surface_allows_unfocused_content_from_gnome_helper_result(
+            result
+        ),
     )
+
+
+def _prepared_surface_requires_mapping_from_gnome_helper_result(
+    result: "GnomeHelperPresentationCycleResult",
+) -> bool:
+    surface_preparation = getattr(result, "surface_preparation", None)
+    return (
+        surface_preparation is not None
+        and getattr(surface_preparation, "mode", "") == BACKEND_PRESENTATION_SURFACE_PREPARATION_MANAGED_WINDOWED
+        and not bool(getattr(result, "surface_preparation_failed", False))
+    )
+
+
+def _prepared_surface_allows_unfocused_content_from_gnome_helper_result(
+    result: "GnomeHelperPresentationCycleResult",
+) -> bool:
+    return _prepared_surface_requires_mapping_from_gnome_helper_result(result)
 
 
 def _scale_size_from_gnome_helper_result(

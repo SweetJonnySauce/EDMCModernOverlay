@@ -75,7 +75,10 @@ from overlay_client.backend.consumers import (
     run_backend_presentation_cycle,
     uses_transient_parent,
 )
-from overlay_client.backend.surface_preparation import BackendPresentationSurfacePreparation
+from overlay_client.backend.surface_preparation import (
+    BACKEND_PRESENTATION_SURFACE_PREPARATION_MANAGED_WINDOWED,
+    BackendPresentationSurfacePreparation,
+)
 from overlay_client.backend.contracts import (
     BackendBundle,
     BackendCapabilities,
@@ -387,6 +390,8 @@ class _FakeGnomePresentationResult:
         )
         self.should_show_overlay = True
         self.target_found = True
+        self.surface_preparation = None
+        self.surface_preparation_failed = False
         self.target_status = type(
             "TargetStatus",
             (),
@@ -445,19 +450,28 @@ def test_backend_presentation_cycle_wraps_gnome_helper_result_when_helper_availa
             ),
         ),
     )
-    calls: list[bool] = []
+    calls: list[tuple[bool, bool, bool, int]] = []
 
     def fake_runner(
         *,
         standalone_mode: bool = False,
         keep_overlay_visible: bool = False,
         previous_surface_action: str = "",
+        title_bar_compensation_enabled: bool = False,
+        title_bar_compensation_height: int = 0,
         prepare_surface=None,
         shell_raster_frame_provider=None,
         shell_raster_runtime_enabled: bool = False,
         suppress_pyqt_fallback_on_shell_raster_failure: bool = False,
     ) -> _FakeGnomePresentationResult:
-        calls.append((standalone_mode, keep_overlay_visible))
+        calls.append(
+            (
+                standalone_mode,
+                keep_overlay_visible,
+                title_bar_compensation_enabled,
+                title_bar_compensation_height,
+            )
+        )
         assert previous_surface_action == "mapped_visible"
         assert prepare_surface is None
         assert shell_raster_frame_provider is None
@@ -470,11 +484,13 @@ def test_backend_presentation_cycle_wraps_gnome_helper_result_when_helper_availa
         standalone_mode=False,
         keep_overlay_visible=True,
         previous_surface_action="mapped_visible",
+        title_bar_compensation_enabled=True,
+        title_bar_compensation_height=30,
         gnome_runner=fake_runner,
     )
 
     assert isinstance(result, BackendPresentationCycleResult)
-    assert calls == [(False, True)]
+    assert calls == [(False, True, True, 30)]
     assert result.should_show_overlay is True
     assert result.scale_size == (300, 200)
     assert result.prime_rect == (10, 20, 300, 200)
@@ -488,6 +504,66 @@ def test_backend_presentation_cycle_wraps_gnome_helper_result_when_helper_availa
     assert result.visibility_snapshot.presentation_attachable is True
     assert result.visibility_snapshot.overlay_window_found is True
     assert result.visibility_snapshot.presentation_rect_match is True
+    assert result.visibility_snapshot.prepared_surface_requires_mapping is False
+    assert result.visibility_snapshot.prepared_surface_allows_unfocused_content is False
+    assert result.diagnostics["prepared_surface_requires_mapping"] is False
+    assert result.diagnostics["prepared_surface_allows_unfocused_content"] is False
+
+
+def test_backend_presentation_cycle_marks_managed_windowed_surface_as_requiring_mapping():
+    status = BackendSelectionStatus(
+        probe=PlatformProbeResult(
+            operating_system=OperatingSystem.LINUX,
+            session_type=SessionType.WAYLAND,
+            qt_platform_name="wayland",
+            compositor="gnome-shell",
+        ),
+        selected_backend=BackendDescriptor(
+            BackendFamily.COMPOSITOR_HELPER,
+            BackendInstance.GNOME_SHELL_RASTER,
+        ),
+        classification=CapabilityClassification.DEGRADED_OVERLAY,
+        helper_states=(
+            HelperCapabilityState(
+                helper=HelperKind.GNOME_SHELL_EXTENSION,
+                required=True,
+                installed=True,
+                enabled=True,
+                approved=True,
+            ),
+        ),
+    )
+    fake_result = _FakeGnomePresentationResult()
+    rect = fake_result.request.content_rect
+    fake_result.surface_preparation = BackendPresentationSurfacePreparation(
+        mode=BACKEND_PRESENTATION_SURFACE_PREPARATION_MANAGED_WINDOWED,
+        rect=(rect.x, rect.y, rect.width, rect.height),
+        reason="test_managed_windowed",
+        target_token="meta:21",
+        rect_source="frame_rect_fallback",
+    )
+    fake_result.target_status.target.has_focus = False
+    fake_result.presentation_status = HelperPresentationStatus(
+        state=HelperPresentationState.DEGRADED,
+        action=HelperPresentationAction.ATTACH,
+        target_token="meta:21",
+        overlay_token="",
+        requested_rect=rect,
+        applied_rect=rect,
+        rect_match=True,
+        degrade_reasons=("overlay_window_not_found",),
+    )
+
+    result = run_backend_presentation_cycle(status, gnome_runner=lambda **_: fake_result)
+
+    assert result is not None
+    assert result.should_show_overlay is True
+    assert result.visibility_snapshot.target_has_focus is False
+    assert result.visibility_snapshot.overlay_window_found is False
+    assert result.visibility_snapshot.prepared_surface_requires_mapping is True
+    assert result.visibility_snapshot.prepared_surface_allows_unfocused_content is True
+    assert result.diagnostics["prepared_surface_requires_mapping"] is True
+    assert result.diagnostics["prepared_surface_allows_unfocused_content"] is True
 
 
 def test_backend_presentation_cycle_enables_shell_raster_when_selected():

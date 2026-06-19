@@ -18,6 +18,10 @@ import {
     HELPER_DBUS_PRESENTATION_METHOD,
     HELPER_DBUS_SERVICE,
     HELPER_DBUS_TARGET_METHOD,
+    HELPER_DEV_MODE_CONFIG_DIR,
+    HELPER_DEV_MODE_CONFIG_FILE,
+    HELPER_DEV_MODE_DEFAULT,
+    HELPER_DEV_MODE_NAMES,
     HELPER_KIND,
     HELPER_PROTOCOL,
     HELPER_UUID,
@@ -55,9 +59,11 @@ const SHELL_ACTOR_PROOF_TIMEOUT_MS = 5000;
 const SHELL_RASTER_FRAME_TIMEOUT_MS_DEFAULT = 1500;
 const SHELL_RASTER_FRAME_MAX_BYTES = 8 * 1024 * 1024;
 const SHELL_RASTER_FRAME_RENDERER = 'gnome_shell_raster_frame';
-const SHELL_RASTER_FRAME_PARENT = 'target_window_actor_child';
+const SHELL_RASTER_FRAME_PARENT = 'target_window_actor_sibling';
+const SHELL_RASTER_REGION_PARENT = 'target_window_actor_child';
+const SHELL_RASTER_STACKING_REFRESH_DELAYS_MS = Object.freeze([50, 150, 300]);
 const SHELL_ACTOR_GROUP_DIAGNOSTIC_CHILD_LIMIT = 12;
-const SHELL_ACTOR_PROOF_PARENT = 'target_window_actor_child';
+const SHELL_ACTOR_PROOF_PARENT = 'target_window_actor_sibling';
 const SHELL_ACTOR_GROUP_DIAGNOSTIC_NAMES = [
     'global.stage',
     'global.window_group',
@@ -75,9 +81,140 @@ const PRESENTATION_STRATEGY_PROBES = [
     'resize_then_make_fullscreen',
     'fullscreen_only',
 ];
+const HELPER_BASE_DBUS_CAPABILITIES = Object.freeze([
+    'hello',
+    'health',
+    'version',
+    'protocol',
+    'capabilities',
+]);
+const HELPER_MODE_FEATURES = Object.freeze({
+    lifecycle_only: Object.freeze({
+        dbusEnabled: false,
+        targetQueryEnabled: false,
+        presentationEnabled: false,
+        overviewHooksEnabled: false,
+        rasterCodeEnabled: false,
+        rasterActorEnabled: false,
+    }),
+    dbus_health_only: Object.freeze({
+        dbusEnabled: true,
+        targetQueryEnabled: false,
+        presentationEnabled: false,
+        overviewHooksEnabled: false,
+        rasterCodeEnabled: false,
+        rasterActorEnabled: false,
+    }),
+    target_query_enabled: Object.freeze({
+        dbusEnabled: true,
+        targetQueryEnabled: true,
+        presentationEnabled: false,
+        overviewHooksEnabled: false,
+        rasterCodeEnabled: false,
+        rasterActorEnabled: false,
+    }),
+    overview_hooks_enabled: Object.freeze({
+        dbusEnabled: true,
+        targetQueryEnabled: true,
+        presentationEnabled: false,
+        overviewHooksEnabled: true,
+        rasterCodeEnabled: false,
+        rasterActorEnabled: false,
+    }),
+    raster_code_enabled_no_actor: Object.freeze({
+        dbusEnabled: true,
+        targetQueryEnabled: true,
+        presentationEnabled: true,
+        overviewHooksEnabled: true,
+        rasterCodeEnabled: true,
+        rasterActorEnabled: false,
+    }),
+    raster_actor_enabled: Object.freeze({
+        dbusEnabled: true,
+        targetQueryEnabled: true,
+        presentationEnabled: true,
+        overviewHooksEnabled: true,
+        rasterCodeEnabled: true,
+        rasterActorEnabled: true,
+    }),
+    full_helper: Object.freeze({
+        dbusEnabled: true,
+        targetQueryEnabled: true,
+        presentationEnabled: true,
+        overviewHooksEnabled: true,
+        rasterCodeEnabled: true,
+        rasterActorEnabled: true,
+    }),
+});
+
+function helperFeatureGatePayload(featureGate = {}) {
+    return {
+        schema: 1,
+        mode: String(featureGate.mode || HELPER_DEV_MODE_DEFAULT),
+        dev_mode_enabled: Boolean(featureGate.devModeEnabled),
+        diagnostics_enabled: Boolean(featureGate.diagnosticsEnabled),
+        config_source: String(featureGate.configSource || 'default'),
+        config_path: String(featureGate.configPath || ''),
+        config_status: String(featureGate.configStatus || ''),
+        dbus_enabled: Boolean(featureGate.dbusEnabled),
+        target_query_enabled: Boolean(featureGate.targetQueryEnabled),
+        presentation_enabled: Boolean(featureGate.presentationEnabled),
+        overview_hooks_enabled: Boolean(featureGate.overviewHooksEnabled),
+        raster_code_enabled: Boolean(featureGate.rasterCodeEnabled),
+        raster_actor_enabled: Boolean(featureGate.rasterActorEnabled),
+    };
+}
+
+function helperDiagnosticLog(enabled, event, fields = {}) {
+    if (!enabled) {
+        return;
+    }
+    const payload = {
+        schema: 1,
+        component: 'edmc_modern_overlay_gnome_helper',
+        event,
+        uuid: HELPER_UUID,
+        generated_at_unix_ms: Date.now(),
+        generated_at_monotonic_us: GLib.get_monotonic_time(),
+        ...fields,
+    };
+    try {
+        console.log(`${HELPER_UUID} ${JSON.stringify(payload)}`);
+    } catch (error) {
+        console.log(`${HELPER_UUID} diagnostic_json_failed event=${event} error=${String(error)}`);
+    }
+}
+
+function helperConfigBool(config, defaultValue, ...names) {
+    for (const name of names) {
+        const value = config?.[name];
+        if (typeof value === 'boolean') {
+            return value;
+        }
+        if (typeof value === 'string') {
+            const normalised = value.trim().toLowerCase();
+            if (['1', 'true', 'yes', 'on'].includes(normalised)) {
+                return true;
+            }
+            if (['0', 'false', 'no', 'off'].includes(normalised)) {
+                return false;
+            }
+        }
+    }
+    return defaultValue;
+}
 
 class HelperHealthService {
-    constructor() {
+    constructor(featureGate = {}) {
+        this._featureGate = {
+            mode: HELPER_DEV_MODE_DEFAULT,
+            configSource: 'default',
+            configPath: '',
+            configStatus: 'default_full_helper',
+            devModeEnabled: false,
+            diagnosticsEnabled: false,
+            ...featureGate,
+        };
         this._startedAtUnixMs = Date.now();
         this._startedAtMonotonicUs = GLib.get_monotonic_time();
         this._targetSequence = 0;
@@ -90,7 +227,17 @@ class HelperHealthService {
         this._shellRasterRegions = new Map();
         this._shellRasterFrameTimeoutId = 0;
         this._shellRasterOverviewSignalIds = [];
-        this._connectShellRasterOverviewSignals();
+        this._logDiagnostic('service_constructed', {
+            feature_gate: helperFeatureGatePayload(this._featureGate),
+            capabilities: this._helperCapabilities(),
+        });
+        if (this._featureGate.overviewHooksEnabled) {
+            this._connectShellRasterOverviewSignals();
+        } else {
+            this._logDiagnostic('overview_hooks_skipped', {
+                reason: 'disabled_by_mode',
+            });
+        }
     }
 
     Hello(_client) {
@@ -104,10 +251,11 @@ class HelperHealthService {
             helper_kind: HELPER_KIND,
             helper_version: HELPER_VERSION,
             helper_protocol: HELPER_PROTOCOL,
-            capabilities: HELPER_CAPABILITIES,
+            capabilities: this._helperCapabilities(),
             service_name: HELPER_DBUS_SERVICE,
             object_path: HELPER_DBUS_OBJECT_PATH,
             interface_name: HELPER_DBUS_INTERFACE,
+            feature_gate: helperFeatureGatePayload(this._featureGate),
             started_at_unix_ms: this._startedAtUnixMs,
             started_at_monotonic_us: this._startedAtMonotonicUs,
             generated_at_unix_ms: Date.now(),
@@ -115,10 +263,70 @@ class HelperHealthService {
         });
     }
 
+    _helperCapabilities() {
+        const capabilities = [...HELPER_BASE_DBUS_CAPABILITIES];
+        if (this._featureGate.targetQueryEnabled) {
+            capabilities.push('target_state');
+        }
+        if (this._featureGate.presentationEnabled) {
+            capabilities.push('presentation_state');
+        }
+        if (this._featureGate.mode === HELPER_DEV_MODE_DEFAULT) {
+            return HELPER_CAPABILITIES;
+        }
+        return Object.freeze(capabilities);
+    }
+
+    _logDiagnostic(event, fields = {}) {
+        helperDiagnosticLog(Boolean(this._featureGate?.diagnosticsEnabled), event, {
+            mode: String(this._featureGate?.mode || HELPER_DEV_MODE_DEFAULT),
+            ...fields,
+        });
+    }
+
+    _logException(operation, error, fields = {}) {
+        this._logDiagnostic('helper_exception', {
+            operation,
+            error: this._errorMessage(error),
+            ...fields,
+        });
+    }
+
+    _shellActorCounts() {
+        return {
+            shell_actor_proof_visible: Boolean(this._shellActorProof?.actor),
+            shell_raster_frame_visible: Boolean(this._shellRasterFrame?.actor),
+            shell_raster_region_count: Number(this._shellRasterRegions?.size || 0),
+        };
+    }
+
     GetTargetState(_query) {
         this._targetSequence += 1;
         const generatedAtUnixMs = Date.now();
         const generatedAtMonotonicUs = GLib.get_monotonic_time();
+        if (!this._featureGate.targetQueryEnabled) {
+            this._logDiagnostic('target_query_blocked_by_mode', {
+                feature_gate: helperFeatureGatePayload(this._featureGate),
+            });
+            return JSON.stringify({
+                status: 'target_query_disabled_by_mode',
+                helper_kind: HELPER_KIND,
+                helper_version: HELPER_VERSION,
+                helper_protocol: HELPER_PROTOCOL,
+                coordinate_space: HELPER_COORDINATE_SPACE,
+                sequence: this._targetSequence,
+                generated_at_unix_ms: generatedAtUnixMs,
+                generated_at_monotonic_us: generatedAtMonotonicUs,
+                candidate_count: 0,
+                launcher_count: 0,
+                detail: 'target query disabled by helper mode',
+                target: null,
+                feature_gate: helperFeatureGatePayload(this._featureGate),
+            });
+        }
+        this._logDiagnostic('target_query_started', {
+            feature_gate: helperFeatureGatePayload(this._featureGate),
+        });
         const queryOptions = this._targetQueryOptions(_query);
         const windows = this._enumerateWindows(queryOptions);
         const selection = this._selectEliteTarget(windows);
@@ -135,6 +343,7 @@ class HelperHealthService {
             launcher_count: selection.launcherCount,
             detail: selection.detail,
             target: selection.target,
+            feature_gate: helperFeatureGatePayload(this._featureGate),
         });
     }
 
@@ -142,6 +351,19 @@ class HelperHealthService {
         this._presentationSequence += 1;
         const generatedAtUnixMs = Date.now();
         const generatedAtMonotonicUs = GLib.get_monotonic_time();
+        if (!this._featureGate.presentationEnabled) {
+            this._logDiagnostic('presentation_blocked_by_mode', {
+                feature_gate: helperFeatureGatePayload(this._featureGate),
+            });
+            return JSON.stringify(this._presentationPayload({
+                status: 'presentation_unsupported',
+                action: 'degrade',
+                generatedAtUnixMs,
+                generatedAtMonotonicUs,
+                degradeReasons: ['presentation_disabled_by_mode'],
+                detail: 'presentation disabled by helper mode',
+            }));
+        }
         const parsed = this._parseJsonObject(request);
         if (!parsed.ok) {
             return JSON.stringify(this._presentationPayload({
@@ -336,11 +558,15 @@ class HelperHealthService {
     _enumerateWindowEntries(options = {}) {
         const tracker = Shell.WindowTracker.get_default();
         return global.get_window_actors()
-            .map(actor => actor?.get_meta_window?.())
-            .filter(window => window)
-            .map(window => ({
-                window,
-                payload: this._windowPayload(window, tracker, options),
+            .map(actor => ({
+                actor,
+                window: actor?.get_meta_window?.(),
+            }))
+            .filter(entry => entry.window)
+            .map(entry => ({
+                actor: entry.actor,
+                window: entry.window,
+                payload: this._windowPayload(entry.window, tracker, options),
             }));
     }
 
@@ -889,6 +1115,7 @@ class HelperHealthService {
             sequence: this._presentationSequence,
             generated_at_unix_ms: generatedAtUnixMs,
             generated_at_monotonic_us: generatedAtMonotonicUs,
+            feature_gate: helperFeatureGatePayload(this._featureGate),
             detail,
         };
         if (frameVersion) {
@@ -927,8 +1154,41 @@ class HelperHealthService {
         rectTolerance,
     }) {
         const normalisedAction = String(frameAction || 'update').trim().toLowerCase();
+        if (!this._featureGate.rasterCodeEnabled) {
+            this._logDiagnostic('raster_code_blocked_by_mode', {
+                action: normalisedAction,
+                feature_gate: helperFeatureGatePayload(this._featureGate),
+                actor_counts: this._shellActorCounts(),
+            });
+            return this._presentationPayload({
+                status: 'presentation_unsupported',
+                action: 'degrade',
+                targetToken,
+                requestedRect,
+                standaloneMode,
+                generatedAtUnixMs,
+                generatedAtMonotonicUs,
+                renderer: SHELL_RASTER_FRAME_RENDERER,
+                degradeReasons: ['raster_code_disabled_by_mode'],
+                detail: 'shell raster code disabled by helper mode',
+                shellRasterFrame: this._shellRasterFramePayload({
+                    requestedAction: normalisedAction,
+                    visible: Boolean(this._shellRasterFrame?.actor),
+                    requestedRect,
+                    targetToken,
+                    eligible: false,
+                    eligibilityReasons: ['raster_code_disabled_by_mode'],
+                }),
+            });
+        }
         if (normalisedAction === 'clear') {
             const cleanupAction = this._clearShellRasterFrame('explicit_clear');
+            this._logDiagnostic('raster_clear_requested', {
+                reason: 'explicit_clear',
+                cleanup_action: cleanupAction,
+                feature_gate: helperFeatureGatePayload(this._featureGate),
+                actor_counts: this._shellActorCounts(),
+            });
             return this._presentationPayload({
                 status: 'shell_raster_frame_cleared',
                 action,
@@ -1001,6 +1261,7 @@ class HelperHealthService {
         const windows = this._enumerateWindowEntries();
         const targetEntry = windows.find(entry => entry.payload.targetToken === targetToken);
         const targetPayload = targetEntry?.payload || null;
+        const targetActor = targetEntry?.actor || null;
         const focusRiskReason = this._shellRasterFrameFocusRiskReason(targetPayload, allowUnfocusedTarget);
         if (focusRiskReason) {
             const cleanupAction = this._clearShellRasterFrame(focusRiskReason);
@@ -1047,6 +1308,12 @@ class HelperHealthService {
         const reasons = [...eligibility.reasons, ...pathValidation.reasons];
         if (reasons.length) {
             const cleanupAction = this._clearShellRasterFrame('invalid_frame');
+            this._logDiagnostic('raster_frame_rejected', {
+                reasons,
+                cleanup_action: cleanupAction,
+                feature_gate: helperFeatureGatePayload(this._featureGate),
+                actor_counts: this._shellActorCounts(),
+            });
             return this._presentationPayload({
                 status: targetPayload ? 'presentation_degraded' : 'target_unavailable',
                 action,
@@ -1082,10 +1349,55 @@ class HelperHealthService {
                 }),
             });
         }
+        if (!this._featureGate.rasterActorEnabled) {
+            const cleanupAction = this._clearShellRasterFrame('raster_actor_disabled_by_mode');
+            this._logDiagnostic('raster_actor_blocked_by_mode', {
+                action: normalisedAction,
+                region_count: frameRegions.length,
+                cleanup_action: cleanupAction,
+                feature_gate: helperFeatureGatePayload(this._featureGate),
+                actor_counts: this._shellActorCounts(),
+            });
+            return this._presentationPayload({
+                status: 'presentation_degraded',
+                action,
+                targetToken,
+                requestedRect: targetRect,
+                appliedRect: null,
+                standaloneMode,
+                generatedAtUnixMs,
+                generatedAtMonotonicUs,
+                renderer: SHELL_RASTER_FRAME_RENDERER,
+                degradeReasons: ['raster_actor_disabled_by_mode'],
+                cleanupAction,
+                detail: 'shell raster actor creation disabled by helper mode',
+                shellRasterFrame: this._shellRasterFramePayload({
+                    requestedAction: normalisedAction,
+                    visible: false,
+                    requestedRect: targetRect,
+                    frameRect,
+                    targetToken,
+                    targetPayload,
+                    frameVersion,
+                    imagePath,
+                    checksum,
+                    byteSize,
+                    regions: frameRegions,
+                    eligible: false,
+                    eligibilityReasons: ['raster_actor_disabled_by_mode'],
+                    cleanupAction,
+                    staleTimeoutMs,
+                    sessionId: this._shellRasterSessionIdFromVersion(frameVersion),
+                    allowUnfocusedTarget,
+                    requestDiagnostics,
+                }),
+            });
+        }
 
         const frameResult = multiRegionRequested
             ? this._showShellRasterFrameRegions({
                 targetPayload,
+                targetActor,
                 targetRect,
                 frameRect,
                 frameVersion,
@@ -1094,6 +1406,7 @@ class HelperHealthService {
             })
             : this._showShellRasterFrame({
                 targetPayload,
+                targetActor,
                 targetRect,
                 frameRect,
                 frameVersion,
@@ -1348,6 +1661,7 @@ class HelperHealthService {
 
     _showShellRasterFrame({
         targetPayload,
+        targetActor = null,
         targetRect,
         frameRect,
         frameVersion,
@@ -1358,20 +1672,35 @@ class HelperHealthService {
     }) {
         const totalStartedUs = GLib.get_monotonic_time();
         const sessionId = this._shellRasterSessionIdFromVersion(frameVersion);
-        const targetActor = this._targetWindowActorForToken(targetPayload?.targetToken || '');
-        if (!targetActor || typeof targetActor.add_child !== 'function') {
-            const cleanupAction = this._clearShellRasterFrame('missing_target_window_actor');
+        const frameParent = this._shellRasterFrameParent(targetPayload, targetActor);
+        if (!frameParent.container || typeof frameParent.container.add_child !== 'function') {
+            const cleanupAction = this._clearShellRasterFrame('missing_shell_raster_parent');
+            this._logDiagnostic('raster_actor_parent_missing', {
+                target_token: targetPayload?.targetToken || '',
+                actor_parent: frameParent.name,
+                actor_parent_mode: frameParent.mode,
+                actor_parent_source: frameParent.parentSource,
+                window_group_target_index: frameParent.windowGroupTargetIndex,
+                target_actor_found: Boolean(frameParent.sibling),
+                target_actor_parent: this._actorLabel(this._actorParent(frameParent.sibling)),
+                target_actor_parent_index: this._actorIndexInParent(
+                    this._actorParent(frameParent.sibling),
+                    frameParent.sibling,
+                ),
+                cleanup_action: cleanupAction,
+                actor_counts: this._shellActorCounts(),
+            });
             return {
                 visible: false,
-                actorParent: SHELL_RASTER_FRAME_PARENT,
+                actorParent: frameParent.name,
                 frameDimensions: null,
                 cleanupAction,
-                reasons: ['target_window_actor_unavailable'],
+                reasons: ['shell_raster_parent_unavailable'],
                 timing: this._shellRasterHelperTiming(totalStartedUs),
             };
         }
         const reusableFrame = this._reuseShellRasterFrameIfMatching({
-            targetActor,
+            parent: frameParent,
             targetPayload,
             targetRect,
             frameRect,
@@ -1401,11 +1730,23 @@ class HelperHealthService {
             decodeMs = this._elapsedMs(decodeStartedUs);
             textureActor = loaded.actor;
             dimensions = loaded.dimensions;
+            this._logDiagnostic('raster_actor_create_decision', {
+                action: 'create_single_frame_actor',
+                target_token: targetPayload.targetToken,
+                frame_version: frameVersion,
+                frame_rect: frameRect,
+                dimensions,
+                actor_counts: this._shellActorCounts(),
+            });
             if (dimensions.width > frameRect.width || dimensions.height > frameRect.height) {
                 textureActor.destroy?.();
+                this._logDiagnostic('raster_actor_destroy_decision', {
+                    reason: 'frame_dimensions_exceed_rect',
+                    actor_counts: this._shellActorCounts(),
+                });
                 return {
                     visible: false,
-                    actorParent: SHELL_RASTER_FRAME_PARENT,
+                    actorParent: frameParent.name,
                     frameDimensions: dimensions,
                     cleanupAction,
                     reasons: ['frame_dimensions_exceed_rect'],
@@ -1414,6 +1755,10 @@ class HelperHealthService {
             }
         } catch (_error) {
             decodeMs = this._elapsedMs(totalStartedUs);
+            this._logException('raster_decode_load_failed', _error, {
+                image_path: imagePath,
+                actor_counts: this._shellActorCounts(),
+            });
             return {
                 visible: false,
                 actorParent: SHELL_RASTER_FRAME_PARENT,
@@ -1424,21 +1769,32 @@ class HelperHealthService {
             };
         }
 
-        const localX = frameRect.x - targetRect.x;
-        const localY = frameRect.y - targetRect.y;
+        const localRect = this._shellActorLocalRect(frameRect, targetRect, frameParent);
         const applyStartedUs = GLib.get_monotonic_time();
         let applyMs = 0;
         textureActor.set_reactive?.(false);
-        textureActor.set_position(localX, localY);
+        textureActor.set_position(localRect.x, localRect.y);
         textureActor.set_size(frameRect.width, frameRect.height);
         try {
-            targetActor.add_child(textureActor);
+            this._logDiagnostic('raster_actor_apply_decision', {
+                action: 'add_single_frame_actor',
+                target_token: targetPayload.targetToken,
+                frame_version: frameVersion,
+                actor_parent: frameParent.name,
+                actor_counts: this._shellActorCounts(),
+            });
+            if (!this._addShellActorToParent(textureActor, frameParent)) {
+                throw new Error('failed to attach Shell raster actor to parent');
+            }
         } catch (_error) {
             applyMs = this._elapsedMs(applyStartedUs);
             textureActor.destroy?.();
+            this._logException('raster_texture_apply_failed', _error, {
+                actor_counts: this._shellActorCounts(),
+            });
             return {
                 visible: false,
-                actorParent: SHELL_RASTER_FRAME_PARENT,
+                actorParent: frameParent.name,
                 frameDimensions: dimensions,
                 cleanupAction,
                 reasons: ['texture_apply_failed'],
@@ -1446,7 +1802,6 @@ class HelperHealthService {
             };
         }
         textureActor.show?.();
-        textureActor.raise_top?.();
         applyMs = this._elapsedMs(applyStartedUs);
         this._shellRasterFrame = {
             actor: textureActor,
@@ -1458,13 +1813,19 @@ class HelperHealthService {
             checksum,
             byteSize,
             sessionId,
-            actorParent: SHELL_RASTER_FRAME_PARENT,
+            actorParent: frameParent.name,
             frameDimensions: dimensions,
         };
+        this._logDiagnostic('raster_actor_applied', {
+            target_token: targetPayload.targetToken,
+            frame_version: frameVersion,
+            actor_counts: this._shellActorCounts(),
+        });
+        this._scheduleShellRasterStackingRefresh(frameParent, targetPayload.targetToken, 'single_frame_applied');
         this._refreshShellRasterFrameTimeout(staleTimeoutMs);
         return {
             visible: true,
-            actorParent: SHELL_RASTER_FRAME_PARENT,
+            actorParent: frameParent.name,
             frameDimensions: dimensions,
             cleanupAction,
             sessionId,
@@ -1480,6 +1841,7 @@ class HelperHealthService {
 
     _showShellRasterFrameRegions({
         targetPayload,
+        targetActor = null,
         targetRect,
         frameRect,
         frameVersion,
@@ -1488,16 +1850,32 @@ class HelperHealthService {
     }) {
         const totalStartedUs = GLib.get_monotonic_time();
         const sessionId = this._shellRasterSessionIdFromVersion(frameVersion);
-        const targetActor = this._targetWindowActorForToken(targetPayload?.targetToken || '');
-        if (!targetActor || typeof targetActor.add_child !== 'function') {
-            const cleanupAction = this._clearShellRasterFrame('missing_target_window_actor');
+        const frameParent = this._shellRasterRegionParent(targetPayload, targetActor);
+        if (!frameParent.container || typeof frameParent.container.add_child !== 'function') {
+            const cleanupAction = this._clearShellRasterFrame('missing_shell_raster_parent');
+            this._logDiagnostic('raster_actor_parent_missing', {
+                target_token: targetPayload?.targetToken || '',
+                actor_parent: frameParent.name,
+                actor_parent_mode: frameParent.mode,
+                actor_parent_source: frameParent.parentSource,
+                window_group_target_index: frameParent.windowGroupTargetIndex,
+                target_actor_found: Boolean(frameParent.sibling),
+                target_actor_parent: this._actorLabel(this._actorParent(frameParent.sibling)),
+                target_actor_parent_index: this._actorIndexInParent(
+                    this._actorParent(frameParent.sibling),
+                    frameParent.sibling,
+                ),
+                cleanup_action: cleanupAction,
+                region_count: regions.length,
+                actor_counts: this._shellActorCounts(),
+            });
             return {
                 visible: false,
-                actorParent: SHELL_RASTER_FRAME_PARENT,
+                actorParent: frameParent.name,
                 appliedRect: null,
                 frameDimensions: null,
                 cleanupAction,
-                reasons: ['target_window_actor_unavailable'],
+                reasons: ['shell_raster_parent_unavailable'],
                 timing: this._shellRasterHelperTiming(totalStartedUs),
                 regions: [],
             };
@@ -1515,7 +1893,7 @@ class HelperHealthService {
         for (const region of regions) {
             const regionStartedUs = GLib.get_monotonic_time();
             const reusable = this._reuseShellRasterRegionIfMatching({
-                targetActor,
+                parent: frameParent,
                 targetPayload,
                 targetRect,
                 region,
@@ -1538,12 +1916,26 @@ class HelperHealthService {
                 decodeMs = this._elapsedMs(decodeStartedUs);
                 textureActor = loaded.actor;
                 dimensions = loaded.dimensions;
+                this._logDiagnostic('raster_actor_create_decision', {
+                    action: 'create_region_actor',
+                    target_token: targetPayload.targetToken,
+                    region_id: region.regionId,
+                    frame_version: region.frameVersion,
+                    frame_rect: region.frameRect,
+                    dimensions,
+                    actor_counts: this._shellActorCounts(),
+                });
                 if (dimensions.width > region.frameRect.width || dimensions.height > region.frameRect.height) {
                     textureActor.destroy?.();
+                    this._logDiagnostic('raster_actor_destroy_decision', {
+                        reason: 'region_dimensions_exceed_rect',
+                        region_id: region.regionId,
+                        actor_counts: this._shellActorCounts(),
+                    });
                     this._clearShellRasterFrame('region_dimensions_exceed_rect');
                     return {
                         visible: false,
-                        actorParent: SHELL_RASTER_FRAME_PARENT,
+                        actorParent: frameParent.name,
                         appliedRect: null,
                         frameDimensions: null,
                         cleanupAction: 'region_dimensions_exceed_rect',
@@ -1553,10 +1945,15 @@ class HelperHealthService {
                     };
                 }
             } catch (_error) {
+                this._logException('region_decode_load_failed', _error, {
+                    region_id: region.regionId,
+                    image_path: region.imagePath,
+                    actor_counts: this._shellActorCounts(),
+                });
                 this._clearShellRasterFrame('region_decode_load_failed');
                 return {
                     visible: false,
-                    actorParent: SHELL_RASTER_FRAME_PARENT,
+                    actorParent: frameParent.name,
                     appliedRect: null,
                     frameDimensions: null,
                     cleanupAction: 'region_decode_load_failed',
@@ -1566,23 +1963,36 @@ class HelperHealthService {
                 };
             }
 
-            const localX = region.frameRect.x - targetRect.x;
-            const localY = region.frameRect.y - targetRect.y;
+            const localRect = this._shellActorLocalRect(region.frameRect, targetRect, frameParent);
             const applyStartedUs = GLib.get_monotonic_time();
             let applyMs = 0;
             textureActor.set_reactive?.(false);
-            textureActor.set_position(localX, localY);
+            textureActor.set_position(localRect.x, localRect.y);
             textureActor.set_size(region.frameRect.width, region.frameRect.height);
             try {
                 this._destroyShellRasterRegion(region.regionId, 'replace_region');
-                targetActor.add_child(textureActor);
+                this._logDiagnostic('raster_actor_apply_decision', {
+                    action: 'add_region_actor',
+                    target_token: targetPayload.targetToken,
+                    region_id: region.regionId,
+                    frame_version: region.frameVersion,
+                    actor_parent: frameParent.name,
+                    actor_counts: this._shellActorCounts(),
+                });
+                if (!this._addShellActorToParent(textureActor, frameParent)) {
+                    throw new Error('failed to attach Shell raster region actor to parent');
+                }
             } catch (_error) {
                 applyMs = this._elapsedMs(applyStartedUs);
                 textureActor.destroy?.();
+                this._logException('region_texture_apply_failed', _error, {
+                    region_id: region.regionId,
+                    actor_counts: this._shellActorCounts(),
+                });
                 this._clearShellRasterFrame('region_texture_apply_failed');
                 return {
                     visible: false,
-                    actorParent: SHELL_RASTER_FRAME_PARENT,
+                    actorParent: frameParent.name,
                     appliedRect: null,
                     frameDimensions: null,
                     cleanupAction: 'region_texture_apply_failed',
@@ -1595,7 +2005,6 @@ class HelperHealthService {
                 };
             }
             textureActor.show?.();
-            textureActor.raise_top?.();
             applyMs = this._elapsedMs(applyStartedUs);
             decodedCount += 1;
             totalDecodeMs += decodeMs;
@@ -1611,13 +2020,20 @@ class HelperHealthService {
                 checksum: region.checksum,
                 byteSize: region.byteSize,
                 sessionId,
-                actorParent: SHELL_RASTER_FRAME_PARENT,
+                actorParent: frameParent.name,
                 frameDimensions: dimensions,
             };
             this._shellRasterRegions.set(region.regionId, record);
+            this._logDiagnostic('raster_actor_applied', {
+                action: 'region_actor_applied',
+                target_token: targetPayload.targetToken,
+                region_id: region.regionId,
+                frame_version: region.frameVersion,
+                actor_counts: this._shellActorCounts(),
+            });
             regionResults.push(this._shellRasterRegionStatusPayload(region, {
                 actor_visible: true,
-                actor_parent: SHELL_RASTER_FRAME_PARENT,
+                actor_parent: frameParent.name,
                 frame_dimensions: dimensions,
                 session_id: sessionId,
                 update_reason: 'decoded_new_region',
@@ -1634,10 +2050,11 @@ class HelperHealthService {
                 cleanupAction = this._destroyShellRasterRegion(regionId, 'remove_stale_region') || cleanupAction;
             }
         }
+        this._scheduleShellRasterStackingRefresh(frameParent, targetPayload.targetToken, 'multi_region_update');
         this._refreshShellRasterFrameTimeout(staleTimeoutMs);
         return {
             visible: true,
-            actorParent: SHELL_RASTER_FRAME_PARENT,
+            actorParent: frameParent.name,
             appliedRect: frameRect,
             frameDimensions: { x: 0, y: 0, width: frameRect.width, height: frameRect.height },
             cleanupAction,
@@ -1656,7 +2073,7 @@ class HelperHealthService {
     }
 
     _reuseShellRasterFrameIfMatching({
-        targetActor,
+        parent,
         targetPayload,
         targetRect,
         frameRect,
@@ -1682,13 +2099,14 @@ class HelperHealthService {
         })) {
             return null;
         }
-        if (typeof frame.actor.get_parent === 'function' && frame.actor.get_parent() !== targetActor) {
+        if (typeof frame.actor.get_parent === 'function' && frame.actor.get_parent() !== parent.container) {
             return null;
         }
 
         const applyStartedUs = GLib.get_monotonic_time();
         frame.actor.show?.();
-        frame.actor.raise_top?.();
+        this._raiseShellActorWithinParent(frame.actor, parent);
+        this._scheduleShellRasterStackingRefresh(parent, targetPayload.targetToken, 'reused_existing_frame');
         this._refreshShellRasterFrameTimeout(staleTimeoutMs);
         return {
             visible: true,
@@ -1709,7 +2127,7 @@ class HelperHealthService {
     }
 
     _reuseShellRasterRegionIfMatching({
-        targetActor,
+        parent,
         targetPayload,
         targetRect,
         region,
@@ -1730,13 +2148,13 @@ class HelperHealthService {
         })) {
             return null;
         }
-        if (typeof frame.actor.get_parent === 'function' && frame.actor.get_parent() !== targetActor) {
+        if (typeof frame.actor.get_parent === 'function' && frame.actor.get_parent() !== parent.container) {
             return null;
         }
 
         const applyStartedUs = GLib.get_monotonic_time();
         frame.actor.show?.();
-        frame.actor.raise_top?.();
+        this._raiseShellActorWithinParent(frame.actor, parent);
         const timing = this._shellRasterHelperTiming(startedUs, {
             decodeMs: 0,
             applyMs: this._elapsedMs(applyStartedUs),
@@ -1939,6 +2357,62 @@ class HelperHealthService {
         );
     }
 
+    _scheduleShellRasterStackingRefresh(parent, targetToken = '', reason = 'refresh') {
+        if (!parent?.container || !targetToken) {
+            return;
+        }
+        for (const delayMs of SHELL_RASTER_STACKING_REFRESH_DELAYS_MS) {
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, delayMs, () => {
+                try {
+                    this._raiseShellRasterActorsWithinParent(parent, targetToken);
+                } catch (_error) {
+                    this._logException('raster_actor_stacking_refresh_failed', _error, {
+                        reason,
+                        actor_parent: parent.name,
+                        delay_ms: delayMs,
+                    });
+                }
+                return GLib.SOURCE_REMOVE;
+            });
+        }
+    }
+
+    _raiseShellRasterActorsWithinParent(parent, targetToken = '') {
+        for (const record of this._shellRasterActorRecords(targetToken)) {
+            try {
+                if (
+                    typeof record.actor.get_parent === 'function' &&
+                    record.actor.get_parent() !== parent.container
+                ) {
+                    continue;
+                }
+                this._raiseShellActorWithinParent(record.actor, parent);
+            } catch (_error) {
+                this._logException('raster_actor_raise_refresh_failed', _error, {
+                    actor_parent: parent.name,
+                    target_token: targetToken,
+                });
+            }
+        }
+    }
+
+    _shellRasterActorRecords(targetToken = '') {
+        const records = [];
+        const expectedToken = String(targetToken || '');
+        if (
+            this._shellRasterFrame?.actor &&
+            String(this._shellRasterFrame.targetToken || '') === expectedToken
+        ) {
+            records.push(this._shellRasterFrame);
+        }
+        for (const record of this._shellRasterRegions?.values?.() || []) {
+            if (record?.actor && String(record.targetToken || '') === expectedToken) {
+                records.push(record);
+            }
+        }
+        return records;
+    }
+
     _clearShellRasterFrame(reason = 'clear') {
         const hadActor = Boolean(this._shellRasterFrame?.actor);
         const hadRegions = Boolean(this._shellRasterRegions?.size);
@@ -1955,13 +2429,20 @@ class HelperHealthService {
                 parent.remove_child(frame.actor);
             }
         } catch (_error) {
+            this._logException('raster_frame_remove_child_failed', _error, { reason });
             // Best-effort cleanup only; diagnostics report the requested cleanup reason.
         }
         try {
             frame?.actor?.destroy?.();
         } catch (_error) {
+            this._logException('raster_frame_destroy_failed', _error, { reason });
             // Best-effort cleanup only; diagnostics report the requested cleanup reason.
         }
+        this._logDiagnostic('raster_clear_decision', {
+            reason,
+            cleanup_action: hadActor || hadRegions ? reason : '',
+            actor_counts: this._shellActorCounts(),
+        });
         return hadActor || hadRegions ? reason : '';
     }
 
@@ -1978,13 +2459,19 @@ class HelperHealthService {
                 parent.remove_child(frame.actor);
             }
         } catch (_error) {
+            this._logException('raster_single_remove_child_failed', _error, { reason });
             // Best-effort cleanup only; diagnostics report the requested cleanup reason.
         }
         try {
             frame.actor.destroy?.();
         } catch (_error) {
+            this._logException('raster_single_destroy_failed', _error, { reason });
             // Best-effort cleanup only; diagnostics report the requested cleanup reason.
         }
+        this._logDiagnostic('raster_actor_destroy_decision', {
+            reason,
+            actor_counts: this._shellActorCounts(),
+        });
         return reason;
     }
 
@@ -2009,28 +2496,47 @@ class HelperHealthService {
                 parent.remove_child(frame.actor);
             }
         } catch (_error) {
+            this._logException('raster_region_remove_child_failed', _error, { region_id: regionId, reason });
             // Best-effort cleanup only; diagnostics report the requested cleanup reason.
         }
         try {
             frame.actor.destroy?.();
         } catch (_error) {
+            this._logException('raster_region_destroy_failed', _error, { region_id: regionId, reason });
             // Best-effort cleanup only; diagnostics report the requested cleanup reason.
         }
+        this._logDiagnostic('raster_actor_destroy_decision', {
+            reason,
+            region_id: regionId,
+            actor_counts: this._shellActorCounts(),
+        });
         return reason;
     }
 
     _connectShellRasterOverviewSignals() {
         const overview = Main?.overview || null;
         if (!overview || typeof overview.connect !== 'function') {
+            this._logDiagnostic('overview_hooks_unavailable', {
+                reason: 'overview_connect_unavailable',
+            });
             return;
         }
         for (const signalName of ['showing', 'shown', 'hiding']) {
             try {
                 const signalId = overview.connect(signalName, () => {
+                    this._logDiagnostic('overview_signal_cleanup', {
+                        signal: signalName,
+                        actor_counts: this._shellActorCounts(),
+                    });
                     this._clearShellRasterFrame('gnome_overview_active');
                 });
                 this._shellRasterOverviewSignalIds.push([overview, signalId]);
+                this._logDiagnostic('overview_hook_attached', {
+                    signal: signalName,
+                    signal_id: signalId,
+                });
             } catch (_error) {
+                this._logException('overview_hook_attach_failed', _error, { signal: signalName });
                 // Some GNOME Shell versions may not expose every overview signal.
             }
         }
@@ -2040,7 +2546,11 @@ class HelperHealthService {
         for (const [overview, signalId] of this._shellRasterOverviewSignalIds) {
             try {
                 overview.disconnect(signalId);
+                this._logDiagnostic('overview_hook_removed', {
+                    signal_id: signalId,
+                });
             } catch (_error) {
+                this._logException('overview_hook_remove_failed', _error, { signal_id: signalId });
                 // Best-effort cleanup on helper disable.
             }
         }
@@ -2070,6 +2580,10 @@ class HelperHealthService {
         const normalisedAction = String(proofAction || 'show').trim().toLowerCase();
         if (normalisedAction === 'clear') {
             const cleanupAction = this._clearShellActorProof('explicit_clear');
+            this._logDiagnostic('shell_actor_proof_clear_requested', {
+                cleanup_action: cleanupAction,
+                actor_counts: this._shellActorCounts(),
+            });
             return this._presentationPayload({
                 status: 'shell_actor_proof_cleared',
                 action,
@@ -2084,6 +2598,32 @@ class HelperHealthService {
                     requestedRect,
                     targetToken,
                     cleanupAction,
+                }),
+            });
+        }
+        if (!this._featureGate.rasterActorEnabled) {
+            this._logDiagnostic('shell_actor_proof_blocked_by_mode', {
+                action: normalisedAction,
+                feature_gate: helperFeatureGatePayload(this._featureGate),
+                actor_counts: this._shellActorCounts(),
+            });
+            return this._presentationPayload({
+                status: 'presentation_unsupported',
+                action: 'degrade',
+                targetToken,
+                requestedRect,
+                standaloneMode,
+                generatedAtUnixMs,
+                generatedAtMonotonicUs,
+                degradeReasons: ['shell_actor_disabled_by_mode'],
+                detail: 'shell actor proof disabled by helper mode',
+                shellActorProof: this._shellActorProofPayload({
+                    requestedAction: normalisedAction,
+                    visible: Boolean(this._shellActorProof?.actor),
+                    requestedRect,
+                    targetToken,
+                    eligible: false,
+                    eligibilityReasons: ['shell_actor_disabled_by_mode'],
                 }),
             });
         }
@@ -2131,6 +2671,7 @@ class HelperHealthService {
         const windows = this._enumerateWindowEntries();
         const targetEntry = windows.find(entry => entry.payload.targetToken === targetToken);
         const targetPayload = targetEntry?.payload || null;
+        const targetActor = targetEntry?.actor || null;
         const eligibility = this._shellActorProofEligibility(targetPayload, requestedRect, rectTolerance);
         if (!eligibility.eligible) {
             const cleanupAction = this._clearShellActorProof('ineligible_target');
@@ -2157,7 +2698,7 @@ class HelperHealthService {
             });
         }
 
-        const proofResult = this._showShellActorProof(targetPayload, requestedRect);
+        const proofResult = this._showShellActorProof(targetPayload, requestedRect, targetActor);
         const status = proofResult.visible ? 'shell_actor_proof_visible' : 'shell_actor_proof_degraded';
         return this._presentationPayload({
             status,
@@ -2234,8 +2775,8 @@ class HelperHealthService {
         };
     }
 
-    _showShellActorProof(targetPayload, requestedRect) {
-        const parent = this._shellActorProofParent(targetPayload);
+    _showShellActorProof(targetPayload, requestedRect, targetActor = null) {
+        const parent = this._shellActorProofParent(targetPayload, targetActor);
         if (!parent.container) {
             this._clearShellActorProof('missing_actor_parent');
             return {
@@ -2278,9 +2819,18 @@ class HelperHealthService {
 
         actor.add_child(outline);
         actor.add_child(label);
+        this._logDiagnostic('shell_actor_proof_create_decision', {
+            target_token: targetPayload.targetToken,
+            requested_rect: requestedRect,
+            actor_counts: this._shellActorCounts(),
+        });
         const attached = this._addShellActorProofToParent(actor, parent);
         if (!attached) {
             actor.destroy?.();
+            this._logDiagnostic('shell_actor_proof_destroy_decision', {
+                reason: 'attach_failed',
+                actor_counts: this._shellActorCounts(),
+            });
             return {
                 visible: false,
                 appliedRect: null,
@@ -2290,7 +2840,6 @@ class HelperHealthService {
         actor.set_position(requestedRect.x, requestedRect.y);
         actor.set_size(requestedRect.width, requestedRect.height);
         actor.show?.();
-        actor.raise_top?.();
 
         this._shellActorProof = {
             actor,
@@ -2299,6 +2848,11 @@ class HelperHealthService {
             actorParent: parent.name,
             actorParentMode: parent.mode,
         };
+        this._logDiagnostic('shell_actor_proof_applied', {
+            target_token: targetPayload.targetToken,
+            actor_parent: parent.name,
+            actor_counts: this._shellActorCounts(),
+        });
         this._refreshShellActorProofTimeout();
         return {
             visible: true,
@@ -2307,26 +2861,122 @@ class HelperHealthService {
         };
     }
 
-    _shellActorProofParent(targetPayload = null) {
-        const targetActor = this._targetWindowActorForToken(targetPayload?.targetToken || '');
+    _shellRasterFrameParent(targetPayload = null, targetActor = null) {
+        return this._targetWindowActorSiblingParent(targetPayload, SHELL_RASTER_FRAME_PARENT, targetActor);
+    }
+
+    _shellRasterRegionParent(targetPayload = null, targetActor = null) {
+        return this._targetWindowActorChildParent(targetPayload, SHELL_RASTER_REGION_PARENT, targetActor);
+    }
+
+    _shellActorProofParent(targetPayload = null, targetActor = null) {
+        return this._targetWindowActorSiblingParent(targetPayload, SHELL_ACTOR_PROOF_PARENT, targetActor);
+    }
+
+    _targetWindowActorChildParent(targetPayload = null, name = 'target_window_actor_child', targetActor = null) {
+        targetActor = targetActor || this._targetWindowActorForToken(targetPayload?.targetToken || '');
+        const windowGroup = this._globalActorByName('global.window_group');
         return {
             container: targetActor,
             mode: 'target_window_actor_child',
-            name: SHELL_ACTOR_PROOF_PARENT,
+            name,
+            sibling: null,
+            parentSource: targetActor ? 'target_window_actor' : '',
+            windowGroupTargetIndex: this._actorIndexInParent(windowGroup, targetActor),
         };
     }
 
-    _addShellActorProofToParent(actor, parent) {
+    _targetWindowActorSiblingParent(targetPayload = null, name = 'target_window_actor_sibling', targetActor = null) {
+        targetActor = targetActor || this._targetWindowActorForToken(targetPayload?.targetToken || '');
+        const directParent = this._actorParent(targetActor);
+        const windowGroup = this._globalActorByName('global.window_group');
+        const windowGroupTargetIndex = this._actorIndexInParent(windowGroup, targetActor);
+        const windowGroupParent = windowGroupTargetIndex === null ? null : windowGroup;
+        const parentActor = directParent || windowGroupParent;
+        const parentSource = directParent
+            ? 'actor_parent'
+            : (windowGroupParent ? 'global_window_group_child' : '');
+        return {
+            container: parentActor,
+            mode: 'target_window_actor_sibling',
+            name,
+            sibling: targetActor,
+            parentSource,
+            windowGroupTargetIndex,
+        };
+    }
+
+    _addShellActorToParent(actor, parent) {
         if (
             parent.mode === 'target_window_actor_child' &&
             typeof parent.container?.add_child === 'function'
         ) {
             try {
                 parent.container.add_child(actor);
+                this._raiseShellActorWithinParent(actor, parent);
                 return true;
             } catch (_error) {
                 return false;
             }
+        }
+        if (
+            parent.mode === 'target_window_actor_sibling' &&
+            typeof parent.container?.add_child === 'function'
+        ) {
+            try {
+                parent.container.add_child(actor);
+                this._raiseShellActorWithinParent(actor, parent);
+                return true;
+            } catch (_error) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    _addShellActorProofToParent(actor, parent) {
+        return this._addShellActorToParent(actor, parent);
+    }
+
+    _shellActorLocalRect(frameRect, targetRect, parent) {
+        if (parent?.mode === 'target_window_actor_child') {
+            return {
+                x: Number(frameRect?.x || 0) - Number(targetRect?.x || 0),
+                y: Number(frameRect?.y || 0) - Number(targetRect?.y || 0),
+                width: Number(frameRect?.width || 0),
+                height: Number(frameRect?.height || 0),
+            };
+        }
+        return {
+            x: Number(frameRect?.x || 0),
+            y: Number(frameRect?.y || 0),
+            width: Number(frameRect?.width || 0),
+            height: Number(frameRect?.height || 0),
+        };
+    }
+
+    _raiseShellActorWithinParent(actor, parent) {
+        try {
+            if (
+                parent.mode === 'target_window_actor_sibling' &&
+                parent.sibling &&
+                typeof parent.container?.set_child_above_sibling === 'function'
+            ) {
+                parent.container.set_child_above_sibling(actor, parent.sibling);
+                return true;
+            }
+        } catch (_error) {
+            this._logException('shell_actor_raise_above_target_failed', _error, {
+                actor_parent: parent.name,
+            });
+        }
+        try {
+            actor.raise_top?.();
+            return true;
+        } catch (_error) {
+            this._logException('shell_actor_raise_top_failed', _error, {
+                actor_parent: parent.name,
+            });
         }
         return false;
     }
@@ -2686,13 +3336,20 @@ class HelperHealthService {
                 parent.remove_child(proof.actor);
             }
         } catch (_error) {
+            this._logException('shell_actor_proof_remove_child_failed', _error, { reason });
             // Best-effort cleanup only; diagnostics report the requested cleanup reason.
         }
         try {
             proof?.actor?.destroy?.();
         } catch (_error) {
+            this._logException('shell_actor_proof_destroy_failed', _error, { reason });
             // Best-effort cleanup only; diagnostics report the requested cleanup reason.
         }
+        this._logDiagnostic('shell_actor_proof_destroy_decision', {
+            reason,
+            cleanup_action: hadActor ? reason : '',
+            actor_counts: this._shellActorCounts(),
+        });
         return hadActor ? reason : '';
     }
 
@@ -3341,18 +3998,37 @@ class HelperHealthService {
 
 export default class EdmcModernOverlayHelperExtension extends Extension {
     enable() {
+        this._dbusObject = null;
+        this._dbusExported = false;
+        this._busOwnerId = 0;
+        this._featureGate = this._loadFeatureGate();
         this._helperIdentity = {
             uuid: HELPER_UUID,
             helperKind: HELPER_KIND,
             helperProtocol: HELPER_PROTOCOL,
             helperVersion: HELPER_VERSION,
         };
-        this._healthService = new HelperHealthService();
+        this._logExtensionDiagnostic('helper_enable', {
+            feature_gate: helperFeatureGatePayload(this._featureGate),
+        });
+        if (!this._featureGate.dbusEnabled) {
+            this._logExtensionDiagnostic('dbus_export_skipped', {
+                reason: 'disabled_by_mode',
+                feature_gate: helperFeatureGatePayload(this._featureGate),
+            });
+            return;
+        }
+
+        this._healthService = new HelperHealthService(this._featureGate);
         this._dbusObject = Gio.DBusExportedObject.wrapJSObject(
             HELPER_DBUS_XML,
             this._healthService,
         );
-        this._dbusExported = false;
+        this._logExtensionDiagnostic('dbus_export_requested', {
+            service_name: HELPER_DBUS_SERVICE,
+            object_path: HELPER_DBUS_OBJECT_PATH,
+            feature_gate: helperFeatureGatePayload(this._featureGate),
+        });
         this._busOwnerId = Gio.bus_own_name(
             Gio.BusType.SESSION,
             HELPER_DBUS_SERVICE,
@@ -3361,16 +4037,26 @@ export default class EdmcModernOverlayHelperExtension extends Extension {
                 if (this._dbusObject) {
                     this._dbusObject.export(connection, HELPER_DBUS_OBJECT_PATH);
                     this._dbusExported = true;
+                    this._logExtensionDiagnostic('dbus_exported', {
+                        service_name: HELPER_DBUS_SERVICE,
+                        object_path: HELPER_DBUS_OBJECT_PATH,
+                    });
                 }
             },
             null,
             () => {
+                this._logExtensionDiagnostic('dbus_name_lost', {
+                    service_name: HELPER_DBUS_SERVICE,
+                });
                 this._unexportDbusObject();
             },
         );
     }
 
     disable() {
+        this._logExtensionDiagnostic('helper_disable', {
+            feature_gate: helperFeatureGatePayload(this._featureGate),
+        });
         if (this._busOwnerId) {
             Gio.bus_unown_name(this._busOwnerId);
             this._busOwnerId = 0;
@@ -3381,6 +4067,7 @@ export default class EdmcModernOverlayHelperExtension extends Extension {
         this._unexportDbusObject();
         this._healthService = null;
         this._helperIdentity = null;
+        this._featureGate = null;
     }
 
     _unexportDbusObject() {
@@ -3389,8 +4076,110 @@ export default class EdmcModernOverlayHelperExtension extends Extension {
         }
         if (this._dbusExported) {
             this._dbusObject.unexport();
+            this._logExtensionDiagnostic('dbus_unexported', {
+                service_name: HELPER_DBUS_SERVICE,
+                object_path: HELPER_DBUS_OBJECT_PATH,
+            });
         }
         this._dbusObject = null;
         this._dbusExported = false;
+    }
+
+    _loadFeatureGate() {
+        const defaultPath = GLib.build_filenamev([
+            GLib.get_user_config_dir(),
+            HELPER_DEV_MODE_CONFIG_DIR,
+            HELPER_DEV_MODE_CONFIG_FILE,
+        ]);
+        const envPath = String(GLib.getenv('EDMC_MODERN_OVERLAY_GNOME_HELPER_DEV_CONFIG') || '').trim();
+        const configPath = envPath || defaultPath;
+        const configSource = envPath ? 'env_path' : 'user_config';
+        if (!GLib.file_test(configPath, GLib.FileTest.EXISTS)) {
+            return this._featureGateForMode(HELPER_DEV_MODE_DEFAULT, {
+                configPath,
+                configSource: 'default',
+                configStatus: 'default_full_helper',
+                devModeEnabled: false,
+                diagnosticsEnabled: false,
+            });
+        }
+
+        try {
+            const [, contents] = GLib.file_get_contents(configPath);
+            const parsed = JSON.parse(new TextDecoder('utf-8').decode(contents));
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                throw new Error('config must be a JSON object');
+            }
+            const requestedMode = String(parsed.mode || HELPER_DEV_MODE_DEFAULT).trim();
+            const devModeEnabled = helperConfigBool(
+                parsed,
+                Boolean(parsed.mode),
+                'enabled',
+                'dev_mode',
+                'devMode',
+            );
+            if (!devModeEnabled) {
+                return this._featureGateForMode(HELPER_DEV_MODE_DEFAULT, {
+                    configPath,
+                    configSource,
+                    configStatus: 'dev_mode_disabled',
+                    devModeEnabled: false,
+                    diagnosticsEnabled: false,
+                });
+            }
+            if (!HELPER_DEV_MODE_NAMES.includes(requestedMode)) {
+                return this._featureGateForMode('lifecycle_only', {
+                    configPath,
+                    configSource,
+                    configStatus: `invalid_mode:${requestedMode}`,
+                    devModeEnabled: true,
+                    diagnosticsEnabled: true,
+                });
+            }
+            return this._featureGateForMode(requestedMode, {
+                configPath,
+                configSource,
+                configStatus: 'loaded',
+                devModeEnabled: true,
+                diagnosticsEnabled: helperConfigBool(parsed, true, 'diagnostics', 'diagnostics_enabled'),
+            });
+        } catch (error) {
+            const featureGate = this._featureGateForMode('lifecycle_only', {
+                configPath,
+                configSource,
+                configStatus: 'malformed_config',
+                devModeEnabled: true,
+                diagnosticsEnabled: true,
+            });
+            helperDiagnosticLog(true, 'helper_config_error', {
+                mode: featureGate.mode,
+                config_path: configPath,
+                config_source: configSource,
+                error: String(error?.message || error || ''),
+                feature_gate: helperFeatureGatePayload(featureGate),
+            });
+            return featureGate;
+        }
+    }
+
+    _featureGateForMode(mode, details = {}) {
+        const features = HELPER_MODE_FEATURES[mode] || HELPER_MODE_FEATURES[HELPER_DEV_MODE_DEFAULT];
+        return {
+            mode,
+            configSource: 'default',
+            configPath: '',
+            configStatus: '',
+            devModeEnabled: false,
+            diagnosticsEnabled: false,
+            ...features,
+            ...details,
+        };
+    }
+
+    _logExtensionDiagnostic(event, fields = {}) {
+        helperDiagnosticLog(Boolean(this._featureGate?.diagnosticsEnabled), event, {
+            mode: String(this._featureGate?.mode || HELPER_DEV_MODE_DEFAULT),
+            ...fields,
+        });
     }
 }

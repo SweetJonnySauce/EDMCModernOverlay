@@ -58,6 +58,7 @@ from overlay_client.backend.bundles._gnome_shell_helper_presentation import (
     GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV,
     GNOME_HELPER_SHELL_RASTER_PROOF_ENV,
     GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV,
+    GNOME_HELPER_SURFACE_PREPARATION_MANAGED_WINDOWED,
     GNOME_HELPER_SURFACE_PREPARATION_FULLSCREEN_MONITOR,
     GnomeHelperPresentationRuntimeState,
     build_shell_raster_frame_clear_request,
@@ -597,10 +598,6 @@ def test_shell_raster_bridge_sends_static_frame_when_eligible(
         stale_timeout_ms=SHELL_RASTER_FRAME_DEFAULT_TIMEOUT_MS,
     )
 
-    monkeypatch.setattr(
-        "overlay_client.backend.bundles._gnome_shell_helper_presentation.build_static_shell_raster_frame_request",
-        lambda *_args, **_kwargs: ShellRasterFrameBuildResult(request=frame_request, eligible=True),
-    )
     calls: list[HelperPresentationRequest] = []
 
     def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
@@ -1049,7 +1046,10 @@ def test_shell_raster_bridge_refreshes_before_short_lease_expires(
     assert len(calls) == 2
 
 
-@pytest.mark.parametrize("reason", ["target_not_focused", "gnome_overview_active"])
+@pytest.mark.parametrize(
+    "reason",
+    ["target_not_focused", "gnome_overview_active", "shell_raster_parent_unavailable"],
+)
 def test_shell_raster_focus_risk_degrade_keeps_managed_pyqt_suppressed(
     monkeypatch: pytest.MonkeyPatch,
     reason: str,
@@ -1111,6 +1111,69 @@ def test_shell_raster_focus_risk_degrade_keeps_managed_pyqt_suppressed(
     assert result.should_show_overlay is False
     assert calls[0].shell_raster_frame == frame_request
     assert calls[0].shell_raster_frame.allow_unfocused_target is False
+
+
+def test_selected_shell_raster_allows_focus_unreliable_fullscreen_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, "1")
+    monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, "1")
+    monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_PROOF_ENV, "1")
+    frame_request = HelperRasterFrameRequest(
+        action="update",
+        frame_version="phase13-static-pyqt-proof-v1:test-session:abc123",
+        target_token="meta:21",
+        target_rect=HelperRect(0, 0, 3440, 1440),
+        frame_rect=HelperRect(0, 0, 3440, 1440),
+        scale=1.0,
+        image_path="/run/user/1000/EDMCModernOverlay/shell-raster/frame.png",
+        checksum="abc123",
+        byte_size=128,
+        stale_timeout_ms=SHELL_RASTER_FRAME_DEFAULT_TIMEOUT_MS,
+    )
+
+    monkeypatch.setattr(
+        "overlay_client.backend.bundles._gnome_shell_helper_presentation.build_static_shell_raster_frame_request",
+        lambda *_args, **_kwargs: ShellRasterFrameBuildResult(request=frame_request, eligible=True),
+    )
+    calls: list[HelperPresentationRequest] = []
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        calls.append(request)
+        assert request.shell_raster_frame is not None
+        assert request.shell_raster_frame.allow_unfocused_target is True
+        return _presentation_payload(
+            request,
+            applied_rect=frame_request.frame_rect.to_payload(),
+            renderer="gnome_shell_raster_frame",
+            shell_raster_frame={
+                "frame_version": frame_request.frame_version,
+                "frame_rect": frame_request.frame_rect.to_payload(),
+                "frame_dimensions": {"x": 0, "y": 0, "width": 3440, "height": 1440},
+                "session_id": "test-session",
+                "allow_unfocused_target": True,
+            },
+        )
+
+    result = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_borderless_target(hasFocus=False)),
+        fetch_presentation=fetch_presentation,
+        clock=lambda: 0.2,
+        shell_raster_frame_provider=lambda *_args, **_kwargs: ShellRasterFrameBuildResult(
+            request=frame_request,
+            eligible=True,
+        ),
+        shell_raster_runtime_enabled=True,
+        suppress_pyqt_fallback_on_shell_raster_failure=True,
+    )
+
+    assert result.presentation_status is not None
+    assert result.presentation_status.state is HelperPresentationState.APPLIED
+    assert result.presentation_status.rect_match is True
+    assert result.shell_raster_frame_presented is True
+    assert result.should_show_overlay is False
+    assert calls
 
 
 def test_shell_raster_bridge_allows_unfocused_target_when_keep_visible_enabled(
@@ -1364,6 +1427,281 @@ def test_selected_shell_raster_failure_clears_and_does_not_fallback_to_pyqt(
     assert calls[0].renderer == "gnome_shell_raster_frame"
     assert calls[0].shell_raster_frame is not None
     assert calls[0].shell_raster_frame.action == "clear"
+
+
+def test_selected_shell_raster_windowed_transition_clears_then_uses_managed_pyqt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, raising=False)
+    monkeypatch.delenv(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, raising=False)
+    clock = _Clock()
+    state = GnomeHelperPresentationRuntimeState()
+    calls: list[HelperPresentationRequest] = []
+    surface_preparations = []
+
+    def provider(
+        target_status,
+        request: HelperPresentationRequest | None,
+        _include_diagnostics: bool,
+    ) -> ShellRasterFrameBuildResult:
+        assert request is not None
+        target = target_status.target if target_status is not None else None
+        if target is None or not target.fullscreen:
+            return ShellRasterFrameBuildResult(reason="target_not_fullscreen")
+        rect = request.content_rect
+        assert rect is not None
+        return ShellRasterFrameBuildResult(
+            request=HelperRasterFrameRequest(
+                action="update",
+                frame_version="test-selected-raster",
+                target_token=request.target_token,
+                target_rect=rect,
+                frame_rect=HelperRect(rect.x + 10, rect.y + 10, rect.width - 20, rect.height - 20),
+                scale=1.0,
+                image_path="/tmp/test-selected-raster.png",
+                checksum="abc123",
+                byte_size=123,
+                stale_timeout_ms=SHELL_RASTER_FRAME_DEFAULT_TIMEOUT_MS,
+            )
+        )
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        calls.append(request)
+        if request.shell_raster_frame is not None and request.shell_raster_frame.action == "clear":
+            return {
+                "status": "shell_raster_frame_cleared",
+                "helper_kind": HELPER_KIND.value,
+                "helper_version": HELPER_VERSION,
+                "helper_protocol": HELPER_PROTOCOL,
+                "coordinate_space": GNOME_SHELL_HELPER_COORDINATE_SPACE,
+                "action": request.action.value,
+                "target_token": request.target_token,
+                "renderer": "gnome_shell_raster_frame",
+                "cleanup_action": "explicit_clear",
+                "shell_raster_frame": {
+                    "requested_action": "clear",
+                    "visible": False,
+                    "target_token": request.target_token,
+                    "cleanup_action": "explicit_clear",
+                },
+            }
+        if request.shell_raster_frame is not None:
+            frame_rect = request.shell_raster_frame.frame_rect.to_payload()
+            return _presentation_payload(
+                request,
+                requested_rect=frame_rect,
+                applied_rect=frame_rect,
+                renderer="gnome_shell_raster_frame",
+                shell_raster_frame={
+                    "frame_version": request.shell_raster_frame.frame_version,
+                    "frame_rect": frame_rect,
+                },
+            )
+        return _presentation_payload(request)
+
+    first = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_borderless_target()),
+        fetch_presentation=fetch_presentation,
+        shell_raster_frame_provider=provider,
+        shell_raster_runtime_enabled=True,
+        suppress_pyqt_fallback_on_shell_raster_failure=True,
+        clock=clock,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+    )
+    clock.now += 12.0
+    second = run_gnome_shell_helper_presentation_cycle(
+        previous_surface_action="hidden",
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_target_window(contentRect=None, decorationInsets=None)),
+        fetch_presentation=fetch_presentation,
+        prepare_surface=lambda preparation: surface_preparations.append(preparation) or True,
+        shell_raster_frame_provider=provider,
+        shell_raster_runtime_enabled=True,
+        suppress_pyqt_fallback_on_shell_raster_failure=True,
+        clock=clock,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+    )
+
+    assert first.shell_raster_frame_presented is True
+    assert first.should_show_overlay is False
+    assert second.should_show_overlay is True
+    assert second.request is not None
+    assert second.request.renderer == "pyqt"
+    assert second.request.shell_raster_frame is None
+    assert second.request.rect_source == GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK
+    assert second.shell_raster_transition_clear_requested is True
+    assert second.shell_raster_transition_clear_succeeded is True
+    assert len(calls) == 3
+    assert calls[1].shell_raster_frame is not None
+    assert calls[1].shell_raster_frame.action == "clear"
+    assert calls[2].renderer == "pyqt"
+    assert calls[2].shell_raster_frame is None
+    assert surface_preparations
+    assert surface_preparations[-1].mode == GNOME_HELPER_SURFACE_PREPARATION_MANAGED_WINDOWED
+
+
+def test_selected_shell_raster_windowed_startup_uses_managed_pyqt_without_clear(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, raising=False)
+    monkeypatch.delenv(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, raising=False)
+    calls: list[HelperPresentationRequest] = []
+    surface_preparations = []
+
+    def provider(*_args, **_kwargs) -> ShellRasterFrameBuildResult:
+        return ShellRasterFrameBuildResult(reason="target_not_fullscreen")
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        calls.append(request)
+        return _presentation_payload(request)
+
+    result = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_target_window(contentRect=None, decorationInsets=None)),
+        fetch_presentation=fetch_presentation,
+        prepare_surface=lambda preparation: surface_preparations.append(preparation) or True,
+        shell_raster_frame_provider=provider,
+        shell_raster_runtime_enabled=True,
+        suppress_pyqt_fallback_on_shell_raster_failure=True,
+        clock=lambda: 100.0,
+    )
+
+    assert result.should_show_overlay is True
+    assert result.shell_raster_transition_clear_requested is False
+    assert result.request is not None
+    assert result.request.renderer == "pyqt"
+    assert result.request.shell_raster_frame is None
+    assert calls == [result.request]
+    assert surface_preparations
+    assert surface_preparations[-1].mode == GNOME_HELPER_SURFACE_PREPARATION_MANAGED_WINDOWED
+
+
+def test_selected_shell_raster_windowed_title_bar_compensation_offsets_managed_pyqt_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, raising=False)
+    monkeypatch.delenv(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, raising=False)
+    calls: list[HelperPresentationRequest] = []
+    surface_preparations = []
+
+    def provider(*_args, **_kwargs) -> ShellRasterFrameBuildResult:
+        return ShellRasterFrameBuildResult(reason="target_not_fullscreen")
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        calls.append(request)
+        return _presentation_payload(request)
+
+    result = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_target_window(contentRect=None, decorationInsets=None)),
+        fetch_presentation=fetch_presentation,
+        prepare_surface=lambda preparation: surface_preparations.append(preparation) or True,
+        shell_raster_frame_provider=provider,
+        shell_raster_runtime_enabled=True,
+        suppress_pyqt_fallback_on_shell_raster_failure=True,
+        title_bar_compensation_enabled=True,
+        title_bar_compensation_height=30,
+        clock=lambda: 100.0,
+    )
+
+    assert result.should_show_overlay is True
+    assert result.request is not None
+    assert result.request.rect_source == GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK
+    assert result.request.content_rect == HelperRect(1080, 246, 1280, 967)
+    assert calls == [result.request]
+    assert surface_preparations
+    assert surface_preparations[-1].mode == GNOME_HELPER_SURFACE_PREPARATION_MANAGED_WINDOWED
+    assert surface_preparations[-1].rect == (1080, 246, 1280, 967)
+
+
+def test_selected_shell_raster_windowed_transition_blocks_pyqt_when_clear_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, raising=False)
+    monkeypatch.delenv(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, raising=False)
+    clock = _Clock()
+    state = GnomeHelperPresentationRuntimeState()
+    calls: list[HelperPresentationRequest] = []
+
+    def provider(
+        target_status,
+        request: HelperPresentationRequest | None,
+        _include_diagnostics: bool,
+    ) -> ShellRasterFrameBuildResult:
+        assert request is not None
+        target = target_status.target if target_status is not None else None
+        if target is None or not target.fullscreen:
+            return ShellRasterFrameBuildResult(reason="target_not_fullscreen")
+        rect = request.content_rect
+        assert rect is not None
+        return ShellRasterFrameBuildResult(
+            request=HelperRasterFrameRequest(
+                action="update",
+                frame_version="test-selected-raster",
+                target_token=request.target_token,
+                target_rect=rect,
+                frame_rect=HelperRect(rect.x + 10, rect.y + 10, rect.width - 20, rect.height - 20),
+                scale=1.0,
+                image_path="/tmp/test-selected-raster.png",
+                checksum="abc123",
+                byte_size=123,
+                stale_timeout_ms=SHELL_RASTER_FRAME_DEFAULT_TIMEOUT_MS,
+            )
+        )
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        calls.append(request)
+        if request.shell_raster_frame is not None and request.shell_raster_frame.action == "clear":
+            raise RuntimeError("clear failed")
+        if request.shell_raster_frame is not None:
+            frame_rect = request.shell_raster_frame.frame_rect.to_payload()
+            return _presentation_payload(
+                request,
+                requested_rect=frame_rect,
+                applied_rect=frame_rect,
+                renderer="gnome_shell_raster_frame",
+                shell_raster_frame={
+                    "frame_version": request.shell_raster_frame.frame_version,
+                    "frame_rect": frame_rect,
+                },
+            )
+        return _presentation_payload(request)
+
+    first = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_borderless_target()),
+        fetch_presentation=fetch_presentation,
+        shell_raster_frame_provider=provider,
+        shell_raster_runtime_enabled=True,
+        suppress_pyqt_fallback_on_shell_raster_failure=True,
+        clock=clock,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+    )
+    clock.now += 12.0
+    second = run_gnome_shell_helper_presentation_cycle(
+        previous_surface_action="hidden",
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_target_window(contentRect=None, decorationInsets=None)),
+        fetch_presentation=fetch_presentation,
+        shell_raster_frame_provider=provider,
+        shell_raster_runtime_enabled=True,
+        suppress_pyqt_fallback_on_shell_raster_failure=True,
+        clock=clock,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+    )
+
+    assert first.shell_raster_frame_presented is True
+    assert second.should_show_overlay is False
+    assert second.shell_raster_transition_clear_requested is True
+    assert second.shell_raster_transition_clear_succeeded is False
+    assert len(calls) == 2
+    assert calls[1].shell_raster_frame is not None
+    assert calls[1].shell_raster_frame.action == "clear"
 
 
 def test_shell_raster_clear_request_is_shutdown_only_payload() -> None:
