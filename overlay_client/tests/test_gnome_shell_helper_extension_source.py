@@ -557,6 +557,29 @@ def test_extension_shell_raster_frame_tracks_session_and_overview_safety() -> No
     assert "overview.connect(signalName" in source
 
 
+def test_extension_shell_raster_transient_clears_suspend_before_destructive_cleanup() -> None:
+    source = _source()
+
+    assert "const SHELL_RASTER_TRANSIENT_CLEAR_REASONS = Object.freeze([" in source
+    assert "'target_not_focused'," in source
+    assert "'gnome_overview_active'," in source
+    assert "_isTransientShellRasterClearReason(reason = '')" in source
+    assert "_suspendShellRasterFrame(reason = 'transient_clear')" in source
+    assert "return this._suspendShellRasterFrame(reason);" in source
+    assert "frame.actor.hide?.()" in source
+    assert "regionFrame.actor.hide?.()" in source
+    assert "suspend_transient_clear" in source
+    assert "raster_actor_suspend_decision" in source
+    assert "raster_actor_destroy_decision" in source
+    assert "this._clearShellRasterFrame('stale_timeout')" in source
+
+    clear_start = source.index("_clearShellRasterFrame(reason = 'clear') {")
+    transient_guard = source.index("if (this._isTransientShellRasterClearReason(reason)) {", clear_start)
+    timeout_removal = source.index("GLib.source_remove(this._shellRasterFrameTimeoutId);", clear_start)
+    frame_destroy = source.index("frame?.actor?.destroy?.()", clear_start)
+    assert clear_start < transient_guard < timeout_removal < frame_destroy
+
+
 def test_extension_shell_raster_frame_reports_debug_timing_diagnostics() -> None:
     source = _source()
 
@@ -598,6 +621,8 @@ def test_extension_shell_raster_frame_identity_requires_same_frame_and_rects() -
 def test_extension_shell_raster_frame_reuse_reports_decode_skip_diagnostics() -> None:
     source = _source()
 
+    assert "raster_actor_reuse_decision" in source
+    assert "was_suspended: wasSuspended" in source
     assert "updateReason: 'reused_existing_frame'" in source
     assert "decodeSkipped: true" in source
     assert "reusedFrame: true" in source

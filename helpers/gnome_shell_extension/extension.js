@@ -62,6 +62,10 @@ const SHELL_RASTER_FRAME_RENDERER = 'gnome_shell_raster_frame';
 const SHELL_RASTER_FRAME_PARENT = 'target_window_actor_sibling';
 const SHELL_RASTER_REGION_PARENT = 'target_window_actor_child';
 const SHELL_RASTER_STACKING_REFRESH_DELAYS_MS = Object.freeze([50, 150, 300]);
+const SHELL_RASTER_TRANSIENT_CLEAR_REASONS = Object.freeze([
+    'target_not_focused',
+    'gnome_overview_active',
+]);
 const SHELL_ACTOR_GROUP_DIAGNOSTIC_CHILD_LIMIT = 12;
 const SHELL_ACTOR_PROOF_PARENT = 'target_window_actor_sibling';
 const SHELL_ACTOR_GROUP_DIAGNOSTIC_NAMES = [
@@ -1815,6 +1819,7 @@ class HelperHealthService {
             sessionId,
             actorParent: frameParent.name,
             frameDimensions: dimensions,
+            suspended: false,
         };
         this._logDiagnostic('raster_actor_applied', {
             target_token: targetPayload.targetToken,
@@ -2022,6 +2027,7 @@ class HelperHealthService {
                 sessionId,
                 actorParent: frameParent.name,
                 frameDimensions: dimensions,
+                suspended: false,
             };
             this._shellRasterRegions.set(region.regionId, record);
             this._logDiagnostic('raster_actor_applied', {
@@ -2104,8 +2110,18 @@ class HelperHealthService {
         }
 
         const applyStartedUs = GLib.get_monotonic_time();
+        const wasSuspended = Boolean(frame.suspended);
         frame.actor.show?.();
+        frame.suspended = false;
         this._raiseShellActorWithinParent(frame.actor, parent);
+        this._logDiagnostic('raster_actor_reuse_decision', {
+            action: 'reuse_single_frame_actor',
+            target_token: targetPayload.targetToken,
+            frame_version: frameVersion,
+            was_suspended: wasSuspended,
+            actor_visible: true,
+            actor_counts: this._shellActorCounts(),
+        });
         this._scheduleShellRasterStackingRefresh(parent, targetPayload.targetToken, 'reused_existing_frame');
         this._refreshShellRasterFrameTimeout(staleTimeoutMs);
         return {
@@ -2153,8 +2169,19 @@ class HelperHealthService {
         }
 
         const applyStartedUs = GLib.get_monotonic_time();
+        const wasSuspended = Boolean(frame.suspended);
         frame.actor.show?.();
+        frame.suspended = false;
         this._raiseShellActorWithinParent(frame.actor, parent);
+        this._logDiagnostic('raster_actor_reuse_decision', {
+            action: 'reuse_region_actor',
+            target_token: targetPayload.targetToken,
+            region_id: region.regionId,
+            frame_version: region.frameVersion,
+            was_suspended: wasSuspended,
+            actor_visible: true,
+            actor_counts: this._shellActorCounts(),
+        });
         const timing = this._shellRasterHelperTiming(startedUs, {
             decodeMs: 0,
             applyMs: this._elapsedMs(applyStartedUs),
@@ -2413,7 +2440,62 @@ class HelperHealthService {
         return records;
     }
 
+    _isTransientShellRasterClearReason(reason = '') {
+        return SHELL_RASTER_TRANSIENT_CLEAR_REASONS.includes(String(reason || ''));
+    }
+
+    _suspendShellRasterFrame(reason = 'transient_clear') {
+        const frame = this._shellRasterFrame;
+        const hadActor = Boolean(frame?.actor);
+        const hadRegions = Boolean(this._shellRasterRegions?.size);
+        const suspendedRegionIds = [];
+
+        if (frame?.actor) {
+            try {
+                frame.actor.hide?.();
+                frame.suspended = true;
+            } catch (_error) {
+                this._logException('raster_frame_suspend_failed', _error, { reason });
+            }
+        }
+
+        for (const [regionId, regionFrame] of this._shellRasterRegions?.entries?.() || []) {
+            if (!regionFrame?.actor) {
+                continue;
+            }
+            try {
+                regionFrame.actor.hide?.();
+                regionFrame.suspended = true;
+                suspendedRegionIds.push(regionId);
+            } catch (_error) {
+                this._logException('raster_region_suspend_failed', _error, { region_id: regionId, reason });
+            }
+        }
+
+        const cleanupAction = hadActor || hadRegions ? 'suspend_transient_clear' : '';
+        this._logDiagnostic('raster_actor_suspend_decision', {
+            action: cleanupAction || 'noop_transient_clear',
+            reason,
+            actor_visible: false,
+            frame_suspended: hadActor,
+            suspended_region_count: suspendedRegionIds.length,
+            region_ids: suspendedRegionIds,
+            actor_counts: this._shellActorCounts(),
+        });
+        this._logDiagnostic('raster_clear_decision', {
+            reason,
+            cleanup_action: cleanupAction,
+            actor_visible: false,
+            suspended_region_count: suspendedRegionIds.length,
+            actor_counts: this._shellActorCounts(),
+        });
+        return cleanupAction;
+    }
+
     _clearShellRasterFrame(reason = 'clear') {
+        if (this._isTransientShellRasterClearReason(reason)) {
+            return this._suspendShellRasterFrame(reason);
+        }
         const hadActor = Boolean(this._shellRasterFrame?.actor);
         const hadRegions = Boolean(this._shellRasterRegions?.size);
         const frame = this._shellRasterFrame;
