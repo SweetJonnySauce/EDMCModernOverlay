@@ -570,6 +570,39 @@ def test_refresh_follow_geometry_logs_backend_geometry_diagnostics_when_present(
     assert any("client_area" in str(args) for _message, args in debug_calls)
 
 
+def test_refresh_follow_geometry_logs_partial_backend_diagnostics_without_crashing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _FollowSurfaceStub()
+    result = BackendPresentationCycleResult(
+        should_show_overlay=False,
+        diagnostics={
+            "helper_health": "unavailable",
+            "target_state": "launcher_only",
+            "presentation_state": "malformed_payload",
+            "presentation_reasons": ["missing_helper"],
+        },
+        visibility_snapshot=BackendPresentationVisibilitySnapshot(
+            target_available=False,
+            presentation_available=False,
+        ),
+        log_prefix="GNOME helper presentation",
+    )
+    debug_calls: list[tuple[str, tuple[object, ...]]] = []
+
+    monkeypatch.setattr("overlay_client.follow_surface.run_backend_presentation_cycle", lambda *_args, **_kwargs: result)
+    monkeypatch.setattr(
+        "overlay_client.follow_surface._CLIENT_LOGGER.debug",
+        lambda message, *args, **_kwargs: debug_calls.append((str(message), args)),
+    )
+
+    stub._refresh_follow_geometry()
+
+    assert stub._last_backend_presentation is result
+    assert stub._visibility_helper.calls == [False]
+    assert any("token=%s" in message and "malformed_payload" in str(args) for message, args in debug_calls)
+
+
 def test_refresh_follow_geometry_primes_backend_rect_before_showing_hidden_overlay(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
