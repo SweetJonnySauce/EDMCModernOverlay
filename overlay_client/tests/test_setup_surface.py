@@ -36,6 +36,18 @@ def test_setup_surface_initialises_defaults(qt_app):
 
 
 @pytest.mark.pyqt_required
+def test_setup_surface_preserves_linux_standalone_setting(qt_app):
+    window = OverlayWindow(InitialClientSettings(standalone_mode=True), DebugConfig())
+    try:
+        assert window._standalone_mode is True
+    finally:
+        window._legacy_timer.stop()
+        window._modifier_timer.stop()
+        window._tracking_timer.stop()
+        window.close()
+
+
+@pytest.mark.pyqt_required
 def test_show_event_delegates_to_setup_surface(monkeypatch, qt_app):
     window = OverlayWindow(InitialClientSettings(), DebugConfig())
     try:

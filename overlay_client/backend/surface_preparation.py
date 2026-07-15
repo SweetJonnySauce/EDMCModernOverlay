@@ -17,3 +17,7 @@ class BackendPresentationSurfacePreparation:
     reason: str
     target_token: str = ""
     rect_source: str = ""
+    target_monitor: int | None = None
+    target_output_name: str = ""
+    target_monitor_rect: tuple[int, int, int, int] | None = None
+    force_recovery: bool = False

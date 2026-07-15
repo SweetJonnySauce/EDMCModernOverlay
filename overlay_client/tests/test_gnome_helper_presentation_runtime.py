@@ -1524,16 +1524,33 @@ def test_selected_shell_raster_windowed_transition_clears_then_uses_managed_pyqt
         runtime_state=state,
         health_cache_jitter_seconds=lambda: 0.0,
     )
+    clock.now += 0.5
+    third = run_gnome_shell_helper_presentation_cycle(
+        previous_surface_action="hidden",
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_target_window(contentRect=None, decorationInsets=None)),
+        fetch_presentation=fetch_presentation,
+        prepare_surface=lambda preparation: surface_preparations.append(preparation) or True,
+        shell_raster_frame_provider=provider,
+        shell_raster_runtime_enabled=True,
+        suppress_pyqt_fallback_on_shell_raster_failure=True,
+        clock=clock,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+    )
 
     assert first.shell_raster_frame_presented is True
     assert first.should_show_overlay is False
-    assert second.should_show_overlay is True
-    assert second.request is not None
-    assert second.request.renderer == "pyqt"
-    assert second.request.shell_raster_frame is None
-    assert second.request.rect_source == GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK
+    assert second.should_show_overlay is False
+    assert second.surface_preparation_action == "stabilizing"
+    assert third.should_show_overlay is True
+    assert third.request is not None
+    assert third.request.renderer == "pyqt"
+    assert third.request.shell_raster_frame is None
+    assert third.request.rect_source == GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK
     assert second.shell_raster_transition_clear_requested is True
     assert second.shell_raster_transition_clear_succeeded is True
+    assert third.shell_raster_transition_clear_requested is False
     assert len(calls) == 3
     assert calls[1].shell_raster_frame is not None
     assert calls[1].shell_raster_frame.action == "clear"
@@ -1558,6 +1575,21 @@ def test_selected_shell_raster_windowed_startup_uses_managed_pyqt_without_clear(
         calls.append(request)
         return _presentation_payload(request)
 
+    clock = _Clock()
+    state = GnomeHelperPresentationRuntimeState()
+
+    first = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_target_window(contentRect=None, decorationInsets=None)),
+        fetch_presentation=fetch_presentation,
+        prepare_surface=lambda preparation: surface_preparations.append(preparation) or True,
+        shell_raster_frame_provider=provider,
+        shell_raster_runtime_enabled=True,
+        suppress_pyqt_fallback_on_shell_raster_failure=True,
+        clock=clock,
+        runtime_state=state,
+    )
+    clock.now += 0.5
     result = run_gnome_shell_helper_presentation_cycle(
         fetch_health=_health_payload,
         fetch_target=lambda: _target_payload(_target_window(contentRect=None, decorationInsets=None)),
@@ -1566,9 +1598,12 @@ def test_selected_shell_raster_windowed_startup_uses_managed_pyqt_without_clear(
         shell_raster_frame_provider=provider,
         shell_raster_runtime_enabled=True,
         suppress_pyqt_fallback_on_shell_raster_failure=True,
-        clock=lambda: 100.0,
+        clock=clock,
+        runtime_state=state,
     )
 
+    assert first.should_show_overlay is False
+    assert first.surface_preparation_action == "stabilizing"
     assert result.should_show_overlay is True
     assert result.shell_raster_transition_clear_requested is False
     assert result.request is not None
@@ -1594,6 +1629,22 @@ def test_selected_shell_raster_windowed_title_bar_compensation_offsets_managed_p
         calls.append(request)
         return _presentation_payload(request)
 
+    clock = _Clock()
+    state = GnomeHelperPresentationRuntimeState()
+    first = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_target_window(contentRect=None, decorationInsets=None)),
+        fetch_presentation=fetch_presentation,
+        prepare_surface=lambda preparation: surface_preparations.append(preparation) or True,
+        shell_raster_frame_provider=provider,
+        shell_raster_runtime_enabled=True,
+        suppress_pyqt_fallback_on_shell_raster_failure=True,
+        title_bar_compensation_enabled=True,
+        title_bar_compensation_height=30,
+        clock=clock,
+        runtime_state=state,
+    )
+    clock.now += 0.5
     result = run_gnome_shell_helper_presentation_cycle(
         fetch_health=_health_payload,
         fetch_target=lambda: _target_payload(_target_window(contentRect=None, decorationInsets=None)),
@@ -1604,9 +1655,11 @@ def test_selected_shell_raster_windowed_title_bar_compensation_offsets_managed_p
         suppress_pyqt_fallback_on_shell_raster_failure=True,
         title_bar_compensation_enabled=True,
         title_bar_compensation_height=30,
-        clock=lambda: 100.0,
+        clock=clock,
+        runtime_state=state,
     )
 
+    assert first.should_show_overlay is False
     assert result.should_show_overlay is True
     assert result.request is not None
     assert result.request.rect_source == GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK
@@ -1615,6 +1668,311 @@ def test_selected_shell_raster_windowed_title_bar_compensation_offsets_managed_p
     assert surface_preparations
     assert surface_preparations[-1].mode == GNOME_HELPER_SURFACE_PREPARATION_MANAGED_WINDOWED
     assert surface_preparations[-1].rect == (1080, 246, 1280, 967)
+
+
+def test_managed_window_focus_changes_refresh_presentation_without_repreparing_surface() -> None:
+    clock = _Clock()
+    state = GnomeHelperPresentationRuntimeState()
+    target = _target_window()
+    preparations = []
+    presentation_calls: list[HelperPresentationRequest] = []
+
+    def run_cycle():
+        result = run_gnome_shell_helper_presentation_cycle(
+            fetch_health=_health_payload,
+            fetch_target=lambda: _target_payload(target),
+            fetch_presentation=lambda request: presentation_calls.append(request) or _presentation_payload(request),
+            prepare_surface=lambda preparation: preparations.append(preparation) or True,
+            shell_raster_frame_provider=lambda *_args: ShellRasterFrameBuildResult(reason="target_not_fullscreen"),
+            shell_raster_runtime_enabled=True,
+            suppress_pyqt_fallback_on_shell_raster_failure=True,
+            clock=clock,
+            runtime_state=state,
+            health_cache_jitter_seconds=lambda: 0.0,
+        )
+        clock.now += 0.5
+        return result
+
+    assert run_cycle().surface_preparation_action == "stabilizing"
+    assert run_cycle().surface_preparation_action == "apply"
+    target["hasFocus"] = False
+    unfocused = run_cycle()
+    target["hasFocus"] = True
+    refocused = run_cycle()
+
+    assert unfocused.target_status is not None
+    assert unfocused.target_status.target is not None
+    assert unfocused.target_status.target.has_focus is False
+    assert unfocused.surface_preparation_action == "reused"
+    assert refocused.surface_preparation_action == "reused"
+    assert len(preparations) == 1
+    assert len(presentation_calls) == 3
+
+
+def test_managed_window_monitor_change_stabilizes_and_transient_monitor_sample_is_ignored() -> None:
+    clock = _Clock()
+    state = GnomeHelperPresentationRuntimeState()
+    current_target = _target_window()
+    preparations = []
+
+    def run_cycle():
+        result = run_gnome_shell_helper_presentation_cycle(
+            fetch_health=_health_payload,
+            fetch_target=lambda: _target_payload(current_target),
+            fetch_presentation=_presentation_payload,
+            prepare_surface=lambda preparation: preparations.append(preparation) or True,
+            shell_raster_frame_provider=lambda *_args: ShellRasterFrameBuildResult(reason="target_not_fullscreen"),
+            shell_raster_runtime_enabled=True,
+            suppress_pyqt_fallback_on_shell_raster_failure=True,
+            clock=clock,
+            runtime_state=state,
+            health_cache_jitter_seconds=lambda: 0.0,
+        )
+        clock.now += 0.5
+        return result
+
+    run_cycle()
+    run_cycle()
+    hdmi_target = _target_window(
+        frameRect={"x": 4520, "y": 216, "width": 1280, "height": 997},
+        bufferRect={"x": 4506, "y": 204, "width": 1308, "height": 1026},
+        contentRect={"x": 4520, "y": 253, "width": 1280, "height": 960},
+        monitor=1,
+        outputName="HDMI-1",
+        monitorRect={"x": 3440, "y": 0, "width": 3440, "height": 1440},
+    )
+
+    current_target = hdmi_target
+    transient = run_cycle()
+    current_target = _target_window()
+    settled_back = run_cycle()
+
+    assert transient.surface_preparation_action == "stabilizing"
+    assert transient.should_show_overlay is False
+    assert settled_back.surface_preparation_action == "reused"
+    assert len(preparations) == 1
+
+    current_target = hdmi_target
+    first_hdmi = run_cycle()
+    second_hdmi = run_cycle()
+
+    assert first_hdmi.surface_preparation_action == "stabilizing"
+    assert second_hdmi.surface_preparation_action == "apply"
+    assert len(preparations) == 2
+    assert preparations[-1].target_monitor == 1
+    assert preparations[-1].target_output_name == "HDMI-1"
+    assert preparations[-1].target_monitor_rect == (3440, 0, 3440, 1440)
+
+    current_target = dict(hdmi_target, targetToken="meta:22")
+    assert run_cycle().surface_preparation_action == "stabilizing"
+    assert run_cycle().surface_preparation_action == "apply"
+    assert len(preparations) == 3
+    assert preparations[-1].target_token == "meta:22"
+
+
+def test_managed_window_negative_monitor_coordinates_are_valid() -> None:
+    clock = _Clock()
+    state = GnomeHelperPresentationRuntimeState()
+    target = _target_window(
+        frameRect={"x": -1700, "y": -860, "width": 1280, "height": 997},
+        bufferRect={"x": -1714, "y": -872, "width": 1308, "height": 1026},
+        contentRect={"x": -1700, "y": -823, "width": 1280, "height": 960},
+        monitor=2,
+        outputName="DP-3",
+        monitorRect={"x": -1920, "y": -1080, "width": 1920, "height": 1080},
+    )
+    preparations = []
+
+    for _ in range(2):
+        result = run_gnome_shell_helper_presentation_cycle(
+            fetch_health=_health_payload,
+            fetch_target=lambda: _target_payload(target),
+            fetch_presentation=_presentation_payload,
+            prepare_surface=lambda preparation: preparations.append(preparation) or True,
+            shell_raster_frame_provider=lambda *_args: ShellRasterFrameBuildResult(reason="target_not_fullscreen"),
+            shell_raster_runtime_enabled=True,
+            suppress_pyqt_fallback_on_shell_raster_failure=True,
+            clock=clock,
+            runtime_state=state,
+            health_cache_jitter_seconds=lambda: 0.0,
+        )
+        clock.now += 0.5
+
+    assert result.surface_preparation_action == "apply"
+    assert len(preparations) == 1
+    assert preparations[0].rect == (-1700, -823, 1280, 960)
+    assert preparations[0].target_monitor_rect == (-1920, -1080, 1920, 1080)
+
+
+def test_managed_window_surface_loss_recovery_is_bounded_and_forced() -> None:
+    clock = _Clock()
+    state = GnomeHelperPresentationRuntimeState()
+    preparations = []
+    overlay_found = True
+    target = _target_window()
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        return _presentation_payload(request, overlay_token="overlay:1" if overlay_found else "")
+
+    def run_cycle():
+        result = run_gnome_shell_helper_presentation_cycle(
+            fetch_health=_health_payload,
+            fetch_target=lambda: _target_payload(target),
+            fetch_presentation=fetch_presentation,
+            prepare_surface=lambda preparation: preparations.append(preparation) or True,
+            shell_raster_frame_provider=lambda *_args: ShellRasterFrameBuildResult(reason="target_not_fullscreen"),
+            shell_raster_runtime_enabled=True,
+            suppress_pyqt_fallback_on_shell_raster_failure=True,
+            clock=clock,
+            runtime_state=state,
+            health_cache_jitter_seconds=lambda: 0.0,
+        )
+        clock.now += 0.5
+        return result
+
+    run_cycle()
+    run_cycle()
+    overlay_found = False
+    loss_results = []
+    for index in range(5):
+        target["hasFocus"] = bool(index % 2)
+        loss_results.append(run_cycle())
+
+    assert [result.surface_preparation_action for result in loss_results[:4]] == ["reused"] * 4
+    assert loss_results[4].surface_preparation_action == "recovery"
+    assert len(preparations) == 2
+    assert preparations[-1].force_recovery is True
+
+
+def test_failed_managed_window_preparation_is_not_cached_and_retries_with_backoff() -> None:
+    clock = _Clock()
+    state = GnomeHelperPresentationRuntimeState()
+    preparations = []
+    preparation_succeeds = False
+
+    def prepare_surface(preparation) -> bool:
+        preparations.append(preparation)
+        return preparation_succeeds
+
+    def run_cycle():
+        result = run_gnome_shell_helper_presentation_cycle(
+            fetch_health=_health_payload,
+            fetch_target=lambda: _target_payload(_target_window()),
+            fetch_presentation=_presentation_payload,
+            prepare_surface=prepare_surface,
+            shell_raster_frame_provider=lambda *_args: ShellRasterFrameBuildResult(reason="target_not_fullscreen"),
+            shell_raster_runtime_enabled=True,
+            suppress_pyqt_fallback_on_shell_raster_failure=True,
+            clock=clock,
+            runtime_state=state,
+            health_cache_jitter_seconds=lambda: 0.0,
+        )
+        clock.now += 0.5
+        return result
+
+    assert run_cycle().surface_preparation_action == "stabilizing"
+    failed = run_cycle()
+    backed_off = run_cycle()
+
+    assert failed.surface_preparation_failed is True
+    assert failed.surface_preparation_action == "failed"
+    assert state.last_surface_preparation is None
+    assert backed_off.surface_preparation_action == "retry_backoff"
+    assert len(preparations) == 1
+
+    preparation_succeeds = True
+    clock.now = state.next_surface_preparation_retry_at
+    recovered = run_cycle()
+
+    assert recovered.surface_preparation_action == "apply"
+    assert recovered.surface_preparation_failed is False
+    assert state.last_surface_preparation is not None
+    assert len(preparations) == 2
+
+
+def test_managed_window_to_borderless_invalidates_pyqt_preparation_and_resumes_raster() -> None:
+    clock = _Clock()
+    state = GnomeHelperPresentationRuntimeState()
+    target = _target_window()
+    preparations = []
+
+    def provider(
+        target_status,
+        request: HelperPresentationRequest | None,
+        _include_diagnostics: bool,
+    ) -> ShellRasterFrameBuildResult:
+        assert request is not None
+        current = target_status.target if target_status is not None else None
+        if current is None or not current.fullscreen:
+            return ShellRasterFrameBuildResult(reason="target_not_fullscreen")
+        rect = request.content_rect
+        assert rect is not None
+        return ShellRasterFrameBuildResult(
+            request=HelperRasterFrameRequest(
+                action="update",
+                frame_version="test-windowed-to-borderless",
+                target_token=request.target_token,
+                target_rect=rect,
+                frame_rect=HelperRect(rect.x + 10, rect.y + 10, rect.width - 20, rect.height - 20),
+                scale=1.0,
+                image_path="/tmp/test-windowed-to-borderless.png",
+                checksum="windowed-to-borderless",
+                byte_size=123,
+                stale_timeout_ms=SHELL_RASTER_FRAME_DEFAULT_TIMEOUT_MS,
+            )
+        )
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        if request.shell_raster_frame is None:
+            return _presentation_payload(request)
+        frame_rect = request.shell_raster_frame.frame_rect.to_payload()
+        return _presentation_payload(
+            request,
+            requested_rect=frame_rect,
+            applied_rect=frame_rect,
+            renderer="gnome_shell_raster_frame",
+            shell_raster_frame={
+                "frame_version": request.shell_raster_frame.frame_version,
+                "frame_rect": frame_rect,
+            },
+        )
+
+    for _ in range(2):
+        windowed = run_gnome_shell_helper_presentation_cycle(
+            fetch_health=_health_payload,
+            fetch_target=lambda: _target_payload(target),
+            fetch_presentation=fetch_presentation,
+            prepare_surface=lambda preparation: preparations.append(preparation) or True,
+            shell_raster_frame_provider=provider,
+            shell_raster_runtime_enabled=True,
+            suppress_pyqt_fallback_on_shell_raster_failure=True,
+            clock=clock,
+            runtime_state=state,
+            health_cache_jitter_seconds=lambda: 0.0,
+        )
+        clock.now += 0.5
+
+    target = _borderless_target()
+    borderless = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(target),
+        fetch_presentation=fetch_presentation,
+        prepare_surface=lambda preparation: preparations.append(preparation) or True,
+        shell_raster_frame_provider=provider,
+        shell_raster_runtime_enabled=True,
+        suppress_pyqt_fallback_on_shell_raster_failure=True,
+        clock=clock,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+    )
+
+    assert windowed.should_show_overlay is True
+    assert len(preparations) == 1
+    assert borderless.shell_raster_frame_presented is True
+    assert borderless.should_show_overlay is False
+    assert borderless.surface_preparation is None
+    assert borderless.surface_preparation_action == "invalidated"
+    assert state.last_surface_preparation is None
 
 
 def test_selected_shell_raster_windowed_transition_blocks_pyqt_when_clear_fails(

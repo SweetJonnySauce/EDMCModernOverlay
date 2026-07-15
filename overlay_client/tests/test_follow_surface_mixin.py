@@ -151,6 +151,7 @@ class _StubWindowHandle:
     def __init__(self, dpr: float = 1.5) -> None:
         self._dpr = dpr
         self._screen = None
+        self.screen_calls = []
         self.transient_parents = []
 
     def devicePixelRatio(self) -> float:
@@ -167,6 +168,7 @@ class _StubWindowHandle:
 
     def setScreen(self, screen) -> None:
         self._screen = screen
+        self.screen_calls.append(screen)
 
 
 class _StubLabel:
@@ -507,6 +509,7 @@ def test_refresh_follow_geometry_uses_gnome_helper_presentation_and_skips_legacy
     stub._client_backend_status = _backend_status(helper_available=True)
     stub._title_bar_enabled = True
     stub._title_bar_height = 30
+    stub._standalone_mode = True
     result = _fake_backend_presentation_result()
     calls: list[tuple[bool, bool, str, bool, int]] = []
 
@@ -535,10 +538,10 @@ def test_refresh_follow_geometry_uses_gnome_helper_presentation_and_skips_legacy
 
     stub._refresh_follow_geometry()
 
-    assert calls == [(False, False, "", True, 30)]
+    assert calls == [(True, False, "", True, 30)]
     assert stub._follow_controller.refresh_called == 0
     assert stub._last_backend_presentation is result
-    assert stub._last_backend_presentation_surface_action == "mapped_visible"
+    assert stub._last_backend_presentation_surface_action == "mapped_suppressed"
     assert stub._visibility_helper.calls == [True]
 
 
@@ -615,7 +618,8 @@ def test_refresh_follow_geometry_primes_backend_rect_before_showing_hidden_overl
     stub._refresh_follow_geometry()
 
     assert stub._geometry_calls == [(431, 167, 1440, 997)]
-    assert stub._event_order[:3] == ["prepareWindowFlags", "setGeometry", "show"]
+    assert stub._event_order[:4] == ["update", "prepareWindowFlags", "setGeometry", "show"]
+    assert stub._backend_presentation_content_suppressed is True
     assert stub._backend_presentation_visibility_state.remap_warmup_active is True
 
 
@@ -649,7 +653,7 @@ def test_backend_fullscreen_surface_preparation_sets_screen_geometry_and_fullscr
     ]
 
 
-def test_backend_managed_windowed_surface_preparation_resets_fullscreen_state_without_showing(
+def test_backend_managed_windowed_surface_preparation_skips_unchanged_normal_state_without_showing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     stub = _FollowSurfaceStub()
@@ -671,9 +675,126 @@ def test_backend_managed_windowed_surface_preparation_resets_fullscreen_state_wi
     assert stub._geometry_calls[-1] == (1080, 216, 1280, 997)
     assert stub._visible is False
     assert "showNormal" not in stub._event_order
-    assert stub._event_order[:5] == [
+    assert stub._event_order[:4] == [
         "prepareWindowFlags",
-        "setWindowState",
+        "setGeometry",
+        "platformPrepare",
+        "platformClickThrough",
+    ]
+
+
+def test_backend_managed_windowed_duplicate_preparation_is_a_noop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _FollowSurfaceStub()
+    screen = type("Screen", (), {"geometry": lambda self: type("Rect", (), {"intersects": lambda *_: True})()})()
+    monkeypatch.setattr("overlay_client.follow_surface.QGuiApplication.screenAt", lambda _point: screen)
+    preparation = BackendPresentationSurfacePreparation(
+        mode="managed_windowed",
+        rect=(1080, 216, 1280, 997),
+        reason="test",
+        target_token="meta:21",
+        rect_source="frame_rect_fallback",
+        target_monitor=0,
+        target_output_name="DP-2",
+        target_monitor_rect=(0, 0, 3440, 1440),
+    )
+
+    assert stub._prepare_backend_presentation_surface(preparation) is True
+    initial_geometry_calls = list(stub._geometry_calls)
+    initial_screen_calls = list(stub.windowHandle().screen_calls)
+    stub._event_order.clear()
+
+    assert stub._prepare_backend_presentation_surface(preparation) is True
+    assert stub._event_order == []
+    assert stub._geometry_calls == initial_geometry_calls
+    assert stub.windowHandle().screen_calls == initial_screen_calls
+
+
+def test_backend_managed_windowed_same_monitor_move_updates_only_geometry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _FollowSurfaceStub()
+    screen = type("Screen", (), {"geometry": lambda self: type("Rect", (), {"intersects": lambda *_: True})()})()
+    monkeypatch.setattr("overlay_client.follow_surface.QGuiApplication.screenAt", lambda _point: screen)
+
+    first = BackendPresentationSurfacePreparation(
+        mode="managed_windowed",
+        rect=(1080, 216, 1280, 997),
+        reason="test",
+        target_token="meta:21",
+        rect_source="frame_rect_fallback",
+        target_monitor=0,
+        target_output_name="DP-2",
+        target_monitor_rect=(0, 0, 3440, 1440),
+    )
+    moved = BackendPresentationSurfacePreparation(
+        mode="managed_windowed",
+        rect=(1200, 300, 1280, 997),
+        reason="test",
+        target_token="meta:21",
+        rect_source="frame_rect_fallback",
+        target_monitor=0,
+        target_output_name="DP-2",
+        target_monitor_rect=(0, 0, 3440, 1440),
+    )
+
+    assert stub._prepare_backend_presentation_surface(first) is True
+    stub._event_order.clear()
+    assert stub._prepare_backend_presentation_surface(moved) is True
+
+    assert stub._event_order == ["setGeometry"]
+    assert stub._geometry_calls[-1] == moved.rect
+    assert len(stub.windowHandle().screen_calls) == 1
+
+
+def test_backend_managed_windowed_monitor_reconfiguration_forces_one_identity_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _FollowSurfaceStub()
+    first_screen = type("Screen", (), {"geometry": lambda self: type("Rect", (), {"intersects": lambda *_: True})()})()
+    replacement_screen = type(
+        "Screen", (), {"geometry": lambda self: type("Rect", (), {"intersects": lambda *_: True})()}
+    )()
+    selected_screen = first_screen
+    screen_points = []
+
+    def screen_at(point):
+        screen_points.append((point.x(), point.y()))
+        return selected_screen
+
+    monkeypatch.setattr("overlay_client.follow_surface.QGuiApplication.screenAt", screen_at)
+    base = BackendPresentationSurfacePreparation(
+        mode="managed_windowed",
+        rect=(-1700, -823, 1280, 960),
+        reason="test",
+        target_token="meta:21",
+        rect_source="content_rect",
+        target_monitor=2,
+        target_output_name="DP-3",
+        target_monitor_rect=(-1920, -1080, 1920, 1080),
+    )
+
+    assert stub._prepare_backend_presentation_surface(base) is True
+    selected_screen = replacement_screen
+    stub._event_order.clear()
+    recovery = BackendPresentationSurfacePreparation(
+        mode=base.mode,
+        rect=base.rect,
+        reason=base.reason,
+        target_token=base.target_token,
+        rect_source=base.rect_source,
+        target_monitor=base.target_monitor,
+        target_output_name=base.target_output_name,
+        target_monitor_rect=base.target_monitor_rect,
+        force_recovery=True,
+    )
+
+    assert stub._prepare_backend_presentation_surface(recovery) is True
+    assert stub.windowHandle().screen() is replacement_screen
+    assert screen_points == [(-1060, -343), (-1060, -343)]
+    assert stub._event_order == [
+        "prepareWindowFlags",
         "setGeometry",
         "platformPrepare",
         "platformClickThrough",
@@ -728,9 +849,43 @@ def test_refresh_follow_geometry_warmup_keeps_visible_after_remap_focus_flip(
 
     assert stub._visibility_helper.calls == [True, True]
     assert stub._visible is True
+    assert stub._backend_presentation_content_suppressed is True
     assert stub._backend_presentation_visibility_state.remap_warmup_active is True
     assert stub._backend_presentation_visibility_state.remap_warmup_samples == 1
     assert stub._backend_presentation_visibility_state.focus_loss_samples == 0
+
+
+def test_refresh_follow_geometry_restores_content_after_remap_rect_matches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _FollowSurfaceStub()
+    results = iter(
+        (
+            _fake_backend_presentation_result(
+                target_has_focus=True,
+                overlay_window_found=False,
+                presentation_rect_match=False,
+            ),
+            _fake_backend_presentation_result(
+                target_has_focus=False,
+                overlay_window_found=True,
+                presentation_rect_match=True,
+            ),
+        )
+    )
+    ticks = iter((20.0, 20.5))
+
+    monkeypatch.setattr("overlay_client.follow_surface.run_backend_presentation_cycle", lambda *_args, **_kwargs: next(results))
+    monkeypatch.setattr("overlay_client.follow_surface.time.monotonic", lambda: next(ticks))
+
+    stub._refresh_follow_geometry()
+    assert stub._backend_presentation_content_suppressed is True
+
+    stub._refresh_follow_geometry()
+
+    assert stub._visible is True
+    assert stub._backend_presentation_content_suppressed is False
+    assert stub._backend_presentation_visibility_state.remap_warmup_active is False
 
 
 def test_refresh_follow_geometry_debounces_backend_presentation_focus_loss(

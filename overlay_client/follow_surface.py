@@ -138,7 +138,7 @@ class FollowSurfaceMixin:
         try:
             result = run_backend_presentation_cycle(
                 getattr(self, "_client_backend_status", None),
-                standalone_mode=False,
+                standalone_mode=bool(getattr(self, "_standalone_mode", False)),
                 keep_overlay_visible=bool(getattr(self, "_keep_overlay_visible", False)),
                 previous_surface_action=str(getattr(self, "_last_backend_presentation_surface_action", "")),
                 title_bar_compensation_enabled=bool(getattr(self, "_title_bar_enabled", False)),
@@ -206,7 +206,8 @@ class FollowSurfaceMixin:
                 reason="backend_presentation_fullscreen_prepare",
             )
             window = self.windowHandle()
-            if window is not None and hasattr(window, "setScreen"):
+            current_screen = window.screen() if window is not None and hasattr(window, "screen") else None
+            if window is not None and hasattr(window, "setScreen") and current_screen is not screen:
                 window.setScreen(screen)
             self._last_set_geometry = target
             self.setGeometry(QRect(*target))
@@ -215,6 +216,8 @@ class FollowSurfaceMixin:
             if window is not None:
                 self._platform_controller.prepare_window(window)
             self._platform_controller.apply_click_through(True)
+            self._backend_managed_surface_prepared = False
+            self._last_backend_surface_preparation_key = ()
             _CLIENT_LOGGER.debug(
                 "Prepared backend fullscreen surface rect=%s screen=%s reason=%s; %s",
                 target,
@@ -242,32 +245,77 @@ class FollowSurfaceMixin:
             )
             return False
         try:
-            self._interaction_controller.prepare_window_flags_for_click_through(
-                True,
-                reason="backend_presentation_windowed_prepare",
+            window = self.windowHandle()
+            current_screen = window.screen() if window is not None and hasattr(window, "screen") else None
+            screen_changed = current_screen is not screen
+            force_recovery = bool(getattr(preparation, "force_recovery", False))
+            preparation_key = self._backend_surface_preparation_key(preparation)
+            unchanged = (
+                not force_recovery
+                and bool(getattr(self, "_backend_managed_surface_prepared", False))
+                and getattr(self, "_last_backend_surface_preparation_key", None) == preparation_key
+                and not screen_changed
+                and getattr(self, "_last_set_geometry", None) == target
             )
+            if unchanged:
+                _CLIENT_LOGGER.debug(
+                    "Reused backend managed-windowed surface rect=%s screen=%s reason=unchanged_preparation; %s",
+                    target,
+                    self._describe_screen(screen),
+                    self.format_scale_debug(),
+                )
+                return True
+
+            identity_refresh_required = (
+                force_recovery
+                or screen_changed
+                or not bool(getattr(self, "_backend_managed_surface_prepared", False))
+            )
+            if identity_refresh_required:
+                self._interaction_controller.prepare_window_flags_for_click_through(
+                    True,
+                    reason="backend_presentation_windowed_prepare",
+                )
+                if screen_changed and window is not None and hasattr(window, "setScreen"):
+                    window.setScreen(screen)
+                if not self._reset_backend_managed_windowed_state():
+                    return False
+
+            if force_recovery or getattr(self, "_last_set_geometry", None) != target:
+                self._last_set_geometry = target
+                self.setGeometry(QRect(*target))
+
             window = self.windowHandle()
-            if window is not None and hasattr(window, "setScreen"):
-                window.setScreen(screen)
-            if not self._reset_backend_managed_windowed_state():
-                return False
-            self._last_set_geometry = target
-            self.setGeometry(QRect(*target))
-            window = self.windowHandle()
-            if window is not None:
+            if identity_refresh_required and window is not None:
                 self._platform_controller.prepare_window(window)
-            self._platform_controller.apply_click_through(True)
+                self._platform_controller.apply_click_through(True)
+            self._backend_managed_surface_prepared = True
+            self._last_backend_surface_preparation_key = preparation_key
             _CLIENT_LOGGER.debug(
-                "Prepared backend managed-windowed surface rect=%s screen=%s reason=%s; %s",
+                "Prepared backend managed-windowed surface rect=%s screen=%s reason=%s identity_refresh=%s force_recovery=%s; %s",
                 target,
                 self._describe_screen(screen),
                 getattr(preparation, "reason", ""),
+                identity_refresh_required,
+                force_recovery,
                 self.format_scale_debug(),
             )
             return True
         except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
             _CLIENT_LOGGER.debug("Backend managed-windowed surface preparation failed: %s", exc)
             return False
+
+    @staticmethod
+    def _backend_surface_preparation_key(preparation: object) -> tuple[object, ...]:
+        return (
+            str(getattr(preparation, "mode", "") or ""),
+            tuple(getattr(preparation, "rect", ()) or ()),
+            str(getattr(preparation, "target_token", "") or ""),
+            str(getattr(preparation, "rect_source", "") or ""),
+            getattr(preparation, "target_monitor", None),
+            str(getattr(preparation, "target_output_name", "") or ""),
+            getattr(preparation, "target_monitor_rect", None),
+        )
 
     def _reset_backend_managed_windowed_state(self) -> bool:
         window_state = getattr(self, "windowState", None)
@@ -284,6 +332,8 @@ class FollowSurfaceMixin:
                     next_state = int(current_value) & ~int(fullscreen_value)
                 except (TypeError, ValueError):
                     return False
+            if next_state == current_state:
+                return True
             set_window_state(next_state)
             return True
         show_normal = getattr(self, "showNormal", None)
@@ -419,7 +469,8 @@ class FollowSurfaceMixin:
             "%s: health=%s target=%s token=%s seq=%s target_monitor=%s output=%s monitor_rect=%s frame_rect=%s rect_source=%s "
             "requested=%s applied=%s prime=%s prime_source=%s delta=%s rect_match=%s state=%s reasons=%s attempts=%s retries=%s "
             "presentation_skipped=%s skip_reason=%s target_poll_skipped=%s "
-            "surface_preparation=%s surface_preparation_failed=%s "
+            "surface_preparation=%s surface_preparation_failed=%s surface_preparation_ready=%s "
+            "surface_preparation_action=%s surface_preparation_reason=%s "
             "visibility=%s visibility_reason=%s surface_action=%s content_visible=%s keep_overlay_visible=%s target_focus=%s target_workspace=%s "
             "target_minimized=%s focus_loss_samples=%s focus_loss_elapsed=%.3fs remap_warmup=%s "
             "remap_warmup_samples=%s remap_warmup_elapsed=%.3fs overlay_window_found=%s legacy_geometry=%s; %s",
@@ -448,6 +499,9 @@ class FollowSurfaceMixin:
             payload.get("target_poll_skipped"),
             payload.get("surface_preparation"),
             payload.get("surface_preparation_failed"),
+            payload.get("surface_preparation_ready"),
+            payload.get("surface_preparation_action"),
+            payload.get("surface_preparation_reason"),
             "visible" if decision.show else "hidden",
             decision.reason,
             decision.surface_action,

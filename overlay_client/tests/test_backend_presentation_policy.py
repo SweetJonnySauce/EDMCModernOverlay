@@ -263,6 +263,8 @@ def test_backend_presentation_visibility_starts_warmup_when_hidden_overlay_remap
     assert decision.show is True
     assert decision.reason == "target_focused_remap_warmup"
     assert decision.remap_warmup_status == "started"
+    assert decision.surface_action == BACKEND_PRESENTATION_SURFACE_MAPPED_SUPPRESSED
+    assert decision.content_visible is False
     assert decision.state.remap_warmup_active is True
     assert decision.state.remap_warmup_samples == 0
     assert decision.state.remap_warmup_started_monotonic == 20.0
@@ -296,6 +298,8 @@ def test_backend_presentation_visibility_warmup_keeps_visible_during_transient_f
     assert decision.show is True
     assert decision.reason == "presentation_warmup_waiting"
     assert decision.remap_warmup_status == "active"
+    assert decision.surface_action == BACKEND_PRESENTATION_SURFACE_MAPPED_SUPPRESSED
+    assert decision.content_visible is False
     assert decision.state.remap_warmup_active is True
     assert decision.state.remap_warmup_samples == 1
     assert decision.state.focus_loss_samples == 0
@@ -318,8 +322,38 @@ def test_backend_presentation_visibility_warmup_completes_after_rect_match() -> 
 
     assert decision.show is True
     assert decision.reason == "presentation_warmup_complete"
+    assert decision.surface_action == BACKEND_PRESENTATION_SURFACE_MAPPED_VISIBLE
+    assert decision.content_visible is True
     assert decision.remap_warmup_status == "complete"
     assert decision.state == BackendPresentationVisibilityState()
+
+
+def test_backend_presentation_visibility_keep_visible_still_suppresses_unconfirmed_remap() -> None:
+    snapshot = BackendPresentationVisibilitySnapshot(
+        target_available=True,
+        target_has_focus=False,
+        target_showing_on_workspace=True,
+        target_minimized=False,
+        presentation_available=True,
+        presentation_attachable=True,
+        overlay_window_found=False,
+        presentation_rect_match=False,
+        prepared_surface_requires_mapping=True,
+    )
+
+    decision = decide_backend_presentation_visibility(
+        snapshot,
+        keep_overlay_visible=True,
+        currently_visible=False,
+        now_monotonic=20.0,
+    )
+
+    assert decision.show is True
+    assert decision.reason == "prepared_surface_remap_warmup"
+    assert decision.surface_action == BACKEND_PRESENTATION_SURFACE_MAPPED_SUPPRESSED
+    assert decision.content_visible is False
+    assert decision.remap_warmup_status == "started"
+    assert decision.state.remap_warmup_active is True
 
 
 def test_backend_presentation_visibility_warmup_expires_when_rect_never_matches() -> None:

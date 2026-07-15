@@ -12,6 +12,7 @@ class _StubPrefs:
         self.gridlines_enabled = False
         self.gridline_spacing = 100
         self.keep_overlay_visible = False
+        self.standalone_mode = True
         self.manual_backend_override = ""
         self.title_bar_enabled = False
         self.title_bar_height = 0
@@ -69,6 +70,7 @@ def test_overlay_config_includes_physical_clamp_flag(monkeypatch):
     assert payload["plugin_group_states"] == {"BGS-Tally Objectives": False}
     assert payload["plugin_group_state_default_on"] is True
     assert payload["keep_overlay_visible"] is False
+    assert payload["standalone_mode"] is True
     assert "force_render" not in payload
 
 

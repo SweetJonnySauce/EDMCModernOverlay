@@ -566,6 +566,49 @@ def test_backend_presentation_cycle_marks_managed_windowed_surface_as_requiring_
     assert result.diagnostics["prepared_surface_allows_unfocused_content"] is True
 
 
+def test_backend_presentation_cycle_does_not_map_stabilizing_managed_window_surface():
+    status = BackendSelectionStatus(
+        probe=PlatformProbeResult(
+            operating_system=OperatingSystem.LINUX,
+            session_type=SessionType.WAYLAND,
+            qt_platform_name="wayland",
+            compositor="gnome-shell",
+        ),
+        selected_backend=BackendDescriptor(
+            BackendFamily.COMPOSITOR_HELPER,
+            BackendInstance.GNOME_SHELL_RASTER,
+        ),
+        classification=CapabilityClassification.DEGRADED_OVERLAY,
+        helper_states=(
+            HelperCapabilityState(
+                helper=HelperKind.GNOME_SHELL_EXTENSION,
+                required=True,
+                installed=True,
+                enabled=True,
+                approved=True,
+            ),
+        ),
+    )
+    fake_result = _FakeGnomePresentationResult()
+    rect = fake_result.request.content_rect
+    fake_result.surface_preparation = BackendPresentationSurfacePreparation(
+        mode=BACKEND_PRESENTATION_SURFACE_PREPARATION_MANAGED_WINDOWED,
+        rect=(rect.x, rect.y, rect.width, rect.height),
+        reason="test_stabilizing",
+        target_token="meta:21",
+        rect_source="frame_rect_fallback",
+    )
+    fake_result.surface_preparation_ready = False
+    fake_result.should_show_overlay = False
+
+    result = run_backend_presentation_cycle(status, gnome_runner=lambda **_: fake_result)
+
+    assert result is not None
+    assert result.should_show_overlay is False
+    assert result.visibility_snapshot.prepared_surface_requires_mapping is False
+    assert result.visibility_snapshot.prepared_surface_allows_unfocused_content is False
+
+
 def test_backend_presentation_cycle_enables_shell_raster_when_selected():
     status = BackendSelectionStatus(
         probe=PlatformProbeResult(

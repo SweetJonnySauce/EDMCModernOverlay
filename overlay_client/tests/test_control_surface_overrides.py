@@ -96,6 +96,30 @@ class _StubWindow(ControlSurfaceMixin):
         self.update_called += 1
 
 
+class _StandaloneStub(ControlSurfaceMixin):
+    def __init__(self) -> None:
+        self._standalone_mode = False
+        self.drag_state_calls = 0
+        self.identity_calls = 0
+
+    def _apply_drag_state(self) -> None:
+        self.drag_state_calls += 1
+
+    def _apply_standalone_window_identity(self) -> None:
+        self.identity_calls += 1
+
+
+def test_set_standalone_mode_is_not_forced_off_on_linux(monkeypatch) -> None:
+    window = _StandaloneStub()
+    monkeypatch.setattr("overlay_client.control_surface.sys.platform", "linux")
+
+    window.set_standalone_mode(True)
+
+    assert window._standalone_mode is True
+    assert window.drag_state_calls == 1
+    assert window.identity_calls == 1
+
+
 def test_set_physical_clamp_overrides_applies_and_refreshes() -> None:
     window = _StubWindow()
 

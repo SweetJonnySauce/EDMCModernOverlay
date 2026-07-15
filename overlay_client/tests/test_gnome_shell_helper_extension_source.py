@@ -588,6 +588,21 @@ def test_extension_shell_raster_frame_reports_debug_timing_diagnostics() -> None
     assert "_requestObject(payload" in source
     assert "_shellRasterFrameDiagnostics(requestDiagnostics, helperTiming)" in source
     assert "helper_decode_ms" in source
+
+
+def test_extension_managed_window_list_identity_is_setting_gated_and_restored() -> None:
+    source = _source()
+
+    assert "_applyManagedWindowListVisibility(" in source
+    assert "const shouldHide = !Boolean(standaloneMode);" in source
+    assert "window.hide_from_window_list();" in source
+    assert "window.show_in_window_list();" in source
+    assert "this._safeCall(window, 'is_skip_taskbar')" in source
+    assert "window_list_visibility_unproven" in source
+    assert "window_list_visibility_decision" in source
+    assert "this._windowListHiddenWindows.set(token, window);" in source
+    assert "_restoreManagedWindowListVisibility(reason = 'helper_disable')" in source
+    assert "this._healthService?._restoreManagedWindowListVisibility?.('helper_disable');" in source
     assert "helper_apply_ms" in source
     assert "helper_total_ms" in source
     assert "timing: this._shellRasterHelperTiming(totalStartedUs" in source

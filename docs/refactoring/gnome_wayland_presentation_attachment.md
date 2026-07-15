@@ -4191,6 +4191,104 @@ After implementation:
 - Test files updated: `overlay_client/tests/test_gnome_shell_helper_extension_source.py`.
 - Harness tests: not added or run. Reason: this change does not touch `load.py`, EDMC lifecycle wiring, preferences, settings replication, or overlay-client backend/runtime policy.
 
+### Phase 18: Stable Managed-Window Preparation And Multi-Monitor Transitions
+- Status: In progress. Initial windowed-mode live validation passed stable attachment and two-way monitor handoff, but exposed a visible remap-warmup intermediate and confirmed that Linux standalone selection is still incorrectly unavailable. Borderless round-trip validation also remains pending.
+- Goal: stop GNOME/Wayland windowed-mode flashing by separating presentation refresh from destructive Qt surface preparation while preserving focus-aware visibility and correct multi-monitor following.
+- Failure evidence, 2026-07-12: changing Elite from borderless fullscreen to windowed mode correctly selected managed PyQt presentation, but helper focus samples changed repeatedly and the client prepared the managed surface about every `500 ms`. The overlay stayed logically visible, which localizes the flashing risk to repeated mapped-surface flag, state, screen, geometry, and platform mutations rather than visibility-policy hide/show decisions.
+- Multi-monitor evidence: during the same transition, the stable Elite target token was first reported on HDMI-1 and then on DP-2 while Proton/GNOME settled the new windowed geometry. Multi-monitor following is a required contract. Transitional samples must not cause repeated mappings, while a stable real monitor change must cause exactly one screen transition.
+
+#### Phase 18 Plan And Invariants
+- Touch points: `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py`, `overlay_client/follow_surface.py`, `overlay_client/tests/test_gnome_helper_presentation_runtime.py`, `overlay_client/tests/test_follow_surface_mixin.py`, and this document. `overlay_client/interaction_controller.py` and its unit tests are optional only if generic flag idempotence cannot be kept inside the existing surface-preparation consumer.
+- Unchanged behavior: focus remains part of backend presentation and visibility policy; Shell-raster fullscreen presentation and transition clear behavior remain backend-owned; generic follow/runtime code does not inspect raw GNOME helper/backend enums; genuine target, mode, geometry, monitor, screen, or surface-loss changes remain recoverable.
+- Preparation identity includes preparation mode, target token, requested target rectangle, rectangle source, target monitor identity/rectangle, and the selected generic Qt screen where the consumer resolves it. Negative and vertically offset global coordinates remain valid.
+- Cache only successful surface preparations. Invalidate on target loss, mode change, target-token change, requested-rectangle change, monitor/screen change, fullscreen/windowed transition, preparation failure, or confirmed surface loss.
+- Focus-only and visibility-only presentation changes may refresh helper presentation and visibility policy but must not reprepare an unchanged mapped Qt surface.
+- A new or changed managed-window identity must stabilize for two compatible target samples before preparation. The existing stable preparation remains authoritative during a pending move; a stale surface must never be presented concurrently on both monitors.
+- Genuine surface loss may retry the same preparation only through a bounded recovery interval, never at the normal `500 ms` poll cadence.
+- Generic Qt preparation is defensive and idempotent: do not reapply window state, screen, geometry, or identity flags when current state already proves the requested value.
+- Observability remains low-overhead: cycle diagnostics report preparation applied, reused, stabilization pending, invalidated, failed, or bounded recovery without introducing release-only polling or compositor calls.
+- A newly mapped managed surface may exist long enough for the helper to discover and place it, but its rendered content must stay suppressed until the helper reports the overlay window at the requested rect. The bounded warmup fallback remains available if confirmation never arrives.
+- The managed PyQt surface used for GNOME windowed mode must be absent from taskbar/window-list and Alt-Tab surfaces in normal mode. Explicit standalone mode must be user-selectable on Linux and must restore normal app-window listing for that managed surface. Borderless fullscreen continues to use the Shell-raster path, which suppresses the PyQt top-level and remains non-standalone. GNOME-specific window-list control and cleanup remain helper-owned under `overlay_client/backend/` and `helpers/gnome_shell_extension/`; generic follow/runtime code only forwards the existing setting and consumes backend-neutral visibility decisions.
+- Helper disable/reload must restore any window-list entries it hid so extension lifecycle changes cannot strand a live overlay in hidden app-window state.
+- Rollback: the change is isolated to backend runtime state/decision helpers and generic no-op guards. Reverting Phase 18 restores the previous eager preparation path without changing helper protocol, settings, extension installation, renderer selection, or EDMC lifecycle wiring.
+
+#### Phase 18 Test Type Selection
+- Use unit tests for deterministic backend preparation identity, stabilization, invalidation, recovery timing, and generic Qt no-op behavior. Dependencies are injectable and no EDMC/plugin lifecycle wiring is involved.
+- Use unit tests for remap content-suppression decisions, generic follow application, cross-platform standalone preference/payload behavior, and forwarding the existing standalone setting into the backend presentation consumer.
+- Use GNOME Shell extension source-contract tests for `hide_from_window_list`/`show_in_window_list`, expected-state verification, and helper-disable restoration because normal pytest cannot execute Mutter/GJS window-list behavior.
+- No harness test is required because Phase 18 does not touch `load.py`, plugin hooks, startup/shutdown orchestration, journal/dashboard callbacks, preferences, or settings replication.
+- The existing preferences-to-client callback and settings replication wiring remain unchanged; their pure payload seam is covered by unit tests. If `load.py` or callback orchestration becomes necessary, add a harness test before that edit.
+- Manual GNOME/Wayland validation remains required after automated gates because pytest cannot prove compositor-visible non-flashing, taskbar/Alt-Tab identity, real Qt surface recreation behavior, or physical monitor handoff.
+
+#### Phase 18 Refactor Staging
+| Stage | Description | Status |
+| --- | --- | --- |
+| 18.1 | Record the flashing evidence, multi-monitor contract, invariants, test selection, exact commands, and rollback boundary | Completed |
+| 18.2 | Add pure backend-owned preparation identity and decision helpers; preserve focus in the full presentation signature | Completed |
+| 18.3 | Add two-sample stabilization for new/changed managed-window monitor/geometry identities and bounded same-identity surface-loss recovery | Completed |
+| 18.4 | Cache only successful preparations; invalidate on target/mode/geometry/monitor/failure transitions; expose diagnostic decision reasons | Completed |
+| 18.5 | Add generic Qt no-op guards for unchanged screen, window state, geometry, and preparation identity without importing GNOME policy | Completed |
+| 18.6 | Add unit coverage for focus-only refresh, invalidation/recovery, fullscreen/windowed handoff, multi-monitor moves, negative/offset layouts, monitor reconfiguration, and duplicate generic preparation | Completed |
+| 18.7 | Run targeted pytest, full pytest, `make check`, `make test`, and `git diff --check`; record exact outcomes | Completed |
+| 18.8 | Perform live GNOME/Wayland validation for windowed stability and DP-2/HDMI-1 handoff | Partial: stable attachment and two-way handoff passed; visible remap intermediate found; borderless round trip not yet run |
+| 18.9 | Record the live remap/standalone findings, unchanged behavior, test selection, and helper lifecycle contract | Completed |
+| 18.10 | Keep managed-window remap content suppressed until helper window discovery and matching applied-rect confirmation | Pending |
+| 18.11 | Make standalone selection cross-platform and add helper-owned GNOME window-list hide/show plus disable-time restoration | Pending |
+| 18.12 | Add unit/source-contract regression coverage and run targeted/full automated gates | Pending |
+| 18.13 | Repeat live windowed movement, DP-2/HDMI-1 handoff, standalone off/on/off identity, and borderless/windowed round trip | Pending manual validation |
+
+#### Phase 18 Planned Test Commands
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_follow_surface_mixin.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_backend_presentation_policy.py`
+- `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_extension_source.py overlay_client/tests/test_interaction_controller.py overlay_client/tests/test_control_surface_overrides.py tests/test_standalone_support.py tests/test_overlay_config_payload.py tests/test_preferences_persistence.py`
+- If `overlay_client/interaction_controller.py` changes: `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_interaction_controller.py`.
+- `source .venv/bin/activate && python -m pytest`
+- `make check`
+- `make test`
+- `git diff --check`
+
+#### Phase 18 Implementation Notes
+- Added a backend-owned managed-surface preparation identity containing the generic preparation mode, target token, requested rectangle, rectangle source, helper monitor index/output/rectangle, and recovery intent. Focus remains in `GnomeHelperPresentationSignature`; it is intentionally not part of the preparation identity.
+- New or changed managed-window identities require two compatible target samples. The first sample records `surface_preparation_action="stabilizing"`, does not call the Qt preparer, does not call helper presentation, and keeps the old surface hidden. This prevents a transient HDMI-1 sample from moving the old overlay before the DP-2 geometry settles.
+- Successful preparations are cached separately from presentation freshness. Focus-only presentation refreshes now report `surface_preparation_action="reused"` and continue through helper presentation/visibility policy without mutating the Qt surface.
+- Failed preparation is not cached and uses a `2.0s` retry interval. Four observed helper presentation samples without an overlay token permit a forced same-identity recovery, also bounded to `2.0s`, rather than retrying every `500 ms`.
+- Target loss, renderer/mode change, target-token change, requested-rectangle change, monitor/output/monitor-rectangle change, or helper health loss invalidates pending/cached preparation state. Windowed-to-borderless Shell raster presentation clears the managed preparation and keeps the PyQt surface hidden.
+- The generic Qt consumer now avoids redundant `setScreen`, `setWindowState`, `setGeometry`, identity-flag, platform-prepare, and click-through calls. Same-monitor moves update geometry only; monitor replacement or explicit recovery performs one identity refresh. Negative global coordinates are passed unchanged to `QGuiApplication.screenAt` and `QRect`.
+- Diagnostics now include `surface_preparation_ready`, `surface_preparation_action`, and `surface_preparation_reason`, and those fields participate in debug-log deduplication.
+- The `fix219` boundary remains intact: GNOME transition/stabilization/recovery policy stays under `overlay_client/backend/bundles/`; `follow_surface.py` consumes only the generic `BackendPresentationSurfacePreparation` contract.
+
+#### Phase 18 Tests Run
+- Test files updated: `overlay_client/tests/test_gnome_helper_presentation_runtime.py`, `overlay_client/tests/test_follow_surface_mixin.py`, and `overlay_client/tests/test_backend_consumers.py`.
+- `overlay_client/.venv/bin/python -m pytest -q overlay_client/tests/test_gnome_helper_presentation_runtime.py -k "windowed or managed_window"`
+- Result: passed with `10 passed, 59 deselected`.
+- `overlay_client/.venv/bin/python -m pytest -q overlay_client/tests/test_follow_surface_mixin.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_backend_presentation_policy.py`
+- Result: passed with `71 passed`.
+- `overlay_client/.venv/bin/python -m pytest -q overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_follow_surface_mixin.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_backend_presentation_policy.py -k "not shell_raster_bridge_sends_static_frame_when_eligible"`
+- Result: passed with `139 passed, 1 deselected`. The deselected pre-existing static proof test creates a `QPainter` without a `QGuiApplication` under the normal headless command and aborts the interpreter before pytest can report a result.
+- `overlay_client/.venv/bin/python -m ruff check .`
+- Result: passed.
+- `overlay_client/.venv/bin/python -m mypy`
+- Result: passed with `Success: no issues found in 92 source files`.
+- `make check`
+- Result: partial. Ruff and mypy passed; the nested `make test` aborted in the same pre-existing static PyQt proof test because the Makefile does not create a headless `QApplication`.
+- `make test`
+- Result: failed with exit `134` at `test_shell_raster_bridge_sends_static_frame_when_eligible` for the same missing-application precondition; it did not reach Phase 18 failures.
+- `QT_QPA_PLATFORM=offscreen PYQT_TESTS=1 overlay_client/.venv/bin/python -c 'from PyQt6.QtWidgets import QApplication; app = QApplication([]); import pytest; raise SystemExit(pytest.main(["-q", "-k", "not shell_raster_bridge_sends_static_frame_when_eligible"]))'`
+- Result: passed with `1154 passed, 21 skipped, 1 deselected`. This is the full project suite with a headless `QApplication` and only the unrelated nondeterministic static proof test excluded.
+- `git diff --check`
+- Result: passed.
+- Harness tests: not added. No `load.py`, EDMC hook/lifecycle orchestration, preferences, settings replication, journal callbacks, or dashboard callbacks changed.
+- Manual/system validation: pending. Required evidence is one live borderless-to-windowed run, focus/Alt-Tab cycles without recurring preparation, same-monitor movement, DP-2/HDMI-1 handoff, return to borderless, and confirmation that logs show one preparation per stable identity rather than the prior `500 ms` loop.
+
+#### Phase 18 Initial Live Validation Findings, 2026-07-14
+- The overlay client was restarted into the current uncommitted code before validation. The GNOME helper was healthy and acquired Elite token `meta:578` in windowed mode.
+- Initial windowed attachment, two same-monitor moves, DP-2 to HDMI-1, and HDMI-1 to DP-2 all stabilized. Each new identity produced one `stabilizing` sample followed by one `apply`; unchanged samples reported `reused`. No preparation failure or recurring `500 ms` preparation loop appeared.
+- The user confirmed final attachment and both monitor directions were correct. All tests in this sample were windowed; borderless behavior was not exercised and remains pending.
+- The visible defect occurs between the stabilization and settled samples: the overlay first disappears, then briefly appears monitor-relative, then attaches correctly to the game. Logs align this with the mapped remap warmup: the first post-prepare sample shows the Qt surface before the helper has found the overlay window, and the next sample reports a matching applied rect.
+- `overlay_settings.json` and the live request both held `standalone_mode=false`, yet the normal PyQt top-level remained selectable in the taskbar/Alt-Tab. The Linux preferences control was disabled by the legacy Windows-only gate, so the user could not explicitly choose standalone versus normal identity.
+- The user confirmed this standalone-like identity occurs in windowed mode only. Borderless fullscreen uses Shell-raster presentation and does not appear as a standalone/task-switcher window; that behavior must remain unchanged.
+- Chosen remap correction: keep the surface mapped but suppress rendered content during warmup. This preserves helper discovery/placement while eliminating the visible monitor-relative intermediate. Restore content only after overlay-window discovery plus matching rect, or after the existing bounded fallback expires.
+- Chosen standalone correction: retain one existing default-off preference across platforms. The GNOME helper owns compositor-specific window-list behavior using Mutter's supported hide/show window-list operations; false hides normal mode, true shows standalone mode, and helper disable restores entries hidden by the helper.
+
 ## Execution Log
 - Plan created on 2026-05-11.
 - Phase 4 runtime wiring was authorized and implemented on 2026-05-11.

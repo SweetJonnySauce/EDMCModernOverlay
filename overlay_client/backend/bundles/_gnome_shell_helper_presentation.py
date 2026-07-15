@@ -64,6 +64,9 @@ GNOME_HELPER_SHELL_RASTER_PROOF_ENV = "EDMC_OVERLAY_GNOME_SHELL_RASTER_PROOF"
 GNOME_HELPER_SHELL_RASTER_LEASE_REFRESH_FRACTION = 0.5
 GNOME_HELPER_SHELL_RASTER_MIN_REFRESH_SECONDS = 0.25
 GNOME_HELPER_PERSISTENT_MISMATCH_THRESHOLD = 2
+GNOME_HELPER_MANAGED_SURFACE_STABLE_SAMPLES = 2
+GNOME_HELPER_SURFACE_LOSS_RECOVERY_SAMPLES = 4
+GNOME_HELPER_SURFACE_RECOVERY_INTERVAL_SECONDS = 2.0
 GNOME_HELPER_REASON_APPLIED_RECT_MISMATCH = "applied_rect_mismatch"
 GNOME_HELPER_REASON_WRONG_MONITOR_APPLIED_RECT = "wrong_monitor_applied_rect"
 GNOME_HELPER_REASON_PERSISTENT_APPLIED_RECT_MISMATCH = "persistent_applied_rect_mismatch"
@@ -130,6 +133,19 @@ class GnomeHelperPersistentMismatchKey:
     applied_rect: tuple[int, int, int, int]
 
 
+@dataclass(frozen=True, slots=True)
+class GnomeHelperSurfacePreparationDecision:
+    """Pure decision for one backend-owned Qt surface preparation candidate."""
+
+    action: str
+    reason: str
+    preparation: BackendPresentationSurfacePreparation | None
+    ready: bool
+    should_apply: bool
+    pending_preparation: BackendPresentationSurfacePreparation | None
+    pending_samples: int
+
+
 @dataclass(slots=True)
 class GnomeHelperPresentationRuntimeState:
     """Mutable GNOME helper presentation cache owned by the backend bundle."""
@@ -146,6 +162,11 @@ class GnomeHelperPresentationRuntimeState:
     persistent_mismatch_count: int = 0
     persistent_mismatch_status: HelperPresentationStatus | None = None
     last_surface_preparation: BackendPresentationSurfacePreparation | None = None
+    pending_surface_preparation: BackendPresentationSurfacePreparation | None = None
+    pending_surface_preparation_samples: int = 0
+    surface_preparation_loss_samples: int = 0
+    next_surface_preparation_retry_at: float = 0.0
+    next_surface_recovery_at: float = 0.0
 
 
 _DEFAULT_PRESENTATION_RUNTIME_STATE = GnomeHelperPresentationRuntimeState()
@@ -170,6 +191,9 @@ class GnomeHelperPresentationCycleResult:
     persistent_mismatch_backoff: bool = False
     surface_preparation: BackendPresentationSurfacePreparation | None = None
     surface_preparation_failed: bool = False
+    surface_preparation_ready: bool = True
+    surface_preparation_action: str = ""
+    surface_preparation_reason: str = ""
     shell_raster_transition_clear_requested: bool = False
     shell_raster_transition_clear_succeeded: bool = False
     shell_raster_transition_clear_reason: str = ""
@@ -214,6 +238,8 @@ class GnomeHelperPresentationCycleResult:
         if self.shell_raster_frame_presented:
             return False
         if self.shell_raster_frame_suspended_for_focus_risk:
+            return False
+        if self.surface_preparation is not None and not self.surface_preparation_ready:
             return False
         return (
             self.target_found
@@ -288,6 +314,9 @@ class GnomeHelperPresentationCycleResult:
                 else None
             ),
             "surface_preparation_failed": self.surface_preparation_failed,
+            "surface_preparation_ready": self.surface_preparation_ready,
+            "surface_preparation_action": self.surface_preparation_action,
+            "surface_preparation_reason": self.surface_preparation_reason,
             "shell_raster_transition_clear_requested": self.shell_raster_transition_clear_requested,
             "shell_raster_transition_clear_succeeded": self.shell_raster_transition_clear_succeeded,
             "shell_raster_transition_clear_reason": self.shell_raster_transition_clear_reason,
@@ -378,6 +407,15 @@ def run_gnome_shell_helper_presentation_cycle(
     presentation_status: HelperPresentationStatus | None = None
     surface_preparation: BackendPresentationSurfacePreparation | None = None
     surface_preparation_failed = False
+    surface_preparation_decision = GnomeHelperSurfacePreparationDecision(
+        action="none",
+        reason="not_required",
+        preparation=None,
+        ready=True,
+        should_apply=False,
+        pending_preparation=None,
+        pending_samples=0,
+    )
     shell_raster_transition_clear_requested = False
     shell_raster_transition_clear_succeeded = False
     shell_raster_transition_clear_reason = ""
@@ -454,17 +492,50 @@ def run_gnome_shell_helper_presentation_cycle(
             env=os.environ,
             shell_raster_runtime_enabled=shell_raster_runtime_enabled,
         )
+        if attempt == 1:
+            surface_preparation_decision = _surface_preparation_decision(
+                state,
+                surface_preparation,
+                now_monotonic=now,
+            )
+            _record_surface_preparation_decision(state, surface_preparation_decision)
+            if not surface_preparation_decision.ready:
+                state.last_target_status = target_status
+                state.last_request = request
+                state.last_presentation_status = None
+                state.last_signature = None
+                state.last_success_at = 0.0
+                state.next_suppressed_target_poll_at = 0.0
+                _clear_persistent_mismatch_cache(state)
+                return GnomeHelperPresentationCycleResult(
+                    health_status=health_status,
+                    target_status=target_status,
+                    request=request,
+                    health_cache_hit=health_cache_hit,
+                    surface_preparation=surface_preparation,
+                    surface_preparation_ready=False,
+                    surface_preparation_action=surface_preparation_decision.action,
+                    surface_preparation_reason=surface_preparation_decision.reason,
+                    shell_raster_transition_clear_requested=shell_raster_transition_clear_requested,
+                    shell_raster_transition_clear_succeeded=shell_raster_transition_clear_succeeded,
+                    shell_raster_transition_clear_reason=shell_raster_transition_clear_reason,
+                )
         signature = _presentation_signature(
             target_status,
             request,
             previous_surface_action=previous_surface_action,
             surface_preparation=surface_preparation,
         )
-        if attempt == 1 and _should_skip_presentation_apply(
-            state,
-            signature,
-            request,
-            now_monotonic=now,
+        if (
+            attempt == 1
+            and surface_preparation_decision.ready
+            and not surface_preparation_decision.should_apply
+            and _should_skip_presentation_apply(
+                state,
+                signature,
+                request,
+                now_monotonic=now,
+            )
         ):
             state.last_target_status = target_status
             state.last_request = request
@@ -484,11 +555,19 @@ def run_gnome_shell_helper_presentation_cycle(
                 presentation_skip_reason="fresh_matching_presentation",
                 health_cache_hit=health_cache_hit,
                 surface_preparation=surface_preparation,
+                surface_preparation_ready=surface_preparation_decision.ready,
+                surface_preparation_action=surface_preparation_decision.action,
+                surface_preparation_reason=surface_preparation_decision.reason,
                 shell_raster_transition_clear_requested=shell_raster_transition_clear_requested,
                 shell_raster_transition_clear_succeeded=shell_raster_transition_clear_succeeded,
                 shell_raster_transition_clear_reason=shell_raster_transition_clear_reason,
             )
-        if attempt == 1 and _should_skip_persistent_mismatch_apply(state, signature):
+        if (
+            attempt == 1
+            and surface_preparation_decision.ready
+            and not surface_preparation_decision.should_apply
+            and _should_skip_persistent_mismatch_apply(state, signature)
+        ):
             state.last_target_status = target_status
             state.last_request = request
             state.last_presentation_status = state.persistent_mismatch_status
@@ -503,12 +582,23 @@ def run_gnome_shell_helper_presentation_cycle(
                 persistent_mismatch_count=state.persistent_mismatch_count,
                 persistent_mismatch_backoff=True,
                 surface_preparation=surface_preparation,
+                surface_preparation_ready=surface_preparation_decision.ready,
+                surface_preparation_action=surface_preparation_decision.action,
+                surface_preparation_reason=surface_preparation_decision.reason,
                 shell_raster_transition_clear_requested=shell_raster_transition_clear_requested,
                 shell_raster_transition_clear_succeeded=shell_raster_transition_clear_succeeded,
                 shell_raster_transition_clear_reason=shell_raster_transition_clear_reason,
             )
-        if attempt == 1 and surface_preparation is not None:
-            if not _apply_surface_preparation(surface_preparation, prepare_surface):
+        if attempt == 1 and surface_preparation_decision.should_apply and surface_preparation is not None:
+            preparation_to_apply = surface_preparation_decision.preparation or surface_preparation
+            surface_preparation_succeeded = _apply_surface_preparation(preparation_to_apply, prepare_surface)
+            _record_surface_preparation_result(
+                state,
+                surface_preparation,
+                succeeded=surface_preparation_succeeded,
+                now_monotonic=now,
+            )
+            if not surface_preparation_succeeded:
                 surface_preparation_failed = True
                 presentation_status = _surface_preparation_failed_status(
                     target_status,
@@ -550,6 +640,7 @@ def run_gnome_shell_helper_presentation_cycle(
         request=request,
         presentation_status=presentation_status,
     )
+    _update_surface_preparation_loss_state(state, surface_preparation, presentation_status)
     _update_presentation_cache(
         state,
         target_status=target_status,
@@ -574,6 +665,13 @@ def run_gnome_shell_helper_presentation_cycle(
         ),
         surface_preparation=surface_preparation,
         surface_preparation_failed=surface_preparation_failed,
+        surface_preparation_ready=surface_preparation_decision.ready,
+        surface_preparation_action=("failed" if surface_preparation_failed else surface_preparation_decision.action),
+        surface_preparation_reason=(
+            GNOME_HELPER_REASON_SURFACE_PREPARATION_FAILED
+            if surface_preparation_failed
+            else surface_preparation_decision.reason
+        ),
         shell_raster_transition_clear_requested=shell_raster_transition_clear_requested,
         shell_raster_transition_clear_succeeded=shell_raster_transition_clear_succeeded,
         shell_raster_transition_clear_reason=shell_raster_transition_clear_reason,
@@ -973,6 +1071,9 @@ def _borderless_fullscreen_surface_preparation(
         reason="gnome_borderless_full_monitor",
         target_token=request.target_token,
         rect_source=request.rect_source,
+        target_monitor=target.monitor,
+        target_output_name=target.output_name,
+        target_monitor_rect=_rect_signature(target.monitor_rect),
     )
 
 
@@ -1000,7 +1101,154 @@ def _managed_windowed_surface_preparation(
         reason=GNOME_HELPER_REASON_WINDOWED_MANAGED_PYQT,
         target_token=request.target_token,
         rect_source=request.rect_source,
+        target_monitor=target.monitor,
+        target_output_name=target.output_name,
+        target_monitor_rect=_rect_signature(target.monitor_rect),
     )
+
+
+def _surface_preparation_decision(
+    state: GnomeHelperPresentationRuntimeState,
+    candidate: BackendPresentationSurfacePreparation | None,
+    *,
+    now_monotonic: float,
+) -> GnomeHelperSurfacePreparationDecision:
+    """Return a deterministic preparation decision without mutating runtime state."""
+
+    if candidate is None:
+        invalidated = state.last_surface_preparation is not None or state.pending_surface_preparation is not None
+        return GnomeHelperSurfacePreparationDecision(
+            action="invalidated" if invalidated else "none",
+            reason="no_surface_preparation" if invalidated else "not_required",
+            preparation=None,
+            ready=True,
+            should_apply=False,
+            pending_preparation=None,
+            pending_samples=0,
+        )
+
+    if candidate == state.last_surface_preparation:
+        recovery_due = (
+            state.surface_preparation_loss_samples >= GNOME_HELPER_SURFACE_LOSS_RECOVERY_SAMPLES
+            and now_monotonic >= state.next_surface_recovery_at
+        )
+        if recovery_due:
+            return GnomeHelperSurfacePreparationDecision(
+                action="recovery",
+                reason="confirmed_surface_loss",
+                preparation=replace(candidate, force_recovery=True),
+                ready=True,
+                should_apply=True,
+                pending_preparation=None,
+                pending_samples=0,
+            )
+        return GnomeHelperSurfacePreparationDecision(
+            action="reused",
+            reason=(
+                "surface_loss_recovery_backoff"
+                if state.surface_preparation_loss_samples >= GNOME_HELPER_SURFACE_LOSS_RECOVERY_SAMPLES
+                else "unchanged_preparation"
+            ),
+            preparation=candidate,
+            ready=True,
+            should_apply=False,
+            pending_preparation=None,
+            pending_samples=0,
+        )
+
+    if candidate.mode != GNOME_HELPER_SURFACE_PREPARATION_MANAGED_WINDOWED:
+        return GnomeHelperSurfacePreparationDecision(
+            action="apply",
+            reason="non_windowed_preparation_changed",
+            preparation=candidate,
+            ready=True,
+            should_apply=True,
+            pending_preparation=None,
+            pending_samples=0,
+        )
+
+    pending_samples = (
+        state.pending_surface_preparation_samples + 1
+        if candidate == state.pending_surface_preparation
+        else 1
+    )
+    if pending_samples < GNOME_HELPER_MANAGED_SURFACE_STABLE_SAMPLES:
+        return GnomeHelperSurfacePreparationDecision(
+            action="stabilizing",
+            reason="managed_window_identity_pending",
+            preparation=candidate,
+            ready=False,
+            should_apply=False,
+            pending_preparation=candidate,
+            pending_samples=pending_samples,
+        )
+    if now_monotonic < state.next_surface_preparation_retry_at:
+        return GnomeHelperSurfacePreparationDecision(
+            action="retry_backoff",
+            reason="surface_preparation_failure_backoff",
+            preparation=candidate,
+            ready=False,
+            should_apply=False,
+            pending_preparation=candidate,
+            pending_samples=pending_samples,
+        )
+    return GnomeHelperSurfacePreparationDecision(
+        action="apply",
+        reason="managed_window_identity_stable",
+        preparation=candidate,
+        ready=True,
+        should_apply=True,
+        pending_preparation=candidate,
+        pending_samples=pending_samples,
+    )
+
+
+def _record_surface_preparation_decision(
+    state: GnomeHelperPresentationRuntimeState,
+    decision: GnomeHelperSurfacePreparationDecision,
+) -> None:
+    state.pending_surface_preparation = decision.pending_preparation
+    state.pending_surface_preparation_samples = decision.pending_samples
+    if decision.action == "invalidated":
+        state.last_surface_preparation = None
+        state.surface_preparation_loss_samples = 0
+        state.next_surface_preparation_retry_at = 0.0
+        state.next_surface_recovery_at = 0.0
+    elif decision.action == "reused":
+        state.pending_surface_preparation = None
+        state.pending_surface_preparation_samples = 0
+
+
+def _record_surface_preparation_result(
+    state: GnomeHelperPresentationRuntimeState,
+    candidate: BackendPresentationSurfacePreparation,
+    *,
+    succeeded: bool,
+    now_monotonic: float,
+) -> None:
+    if not succeeded:
+        state.next_surface_preparation_retry_at = now_monotonic + GNOME_HELPER_SURFACE_RECOVERY_INTERVAL_SECONDS
+        return
+    state.last_surface_preparation = candidate
+    state.pending_surface_preparation = None
+    state.pending_surface_preparation_samples = 0
+    state.surface_preparation_loss_samples = 0
+    state.next_surface_preparation_retry_at = 0.0
+    state.next_surface_recovery_at = now_monotonic + GNOME_HELPER_SURFACE_RECOVERY_INTERVAL_SECONDS
+
+
+def _update_surface_preparation_loss_state(
+    state: GnomeHelperPresentationRuntimeState,
+    candidate: BackendPresentationSurfacePreparation | None,
+    presentation_status: HelperPresentationStatus | None,
+) -> None:
+    if candidate is None or candidate != state.last_surface_preparation or presentation_status is None:
+        state.surface_preparation_loss_samples = 0
+        return
+    if presentation_status.overlay_token:
+        state.surface_preparation_loss_samples = 0
+        return
+    state.surface_preparation_loss_samples += 1
 
 
 def _apply_surface_preparation(
@@ -1437,6 +1685,12 @@ def _clear_presentation_cache(state: GnomeHelperPresentationRuntimeState) -> Non
     state.last_signature = None
     state.last_success_at = 0.0
     state.next_suppressed_target_poll_at = 0.0
+    state.last_surface_preparation = None
+    state.pending_surface_preparation = None
+    state.pending_surface_preparation_samples = 0
+    state.surface_preparation_loss_samples = 0
+    state.next_surface_preparation_retry_at = 0.0
+    state.next_surface_recovery_at = 0.0
     _clear_persistent_mismatch_cache(state)
 
 

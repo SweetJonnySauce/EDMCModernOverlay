@@ -65,6 +65,9 @@ class BackendPresentationCycleResult:
             payload.get("surface_preparation"),
             str(payload.get("surface_preparation_rect")),
             payload.get("surface_preparation_failed"),
+            payload.get("surface_preparation_ready"),
+            payload.get("surface_preparation_action"),
+            payload.get("surface_preparation_reason"),
             payload.get("prepared_surface_requires_mapping"),
             payload.get("prepared_surface_allows_unfocused_content"),
             payload.get("legacy_geometry_policy"),
@@ -411,6 +414,7 @@ def _prepared_surface_requires_mapping_from_gnome_helper_result(
         surface_preparation is not None
         and getattr(surface_preparation, "mode", "") == BACKEND_PRESENTATION_SURFACE_PREPARATION_MANAGED_WINDOWED
         and not bool(getattr(result, "surface_preparation_failed", False))
+        and bool(getattr(result, "surface_preparation_ready", True))
     )
 
 

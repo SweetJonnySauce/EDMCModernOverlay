@@ -71,8 +71,6 @@ class ControlSurfaceMixin:
 
     def set_standalone_mode(self, enabled: Optional[bool]) -> None:
         flag = bool(enabled)
-        if not sys.platform.startswith("win"):
-            flag = False
         if flag == getattr(self, "_standalone_mode", False):
             return
         self._standalone_mode = flag

@@ -113,9 +113,6 @@ def decide_backend_presentation_visibility(
             surface_action=BACKEND_PRESENTATION_SURFACE_HIDDEN,
             content_visible=False,
         )
-    if keep_overlay_visible:
-        return BackendPresentationVisibilityDecision(True, "keep_overlay_visible", reset_state)
-
     previous_state = previous or reset_state
     if previous_state.remap_warmup_active:
         warmup_started = previous_state.remap_warmup_started_monotonic
@@ -135,10 +132,10 @@ def decide_backend_presentation_visibility(
             warmup_samples >= max(1, int(remap_warmup_max_samples))
             or warmup_elapsed >= max(0.0, float(remap_warmup_seconds))
         ):
-            if snapshot.target_has_focus:
+            if keep_overlay_visible or snapshot.target_has_focus:
                 return BackendPresentationVisibilityDecision(
                     True,
-                    "target_focused_warmup_expired",
+                    "remap_warmup_expired_visible",
                     reset_state,
                     remap_warmup_elapsed_seconds=warmup_elapsed,
                     remap_warmup_status="expired",
@@ -162,7 +159,31 @@ def decide_backend_presentation_visibility(
             ),
             remap_warmup_elapsed_seconds=warmup_elapsed,
             remap_warmup_status="active",
+            surface_action=BACKEND_PRESENTATION_SURFACE_MAPPED_SUPPRESSED,
+            content_visible=False,
         )
+
+    awaiting_mapped_surface_confirmation = (
+        not currently_visible
+        and snapshot.prepared_surface_requires_mapping
+        and not (snapshot.overlay_window_found and snapshot.presentation_rect_match)
+    )
+    if awaiting_mapped_surface_confirmation:
+        return BackendPresentationVisibilityDecision(
+            True,
+            "prepared_surface_remap_warmup",
+            BackendPresentationVisibilityState(
+                remap_warmup_active=True,
+                remap_warmup_samples=0,
+                remap_warmup_started_monotonic=float(now_monotonic),
+            ),
+            remap_warmup_status="started",
+            surface_action=BACKEND_PRESENTATION_SURFACE_MAPPED_SUPPRESSED,
+            content_visible=False,
+        )
+
+    if keep_overlay_visible:
+        return BackendPresentationVisibilityDecision(True, "keep_overlay_visible", reset_state)
 
     if not currently_visible and snapshot.target_has_focus:
         return BackendPresentationVisibilityDecision(
@@ -174,6 +195,8 @@ def decide_backend_presentation_visibility(
                 remap_warmup_started_monotonic=float(now_monotonic),
             ),
             remap_warmup_status="started",
+            surface_action=BACKEND_PRESENTATION_SURFACE_MAPPED_SUPPRESSED,
+            content_visible=False,
         )
     if (
         snapshot.prepared_surface_allows_unfocused_content
