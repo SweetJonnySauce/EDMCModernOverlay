@@ -109,15 +109,15 @@ class _StandaloneStub(ControlSurfaceMixin):
         self.identity_calls += 1
 
 
-def test_set_standalone_mode_is_not_forced_off_on_linux(monkeypatch) -> None:
+def test_set_standalone_mode_is_forced_off_on_linux(monkeypatch) -> None:
     window = _StandaloneStub()
     monkeypatch.setattr("overlay_client.control_surface.sys.platform", "linux")
 
     window.set_standalone_mode(True)
 
-    assert window._standalone_mode is True
-    assert window.drag_state_calls == 1
-    assert window.identity_calls == 1
+    assert window._standalone_mode is False
+    assert window.drag_state_calls == 0
+    assert window.identity_calls == 0
 
 
 def test_set_physical_clamp_overrides_applies_and_refreshes() -> None:

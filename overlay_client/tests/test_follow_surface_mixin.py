@@ -538,7 +538,7 @@ def test_refresh_follow_geometry_uses_gnome_helper_presentation_and_skips_legacy
 
     stub._refresh_follow_geometry()
 
-    assert calls == [(True, False, "", True, 30)]
+    assert calls == [(False, False, "", True, 30)]
     assert stub._follow_controller.refresh_called == 0
     assert stub._last_backend_presentation is result
     assert stub._last_backend_presentation_surface_action == "mapped_suppressed"

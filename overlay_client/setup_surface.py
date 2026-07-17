@@ -115,6 +115,8 @@ class SetupSurfaceMixin:
         self._log_retention: int = max(1, int(initial.client_log_retention))
         self._keep_overlay_visible: bool = bool(getattr(initial, "keep_overlay_visible", False))
         self._standalone_mode: bool = bool(getattr(initial, "standalone_mode", False))
+        if not sys.platform.startswith("win"):
+            self._standalone_mode = False
         self._standalone_icon_handles: Tuple[Optional[int], Optional[int]] = (None, None)
         self._physical_clamp_enabled: bool = bool(getattr(initial, "physical_clamp_enabled", False))
         self._physical_clamp_overrides: Dict[str, float] = dict(

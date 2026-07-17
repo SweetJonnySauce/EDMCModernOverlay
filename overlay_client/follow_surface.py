@@ -138,7 +138,7 @@ class FollowSurfaceMixin:
         try:
             result = run_backend_presentation_cycle(
                 getattr(self, "_client_backend_status", None),
-                standalone_mode=bool(getattr(self, "_standalone_mode", False)),
+                standalone_mode=False,
                 keep_overlay_visible=bool(getattr(self, "_keep_overlay_visible", False)),
                 previous_surface_action=str(getattr(self, "_last_backend_presentation_surface_action", "")),
                 title_bar_compensation_enabled=bool(getattr(self, "_title_bar_enabled", False)),

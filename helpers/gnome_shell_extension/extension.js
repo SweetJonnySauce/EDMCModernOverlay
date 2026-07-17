@@ -231,7 +231,6 @@ class HelperHealthService {
         this._shellRasterRegions = new Map();
         this._shellRasterFrameTimeoutId = 0;
         this._shellRasterOverviewSignalIds = [];
-        this._windowListHiddenWindows = new Map();
         this._logDiagnostic('service_constructed', {
             feature_gate: helperFeatureGatePayload(this._featureGate),
             capabilities: this._helperCapabilities(),
@@ -505,12 +504,6 @@ class HelperHealthService {
             }));
         }
 
-        const windowListVisibility = this._applyManagedWindowListVisibility(
-            overlayEntry.window,
-            overlayEntry.payload.targetToken,
-            standaloneMode,
-        );
-
         const result = this._applyOverlayPresentation(
             overlayEntry.window,
             requestedRect,
@@ -528,12 +521,6 @@ class HelperHealthService {
         const focusSafe = result.stacking && clickThrough;
         const unsupportedFeatures = [...result.unsupportedFeatures];
         const degradeReasons = [...result.degradeReasons];
-        if (!windowListVisibility.supported) {
-            unsupportedFeatures.push('window_list_visibility');
-        }
-        if (!windowListVisibility.matchesExpected) {
-            degradeReasons.push('window_list_visibility_unproven');
-        }
         if (!chromeFree) {
             degradeReasons.push('chrome_free_unproven');
         }
@@ -549,9 +536,6 @@ class HelperHealthService {
         const status = degradeReasons.length || unsupportedFeatures.length
             ? 'presentation_degraded'
             : 'presentation_applied';
-        if (result.presentationDiagnostics) {
-            result.presentationDiagnostics.window_list_visibility = windowListVisibility;
-        }
 
         return JSON.stringify(this._presentationPayload({
             ...base,
@@ -3474,84 +3458,6 @@ class HelperHealthService {
         }) || null;
     }
 
-    _applyManagedWindowListVisibility(window, overlayToken, standaloneMode) {
-        const token = String(overlayToken || this._targetToken(window) || '');
-        const shouldHide = !Boolean(standaloneMode);
-        const canHide = typeof window?.hide_from_window_list === 'function';
-        const canShow = typeof window?.show_in_window_list === 'function';
-        const supported = canHide && canShow;
-        const before = this._safeCall(window, 'is_skip_taskbar');
-        let action = 'unchanged';
-        let error = '';
-
-        if (supported && Boolean(before) !== shouldHide) {
-            try {
-                if (shouldHide) {
-                    window.hide_from_window_list();
-                    action = 'hide_from_window_list';
-                } else {
-                    window.show_in_window_list();
-                    action = 'show_in_window_list';
-                }
-            } catch (_error) {
-                action = 'error';
-                error = this._errorMessage(_error);
-            }
-        } else if (!supported) {
-            action = 'unsupported';
-        }
-
-        const after = this._safeCall(window, 'is_skip_taskbar');
-        const matchesExpected = supported && typeof after === 'boolean' && after === shouldHide;
-        if (shouldHide && action === 'hide_from_window_list' && matchesExpected && token) {
-            this._windowListHiddenWindows.set(token, window);
-        } else if (!shouldHide && token) {
-            this._windowListHiddenWindows.delete(token);
-        }
-        const result = {
-            supported,
-            standalone_mode: Boolean(standaloneMode),
-            expected_hidden: shouldHide,
-            hidden_before: typeof before === 'boolean' ? before : null,
-            hidden_after: typeof after === 'boolean' ? after : null,
-            matchesExpected,
-            action,
-            error,
-        };
-        this._logDiagnostic('window_list_visibility_decision', {
-            overlay_token: token,
-            ...result,
-        });
-        return result;
-    }
-
-    _restoreManagedWindowListVisibility(reason = 'helper_disable') {
-        let restored = 0;
-        let failed = 0;
-        for (const [overlayToken, window] of this._windowListHiddenWindows.entries()) {
-            try {
-                if (typeof window?.show_in_window_list !== 'function') {
-                    failed += 1;
-                    continue;
-                }
-                window.show_in_window_list();
-                restored += 1;
-            } catch (_error) {
-                failed += 1;
-                this._logException('window_list_visibility_restore_failed', _error, {
-                    overlay_token: overlayToken,
-                    reason,
-                });
-            }
-        }
-        this._windowListHiddenWindows.clear();
-        this._logDiagnostic('window_list_visibility_restored', {
-            reason,
-            restored,
-            failed,
-        });
-    }
-
     _applyOverlayPresentation(window, requestedRect, rectTolerance = 2, options = {}) {
         const unsupportedFeatures = [];
         const degradeReasons = [];
@@ -4240,7 +4146,6 @@ export default class EdmcModernOverlayHelperExtension extends Extension {
         this._healthService?._clearShellActorProof?.('helper_disable');
         this._healthService?._clearShellRasterFrame?.('helper_disable');
         this._healthService?._disconnectShellRasterOverviewSignals?.();
-        this._healthService?._restoreManagedWindowListVisibility?.('helper_disable');
         this._unexportDbusObject();
         this._healthService = null;
         this._helperIdentity = null;
