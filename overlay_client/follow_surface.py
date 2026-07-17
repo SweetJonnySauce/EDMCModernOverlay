@@ -12,7 +12,9 @@ from PyQt6.QtWidgets import QApplication
 
 from overlay_client.backend.consumers import BackendPresentationCycleResult, run_backend_presentation_cycle
 from overlay_client.backend.presentation_policy import (
+    BACKEND_PRESENTATION_SURFACE_HIDDEN,
     BackendPresentationVisibilityDecision,
+    BackendPresentationVisibilityState,
     decide_backend_presentation_visibility,
 )
 from overlay_client.backend.surface_preparation import (
@@ -151,8 +153,10 @@ class FollowSurfaceMixin:
             return True
         if result is None:
             return False
-        currently_visible = self.isVisible()
         self._last_backend_presentation = result
+        if result.reset_surface_state:
+            self._reset_backend_presentation_surface_state()
+        currently_visible = self.isVisible()
         decision = decide_backend_presentation_visibility(
             result.visibility_snapshot,
             keep_overlay_visible=bool(getattr(self, "_keep_overlay_visible", False)),
@@ -167,6 +171,17 @@ class FollowSurfaceMixin:
         if decision.show and result.scale_size is not None:
             self._update_auto_legacy_scale(*result.scale_size)
         return True
+
+    def _reset_backend_presentation_surface_state(self) -> None:
+        """Hide and invalidate generic managed-surface state after backend takeover."""
+
+        self._set_backend_presentation_content_suppressed(False, reason="backend_surface_reset")
+        if self.isVisible():
+            self.hide()
+        self._backend_managed_surface_prepared = False
+        self._last_backend_surface_preparation_key = ()
+        self._backend_presentation_visibility_state = BackendPresentationVisibilityState()
+        self._last_backend_presentation_surface_action = BACKEND_PRESENTATION_SURFACE_HIDDEN
 
     def _prepare_backend_presentation_surface(self, preparation: object) -> bool:
         mode = str(getattr(preparation, "mode", "") or "")
@@ -471,6 +486,8 @@ class FollowSurfaceMixin:
             "presentation_skipped=%s skip_reason=%s target_poll_skipped=%s "
             "surface_preparation=%s surface_preparation_failed=%s surface_preparation_ready=%s "
             "surface_preparation_action=%s surface_preparation_reason=%s "
+            "transition_state=%s transition_reason=%s transition_action=%s transition_elapsed=%.3fs "
+            "transition_samples=%s transition_token=%s transition_monitor=%s surface_reset=%s "
             "visibility=%s visibility_reason=%s surface_action=%s content_visible=%s keep_overlay_visible=%s target_focus=%s target_workspace=%s "
             "target_minimized=%s focus_loss_samples=%s focus_loss_elapsed=%.3fs remap_warmup=%s "
             "remap_warmup_samples=%s remap_warmup_elapsed=%.3fs overlay_window_found=%s legacy_geometry=%s; %s",
@@ -502,6 +519,14 @@ class FollowSurfaceMixin:
             payload.get("surface_preparation_ready"),
             payload.get("surface_preparation_action"),
             payload.get("surface_preparation_reason"),
+            payload.get("transition_state", ""),
+            payload.get("transition_reason", ""),
+            payload.get("transition_action", ""),
+            float(payload.get("transition_elapsed_seconds", 0.0) or 0.0),
+            payload.get("transition_sample_count", 0),
+            payload.get("transition_target_token", ""),
+            payload.get("transition_target_monitor"),
+            payload.get("managed_surface_reset_requested", False),
             "visible" if decision.show else "hidden",
             decision.reason,
             decision.surface_action,

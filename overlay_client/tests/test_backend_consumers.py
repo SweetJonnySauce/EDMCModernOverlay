@@ -510,6 +510,38 @@ def test_backend_presentation_cycle_wraps_gnome_helper_result_when_helper_availa
     assert result.diagnostics["prepared_surface_allows_unfocused_content"] is False
 
 
+def test_backend_presentation_cycle_transports_generic_surface_reset_action():
+    status = BackendSelectionStatus(
+        probe=PlatformProbeResult(
+            operating_system=OperatingSystem.LINUX,
+            session_type=SessionType.WAYLAND,
+            qt_platform_name="wayland",
+            compositor="gnome-shell",
+        ),
+        selected_backend=BackendDescriptor(
+            BackendFamily.COMPOSITOR_HELPER,
+            BackendInstance.GNOME_SHELL_RASTER,
+        ),
+        classification=CapabilityClassification.DEGRADED_OVERLAY,
+        helper_states=(
+            HelperCapabilityState(
+                helper=HelperKind.GNOME_SHELL_EXTENSION,
+                required=True,
+                installed=True,
+                enabled=True,
+                approved=True,
+            ),
+        ),
+    )
+    helper_result = _FakeGnomePresentationResult()
+    helper_result.managed_surface_reset_requested = True
+
+    result = run_backend_presentation_cycle(status, gnome_runner=lambda **_: helper_result)
+
+    assert result is not None
+    assert result.reset_surface_state is True
+
+
 def test_backend_presentation_cycle_marks_managed_windowed_surface_as_requiring_mapping():
     status = BackendSelectionStatus(
         probe=PlatformProbeResult(

@@ -4288,10 +4288,10 @@ After implementation:
 - `overlay_settings.json` and the live request both held `standalone_mode=false`, yet the normal PyQt top-level remained selectable in the taskbar/Alt-Tab. The Linux preferences control was disabled by the legacy Windows-only gate, so the user could not explicitly choose standalone versus normal identity.
 - The user confirmed this standalone-like identity occurs in windowed mode only. Borderless fullscreen uses Shell-raster presentation and does not appear as a standalone/task-switcher window; that behavior must remain unchanged.
 - Chosen remap correction: keep the surface mapped but suppress rendered content during warmup. This preserves helper discovery/placement while eliminating the visible monitor-relative intermediate. Restore content only after overlay-window discovery plus matching rect, or after the existing bounded fallback expires.
-- Chosen standalone correction: retain one existing default-off preference across platforms. The GNOME helper owns compositor-specific window-list behavior using Mutter's supported hide/show window-list operations; false hides normal mode, true shows standalone mode, and helper disable restores entries hidden by the helper.
+- Superseded standalone experiment: the proposed GNOME helper window-list operations proved unsupported on the tested Mutter runtime and were removed by readiness containment commit `51043a2`. Linux standalone identity remains deferred; Phase 19 does not depend on window-list manipulation.
 
 ### Phase 19: Atomic Fullscreen Monitor Handoff Without Managed-Window Fallback Exposure
-- Status: Planned on 2026-07-14. Live reproduction and settled-state evidence are captured; no Phase 19 runtime code has been implemented.
+- Status: Completed on 2026-07-17. The guard is default-on with an explicit opt-out, and the implementation was committed separately from Linux standalone/window-list identity work.
 - Goal: preserve Shell-raster ownership while GNOME transiently changes Elite's fullscreen/maximized metadata during a Shift+Super+Arrow monitor move, so the managed PyQt fallback cannot appear as a standalone, decorated, focus-affecting top-level window.
 - Scope boundary: Phase 19 fixes renderer ownership and surface lifecycle during a fullscreen monitor handoff. It does not redefine maximized windows as fullscreen, change normal managed-window behavior, or select a new Linux taskbar/Alt-Tab implementation.
 
@@ -4333,7 +4333,7 @@ After implementation:
 - Stable Windows mechanism: the existing standalone preference is implemented through Qt window identity. Normal overlay mode applies `Qt.Tool`; Windows standalone mode prevents that tool-window flag, leaving a normal app window that capture tools, the taskbar, and Alt-Tab can identify. `_apply_standalone_window_identity()` then applies the standalone window icons. Historically, non-Windows clients forced the preference false.
 - Generic flag mechanism: `InteractionController._apply_window_identity_flags()` applies `WindowStaysOnTopHint`, `FramelessWindowHint`, click-through attributes, and `Qt.Tool` only when the backend is not Wayland. `OverlayWindow._set_window_flag()` contains the Windows standalone exception that disables `Qt.Tool` while standalone mode is enabled. Preserve this reference when refactoring; past regressions have come from changing tool/window flags during native-surface recreation.
 - Borderless GNOME mechanism: Shell-raster presentation has no visible managed PyQt top-level and is therefore naturally absent from taskbar, Alt-Tab, and Overview. Standalone selection does not apply to this renderer.
-- Current GNOME managed-window experiment: the cross-platform preference is forwarded to the helper, where normal mode attempts `hide_from_window_list()` and standalone mode attempts `show_in_window_list()`. On the tested GNOME/Mutter runtime both methods probe as unsupported. Consequently, `standalone=true` appears to work only because the managed PyQt surface is already a normal top-level; `standalone=false` cannot reliably remove it from task switching. This experiment is evidence, not an accepted production mechanism.
+- Removed GNOME managed-window experiment: the former cross-platform preference forwarding attempted `hide_from_window_list()` and `show_in_window_list()`. Both methods proved unsupported on the tested GNOME/Mutter runtime, so readiness containment commit `51043a2` removed the calls, diagnostics, and Linux preference exposure. This remains historical evidence, not an accepted production mechanism.
 - Historical reference: repository branch `origin/linux_standalone` contains earlier broad Linux standalone work. It may be inspected for intent, but must not be cherry-picked wholesale; any reusable behavior requires current backend-boundary review and focused tests.
 - Future GNOME standalone work must first prove a version-compatible compositor or Qt identity mechanism in an isolated spike. It must preserve `FramelessWindowHint`, click-through, focus safety, helper discovery, windowed multi-monitor attachment, and helper-disable cleanup before replacing the unsupported experiment.
 
@@ -4348,13 +4348,13 @@ After implementation:
 | Stage | Description | Status |
 | --- | --- | --- |
 | 19.1 | Record the fullscreen/windowed invariants, one-client reproduction, unsupported window-list evidence, test selection, and rollback boundary | Completed |
-| 19.2 | Extract a pure backend presentation-transition policy with stable Shell-raster, pending fullscreen-handoff, and stable managed-window states; inject a named `1.5s` default | Pending |
-| 19.3 | Wire transition state through the backend-owned GNOME bundle and backend-neutral consumer contract without crossing the `fix219` boundary | Pending |
-| 19.4 | Make renderer transitions atomic: retain/suspend Shell raster during handoff and explicitly suppress/reset managed PyQt surfaces | Pending |
-| 19.5 | Add unit, backend runtime-contract, and PyQt lifecycle regression coverage for stable modes and every transition outcome | Pending |
-| 19.6 | Run targeted tests, full headless/GUI suites, Ruff, mypy, architecture checks, `make check`, `make test`, and `git diff --check` | Pending |
-| 19.7 | Perform the two-monitor manual matrix with the transition toggle enabled, then disabled as a rollback proof | Pending |
-| 19.8 | Record evidence and commit Phase 19 separately from Linux standalone/window-list identity work | Pending |
+| 19.2 | Extract a pure backend presentation-transition policy with stable Shell-raster, pending fullscreen-handoff, and stable managed-window states; inject a named `1.5s` default | Completed |
+| 19.3 | Wire transition state through the backend-owned GNOME bundle and backend-neutral consumer contract without crossing the `fix219` boundary | Completed |
+| 19.4 | Make renderer transitions atomic: retain/suspend Shell raster during handoff and explicitly suppress/reset managed PyQt surfaces | Completed |
+| 19.5 | Add unit, backend runtime-contract, and PyQt lifecycle regression coverage for stable modes and every transition outcome | Completed |
+| 19.6 | Run targeted tests, full headless/GUI suites, Ruff, mypy, architecture checks, `make check`, `make test`, and `git diff --check` | Completed; known static-raster environment proof remains the documented exception |
+| 19.7 | Perform the two-monitor manual matrix with the transition toggle enabled, then disabled as a rollback proof | Completed |
+| 19.8 | Record evidence and commit Phase 19 separately from Linux standalone/window-list identity work | Completed |
 
 #### Phase 19 Planned Touch Points
 - New pure policy candidate: `overlay_client/backend/presentation_transition.py`.
@@ -4363,7 +4363,7 @@ After implementation:
 - Generic surface action application only: `overlay_client/follow_surface.py`; it must not inspect GNOME helper/backend enums.
 - Tests: a new `overlay_client/tests/test_presentation_transition.py` plus focused additions to `test_gnome_helper_presentation_runtime.py`, `test_backend_consumers.py`, `test_backend_presentation_policy.py`, `test_follow_surface_mixin.py`, `test_setup_surface.py`, and `test_interaction_controller.py` as required by actual touchpoints.
 - The GNOME extension should not require a protocol or window-list change for Phase 19. Helper changes are allowed only if target-actor suspend/reuse diagnostics prove insufficient, and must receive source-contract coverage.
-- Toggle contract: `_gnome_shell_helper_presentation.py` owns `EDMC_OVERLAY_GNOME_FULLSCREEN_HANDOFF_GUARD`; disabled preserves the current transition path exactly, enabled invokes the new arbiter. The `1.5s` grace remains a separately injected named policy parameter.
+- Toggle contract: `_gnome_shell_helper_presentation.py` owns `EDMC_OVERLAY_GNOME_FULLSCREEN_HANDOFF_GUARD`; unset or enabled invokes the validated arbiter, while an explicit false value preserves the pre-Phase 19 transition path as a rollback. The `1.5s` grace remains a separately injected named policy parameter.
 
 #### Phase 19 Planned Test Commands
 - `overlay_client/.venv/bin/python -m pytest -q overlay_client/tests/test_presentation_transition.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_backend_presentation_policy.py overlay_client/tests/test_follow_surface_mixin.py`
@@ -4420,6 +4420,81 @@ After implementation:
 - Result: passed.
 - Harness tests: not added or run. The containment does not touch `load.py`, EDMC hook/lifecycle orchestration, preferences replication wiring, journal/dashboard callbacks, or process orchestration.
 - Manual GNOME validation: not run for readiness containment. The installed helper is not reloaded in this step; helper reload and compositor-visible validation remain part of the controlled Phase 19 manual milestone.
+
+#### Phase 19 Implementation Through Automated Gate, 2026-07-16
+- Stage 19.2: completed. Added immutable pure policy state, snapshots, decisions, and named injected defaults in `overlay_client/backend/presentation_transition.py`. The policy models `stable_shell_raster`, `pending_fullscreen_handoff`, and `stable_managed_windowed`; selects `hold_raster`, `commit_raster`, `commit_managed`, or `hide_all`; and requires the same token, visibility, non-minimized state, and monitor-relative geometry evidence before holding a transient non-fullscreen sample.
+- Stage 19.3: completed. Added backend-owned runtime transition state and `EDMC_OVERLAY_GNOME_FULLSCREEN_HANDOFF_GUARD` handling in `_gnome_shell_helper_presentation.py`. It remained default-off through initial live proof, then was promoted default-on after stage 19.7; an explicit false value retains the prior clear-before-managed behavior. Generic transport exposes only a backend-neutral `reset_surface_state` action; `follow_surface.py` does not inspect GNOME helper or backend enums.
+- Stage 19.4: completed. Pending handoff returns before raster building, managed preparation, or helper presentation. It retains the prior Shell-raster cache and never issues a destructive clear; the existing `1500ms` raster lease may expire into the explicitly accepted brief disappearance. Persistent non-fullscreen state enters the existing Phase 18 preparation/remap path, but raster clear is deferred until the helper reports a matching managed-PyQt presentation. Successful Shell-raster takeover requests a generic hide/reset that clears managed preparation, remap, and content-suppression state.
+- Stage 19.5: completed. Pure tests cover transient recovery, bounded persistent loss, initial windowed startup, monitor/geometry changes, deadline preservation across changed samples, token replacement, minimize/workspace/target loss, and no-evidence fullscreen loss. Runtime tests prove no managed preparation or raster clear while pending, PyQt presentation before raster clear after a persistent loss, exactly one managed preparation, target-replacement cleanup, guard-disabled baseline behavior, and managed-to-raster reset. Consumer/follow tests prove backend-neutral reset transport and Qt surface-state cleanup. Existing setup and interaction tests continue proving frameless/focus-safe preparation behavior.
+- Stage 19.6: completed with the same pre-existing static-raster proof exception recorded in readiness containment. The safe full suite, focused GUI suite, architecture boundary, Ruff, mypy, and diff checks pass. `make check` and `make test` reach the same unrelated `/run/user/1000` sandbox failure after all other tests pass.
+- No helper protocol or extension source changed. Pending raster actors use the existing target-actor parent and lease behavior; a new helper suspend/reuse operation was unnecessary.
+- No `load.py`, EDMC hooks, preferences replication, journal/dashboard callbacks, or process orchestration changed. Harness tests were therefore neither added nor required under the test-selection policy.
+- Manual status: stage 19.7 completed on 2026-07-17 with one client. Both the enabled two-monitor transition matrix and explicit disabled rollback proof passed. Phase 19 is ready for its separate stage 19.8 commit.
+
+#### Phase 19 Manual Validation In Progress, 2026-07-16
+- Preflight passed with one current overlay client launch. The plugin launch diagnostics recorded `EDMC_OVERLAY_GNOME_FULLSCREEN_HANDOFF_GUARD=1`; helper health was `healthy`, protocol version was `3`, and the Elite target remained token `meta:54`.
+- Direct borderless-fullscreen startup passed on monitor 0 with target and monitor rect `(0,0,3440,1440)`, `transition_state=stable_shell_raster`, and `transition_action=commit_raster`.
+- A fullscreen Shift+Super+Arrow move from monitor 0 to monitor 1 passed visually. The overlay remained attached, Alt-Tab worked, and no title bar, black surface, focus trap, or standalone-like identity was observed. Diagnostics settled on monitor 1 with target and monitor rect `(3440,0,3440,1440)`, stable Shell-raster ownership, and no managed-renderer commit.
+- Repeated rapid moves in both directions, direction reversal, Alt-Tab, and Super/Overview stress passed visually. The user reported no issues. Matching diagnostics remained on `stable_shell_raster` / `commit_raster`; no `commit_managed` or managed-surface reset was emitted during the fullscreen stress interval.
+- GNOME did not reproduce the earlier transient same-token `fullscreen=false` work-area sample during these moves, so the live `hold_raster` action was not observed. The compositor-visible regression path passed, while exact pending-handoff action coverage remains provided by the Phase 19 pure-policy and backend runtime tests.
+- The intentional fullscreen-to-windowed test subsequently exercised the live guard branch. For target `meta:54`, the runtime emitted `hold_raster` at elapsed `0.000s`, `0.501s`, and `1.000s`, without managed preparation or raster cleanup, then emitted `commit_managed` with `fullscreen_handoff_expired` after the configured grace period. This proves the bounded hold path works in the live compositor session.
+- The managed-window result failed manual validation. Preparation stabilized and applied once, but the helper moved the requested rect `(760,123,1920,1287)` first to monitor 1 at `(3440,0,1920,1287)` and then to `(0,29,1920,1287)`. Presentation remained degraded with `wrong_monitor_applied_rect`, `applied_rect_mismatch`, and later `persistent_applied_rect_mismatch`; the user observed the overlay trying to spawn as a standalone-like app without attaching to the game window.
+- This failed run is not yet valid evidence of a Phase 19 code regression because the active helper returned `window_list_visibility_unproven`, a reason removed from repository and installed extension source by containment commit `51043a2`. The helper service started after that commit, showing that disable/enable restarted the service while GNOME Shell retained the older cached JavaScript module. A full Wayland logout/login is required before repeating the windowed transition against the contained helper implementation.
+- After a full GNOME logout/login, the helper restarted at `2026-07-17 06:25:31 PDT`; repository and installed extension sources matched exactly and contained none of the removed window-list experiment. One client relaunched with the guard enabled and a fresh Elite target `meta:22`.
+- The clean-session fullscreen-to-windowed rerun passed the Phase 19 renderer and attachment contract. The guard emitted `hold_raster` at elapsed `0.000s`, `0.500s`, and `1.001s`, then `commit_managed` with `fullscreen_handoff_expired` at `1.504s`. Managed preparation applied once; the first helper sample correctly reported `overlay_window_not_found` during suppressed remap, and the next sample found the overlay with requested/applied rect `(760,123,1920,1287)`, zero delta, and `rect_match=True`. Content was revealed only after `presentation_warmup_complete` at `0.509s`.
+- The user confirmed that the overlay appeared correctly attached in stable windowed mode. They also confirmed it remained standalone-like. Persisted and published configuration both recorded `standalone_mode=false`, so this is not a Phase 19 renderer selection or setting regression; it is the separately deferred GNOME managed-window identity/task-list limitation retained by the Phase 19 decision record.
+- Stable-windowed Alt-Tab and GNOME Overview passed without a black screen, focus trap, attachment loss, or renderer-mode error. The standalone-like overlay entry remained visible as the already recorded identity limitation.
+- The first stable-windowed Shift+Super+Arrow move from monitor 0 to monitor 1 passed the Phase 18 target-follow contract. Target `meta:22` changed to monitor 1 with frame rect `(4080,36,1920,1317)`; preparation stabilized, applied once, and the next helper sample matched requested/applied overlay rect `(4080,66,1920,1287)` before revealing content.
+- The immediate return shortcut exposed the separate identity/focus limitation. After the managed remap, Elite reported `target_focus=false`; Shift+Super+Arrow acted on the standalone-like overlay top-level instead of Elite, producing overlay-only monitor move events while the helper corrected the overlay back to the still-stationary target. After the user explicitly focused Elite, the shortcut moved the game to monitor 0 and the existing two-sample preparation/remap path reattached the overlay with a matching rect.
+- Interpretation: this is not a Phase 19 transition-arbiter failure; diagnostics remained `stable_managed_windowed` / `commit_managed` throughout. It is user-visible fallout from the separately deferred GNOME managed-window identity/focus problem. Phase 19 must not attempt another unsupported window-list implementation to mask it.
+- The clean-session windowed-to-borderless-fullscreen return passed. Shell raster reached `presentation_applied` with the full monitor rect `(0,0,3440,1440)` and `transition_action=commit_raster`; the same successful cycle emitted `surface_preparation_action=invalidated` and `surface_reset=True`. Later cycles remained stable Shell raster with no managed overlay window. The user opened GNOME Overview and confirmed that no standalone-like overlay app remained.
+- The final clean-session enabled-guard fullscreen regression passed with zero reported problems. After explicitly focusing Elite, the user moved it to the second monitor and back, then exercised Alt-Tab and GNOME Overview. There was no attachment problem, title bar, overlay app entry, black screen, focus trap, or unacceptable disappearance.
+- Enabled-guard matrix result: passed for the Phase 19 renderer-transition scope. The separately deferred stable-windowed GNOME standalone-like identity/focus limitation remains documented above and was not reclassified as a Phase 19 renderer failure.
+- The explicit guard-disabled rollback proof passed after restarting EDMC without the temporary environment override. On deliberate fullscreen-to-windowed transition, all transition diagnostics remained empty, proving the arbiter was bypassed. The pre-Phase 19 path began managed preparation immediately at `2026-07-17 14:44:16.965 UTC`, applied the prepared surface once, and reached requested/applied rect `(760,123,1920,1287)` with zero delta and `rect_match=True` at `14:44:17.604 UTC`; content was restored after a `0.136s` remap warmup. The user confirmed that the overlay attached.
+- Rollback result: passed. Explicit `EDMC_OVERLAY_GNOME_FULLSCREEN_HANDOFF_GUARD=0` preserves the legacy transition path; the validated arbiter is now default-on when the variable is unset. Minimize remains inapplicable to the tested Elite window; immediate target-loss/game-exit behavior is unchanged and covered by the pure-policy and backend runtime tests. The stable-windowed identity/focus limitation is explicitly deferred above.
+- The post-promotion default-on startup proof passed after one final EDMC restart with no temporary override file. The fresh overlay client started at `2026-07-17 14:50:52.957 UTC`; its first helper cycle already reported `transition_state=stable_shell_raster`, `transition_reason=fullscreen_target`, and `transition_action=commit_raster` for target `meta:22` on monitor 0. Subsequent cycles retained full requested/applied rect `(0,0,3440,1440)` with zero delta and no managed-surface preparation, proving the unset/default runtime path loaded successfully.
+- Stage 19.8: completed in `fix(gnome): implement Phase 19 atomic fullscreen monitor handoff`. The commit contains only the Phase 19 policy, backend/runtime wiring, backend-neutral surface reset transport, regression tests, and this phase documentation; the earlier unsupported standalone/window-list experiment remains separated in containment commit `51043a2`.
+
+#### Phase 19 Implementation Files Changed
+- Runtime: `overlay_client/backend/presentation_transition.py`, `overlay_client/backend/bundles/_gnome_shell_helper_presentation.py`, `overlay_client/backend/consumers.py`, and `overlay_client/follow_surface.py`.
+- Tests: `overlay_client/tests/test_presentation_transition.py`, `overlay_client/tests/test_gnome_helper_presentation_runtime.py`, `overlay_client/tests/test_backend_consumers.py`, and `overlay_client/tests/test_follow_surface_mixin.py`.
+- Documentation: `docs/refactoring/gnome_wayland_presentation_attachment.md`.
+
+#### Phase 19 Automated Tests Run
+- `overlay_client/.venv/bin/python -m pytest -q overlay_client/tests/test_presentation_transition.py`
+- Result: passed with `6 passed`.
+- `overlay_client/.venv/bin/python -m pytest -q overlay_client/tests/test_presentation_transition.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_backend_presentation_policy.py overlay_client/tests/test_follow_surface_mixin.py`
+- Result: partial with `151 passed, 1 failed`. The only failure is the pre-existing `test_shell_raster_bridge_sends_static_frame_when_eligible` write to read-only `/run/user/1000/EDMCModernOverlay/shell-raster`; it is not a Phase 19 regression.
+- `overlay_client/.venv/bin/python -m pytest -q overlay_client/tests/test_presentation_transition.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_backend_presentation_policy.py overlay_client/tests/test_follow_surface_mixin.py -k 'not shell_raster_bridge_sends_static_frame_when_eligible'`
+- Result: passed with `151 passed, 1 deselected`.
+- `QT_QPA_PLATFORM=offscreen PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest -q overlay_client/tests/test_setup_surface.py overlay_client/tests/test_interaction_controller.py overlay_client/tests/test_follow_surface_mixin.py`
+- Result: passed with `34 passed`.
+- `overlay_client/.venv/bin/python -m pytest -q overlay_client/tests/test_backend_architecture_boundary.py`
+- Result: passed with `2 passed`.
+- `overlay_client/.venv/bin/python -m ruff check .`
+- Result: passed.
+- `overlay_client/.venv/bin/python -m mypy`
+- Result: passed with `Success: no issues found in 92 source files`.
+- `QT_QPA_PLATFORM=offscreen PYQT_TESTS=1 overlay_client/.venv/bin/python -c 'from PyQt6.QtWidgets import QApplication; app = QApplication([]); import pytest; raise SystemExit(pytest.main(["-q", "-k", "not shell_raster_bridge_sends_static_frame_when_eligible"]))'`
+- Result: passed with `1169 passed, 21 skipped, 1 deselected`.
+- `make check`
+- Result: partial. Ruff and mypy passed; pytest reached `1169 passed, 21 skipped, 1 failed`, with only the known read-only `/run/user/1000` static-raster proof failure.
+- `make test`
+- Result: partial with `1169 passed, 21 skipped, 1 failed`, with only the same known static-raster proof failure.
+- `git diff --check`
+- Result: passed.
+- Harness tests: not added or run because no harness-required lifecycle touchpoint changed.
+- Default-on promotion rerun: `overlay_client/.venv/bin/python -m pytest -q overlay_client/tests/test_presentation_transition.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_backend_presentation_policy.py overlay_client/tests/test_follow_surface_mixin.py -k 'not shell_raster_bridge_sends_static_frame_when_eligible'`
+- Result: passed with `151 passed, 1 deselected`. The runtime fixture explicitly selects rollback mode for baseline tests, while `test_default_guard_transient_fullscreen_handoff_holds_raster_without_managed_preparation` removes the variable and proves the promoted unset/default path invokes the arbiter.
+- Default-on promotion rerun: `overlay_client/.venv/bin/python -m ruff check .`
+- Result: passed.
+- Default-on promotion rerun: `overlay_client/.venv/bin/python -m mypy`
+- Result: passed with `Success: no issues found in 92 source files`.
+- Default-on promotion rerun: `QT_QPA_PLATFORM=offscreen PYQT_TESTS=1 overlay_client/.venv/bin/python -c 'from PyQt6.QtWidgets import QApplication; app = QApplication([]); import pytest; raise SystemExit(pytest.main(["-q", "-k", "not shell_raster_bridge_sends_static_frame_when_eligible"]))'`
+- Result: passed with `1169 passed, 21 skipped, 1 deselected`.
+- Default-on promotion rerun: `git diff --check`
+- Result: passed.
+- Manual GNOME validation: completed in stage 19.7. Enabled transition behavior and explicit disabled rollback both passed; detailed evidence is recorded above.
 
 ## Execution Log
 - Plan created on 2026-05-11.

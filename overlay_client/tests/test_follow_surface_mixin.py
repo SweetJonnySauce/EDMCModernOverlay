@@ -545,6 +545,46 @@ def test_refresh_follow_geometry_uses_gnome_helper_presentation_and_skips_legacy
     assert stub._visibility_helper.calls == [True]
 
 
+def test_backend_surface_reset_hides_and_invalidates_managed_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _FollowSurfaceStub()
+    stub._visible = True
+    stub._backend_managed_surface_prepared = True
+    stub._last_backend_surface_preparation_key = ("managed_windowed", "meta:21")
+    stub._backend_presentation_content_suppressed = True
+    stub.message_label.visible = False
+    stub._backend_presentation_visibility_state = BackendPresentationVisibilityState(
+        remap_warmup_active=True,
+        remap_warmup_samples=2,
+        remap_warmup_started_monotonic=10.0,
+    )
+    result = BackendPresentationCycleResult(
+        should_show_overlay=False,
+        reset_surface_state=True,
+        visibility_snapshot=BackendPresentationVisibilitySnapshot(
+            target_available=True,
+            target_showing_on_workspace=True,
+            presentation_available=True,
+            presentation_attachable=False,
+        ),
+    )
+    monkeypatch.setattr(
+        "overlay_client.follow_surface.run_backend_presentation_cycle",
+        lambda *_args, **_kwargs: result,
+    )
+
+    stub._refresh_follow_geometry()
+
+    assert stub._visible is False
+    assert stub._backend_managed_surface_prepared is False
+    assert stub._last_backend_surface_preparation_key == ()
+    assert stub._backend_presentation_content_suppressed is False
+    assert stub.message_label.visible is True
+    assert stub._backend_presentation_visibility_state == BackendPresentationVisibilityState()
+    assert stub._last_backend_presentation_surface_action == "hidden"
+
+
 def test_refresh_follow_geometry_logs_backend_geometry_diagnostics_when_present(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

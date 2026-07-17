@@ -35,6 +35,7 @@ class BackendPresentationCycleResult:
     diagnostics: Mapping[str, object] = field(default_factory=dict)
     visibility_snapshot: BackendPresentationVisibilitySnapshot = field(default_factory=BackendPresentationVisibilitySnapshot)
     log_prefix: str = "Backend presentation"
+    reset_surface_state: bool = False
 
     def diagnostic_signature(self) -> tuple[object, ...]:
         """Return a stable signature suitable for log de-duplication."""
@@ -70,8 +71,17 @@ class BackendPresentationCycleResult:
             payload.get("surface_preparation_reason"),
             payload.get("prepared_surface_requires_mapping"),
             payload.get("prepared_surface_allows_unfocused_content"),
+            payload.get("transition_state"),
+            payload.get("transition_reason"),
+            payload.get("transition_action"),
+            payload.get("transition_elapsed_seconds"),
+            payload.get("transition_sample_count"),
+            payload.get("transition_target_token"),
+            payload.get("transition_target_monitor"),
+            payload.get("managed_surface_reset_requested"),
             payload.get("legacy_geometry_policy"),
             str(payload.get("shell_raster_metrics")),
+            self.reset_surface_state,
         )
 
 
@@ -353,6 +363,7 @@ def _backend_result_from_gnome_helper_result(
         diagnostics=_diagnostics_from_gnome_helper_result(result),
         visibility_snapshot=_visibility_snapshot_from_gnome_helper_result(result),
         log_prefix="GNOME helper presentation",
+        reset_surface_state=bool(getattr(result, "managed_surface_reset_requested", False)),
     )
 
 
