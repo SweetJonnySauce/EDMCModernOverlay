@@ -9,7 +9,7 @@ and real-world compositor tests are not required for this step.
 
 | Phase | Status |
 | --- | --- |
-| Phase 2: Step 02 behavioral runtime contracts | In progress |
+| Phase 2: Step 02 behavioral runtime contracts | Completed |
 
 | Stage | Description | Status |
 | --- | --- | --- |
@@ -18,7 +18,7 @@ and real-world compositor tests are not required for this step.
 | 2.3 | Write all unit/contract tests and capture expected RED failures | Completed |
 | 2.4 | Implement contracts, failure runtimes, and paper backend to GREEN | Completed |
 | 2.5 | Refactor and run targeted/project validation | Completed |
-| 2.6 | Update authoritative evidence and commit the completed Step 02 increment | In progress |
+| 2.6 | Update authoritative evidence and commit the completed Step 02 increment | Completed |
 
 ## Test Scenarios
 

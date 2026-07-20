@@ -8,7 +8,7 @@
 - [x] Stage 2.4: implemented behavioral contracts, failure runtimes, and paper backend through
   RED/GREEN cycles.
 - [x] Stage 2.5: refactored, validated, and reviewed privacy/architecture/compatibility.
-- [ ] Stage 2.6: update authoritative Step 02 evidence and commit without pushing.
+- [x] Stage 2.6: updated authoritative Step 02 evidence and committed without pushing.
 
 ## Setup Notes
 
@@ -83,4 +83,7 @@
 
 ## Commit Status
 
-- Not committed.
+- Implementation commit: `51902e5` (`feat(backend): add behavioral runtime contracts`).
+- The commit contains exactly the Step 02 implementation, public exports, test-only paper
+  backend/suite, focused tests, authoritative completion evidence, and code-assist records.
+- Nothing was pushed.
