@@ -603,6 +603,10 @@ def test_shell_raster_bridge_sends_static_frame_when_eligible(
         byte_size=128,
         stale_timeout_ms=SHELL_RASTER_FRAME_DEFAULT_TIMEOUT_MS,
     )
+    monkeypatch.setattr(
+        "overlay_client.backend.bundles._gnome_shell_helper_presentation.build_static_shell_raster_frame_request",
+        lambda *_args, **_kwargs: ShellRasterFrameBuildResult(request=frame_request, eligible=True),
+    )
 
     calls: list[HelperPresentationRequest] = []
 
