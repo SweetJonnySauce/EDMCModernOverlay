@@ -38,9 +38,9 @@
 - Report pass/fail/skip outcomes and reasons for skips.
 
 ## Per-Iteration Test Plan
-- **Env setup (once per machine):** `python3 -m venv .venv && source .venv/bin/activate && python -m pip install -U pip && python -m pip install -r requirements-dev.txt`
+- **Env setup (once per machine):** `python3 -m venv .venv && source .venv/bin/activate && python -m pip install -U pip && python -m pip install -r requirements/dev.txt`
 - **Headless quick pass (default for each step):** `source .venv/bin/activate && python -m pytest` (scope with `tests/…` or `-k` as needed).
-- **Windows-only pytest workaround (Python 3.13+):** if `tmp_path` setup fails with `WinError 5`, run tests via `overlay_client\.venv\Scripts\python scripts\run_pytest_safe_windows.py <pytest args>`. This workaround is Windows-only.
+- **Windows-only pytest workaround (Python 3.13+):** if `tmp_path` setup fails with `WinError 5`, run tests via `.venv\Scripts\python scripts\run_pytest_safe_windows.py <pytest args>`. This workaround is Windows-only.
 - **Core project checks:** `make check` (lint/typecheck/pytest defaults) and `make test` (project test target) from repo root.
 - **Full suite with GUI deps (as applicable):** ensure GUI/runtime deps are installed (e.g., PyQt for Qt projects), then set the required env flag (e.g., `PYQT_TESTS=1`) and run the full suite.
 - **Targeted filters:** use `-k` to scope to touched areas; document skips (e.g., long-running/system tests) with reasons.

@@ -134,18 +134,18 @@ When every stage in a phase is complete, update its phase status to **Completed*
 
 ## Standard Validation Commands
 
-Run commands from the repository root. Use the repository environment at `overlay_client/.venv`.
+Run commands from the repository root. Use the repository environment at `.venv`.
 
-- Targeted unit/harness tests: `overlay_client/.venv/bin/python -m pytest <test paths> -q`
-- Headless suite: `overlay_client/.venv/bin/python -m pytest`
-- GUI-enabled suite: `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest`
-- Harness suite: `overlay_client/.venv/bin/python -m pytest -m harness -q`
+- Targeted unit/harness tests: `.venv/bin/python -m pytest <test paths> -q`
+- Headless suite: `.venv/bin/python -m pytest`
+- GUI-enabled suite: `PYQT_TESTS=1 .venv/bin/python -m pytest`
+- Harness suite: `.venv/bin/python -m pytest -m harness -q`
 - Lint/typecheck/full test gate: `make check`
 - Project test target: `make test`
-- EDMC baseline check: `overlay_client/.venv/bin/python scripts/check_edmc_python.py`
+- EDMC baseline check: `.venv/bin/python scripts/check_edmc_python.py`
 - Patch hygiene: `git diff --check`
 
-On Windows Python 3.13+, use `overlay_client\.venv\Scripts\python scripts\run_pytest_safe_windows.py <pytest args>` only if the documented `tmp_path` `WinError 5` occurs.
+On Windows Python 3.13+, use `.venv\Scripts\python scripts\run_pytest_safe_windows.py <pytest args>` only if the documented `tmp_path` `WinError 5` occurs.
 
 ## Step 1: Add converged backend models and a shadow control-plane envelope
 
@@ -166,7 +166,7 @@ Introduce immutable backend identity, operational probe, support policy, evidenc
 - Unit tests for enum values, immutable records, revision behavior, round trips, unknown versions, bounded histories, and redaction.
 - Extend `test_backend_status.py` while adding a focused control-plane model test rather than replacing transitional assertions.
 - Run:
-  - `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_status.py overlay_client/tests/test_backend_control_plane.py -q`
+  - `.venv/bin/python -m pytest overlay_client/tests/test_backend_status.py overlay_client/tests/test_backend_control_plane.py -q`
   - `git diff --check`
 
 **Integration**
@@ -217,7 +217,7 @@ Define backend runtime, discovery, presentation, input, and helper-lifecycle beh
 - Unit/contract tests for immutable identity, one start, partial-start cleanup, idempotent stop, stable component instances, discovery appearance/loss, presentation/hide results, independent input state, status revisions, owner-loss cleanup, and sanitized diagnostics.
 - Keep current `test_backend_contracts.py` assertions until their production replacements exist.
 - Run:
-  - `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_contracts.py overlay_client/tests/test_backend_runtime_contracts.py -q`
+  - `.venv/bin/python -m pytest overlay_client/tests/test_backend_contracts.py overlay_client/tests/test_backend_runtime_contracts.py -q`
   - `git diff --check`
 
 **Integration**
@@ -247,7 +247,7 @@ Create the scenario manifest and summary tooling, then capture the required curr
 - Unit tests for manifest validation, sample aggregation, clock-domain separation, redaction, and threshold comparison.
 - Manual baseline capture on GNOME Shell 46/Ubuntu 24.04.4 using fixed fixture, geometry, warm-up, duration, and repetitions.
 - Run:
-  - `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_performance_summary.py tests/test_debug_collectors.py -q`
+  - `.venv/bin/python -m pytest overlay_client/tests/test_backend_performance_summary.py tests/test_debug_collectors.py -q`
   - `git diff --check`
 - This step cannot be marked complete without the manual baseline; if the target environment is unavailable, Steps 1–2 may stand but production routing must not proceed.
 
@@ -278,7 +278,7 @@ Associate stable backend identities with factories in one registry and prove tha
 - Unit tests for registration uniqueness, exact identity equality, unknown identity, failed construction, placeholder construction, and parity with current selection.
 - Architecture tests for allowed registry imports and forbidden behavior dispatch.
 - Run:
-  - `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_selector.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_backend_registry.py overlay_client/tests/test_backend_architecture_boundary.py -q`
+  - `.venv/bin/python -m pytest overlay_client/tests/test_backend_selector.py overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_backend_registry.py overlay_client/tests/test_backend_architecture_boundary.py -q`
   - `git diff --check`
 
 **Integration**
@@ -308,8 +308,8 @@ Make `overlay_client.launcher.main()` construct and stop exactly one selected ru
 - Unit tests for construction order, exactly one runtime, hidden unavailable startup, idempotent stop, partial-start cleanup, and identity invariants.
 - GUI-enabled launcher tests for surface attachment/show gating and Qt main-thread behavior.
 - Run:
-  - `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_application_composition_root.py overlay_client/tests/test_platform_context.py -q`
-  - `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_application_composition_root.py overlay_client/tests/test_launcher_group_filter.py -q`
+  - `.venv/bin/python -m pytest overlay_client/tests/test_application_composition_root.py overlay_client/tests/test_platform_context.py -q`
+  - `PYQT_TESTS=1 .venv/bin/python -m pytest overlay_client/tests/test_application_composition_root.py overlay_client/tests/test_launcher_group_filter.py -q`
   - `git diff --check`
 
 **Integration**
@@ -339,8 +339,8 @@ Replace separate tracker construction with the root-owned discovery service whil
 - Unit/contract tests for one discovery lifetime, appearance/loss, fallback selection, recovery, and stop.
 - Extend current tracker routing and follow-surface tests; add GUI tests only where callback/UI wiring requires them.
 - Run:
-  - `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_window_tracking_bundle_routing.py overlay_client/tests/test_follow_surface_mixin.py overlay_client/tests/test_backend_runtime_contracts.py -q`
-  - `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_follow_surface_mixin.py -q`
+  - `.venv/bin/python -m pytest overlay_client/tests/test_window_tracking_bundle_routing.py overlay_client/tests/test_follow_surface_mixin.py overlay_client/tests/test_backend_runtime_contracts.py -q`
+  - `PYQT_TESTS=1 .venv/bin/python -m pytest overlay_client/tests/test_follow_surface_mixin.py -q`
   - `git diff --check`
 
 **Integration**
@@ -370,8 +370,8 @@ Lift existing X11, XWayland, Windows, and transitional generic presentation/inpu
 - Unit/contract tests for present/hide, click-through/focus, independent revisions, teardown, and identity separation.
 - GUI tests for Qt flags/surface behavior; existing X11/XWayland bundle tests remain regression anchors.
 - Run:
-  - `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_bundles_x11.py overlay_client/tests/test_backend_presentation_policy.py overlay_client/tests/test_interaction_surface.py overlay_client/tests/test_backend_runtime_contracts.py -q`
-  - `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_setup_surface.py overlay_client/tests/test_interaction_surface.py -q`
+  - `.venv/bin/python -m pytest overlay_client/tests/test_backend_bundles_x11.py overlay_client/tests/test_backend_presentation_policy.py overlay_client/tests/test_interaction_surface.py overlay_client/tests/test_backend_runtime_contracts.py -q`
+  - `PYQT_TESTS=1 .venv/bin/python -m pytest overlay_client/tests/test_setup_surface.py overlay_client/tests/test_interaction_surface.py -q`
   - `git diff --check`
 
 **Integration**
@@ -401,8 +401,8 @@ Route the complete current GNOME helper/raster/managed-PyQt behavior through a G
 - Old/new parity tests with identical injected inputs and clocks.
 - Reuse all GNOME helper, raster, presentation state, transition, focus, negative-coordinate, and monitor-handoff tests.
 - Run:
-  - `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_gnome_shell_helper_presentation_state.py overlay_client/tests/test_presentation_transition.py -q`
-  - `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_follow_surface_mixin.py -q`
+  - `.venv/bin/python -m pytest overlay_client/tests/test_backend_consumers.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_gnome_shell_helper_presentation_state.py overlay_client/tests/test_presentation_transition.py -q`
+  - `PYQT_TESTS=1 .venv/bin/python -m pytest overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_follow_surface_mixin.py -q`
   - `git diff --check`
 
 **Integration**
@@ -432,8 +432,8 @@ Make the selected GNOME runtime own client-side startup recovery and shutdown cl
 - Unit tests for GNOME startup recovery, normal stop, repeated stop, partial start, and non-GNOME no-op behavior.
 - GUI launcher tests for root stop ordering and no private imports.
 - Run:
-  - `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_launcher_shell_raster_shutdown.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_application_composition_root.py overlay_client/tests/test_backend_architecture_boundary.py -q`
-  - `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_application_composition_root.py -q`
+  - `.venv/bin/python -m pytest overlay_client/tests/test_launcher_shell_raster_shutdown.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_application_composition_root.py overlay_client/tests/test_backend_architecture_boundary.py -q`
+  - `PYQT_TESTS=1 .venv/bin/python -m pytest overlay_client/tests/test_application_composition_root.py -q`
   - `git diff --check`
 
 **Integration**
@@ -464,8 +464,8 @@ Promote the watchdog-launched loopback client connection to one authenticated ow
 - Transport tests for owner/content coexistence.
 - Harness tests are mandatory because `load.py`, server, launch, and watchdog wiring change.
 - Run:
-  - `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_owner_transport.py tests/test_controller_launcher.py tests/test_harness_backend_selection_wiring.py -q`
-  - `overlay_client/.venv/bin/python -m pytest -m harness -q`
+  - `.venv/bin/python -m pytest overlay_client/tests/test_owner_transport.py tests/test_controller_launcher.py tests/test_harness_backend_selection_wiring.py -q`
+  - `.venv/bin/python -m pytest -m harness -q`
   - `git diff --check`
 
 **Integration**
@@ -496,8 +496,8 @@ Make the owner stream authoritative: clean EOF/shutdown stops the client immedia
 - Harness tests for normal plugin stop, abrupt server loss, EDMC restart/new identity, cleanup grace, and watchdog escalation.
 - Manual suspend/resume and debugger-pause probes; record results without silently retuning defaults.
 - Run:
-  - `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_owner_transport.py overlay_client/tests/test_data_client.py tests/test_lifecycle_tracking.py tests/test_harness_plugin_hooks_contract.py -q`
-  - `overlay_client/.venv/bin/python -m pytest -m harness -q`
+  - `.venv/bin/python -m pytest overlay_client/tests/test_owner_transport.py overlay_client/tests/test_data_client.py tests/test_lifecycle_tracking.py tests/test_harness_plugin_hooks_contract.py -q`
+  - `.venv/bin/python -m pytest -m harness -q`
   - `git diff --check`
 
 **Integration**
@@ -528,8 +528,8 @@ Make preferences/status reads immediate and Tk-safe by caching client-pushed imm
 - Harness tests for status push, preferences open with a silent client, fresh-client cache replacement after EDMC restart, and shutdown safety.
 - Add a timing assertion that the Tk-facing read does not wait on network/helper activity.
 - Run:
-  - `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_platform_controller_backend_status.py tests/test_harness_backend_status_roundtrip.py tests/test_harness_prefs_roundtrip.py tests/test_preferences_panel_controller_tab.py -q`
-  - `overlay_client/.venv/bin/python -m pytest -m harness -q`
+  - `.venv/bin/python -m pytest overlay_client/tests/test_platform_controller_backend_status.py tests/test_harness_backend_status_roundtrip.py tests/test_harness_prefs_roundtrip.py tests/test_preferences_panel_controller_tab.py -q`
+  - `.venv/bin/python -m pytest -m harness -q`
   - `git diff --check`
 
 **Integration**
@@ -559,8 +559,8 @@ Complete backend-neutral plugin lifecycle ownership by deleting plugin-side GNOM
 - Harness tests are mandatory for plugin start, normal stop, client refusal, repeated stop, and EDMC restart.
 - Architecture/source tests assert no private GNOME lifecycle import or behavior in `load.py`.
 - Run:
-  - `overlay_client/.venv/bin/python -m pytest tests/test_harness_plugin_hooks_contract.py tests/test_harness_integration.py overlay_client/tests/test_backend_architecture_boundary.py -q`
-  - `overlay_client/.venv/bin/python -m pytest -m harness -q`
+  - `.venv/bin/python -m pytest tests/test_harness_plugin_hooks_contract.py tests/test_harness_integration.py overlay_client/tests/test_backend_architecture_boundary.py -q`
+  - `.venv/bin/python -m pytest -m harness -q`
   - `git diff --check`
 
 **Integration**
@@ -594,7 +594,7 @@ Update the client and GNOME extension together so every presentation mutation re
 - Extension source/manifest/protocol-fixture tests cover Shell 46–50 and protocol 4.
 - Isolated D-Bus/GJS tests where supported; otherwise document environment skip and require the manual helper smoke before completion.
 - Run:
-  - `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_dbus_health.py overlay_client/tests/test_gnome_shell_helper_extension_source.py overlay_client/tests/test_gnome_helper_presentation_runtime.py tests/test_gnome_shell_extension_manifest.py -q`
+  - `.venv/bin/python -m pytest overlay_client/tests/test_gnome_shell_helper_dbus_health.py overlay_client/tests/test_gnome_shell_helper_extension_source.py overlay_client/tests/test_gnome_helper_presentation_runtime.py tests/test_gnome_shell_extension_manifest.py -q`
   - `git diff --check`
 
 **Integration**
@@ -625,8 +625,8 @@ Ensure external GNOME state clears without client cleanup and overlapping client
 - Harness/integration test for EDMC restart launching a fresh client while the old lease remains.
 - Manual extension disable/re-enable and Shell restart checks.
 - Run:
-  - `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_helper_lease.py overlay_client/tests/test_gnome_shell_helper_extension_source.py tests/test_harness_backend_status_roundtrip.py -q`
-  - `overlay_client/.venv/bin/python -m pytest -m harness -q`
+  - `.venv/bin/python -m pytest overlay_client/tests/test_gnome_helper_lease.py overlay_client/tests/test_gnome_shell_helper_extension_source.py tests/test_harness_backend_status_roundtrip.py -q`
+  - `.venv/bin/python -m pytest -m harness -q`
   - `git diff --check`
 
 **Integration**
@@ -659,8 +659,8 @@ Complete hierarchical lifecycle behavior so helper renewals occur only while EDM
 - Manual suspend/resume, lock/unlock, Overview, and debugger-pause observations finalize or retain initial timing.
 - Compare Step 3 performance measures and investigate unexpected call-rate/latency changes.
 - Run:
-  - `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_owner_transport.py overlay_client/tests/test_gnome_helper_lease.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_application_composition_root.py -q`
-  - `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_follow_surface_mixin.py -q`
+  - `.venv/bin/python -m pytest overlay_client/tests/test_owner_transport.py overlay_client/tests/test_gnome_helper_lease.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_application_composition_root.py -q`
+  - `PYQT_TESTS=1 .venv/bin/python -m pytest overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_follow_surface_mixin.py -q`
   - `git diff --check`
 
 **Integration**
@@ -693,8 +693,8 @@ Remove Shell raster as a backend identity and make one `gnome_shell_wayland` run
 - GUI/manual matrix slice at 100% and 125% for both stable modes and both transition directions.
 - Compare Step 3 latency/work/invariant metrics.
 - Run:
-  - `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_selector.py overlay_client/tests/test_backend_override_options.py overlay_client/tests/test_backend_status.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_presentation_transition.py -q`
-  - `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_follow_surface_mixin.py -q`
+  - `.venv/bin/python -m pytest overlay_client/tests/test_backend_selector.py overlay_client/tests/test_backend_override_options.py overlay_client/tests/test_backend_status.py overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_presentation_transition.py -q`
+  - `PYQT_TESTS=1 .venv/bin/python -m pytest overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_follow_surface_mixin.py -q`
   - `git diff --check`
 
 **Integration**
@@ -726,8 +726,8 @@ Select and classify `native_x11` from required ICCCM/EWMH behavior while certify
 - Run the full GNOME/Mutter native-X11 matrix at 100%/125%, two monitors/negative coordinates, transitions, Alt-Tab, and Overview.
 - Add Mutter policy tests only if such code is introduced.
 - Run:
-  - `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_bundles_x11.py overlay_client/tests/test_backend_selector.py overlay_client/tests/test_window_tracking_bundle_routing.py overlay_client/tests/test_native_x11_probes.py -q`
-  - `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_setup_surface.py overlay_client/tests/test_follow_surface_mixin.py -q`
+  - `.venv/bin/python -m pytest overlay_client/tests/test_backend_bundles_x11.py overlay_client/tests/test_backend_selector.py overlay_client/tests/test_window_tracking_bundle_routing.py overlay_client/tests/test_native_x11_probes.py -q`
+  - `PYQT_TESTS=1 .venv/bin/python -m pytest overlay_client/tests/test_setup_surface.py overlay_client/tests/test_follow_surface_mixin.py -q`
   - `git diff --check`
 
 **Integration**
@@ -758,7 +758,7 @@ Stop nominal native-Wayland identities from constructing a shared runtime or cla
 - Replace transitional tests that expect shared Wayland integrations only after new placeholder tests pass.
 - Basic manual GNOME Wayland XWayland smoke for startup, tracking/presentation baseline, degraded status, and clean shutdown.
 - Run:
-  - `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_bundles_wayland.py overlay_client/tests/test_backend_bundles_x11.py overlay_client/tests/test_backend_selector.py overlay_client/tests/test_backend_override_options.py overlay_client/tests/test_backend_registry.py overlay_client/tests/test_backend_architecture_boundary.py -q`
+  - `.venv/bin/python -m pytest overlay_client/tests/test_backend_bundles_wayland.py overlay_client/tests/test_backend_bundles_x11.py overlay_client/tests/test_backend_selector.py overlay_client/tests/test_backend_override_options.py overlay_client/tests/test_backend_registry.py overlay_client/tests/test_backend_architecture_boundary.py -q`
   - `git diff --check`
 
 **Integration**
@@ -789,8 +789,8 @@ Switch the client, plugin, controller, preferences/status UI, settings, collecto
 - Unit tests for every producer/consumer round trip, unknown versions, stale settings, status table rendering, revision/cache behavior, and compatibility payload invariants.
 - Harness tests for selection/status/override/preferences wiring; both unit and harness are required.
 - Run:
-  - `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_control_plane.py overlay_client/tests/test_platform_controller_backend_status.py tests/test_status_table_model.py tests/test_status_table_payloads.py tests/test_harness_backend_status_roundtrip.py tests/test_harness_backend_override_roundtrip.py tests/test_harness_prefs_roundtrip.py -q`
-  - `overlay_client/.venv/bin/python -m pytest -m harness -q`
+  - `.venv/bin/python -m pytest overlay_client/tests/test_backend_control_plane.py overlay_client/tests/test_platform_controller_backend_status.py tests/test_status_table_model.py tests/test_status_table_payloads.py tests/test_harness_backend_status_roundtrip.py tests/test_harness_backend_override_roundtrip.py tests/test_harness_prefs_roundtrip.py -q`
+  - `.venv/bin/python -m pytest -m harness -q`
   - `git diff --check`
 
 **Integration**
@@ -820,7 +820,7 @@ Create the public support/evidence workflow and generate a reviewable redacted b
 - Unit/source tests for matrix schema, generated Markdown consistency, evidence record references, report-template fields, collector parsing, bounded histories, and privacy redaction.
 - Negative fixtures include tokens, raw IDs, personal paths, titles, command lines, and broad environment fields and assert none survive.
 - Run:
-  - `overlay_client/.venv/bin/python -m pytest tests/test_debug_collectors.py tests/test_backend_support_matrix.py overlay_client/tests/test_backend_control_plane.py -q`
+  - `.venv/bin/python -m pytest tests/test_debug_collectors.py tests/test_backend_support_matrix.py overlay_client/tests/test_backend_control_plane.py -q`
   - `git diff --check`
 
 **Integration**
@@ -849,9 +849,9 @@ Remediate all known EDMC compliance failures and produce a reproducible yes/no r
 
 - Unit/source checks for compliance rules plus mandatory harness coverage for plugin lifecycle/preferences.
 - Run:
-  - `overlay_client/.venv/bin/python scripts/check_edmc_python.py`
-  - `overlay_client/.venv/bin/python -m pytest tests/test_harness_plugin_hooks_contract.py tests/test_harness_prefs_roundtrip.py tests/test_logging_and_version_helper.py tests/test_preferences_persistence.py tests/test_debug_collectors.py -q`
-  - `overlay_client/.venv/bin/python -m pytest -m harness -q`
+  - `.venv/bin/python scripts/check_edmc_python.py`
+  - `.venv/bin/python -m pytest tests/test_harness_plugin_hooks_contract.py tests/test_harness_prefs_roundtrip.py tests/test_logging_and_version_helper.py tests/test_preferences_persistence.py tests/test_debug_collectors.py -q`
+  - `.venv/bin/python -m pytest -m harness -q`
   - `make check`
   - `git diff --check`
 
@@ -882,7 +882,7 @@ Document and prove the process a future backend must follow without implementing
 - Run the paper backend contract suite and architecture scans.
 - Add a documentation/source consistency test for referenced public interfaces and test-factory entry points.
 - Run:
-  - `overlay_client/.venv/bin/python -m pytest overlay_client/tests/test_backend_runtime_contracts.py overlay_client/tests/test_backend_architecture_boundary.py tests/test_backend_implementation_guide.py -q`
+  - `.venv/bin/python -m pytest overlay_client/tests/test_backend_runtime_contracts.py overlay_client/tests/test_backend_architecture_boundary.py tests/test_backend_implementation_guide.py -q`
   - `git diff --check`
 
 **Integration**
@@ -911,12 +911,12 @@ Prove the converged runtime against all automated, performance, manual, support,
 
 - Strengthened architecture tests prove no private compositor dispatch in generic launcher/follow/lifecycle/status/control-plane code.
 - Run all targeted suites named in prior steps, then:
-  - `overlay_client/.venv/bin/python -m pytest`
-  - `PYQT_TESTS=1 overlay_client/.venv/bin/python -m pytest`
-  - `overlay_client/.venv/bin/python -m pytest -m harness -q`
+  - `.venv/bin/python -m pytest`
+  - `PYQT_TESTS=1 .venv/bin/python -m pytest`
+  - `.venv/bin/python -m pytest -m harness -q`
   - `make check`
   - `make test`
-  - `overlay_client/.venv/bin/python scripts/check_edmc_python.py`
+  - `.venv/bin/python scripts/check_edmc_python.py`
   - `git diff --check`
 - Run and archive the full manual support/performance matrix. Record any platform-dependent skip with reason; required acceptance cases cannot be skipped.
 
