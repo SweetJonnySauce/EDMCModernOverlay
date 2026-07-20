@@ -18,6 +18,8 @@ from overlay_client.backend.status import (
     format_status_ui_warning,
     format_status_window_title,
 )
+from overlay_client.backend.control_plane_models import EvidenceLevel, ProducerInfo, SupportPolicy, SupportSummary
+from overlay_client.backend.shadow_status import adapt_backend_selection_status
 
 
 def _probe() -> PlatformProbeResult:
@@ -286,8 +288,7 @@ def test_backend_status_labels_gnome_shell_raster_as_experimental_degraded_mode(
         "Overlay backend: GNOME Shell Raster | Helper: GNOME Shell extension available"
     )
     assert format_status_ui_warning(payload) == (
-        "Warning: Overlay backend is set to GNOME Shell Raster.; "
-        "Some overlay guarantees are reduced in this mode."
+        "Warning: Overlay backend is set to GNOME Shell Raster.; " "Some overlay guarantees are reduced in this mode."
     )
 
 
@@ -392,9 +393,7 @@ def test_backend_status_report_helpers_accept_backend_status_response_wrapper():
     response = {"status": "ok", "backend_status": status.to_payload()}
 
     assert build_status_report(response)["source"] == "plugin_hint"
-    assert format_status_ui_summary(response) == (
-        "Backend: KWin Wayland | Mode: True overlay | Source: Plugin hint"
-    )
+    assert format_status_ui_summary(response) == ("Backend: KWin Wayland | Mode: True overlay | Source: Plugin hint")
 
 
 def test_backend_status_ui_helpers_surface_manual_override_and_invalid_override() -> None:
@@ -441,3 +440,31 @@ def test_backend_status_ui_helpers_surface_manual_override_and_invalid_override(
         "Warning: Saved Overlay backend selection is invalid for this session: bogus_backend.; "
         "Set Overlay backend to Auto or choose a valid backend for this session."
     )
+
+
+def test_shadow_adaptation_does_not_change_transitional_status_payload() -> None:
+    status = BackendSelectionStatus(
+        probe=_probe(),
+        selected_backend=BackendDescriptor(BackendFamily.XWAYLAND_COMPAT, BackendInstance.XWAYLAND_COMPAT),
+        classification=CapabilityClassification.DEGRADED_OVERLAY,
+        fallback_from=BackendDescriptor(BackendFamily.NATIVE_WAYLAND, BackendInstance.KWIN_WAYLAND),
+        fallback_reason=FallbackReason.XWAYLAND_COMPAT_ONLY,
+        notes=("client_selector_result",),
+        shadow_mode=False,
+    )
+    before = status.to_payload()
+
+    adapt_backend_selection_status(
+        status,
+        producer=ProducerInfo(component="overlay_client_shadow", version="0.9.0"),
+        support=SupportSummary(
+            policy=SupportPolicy.COMPATIBILITY,
+            environment_key="linux|ubuntu|24.04.4|wayland|gnome|mutter|46.0|windowed",
+            evidence_level=EvidenceLevel.MAINTAINER_SMOKE,
+            evidence_record="xwayland-smoke",
+            last_reviewed_release="0.9.0",
+        ),
+        revision=1,
+    )
+
+    assert status.to_payload() == before

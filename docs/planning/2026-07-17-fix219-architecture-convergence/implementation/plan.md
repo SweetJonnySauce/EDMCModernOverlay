@@ -2,7 +2,7 @@
 
 Plan review status: **Approved for PDD completion on 2026-07-19**
 
-Implementation status: **Not started**
+Implementation status: **In progress**
 
 ## Authority and Scope
 
@@ -21,7 +21,7 @@ No step implements KDE/KWin or another out-of-scope compositor. Windows, content
 
 ## Implementation Checklist
 
-- [ ] Step 1: Add converged backend models and a shadow control-plane envelope
+- [x] Step 1: Add converged backend models and a shadow control-plane envelope
 - [ ] Step 2: Add behavioral runtime contracts and the reusable paper-backend contract suite
 - [ ] Step 3: Capture the repeatable pre-migration performance baseline
 - [ ] Step 4: Add the backend registry and prove selection/construction identity in shadow mode
@@ -52,11 +52,11 @@ Checklist items correspond one-to-one with the numbered steps below. A box is ch
 
 ### Phase 1: Contract and Evidence Anchors
 
-Phase status: **Not started**
+Phase status: **In progress**
 
 | Stage | Step | Description | Status |
 | --- | --- | --- | --- |
-| 1.1 | 1 | Converged pure models and shadow status envelope | Not started |
+| 1.1 | 1 | Converged pure models and shadow status envelope | Completed |
 | 1.2 | 2 | Behavioral contracts and paper-backend suite | Not started |
 | 1.3 | 3 | Repeatable pre-migration performance baseline | Not started |
 
@@ -176,6 +176,27 @@ The shadow adapter consumes current status and provides a comparison artifact fo
 **Demo**
 
 Given representative GNOME, native-X11, XWayland, and unimplemented inputs, serialize schema-version-1 snapshots showing independent support, evidence, and health dimensions while the shipped runtime path remains unchanged.
+
+**Completion evidence — 2026-07-19**
+
+- Added immutable normalized models, strict deterministic schema-v1 codec, bounded/privacy-safe
+  diagnostic boundaries, and a developer-gated shadow adapter beside transitional types.
+- Preserved production selector, bundle, presentation, content/settings payloads, and
+  `BackendSelectionStatus.to_payload()`; no generic consumer reads the envelope for behavior.
+- Added/updated `overlay_client/tests/test_backend_control_plane.py` and
+  `overlay_client/tests/test_backend_status.py` with representative GNOME, native-X11,
+  XWayland, unimplemented, revision, round-trip, malformed, bounds, and redaction coverage.
+- Targeted unit gate: 45 passed using the repository root `.venv`; the requested
+  `overlay_client/.venv` could not run because that environment has no pytest installation.
+- Headless suite excluding one pre-existing environment-defective raster test: 1165 passed,
+  41 skipped, 1 deselected. Offscreen GUI-enabled suite with the same deselection: 1202 passed,
+  21 skipped, 1 deselected.
+- The deselected test constructs a `QFont` without a `QGuiApplication`; it aborts when its
+  `/run/user/1000` cache is writable and otherwise fails on the sandbox's read-only runtime
+  directory. The touched pure modules do not participate in that test.
+- Whole-repository ruff and mypy, touched-file format check, and `git diff --check` passed.
+- Rollback remains additive: remove the new models/codec/adapter, exports, and focused tests;
+  the shipped runtime route is unchanged.
 
 ## Step 2: Add behavioral runtime contracts and the reusable paper-backend contract suite
 
