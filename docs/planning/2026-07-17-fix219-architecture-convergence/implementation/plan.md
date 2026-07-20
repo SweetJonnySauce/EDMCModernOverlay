@@ -22,7 +22,7 @@ No step implements KDE/KWin or another out-of-scope compositor. Windows, content
 ## Implementation Checklist
 
 - [x] Step 1: Add converged backend models and a shadow control-plane envelope
-- [ ] Step 2: Add behavioral runtime contracts and the reusable paper-backend contract suite
+- [x] Step 2: Add behavioral runtime contracts and the reusable paper-backend contract suite
 - [ ] Step 3: Capture the repeatable pre-migration performance baseline
 - [ ] Step 4: Add the backend registry and prove selection/construction identity in shadow mode
 - [ ] Step 5: Install the launcher-owned application composition root
@@ -57,7 +57,7 @@ Phase status: **In progress**
 | Stage | Step | Description | Status |
 | --- | --- | --- | --- |
 | 1.1 | 1 | Converged pure models and shadow status envelope | Completed |
-| 1.2 | 2 | Behavioral contracts and paper-backend suite | Not started |
+| 1.2 | 2 | Behavioral contracts and paper-backend suite | Completed |
 | 1.3 | 3 | Repeatable pre-migration performance baseline | Not started |
 
 ### Phase 2: One Composition Root
@@ -227,6 +227,36 @@ The paper runtime serializes through Step 1's envelope and establishes the test 
 **Demo**
 
 Run one deterministic paper runtime from construction through target appearance, present, input change, owner loss, repeated stop, and final serialized status without importing any compositor module.
+
+**Completion evidence — 2026-07-19**
+
+- Added immutable normalized target, frame, geometry/coordinate-space, presentation,
+  interaction, helper-health, presentation-state, input-state, and lifecycle records plus
+  runtime-checkable runtime/discovery/presentation/input/helper protocols.
+- Kept presentation and input behavior independently revisioned and gave their snapshot methods
+  distinct names so separate objects and one combined Python implementation both satisfy the
+  contracts without identity coupling.
+- Added directly constructible unavailable and unimplemented runtimes with stable inert
+  services, exact selected identity, independent support/evidence/health, fail-closed
+  presentation, one-start/terminal-stop behavior, deadline-aware reverse cleanup, bounded
+  normalized failures, and schema-v1 status.
+- Added a test-only deterministic paper backend, injected clock/failure/target/owner controls,
+  resource ledger, backend test-factory protocol, and reusable observable contract assertions.
+  No production selector, bundle, launcher, consumer, or registration imports the paper backend;
+  production routing remains unchanged.
+- Added `overlay_client/tests/test_backend_runtime_contracts.py` and
+  `overlay_client/tests/backend_runtime_testkit.py`; retained all assertions in
+  `overlay_client/tests/test_backend_contracts.py` unchanged.
+- Targeted unit/contract gate: 36 passed. Named paper lifecycle demo: 1 passed. Headless suite:
+  1,197 passed, 41 skipped. `make check`: ruff and mypy passed, then GUI-enabled pytest passed
+  with 1,234 passed and 21 skipped. `make test`: 1,234 passed and 21 skipped.
+- Focused mypy passed for the three new implementation/test-support modules. The EDMC Python
+  compatibility-floor check passed under the documented development override and repeated the
+  existing 64-bit-versus-preferred-32-bit warning. `git diff --check` passed.
+- The skipped tests retain their existing environment/runtime gates. No harness or manual
+  compositor test was required because Step 2 changes no EDMC hook or production behavior.
+- Rollback remains additive: remove the behavioral/failure-runtime modules, exports, test-only
+  paper suite, focused tests, and this evidence; the shipped runtime route is unchanged.
 
 ## Step 3: Capture the repeatable pre-migration performance baseline
 
