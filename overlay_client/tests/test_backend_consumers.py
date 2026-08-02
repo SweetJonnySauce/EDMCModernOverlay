@@ -450,7 +450,7 @@ def test_backend_presentation_cycle_wraps_gnome_helper_result_when_helper_availa
             ),
         ),
     )
-    calls: list[tuple[bool, bool, bool, int]] = []
+    calls: list[tuple[bool, bool, bool, int, bool]] = []
 
     def fake_runner(
         *,
@@ -459,6 +459,7 @@ def test_backend_presentation_cycle_wraps_gnome_helper_result_when_helper_availa
         previous_surface_action: str = "",
         title_bar_compensation_enabled: bool = False,
         title_bar_compensation_height: int = 0,
+        presentation_refresh_requested: bool = False,
         prepare_surface=None,
         shell_raster_frame_provider=None,
         shell_raster_runtime_enabled: bool = False,
@@ -470,6 +471,7 @@ def test_backend_presentation_cycle_wraps_gnome_helper_result_when_helper_availa
                 keep_overlay_visible,
                 title_bar_compensation_enabled,
                 title_bar_compensation_height,
+                presentation_refresh_requested,
             )
         )
         assert previous_surface_action == "mapped_visible"
@@ -486,11 +488,12 @@ def test_backend_presentation_cycle_wraps_gnome_helper_result_when_helper_availa
         previous_surface_action="mapped_visible",
         title_bar_compensation_enabled=True,
         title_bar_compensation_height=30,
+        presentation_refresh_requested=True,
         gnome_runner=fake_runner,
     )
 
     assert isinstance(result, BackendPresentationCycleResult)
-    assert calls == [(False, True, True, 30)]
+    assert calls == [(False, True, True, 30, True)]
     assert result.should_show_overlay is True
     assert result.scale_size == (300, 200)
     assert result.prime_rect == (10, 20, 300, 200)
@@ -1121,7 +1124,9 @@ def test_resolve_tracker_fallback_bundle_uses_bundle_declared_fallback_mapping(m
         input_policy=_CapabilityOnlyInputPolicy(),
     )
 
-    monkeypatch.setattr("overlay_client.backend.consumers.resolve_linux_bundle_from_status", lambda _: capability_bundle)
+    monkeypatch.setattr(
+        "overlay_client.backend.consumers.resolve_linux_bundle_from_status", lambda _: capability_bundle
+    )
     monkeypatch.setattr(
         "overlay_client.backend.consumers._build_linux_bundle_for_instance",
         lambda instance: BackendBundle(

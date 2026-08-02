@@ -55,6 +55,7 @@ const DISPLAY_CONFIG_DBUS_INTERFACE = 'org.gnome.Mutter.DisplayConfig';
 const DISPLAY_CONFIG_GET_CURRENT_STATE_METHOD = 'GetCurrentState';
 const DISPLAY_CONFIG_MONITOR_CACHE_TTL_US = 1000000;
 const DISPLAY_CONFIG_DBUS_TIMEOUT_MS = 250;
+const PRESSURE_COUNTER_MAX = 1000000;
 const SHELL_ACTOR_PROOF_TIMEOUT_MS = 5000;
 const SHELL_RASTER_FRAME_TIMEOUT_MS_DEFAULT = 1500;
 const SHELL_RASTER_FRAME_MAX_BYTES = 8 * 1024 * 1024;
@@ -223,6 +224,10 @@ class HelperHealthService {
         this._startedAtMonotonicUs = GLib.get_monotonic_time();
         this._targetSequence = 0;
         this._presentationSequence = 0;
+        this._pressureCounters = {
+            target_queries: 0,
+            presentation_calls: 0,
+        };
         this._displayConfigMonitorCache = null;
         this._displayConfigMonitorCacheExpiresUs = 0;
         this._shellActorProof = null;
@@ -264,6 +269,8 @@ class HelperHealthService {
             started_at_monotonic_us: this._startedAtMonotonicUs,
             generated_at_unix_ms: Date.now(),
             generated_at_monotonic_us: GLib.get_monotonic_time(),
+            pressure_counters: {...this._pressureCounters},
+            actor_counts: this._shellActorCounts(),
         });
     }
 
@@ -304,7 +311,16 @@ class HelperHealthService {
         };
     }
 
+    _incrementPressureCounter(name) {
+        if (!Object.hasOwn(this._pressureCounters, name)) {
+            return;
+        }
+        const current = Math.max(0, Number(this._pressureCounters[name]) || 0);
+        this._pressureCounters[name] = Math.min(PRESSURE_COUNTER_MAX, current + 1);
+    }
+
     GetTargetState(_query) {
+        this._incrementPressureCounter('target_queries');
         this._targetSequence += 1;
         const generatedAtUnixMs = Date.now();
         const generatedAtMonotonicUs = GLib.get_monotonic_time();
@@ -352,6 +368,7 @@ class HelperHealthService {
     }
 
     ApplyPresentation(request) {
+        this._incrementPressureCounter('presentation_calls');
         this._presentationSequence += 1;
         const generatedAtUnixMs = Date.now();
         const generatedAtMonotonicUs = GLib.get_monotonic_time();

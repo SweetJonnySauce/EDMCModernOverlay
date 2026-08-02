@@ -1,7 +1,7 @@
 {
-  "group_bounds_outline": true,
+  "group_bounds_outline": false,
   "log_repaint_debounce": false,
-  "overlay_outline": true,
+  "overlay_outline": false,
   "payload_ids": [],
   "payload_vertex_markers": false,
   "repaint_debounce_enabled": true,

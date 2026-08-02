@@ -233,6 +233,11 @@ def _build_payload_handler(
             if request_id:
                 window.send_current_backend_status(request_id)
             return
+        if event == "OverlayClientPressureSnapshotRequest":
+            request_id = str(payload.get("request_id") or "").strip()
+            if request_id:
+                window.send_current_pressure_snapshot(request_id)
+            return
         if event == "LegacyOverlay":
             if group_filter is not None and not group_filter.allow_payload(payload):
                 return

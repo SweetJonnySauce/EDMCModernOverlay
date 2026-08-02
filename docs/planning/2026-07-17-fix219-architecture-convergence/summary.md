@@ -8,7 +8,11 @@ Detailed design review: **Completed**
 
 Implementation plan review: **Approved for PDD completion on 2026-07-19**
 
-Implementation status: **Not started**
+Implementation status: **In progress — Steps 1–2 complete; Step 3 amended and in progress**
+
+Step 3 amendment status: **Completed on 2026-07-21**
+
+Amendment iteration checkpoint: **Reviewed and approved — Stage 1.6 not yet authorized**
 
 At PDD closure:
 
@@ -41,6 +45,11 @@ Requirements clarification produced 34 explicit decisions covering:
 
 The design-stage iteration checklist found no blocking product question, missing prerequisite research, internal contradiction, or implementation-planning blocker.
 
+Question 35 adds the evidence-driven Step 3 correction: disable capture diagnostics, reduce
+stable GNOME helper-query and unchanged repaint pressure test-first, run a controlled four-cell
+helper A/B, repeat manual regression checks, and restart a clean 42-capture baseline without
+mixing the 12 accepted pre-optimization captures.
+
 ## Design Overview
 
 The approved detailed design defines:
@@ -55,6 +64,9 @@ The approved detailed design defines:
 8. GNOME helper protocol 4 with non-preemptive ownership, 2-second initial renewal cadence, and approximately 10-second independent expiry.
 9. A schema-version-1 backend envelope separating support, evidence, health, ownership, presentation, probes, and diagnostics.
 10. Contract-first migration, developer rollback until parity, formal validation/compliance gates, and final deletion of the temporary second architecture.
+11. Backend-owned stable-target caching, unchanged-render repaint suppression, quiet aggregated
+    diagnostics, and a clean-baseline rule that preserves immediate recovery and Phase 19
+    behavior.
 
 ## Implementation Plan Overview
 
@@ -79,6 +91,16 @@ Every step includes:
 
 The pre-migration performance baseline in Step 3 is a hard gate before production routing in Step 5. The old GNOME route is removed only in Step 24 after automated parity, Phase 19, lifecycle, manual support, performance, privacy, and EDMC compliance gates pass.
 
+Step 3 is now expanded within Phase 1 from evidence tooling through cold-start/capture
+corrections, a paused 12/42 historical matrix, quiet configuration, helper-query reduction,
+unchanged-repaint suppression, controlled A/B, manual regression/soak, and a new coherent
+post-optimization matrix starting at 0/42. Thresholds remain unset until that matrix is complete
+and reviewed.
+
+The controlled A/B first establishes pressure-reduction acceptance bounds recorded in its report.
+Only the completed clean 42-capture baseline establishes versioned migration-regression
+thresholds for later fix219 comparisons.
+
 ## Artifacts
 
 ### Project inputs and requirements
@@ -100,12 +122,14 @@ The pre-migration performance baseline in Step 3 is a hard gate before productio
 - [`backend-contracts-and-control-plane.md`](research/backend-contracts-and-control-plane.md) — behavior interfaces and three-axis status/schema design.
 - [`contract-tests-and-migration.md`](research/contract-tests-and-migration.md) — reusable contracts, GNOME specialization, harness boundary, and staged replacement.
 - [`performance-baseline.md`](research/performance-baseline.md) — scenario manifest, measures, and comparison policy.
+- [`gnome-helper-pressure-and-repaint.md`](research/gnome-helper-pressure-and-repaint.md) — Step 3 incident evidence, cache/repaint contracts, controlled A/B, and clean-baseline decision.
 - [`validation-evidence-and-compliance.md`](research/validation-evidence-and-compliance.md) — public evidence workflow, collector privacy, and current EDMC compliance findings.
 
 ### Design and implementation planning
 
 - [`detailed-design.md`](design/detailed-design.md) — standalone approved architecture, interfaces, models, errors, migration, testing, and alternatives.
 - [`plan.md`](implementation/plan.md) — approved 24-step test-driven implementation plan and phase/checklist tracker.
+- [`iteration-checklist.md`](iteration-checklist.md) — amendment traceability, readiness audit, verified evidence state, and required synchronization actions.
 - [`summary.md`](summary.md) — this PDD completion summary.
 
 ## Known Starting Compliance Work
@@ -134,20 +158,32 @@ These do not require more requirements clarification unless evidence would chang
 ## Validation Performed During PDD
 
 - Verified branch, HEAD, tracked implementation state, and artifact layout.
-- Verified all 34 requirements are traceable in the detailed design.
+- Verified all original 34 requirements are traceable in the detailed design; the 2026-07-21
+  amendment records and traces Question 35 through research, design, and Step 3 planning.
 - Verified all eight required design sections and seven Mermaid diagrams.
 - Verified 24 implementation checklist titles exactly match 24 numbered steps.
 - Verified every implementation step contains objective, guidance, tests, integration, and demo sections.
-- Verified six implementation phases contain 24 ordered stages.
+- Verified six implementation phases preserve 24 numbered steps; Phase 1 now expands Step 3
+  into nine evidence, correction, A/B, regression, and clean-baseline tracking stages.
 - Verified planning Markdown has balanced fences where applicable and no trailing whitespace.
+- Revalidated the frozen reduced-v2 manifest as 14 scenarios with three repetitions and all 12
+  historical captures against it; confirmed two full-v1 captures remain preserved and
+  `thresholds.json` remains absent.
+- Verified the synchronization leaves Stage 1.6/working Stage 3.10 not started and does not
+  authorize capture resumption, settings changes, or runtime implementation.
+- Recorded user approval of the threshold distinction, working sequence, tiered-testing policy,
+  progress supersession rule, historical evidence hold, and synchronization as a whole.
 
-No implementation tests, lint, typecheck, build, or GUI commands were run because the PDD changed documentation only. No test files were added or updated.
+No implementation tests, lint, typecheck, build, or GUI commands were run for the 2026-07-21
+amendment because it changed documentation only. No test files were added or updated.
 
 ## Next Steps
 
 1. Review and optionally commit the PDD artifact tree as a planning-only change.
-2. Explicitly authorize a selected implementation step before any code changes.
-3. Begin with Step 1's pure models/shadow envelope and its unit tests.
-4. Complete the Step 3 GNOME 46/Ubuntu 24.04.4 pre-migration baseline before Step 5 changes production routing.
+2. Explicitly authorize Stage 1.6 before any code or configuration changes.
+3. Resume Step 3 at Stage 1.6 by disabling capture diagnostics and establishing a quiet
+   normal-use state.
+4. Complete test-first helper-query and unchanged-repaint pressure reduction, the controlled A/B,
+   manual regression/soak, and the clean GNOME 46/Ubuntu 24.04.4 baseline before Step 5 changes
+   production routing.
 5. Update the plan checklist, phase/stage tables, and exact test evidence after every implemented increment.
-

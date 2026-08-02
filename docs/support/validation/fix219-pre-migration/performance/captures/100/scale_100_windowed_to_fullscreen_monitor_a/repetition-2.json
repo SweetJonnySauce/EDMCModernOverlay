@@ -1,0 +1,594 @@
+{
+  "capture_id": "baseline_scale_100_windowed_to_fullscreen_monitor_a_r2",
+  "capture_role": "baseline",
+  "clock_domains": {
+    "client_elapsed": "client_perf_counter",
+    "helper_elapsed": "gnome_shell_monotonic"
+  },
+  "diagnostic_configuration_id": "performance_diagnostics_v1",
+  "diagnostic_reference": "diag_scale_100_windowed_to_fullscreen_monitor_a_r2",
+  "display_configuration_id": "dual_ultrawide_scale_100",
+  "environment": {
+    "compositor": "mutter",
+    "compositor_version": "46.0",
+    "desktop": "gnome",
+    "distribution": "ubuntu",
+    "distribution_version": "24.04.4",
+    "operating_system": "linux",
+    "session_type": "wayland"
+  },
+  "idle_cpu": {
+    "client_percent_samples": [
+      0.999313,
+      16.99843,
+      1.997448,
+      19.998471,
+      1.999834,
+      8.999166,
+      10.991253,
+      0.999922,
+      17.969202,
+      1.999848,
+      16.997621,
+      0.999919,
+      18.999372,
+      1.999834,
+      17.994499
+    ],
+    "gnome_shell_percent_samples": [
+      47.967033,
+      50.99529,
+      50.934929,
+      54.995794,
+      48.995935,
+      48.995457,
+      48.961036,
+      47.996263,
+      48.916161,
+      49.996212,
+      49.993003,
+      47.996095,
+      50.998315,
+      50.995755,
+      49.984718
+    ],
+    "interval_seconds": 15
+  },
+  "idle_cpu_seconds": 15,
+  "latency_samples": [
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000001",
+      "elapsed_ms": 48.25438,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000002",
+      "elapsed_ms": 34.198122,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000003",
+      "elapsed_ms": 22.956222,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000004",
+      "elapsed_ms": 15.676634,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000005",
+      "elapsed_ms": 24.33419,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000006",
+      "elapsed_ms": 46.28126,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000007",
+      "elapsed_ms": 16.877608,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000008",
+      "elapsed_ms": 17.234412,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000009",
+      "elapsed_ms": 15.969116,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000010",
+      "elapsed_ms": 79.062721,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000011",
+      "elapsed_ms": 28.376815,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000012",
+      "elapsed_ms": 18.391283,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000013",
+      "elapsed_ms": 12.617275,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000014",
+      "elapsed_ms": 41.77444,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000015",
+      "elapsed_ms": 39.22904,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000016",
+      "elapsed_ms": 30.881949,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000017",
+      "elapsed_ms": 18.037195,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000018",
+      "elapsed_ms": 15.41455,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000019",
+      "elapsed_ms": 33.671239,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000020",
+      "elapsed_ms": 15.154449,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000021",
+      "elapsed_ms": 27.678297,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000022",
+      "elapsed_ms": 17.726049,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000023",
+      "elapsed_ms": 63.384805,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000024",
+      "elapsed_ms": 33.463537,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000025",
+      "elapsed_ms": 25.511761,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000026",
+      "elapsed_ms": 34.050935,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000027",
+      "elapsed_ms": 34.959599,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000028",
+      "elapsed_ms": 56.029594,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000029",
+      "elapsed_ms": 19.314916,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000030",
+      "elapsed_ms": 46.222176,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000031",
+      "elapsed_ms": 23.305939,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000032",
+      "elapsed_ms": 59.339611,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000033",
+      "elapsed_ms": 19.183003,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000034",
+      "elapsed_ms": 30.663541,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000035",
+      "elapsed_ms": 16.831272,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000036",
+      "elapsed_ms": 49.640951,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000037",
+      "elapsed_ms": 18.586989,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000038",
+      "elapsed_ms": 49.777578,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000039",
+      "elapsed_ms": 23.457135,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000040",
+      "elapsed_ms": 45.71734,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000041",
+      "elapsed_ms": 34.820935,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000042",
+      "elapsed_ms": 32.533855,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000043",
+      "elapsed_ms": 40.476481,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000044",
+      "elapsed_ms": 36.589116,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000045",
+      "elapsed_ms": 41.076054,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000046",
+      "elapsed_ms": 36.62284,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000047",
+      "elapsed_ms": 22.282989,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000048",
+      "elapsed_ms": 38.655315,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000049",
+      "elapsed_ms": 35.006947,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000050",
+      "elapsed_ms": 38.770612,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000051",
+      "elapsed_ms": 26.766041,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000052",
+      "elapsed_ms": 37.341688,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000053",
+      "elapsed_ms": 36.709305,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000054",
+      "elapsed_ms": 73.742086,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000055",
+      "elapsed_ms": 21.603579,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000056",
+      "elapsed_ms": 36.141142,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000057",
+      "elapsed_ms": 25.970364,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000058",
+      "elapsed_ms": 55.14638,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000059",
+      "elapsed_ms": 26.974193,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "cycle_000060",
+      "elapsed_ms": 32.618711,
+      "metric": "presentation_cycle_ms"
+    },
+    {
+      "clock_domain": "gnome_shell_monotonic",
+      "correlation_id": "helper_000001",
+      "elapsed_ms": 0.0,
+      "metric": "helper_apply_ms"
+    },
+    {
+      "clock_domain": "gnome_shell_monotonic",
+      "correlation_id": "helper_000002",
+      "elapsed_ms": 0.37,
+      "metric": "helper_apply_ms"
+    },
+    {
+      "clock_domain": "gnome_shell_monotonic",
+      "correlation_id": "helper_000003",
+      "elapsed_ms": 0.316,
+      "metric": "helper_apply_ms"
+    },
+    {
+      "clock_domain": "gnome_shell_monotonic",
+      "correlation_id": "helper_000004",
+      "elapsed_ms": 0.248,
+      "metric": "helper_apply_ms"
+    },
+    {
+      "clock_domain": "gnome_shell_monotonic",
+      "correlation_id": "helper_000005",
+      "elapsed_ms": 0.399,
+      "metric": "helper_apply_ms"
+    },
+    {
+      "clock_domain": "gnome_shell_monotonic",
+      "correlation_id": "helper_000006",
+      "elapsed_ms": 0.475,
+      "metric": "helper_apply_ms"
+    },
+    {
+      "clock_domain": "gnome_shell_monotonic",
+      "correlation_id": "helper_000007",
+      "elapsed_ms": 0.319,
+      "metric": "helper_apply_ms"
+    },
+    {
+      "clock_domain": "gnome_shell_monotonic",
+      "correlation_id": "helper_000008",
+      "elapsed_ms": 0.311,
+      "metric": "helper_apply_ms"
+    },
+    {
+      "clock_domain": "gnome_shell_monotonic",
+      "correlation_id": "helper_000009",
+      "elapsed_ms": 0.277,
+      "metric": "helper_apply_ms"
+    },
+    {
+      "clock_domain": "gnome_shell_monotonic",
+      "correlation_id": "helper_000010",
+      "elapsed_ms": 0.543,
+      "metric": "helper_apply_ms"
+    },
+    {
+      "clock_domain": "gnome_shell_monotonic",
+      "correlation_id": "helper_000011",
+      "elapsed_ms": 0.357,
+      "metric": "helper_apply_ms"
+    },
+    {
+      "clock_domain": "gnome_shell_monotonic",
+      "correlation_id": "helper_000012",
+      "elapsed_ms": 0.258,
+      "metric": "helper_apply_ms"
+    },
+    {
+      "clock_domain": "gnome_shell_monotonic",
+      "correlation_id": "helper_000013",
+      "elapsed_ms": 0.259,
+      "metric": "helper_apply_ms"
+    },
+    {
+      "clock_domain": "gnome_shell_monotonic",
+      "correlation_id": "helper_000014",
+      "elapsed_ms": 0.286,
+      "metric": "helper_apply_ms"
+    },
+    {
+      "clock_domain": "gnome_shell_monotonic",
+      "correlation_id": "helper_000015",
+      "elapsed_ms": 0.547,
+      "metric": "helper_apply_ms"
+    },
+    {
+      "clock_domain": "gnome_shell_monotonic",
+      "correlation_id": "helper_000016",
+      "elapsed_ms": 0.458,
+      "metric": "helper_apply_ms"
+    },
+    {
+      "clock_domain": "gnome_shell_monotonic",
+      "correlation_id": "helper_000017",
+      "elapsed_ms": 0.278,
+      "metric": "helper_apply_ms"
+    },
+    {
+      "clock_domain": "gnome_shell_monotonic",
+      "correlation_id": "helper_000018",
+      "elapsed_ms": 0.282,
+      "metric": "helper_apply_ms"
+    },
+    {
+      "clock_domain": "gnome_shell_monotonic",
+      "correlation_id": "helper_000019",
+      "elapsed_ms": 0.33,
+      "metric": "helper_apply_ms"
+    },
+    {
+      "clock_domain": "gnome_shell_monotonic",
+      "correlation_id": "helper_000020",
+      "elapsed_ms": 0.39,
+      "metric": "helper_apply_ms"
+    },
+    {
+      "clock_domain": "gnome_shell_monotonic",
+      "correlation_id": "helper_000021",
+      "elapsed_ms": 0.26,
+      "metric": "helper_apply_ms"
+    },
+    {
+      "clock_domain": "client_perf_counter",
+      "correlation_id": "transition_000001",
+      "elapsed_ms": 0.0,
+      "metric": "end_to_stable_ms"
+    }
+  ],
+  "manifest_id": "fix219_gnome46_pre_migration_reduced_v2",
+  "manual_observations": {
+    "black_surface": false,
+    "dual_visible_presenters": false,
+    "focus_trap": false,
+    "material_hitch": false,
+    "monitor_relative_intermediate": false,
+    "note_codes": [],
+    "premature_commitment": false,
+    "title_bar_intermediate": false,
+    "unexpected_identity": false
+  },
+  "observation_seconds": 30,
+  "payload_fixture_id": "representative_payload_v1",
+  "repetition": 2,
+  "scenario_id": "scale_100_windowed_to_fullscreen_monitor_a",
+  "schema_version": 1,
+  "versions": {
+    "architecture_stage": "pre_migration",
+    "client": "1.0.0",
+    "helper_protocol": 3,
+    "plugin": "1.0.0",
+    "source_revision": "3d2332869454d6561995203752fd239a558a95a5"
+  },
+  "warm_up_seconds": 10,
+  "work": {
+    "frame_builds": 38,
+    "helper_apply_ms": 6.963,
+    "helper_decode_ms": 3.556,
+    "helper_health_calls": 5,
+    "helper_presentation_calls": 21,
+    "helper_target_calls": 60,
+    "paints": 26,
+    "raster_builds": 1,
+    "raster_bytes": 2165886,
+    "raster_encode_ms": 6.263,
+    "raster_regions": 114,
+    "raster_reuses": 37,
+    "raster_skips": 0,
+    "repaints": 841,
+    "transitions": 1
+  }
+}

@@ -9,7 +9,7 @@ import json
 import math
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Sequence, Set, Tuple
 
 from PyQt6.QtCore import QPoint, QRect, Qt
@@ -39,6 +39,7 @@ from overlay_client.viewport_transform import (
 from overlay_client.viewport_helper import BASE_HEIGHT, BASE_WIDTH, ScaleMode
 from overlay_client.opacity_utils import apply_global_payload_opacity, coerce_percent
 from overlay_client.window_utils import legacy_preset_point_size as util_legacy_preset_point_size, line_width as util_line_width
+from overlay_client.work_counters import WORK_COUNTER_MAX, increment_bounded_counter
 
 _CLIENT_LOGGER = logging.getLogger("EDMC.ModernOverlay.Client")
 
@@ -1055,8 +1056,33 @@ class RenderSurfaceMixin:
             build_multi_region_real_content_shell_raster_frame_request,
         )
 
+        work_counts = getattr(self, "_shell_raster_frame_work_counts", None)
+        if not isinstance(work_counts, dict):
+            work_counts = {
+                "requests": 0,
+                "builds": 0,
+                "unchanged_reuses": 0,
+                "uncacheable": 0,
+                "failures": 0,
+            }
+            self._shell_raster_frame_work_counts = work_counts
+        increment_bounded_counter(work_counts, "requests", limit=WORK_COUNTER_MAX)
+        render_size = self._shell_raster_target_render_size(target_status, request)
+        cache_identity = self._shell_raster_frame_identity(
+            target_status,
+            request,
+            render_size=render_size,
+            include_diagnostics=include_diagnostics,
+        )
+        if cache_identity is not None and cache_identity == getattr(self, "_shell_raster_frame_cache_identity", None):
+            cached_result = getattr(self, "_shell_raster_frame_cache_result", None)
+            if isinstance(cached_result, ShellRasterFrameBuildResult):
+                increment_bounded_counter(work_counts, "unchanged_reuses", limit=WORK_COUNTER_MAX)
+                return self._shell_raster_reused_frame_result(cached_result)
+        if cache_identity is None:
+            increment_bounded_counter(work_counts, "uncacheable", limit=WORK_COUNTER_MAX)
+
         try:
-            render_size = self._shell_raster_target_render_size(target_status, request)
             with self._temporary_shell_raster_render_size(render_size):
                 payload_results = self._prepare_shell_raster_payload_results()
                 contributors = self._shell_raster_crop_contributor_snapshot(payload_results)
@@ -1081,7 +1107,8 @@ class RenderSurfaceMixin:
             if not image.save(str(image_path), "PNG"):
                 raise RuntimeError("real-content Shell raster PNG save failed")
 
-        return build_multi_region_real_content_shell_raster_frame_request(
+        increment_bounded_counter(work_counts, "builds", limit=WORK_COUNTER_MAX)
+        result = build_multi_region_real_content_shell_raster_frame_request(
             target_status,
             request,
             contributors=contributors,
@@ -1089,6 +1116,123 @@ class RenderSurfaceMixin:
             env=os.environ,
             include_diagnostics=include_diagnostics,
         )
+        if result.eligible and result.request is not None and result.request.action == "update" and cache_identity is not None:
+            self._shell_raster_frame_cache_identity = cache_identity
+            self._shell_raster_frame_cache_result = result
+        else:
+            self._shell_raster_frame_cache_identity = None
+            self._shell_raster_frame_cache_result = None
+            increment_bounded_counter(work_counts, "failures", limit=WORK_COUNTER_MAX)
+        return result
+
+    def _shell_raster_frame_identity(
+        self,
+        target_status: object,
+        request: object,
+        *,
+        render_size: Tuple[int, int] | None,
+        include_diagnostics: bool,
+    ) -> object | None:
+        target = getattr(target_status, "target", None) if getattr(target_status, "found", False) else None
+        target_rect = getattr(target, "content_rect", None)
+        monitor_rect = getattr(target, "monitor_rect", None)
+        request_rect = getattr(request, "content_rect", None)
+        if target is None or request is None or target_rect is None or monitor_rect is None or request_rect is None:
+            return None
+        if not all(bool(getattr(rect, "valid", False)) for rect in (target_rect, monitor_rect, request_rect)):
+            return None
+        if render_size is None or render_size[0] <= 0 or render_size[1] <= 0:
+            return None
+        try:
+            with self._temporary_shell_raster_render_size(render_size):
+                context = self._build_legacy_render_context()
+                snapshot = PayloadSnapshot(items_count=len(list(self._payload_model.store.items())))
+                render_identity = self._render_pipeline.render_identity(context, snapshot)
+            return (
+                render_identity,
+                self._shell_raster_visual_environment_identity(),
+                str(getattr(target, "target_token", "")),
+                self._shell_raster_rect_identity(getattr(target, "frame_rect", None)),
+                self._shell_raster_rect_identity(getattr(target, "buffer_rect", None)),
+                self._shell_raster_rect_identity(target_rect),
+                self._shell_raster_rect_identity(monitor_rect),
+                getattr(target, "monitor", None),
+                str(getattr(target, "output_name", "")),
+                round(float(getattr(target, "monitor_scale", 0.0) or 0.0), 6),
+                bool(getattr(target, "has_focus", False)),
+                bool(getattr(target, "showing_on_workspace", False)),
+                bool(getattr(target, "minimized", False)),
+                bool(getattr(target, "fullscreen", False)),
+                str(getattr(target, "workspace", "")),
+                str(getattr(getattr(request, "action", None), "value", "")),
+                str(getattr(request, "target_token", "")),
+                self._shell_raster_rect_identity(request_rect),
+                str(getattr(request, "rect_source", "")),
+                int(getattr(request, "rect_tolerance", 0)),
+                str(getattr(request, "renderer", "")),
+                bool(getattr(request, "standalone_mode", False)),
+                bool(getattr(request, "require_placement", False)),
+                bool(getattr(request, "require_chrome_free", False)),
+                bool(getattr(request, "require_stacking", False)),
+                bool(getattr(request, "require_click_through", False)),
+                bool(getattr(request, "require_focus_safe", False)),
+                tuple(render_size),
+                bool(include_diagnostics),
+            )
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return None
+
+    def _shell_raster_visual_environment_identity(self) -> object:
+        """Return non-payload renderer state that can change exported pixels."""
+
+        line_widths = getattr(self, "_line_widths", {})
+        if not isinstance(line_widths, Mapping):
+            line_widths = {}
+        return (
+            int(self._payload_opacity_percent()),
+            bool(getattr(self, "_payload_nudge_enabled", False)),
+            int(getattr(self, "_payload_nudge_gutter", 0)),
+            str(getattr(self, "_font_family", "") or ""),
+            tuple(str(value) for value in getattr(self, "_font_fallbacks", ())),
+            round(float(getattr(self, "_font_scale_diag", 0.0)), 6),
+            round(float(getattr(self, "_font_min_point", 0.0)), 6),
+            round(float(getattr(self, "_font_max_point", 0.0)), 6),
+            round(float(getattr(self, "_legacy_font_step", 0.0)), 6),
+            int(getattr(self, "_text_cache_generation", 0)),
+            tuple(sorted((str(key), int(value)) for key, value in line_widths.items())),
+        )
+
+    @staticmethod
+    def _shell_raster_rect_identity(rect: object) -> Tuple[int, int, int, int] | None:
+        if rect is None or not bool(getattr(rect, "valid", False)):
+            return None
+        return (
+            int(getattr(rect, "x", 0)),
+            int(getattr(rect, "y", 0)),
+            int(getattr(rect, "width", 0)),
+            int(getattr(rect, "height", 0)),
+        )
+
+    @staticmethod
+    def _shell_raster_reused_frame_result(result: object) -> object:
+        request = getattr(result, "request", None)
+        request_diagnostics_raw = getattr(request, "diagnostics", None) if request is not None else None
+        if request is None or request_diagnostics_raw is None:
+            return result
+        request_diagnostics = dict(request_diagnostics_raw)
+        request_diagnostics.update(
+            {
+                "cache_hit": True,
+                "client_payload_reused": True,
+                "build_ms": 0.0,
+                "frame_preparation_skipped": True,
+                "frame_preparation_skip_reason": "unchanged_visual",
+            }
+        )
+        reused_request = replace(request, diagnostics=request_diagnostics)
+        result_diagnostics = dict(getattr(result, "diagnostics", None) or {})
+        result_diagnostics.update(request_diagnostics)
+        return replace(result, request=reused_request, diagnostics=result_diagnostics)
 
     def _apply_group_logging_payloads(
         self,

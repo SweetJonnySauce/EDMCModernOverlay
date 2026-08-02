@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 import logging
 import os
-from typing import Callable, Dict, Mapping, Optional, Tuple, Any
+from typing import Callable, Dict, Mapping, Optional, Tuple
 
 from overlay_client.legacy_processor import (
     TraceCallback,
@@ -12,10 +12,13 @@ from overlay_client.legacy_processor import (
     _extract_plugin,
 )  # type: ignore
 from overlay_client.legacy_store import LegacyItem, LegacyItemStore  # type: ignore
+from overlay_client.work_counters import WORK_COUNTER_MAX, increment_bounded_counter
 
 
 class PayloadModel:
     """Owns the legacy item store and handles ingest/TTL."""
+
+    INGEST_COUNT_MAX = WORK_COUNTER_MAX
 
     def __init__(self, trace_logger: Callable[[str, str, str, Mapping[str, object]], None]) -> None:
         self._store = LegacyItemStore()
@@ -27,7 +30,17 @@ class PayloadModel:
             {"kind": getattr(item, "kind", "unknown")},
         ))
         self._trace_logger = trace_logger
-        self._last_snapshots: Dict[str, Tuple[Tuple[Any, ...], Optional[int]]] = {}
+        self._last_snapshots: Dict[
+            str,
+            Tuple[Tuple[object, ...], Optional[int], str, str],
+        ] = {}
+        self._ingest_counts: Dict[str, int] = {
+            "visual_change": 0,
+            "lifecycle_refresh": 0,
+            "animation_bypass": 0,
+            "unknown_fallback": 0,
+            "rejected": 0,
+        }
         self._dedupe_log_state: Dict[str, Dict[str, float | int]] = {}
         dedupe_env = (os.getenv("EDMC_OVERLAY_INGEST_DEDUPE") or "1").strip().lower()
         self._dedupe_enabled = dedupe_env not in {"0", "false", "no", "off"}
@@ -35,6 +48,15 @@ class PayloadModel:
     @property
     def store(self) -> LegacyItemStore:
         return self._store
+
+    @property
+    def ingest_counts(self) -> Dict[str, int]:
+        """Return fixed-cardinality aggregate ingest attribution."""
+
+        return dict(self._ingest_counts)
+
+    def _record_ingest(self, reason: str) -> None:
+        increment_bounded_counter(self._ingest_counts, reason, limit=self.INGEST_COUNT_MAX)
 
     def ingest(
         self,
@@ -48,26 +70,39 @@ class PayloadModel:
 
         item_id = payload.get("id")
         item_type = payload.get("type")
-        snapshot: Optional[Tuple[Any, ...]] = None
+        snapshot: Optional[Tuple[object, ...]] = None
+        animation_bypass = bool(payload.get("animate"))
         if self._dedupe_enabled and isinstance(item_id, str) and isinstance(item_type, str):
             try:
                 snapshot = _hashable_payload_snapshot(item_type, payload)
             except Exception:
                 snapshot = None
-            if snapshot is not None:
+            if snapshot is None:
+                self._record_ingest("unknown_fallback")
+            if animation_bypass:
+                self._record_ingest("animation_bypass")
+            elif snapshot is not None:
+                plugin_name = _extract_plugin(payload) or ""
+                group_name = group_label or ""
                 last_entry = self._last_snapshots.get(item_id)
                 if last_entry is not None:
-                    last_snapshot, last_generation = last_entry
+                    last_snapshot, last_generation, last_plugin, last_group = last_entry
                 else:
-                    last_snapshot, last_generation = None, None
-                if last_snapshot == snapshot and (last_generation == override_generation or override_generation is None):
+                    last_snapshot, last_generation, last_plugin, last_group = None, None, "", ""
+                if (
+                    last_snapshot == snapshot
+                    and last_plugin == plugin_name
+                    and last_group == group_name
+                    and (last_generation == override_generation or override_generation is None)
+                ):
                     ttl = max(int(payload.get("ttl", 4)), 0)
                     now = time.monotonic()
                     expiry = now + ttl if ttl > 0 else now
                     existing = self._store.get(item_id)
                     if existing is not None:
                         existing.expiry = expiry
-                        plugin_name = _extract_plugin(payload) or "unknown"
+                        existing.data["__mo_ttl__"] = ttl
+                        plugin_name = plugin_name or "unknown"
                         item_id_token = item_id.casefold()
                         reason = (
                             "controller_heartbeat"
@@ -107,11 +142,20 @@ class PayloadModel:
                                     )
                                     state["count"] = 0
                                     state["last"] = now
+                        self._record_ingest("lifecycle_refresh")
                         return False
 
         changed = process_legacy_payload(self._store, payload, trace_fn=trace_fn)
         if changed and snapshot is not None and isinstance(item_id, str):
-            self._last_snapshots[item_id] = (snapshot, override_generation)
+            self._last_snapshots[item_id] = (
+                snapshot,
+                override_generation,
+                _extract_plugin(payload) or "",
+                group_label or "",
+            )
+        elif changed and isinstance(item_id, str):
+            self._last_snapshots.pop(item_id, None)
+        self._record_ingest("visual_change" if changed else "rejected")
         return changed
 
     def purge_expired(self, now: Optional[float] = None) -> bool:

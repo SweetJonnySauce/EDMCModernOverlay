@@ -5,7 +5,6 @@ import time
 from datetime import datetime, timezone
 from collections.abc import Iterable, Sequence
 from typing import Any, Callable, Mapping, MutableMapping, Optional
-import json
 
 from overlay_client.legacy_store import LegacyItem, LegacyItemStore
 
@@ -23,7 +22,21 @@ def _normalise_marker_text_size(value: Any) -> Optional[str]:
     return None
 
 
-def _hashable_payload_snapshot(item_type: str, payload: Mapping[str, Any]) -> tuple:
+def _freeze_visual_value(value: Any) -> object:
+    """Return a deterministic immutable representation of supported visual metadata."""
+
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, Mapping):
+        return tuple(sorted((str(key), _freeze_visual_value(item)) for key, item in value.items()))
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return tuple(_freeze_visual_value(item) for item in value)
+    raise TypeError(f"unsupported visual value: {type(value).__name__}")
+
+
+def _hashable_payload_snapshot(item_type: str, payload: Mapping[str, Any]) -> Optional[tuple[object, ...]]:
+    """Build a visual fingerprint only for payload types whose rendering is understood."""
+
     if item_type == "message":
         return (
             payload.get("text", ""),
@@ -31,7 +44,7 @@ def _hashable_payload_snapshot(item_type: str, payload: Mapping[str, Any]) -> tu
             payload.get("x", 0),
             payload.get("y", 0),
             payload.get("size", ""),
-            payload.get("__mo_transform__", None),
+            _freeze_visual_value(payload.get("__mo_transform__", None)),
         )
     if item_type == "shape":
         shape_name = str(payload.get("shape") or "").lower()
@@ -44,7 +57,7 @@ def _hashable_payload_snapshot(item_type: str, payload: Mapping[str, Any]) -> tu
                 payload.get("y", 0),
                 payload.get("w", 0),
                 payload.get("h", 0),
-                payload.get("__mo_transform__", None),
+                _freeze_visual_value(payload.get("__mo_transform__", None)),
             )
         if shape_name == "vect":
             vector = payload.get("vector") or []
@@ -80,9 +93,9 @@ def _hashable_payload_snapshot(item_type: str, payload: Mapping[str, Any]) -> tu
                 payload.get("color", ""),
                 payload_size_value,
                 tuple(points),
-                payload.get("__mo_transform__", None),
+                _freeze_visual_value(payload.get("__mo_transform__", None)),
             )
-    return (item_type, json.dumps(payload, sort_keys=True, default=str))
+    return None
 
 
 TraceCallback = Callable[[str, Mapping[str, Any], Mapping[str, Any]], None]

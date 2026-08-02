@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 from PyQt6.QtGui import QGuiApplication, QPainter
 
 from overlay_client.backend import ProbeSource
+from overlay_client.backend.pressure_ab import build_work_snapshot
 from overlay_client.backend.status import format_status_report_line
 from overlay_client.group_transform import GroupTransform
 from overlay_client.legacy_store import LegacyItem
@@ -24,6 +25,7 @@ from overlay_client.payload_transform import (
 from overlay_client.platform_context import PlatformContext, _backend_status_signature, _client_backend_status
 from overlay_client.viewport_helper import BASE_HEIGHT, BASE_WIDTH, ScaleMode
 from overlay_client.viewport_transform import LegacyMapper, build_viewport
+from overlay_client.work_counters import WORK_COUNTER_MAX, increment_bounded_counter
 
 _CLIENT_LOGGER = logging.getLogger("EDMC.ModernOverlay.Client")
 
@@ -39,6 +41,70 @@ TRANSPARENCY_WARNING_BODY_COLOR = "#ffa500"
 
 class ControlSurfaceMixin:
     """Setter/status surface, cycle helpers, repaint scheduling, and config toggles."""
+
+    _REPAINT_COUNT_MAX = WORK_COUNTER_MAX
+
+    def current_pressure_snapshot(self) -> dict[str, object]:
+        """Return one fixed-schema cumulative work snapshot without detailed diagnostics."""
+
+        ingest = getattr(getattr(self, "_payload_model", None), "ingest_counts", {})
+        repaint = getattr(self, "_repaint_metrics", {}).get("counts", {})
+        paints = getattr(self, "_paint_stats", {})
+        frames = getattr(self, "_shell_raster_frame_work_counts", {})
+        backend = getattr(self, "_backend_work_counts", {})
+        counters = {
+            "backend_cycles": backend.get("cycles", 0),
+            "helper_health_calls": backend.get("helper_health_calls", 0),
+            "helper_target_calls": backend.get("helper_target_calls", 0),
+            "helper_presentation_calls": backend.get("helper_presentation_calls", 0),
+            "ingest_visual_change": ingest.get("visual_change", 0),
+            "ingest_lifecycle_refresh": ingest.get("lifecycle_refresh", 0),
+            "ingest_animation_bypass": ingest.get("animation_bypass", 0),
+            "ingest_unknown_fallback": ingest.get("unknown_fallback", 0),
+            "ingest_rejected": ingest.get("rejected", 0),
+            "repaint_total": repaint.get("total", 0),
+            "repaint_ingest": repaint.get("ingest", 0),
+            "repaint_purge": repaint.get("purge", 0),
+            "repaint_plugin_group_clear": repaint.get("plugin_group_clear", 0),
+            "repaint_override_reload": repaint.get("override_reload", 0),
+            "repaint_override_payload": repaint.get("override_payload", 0),
+            "repaint_controller_target": repaint.get("controller_target", 0),
+            "repaint_explicit_refresh": repaint.get("explicit_refresh", 0),
+            "repaint_other": repaint.get("other", 0),
+            "repaint_immediate": repaint.get("immediate", 0),
+            "repaint_debounce_started": repaint.get("debounce_started", 0),
+            "repaint_debounce_coalesced": repaint.get("debounce_coalesced", 0),
+            "repaint_backend_refresh": repaint.get("backend_refresh", 0),
+            "repaint_qt_update": repaint.get("qt_update", 0),
+            "qt_paints": paints.get("paint_count", 0),
+            "frame_requests": frames.get("requests", 0),
+            "frame_builds": frames.get("builds", 0),
+            "frame_unchanged_reuses": frames.get("unchanged_reuses", 0),
+            "frame_uncacheable": frames.get("uncacheable", 0),
+            "frame_failures": frames.get("failures", 0),
+        }
+        return build_work_snapshot(
+            origin_id=getattr(self, "_pressure_snapshot_origin_id", ""),
+            captured_at_ns=time.monotonic_ns(),
+            counters=counters,
+        )
+
+    def send_current_pressure_snapshot(self, request_id: str) -> bool:
+        """Send a requested snapshot over the existing client data connection."""
+
+        request = str(request_id or "").strip()
+        client = getattr(self, "_data_client", None)
+        if not request or client is None:
+            return False
+        return bool(
+            client.send_cli_payload(
+                {
+                    "cli": "client_runtime_pressure_snapshot",
+                    "request_id": request,
+                    "snapshot": self.current_pressure_snapshot(),
+                }
+            )
+        )
 
     def set_keep_overlay_visible(self, visible: bool) -> None:
         flag = bool(visible)
@@ -614,30 +680,33 @@ class ControlSurfaceMixin:
         if not metrics.get("enabled"):
             return
         counts = metrics.setdefault("counts", {})
-        counts["total"] = counts.get("total", 0) + 1
-        counts[reason] = counts.get(reason, 0) + 1
+        increment_bounded_counter(counts, "total", limit=self._REPAINT_COUNT_MAX)
+        reason_key = reason if reason in counts else "other"
+        increment_bounded_counter(counts, reason_key, limit=self._REPAINT_COUNT_MAX)
         now = time.monotonic()
         last_ts_raw = metrics.get("last_ts")
         last_ts = float(last_ts_raw) if last_ts_raw is not None else None
         if last_ts is None or now - last_ts > 0.1:
             burst = 1
         else:
-            burst = int(metrics.get("burst_current", 0)) + 1
+            burst = min(self._REPAINT_COUNT_MAX, int(metrics.get("burst_current", 0)) + 1)
         metrics["burst_current"] = burst
         metrics["last_ts"] = now
         if burst > metrics.get("burst_max", 0):
             metrics["burst_max"] = burst
-            _CLIENT_LOGGER.debug(
-                "Repaint burst updated (%s): current=%d max=%d interval=%.3fs totals=%s",
-                reason,
-                burst,
-                metrics["burst_max"],
-                (now - last_ts) if last_ts is not None else 0.0,
-                counts,
-            )
+            if self._repaint_debounce_log:
+                _CLIENT_LOGGER.debug(
+                    "Repaint burst updated (%s): current=%d max=%d interval=%.3fs totals=%s",
+                    reason,
+                    burst,
+                    metrics["burst_max"],
+                    (now - last_ts) if last_ts is not None else 0.0,
+                    counts,
+                )
 
     def _request_repaint(self, reason: str, *, immediate: bool = False) -> None:
         self._record_repaint_event(reason)
+        counts = self._repaint_metrics.get("counts", {})
         debounce_enabled = bool(getattr(self, "_repaint_debounce_enabled", True))
         timer = getattr(self, "_repaint_timer", None)
         effective_immediate = immediate or not debounce_enabled or timer is None
@@ -661,24 +730,36 @@ class ControlSurfaceMixin:
                     )
                     self._repaint_log_last = {"reason": reason, "path": path_label, "ts": now}
         if effective_immediate:
+            increment_bounded_counter(counts, "immediate", limit=self._REPAINT_COUNT_MAX)
             if timer is not None and timer.isActive():
                 timer.stop()
-            self._refresh_backend_presentation_for_repaint()
+            if self._refresh_backend_presentation_for_repaint():
+                increment_bounded_counter(counts, "backend_refresh", limit=self._REPAINT_COUNT_MAX)
+            increment_bounded_counter(counts, "qt_update", limit=self._REPAINT_COUNT_MAX)
             self.update()
             return
         if not timer.isActive():
+            increment_bounded_counter(counts, "debounce_started", limit=self._REPAINT_COUNT_MAX)
             timer.start()
+        else:
+            increment_bounded_counter(counts, "debounce_coalesced", limit=self._REPAINT_COUNT_MAX)
 
     def _trigger_debounced_repaint(self) -> None:
-        self._refresh_backend_presentation_for_repaint()
+        counts = self._repaint_metrics.get("counts", {})
+        if self._refresh_backend_presentation_for_repaint():
+            increment_bounded_counter(counts, "backend_refresh", limit=self._REPAINT_COUNT_MAX)
+        increment_bounded_counter(counts, "qt_update", limit=self._REPAINT_COUNT_MAX)
         self.update()
 
-    def _refresh_backend_presentation_for_repaint(self) -> None:
+    def _refresh_backend_presentation_for_repaint(self) -> bool:
         if not getattr(self, "_backend_presentation_content_suppressed", False):
-            return
+            return False
         refresh = getattr(self, "_refresh_backend_presentation", None)
         if callable(refresh):
+            self._backend_presentation_refresh_requested = True
             refresh()
+            return True
+        return False
 
     @staticmethod
     def _should_bypass_debounce(payload: Mapping[str, Any]) -> bool:

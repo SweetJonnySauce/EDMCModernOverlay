@@ -110,6 +110,7 @@ if __package__:
         collect_platform_probe,
     )
     from .overlay_client.backend.status import build_status_report, format_status_report_line
+    from .overlay_client.backend.pressure_ab import PressureAbValidationError, parse_work_snapshot
 else:  # pragma: no cover - EDMC loads as top-level module
     from version import __version__ as MODERN_OVERLAY_VERSION, DEV_MODE_ENV_VAR, is_dev_build
     from overlay_plugin.lifecycle import LifecycleTracker
@@ -194,6 +195,7 @@ else:  # pragma: no cover - EDMC loads as top-level module
         collect_platform_probe,
     )
     from overlay_client.backend.status import build_status_report, format_status_report_line
+    from overlay_client.backend.pressure_ab import PressureAbValidationError, parse_work_snapshot
 
 PLUGIN_NAME = "EDMCModernOverlay"
 PLUGIN_VERSION = MODERN_OVERLAY_VERSION
@@ -515,6 +517,7 @@ CONNECTION_LOG_INTERVAL_SECONDS = 5.0
 CLIENT_RUNTIME_STATUS_TIMEOUT_SECONDS = 1.0
 CLIENT_RUNTIME_STATUS_FRESH_SECONDS = 5.0
 CLIENT_RUNTIME_STATUS_REQUEST_INTERVAL_SECONDS = 2.0
+CLIENT_PRESSURE_SNAPSHOT_TIMEOUT_SECONDS = 1.0
 
 DEFAULT_DEBUG_CONFIG: Dict[str, Any] = {
     "capture_client_stderrout": True,
@@ -617,6 +620,8 @@ class _PluginRuntime:
         self._client_backend_status_cached_at: float = 0.0
         self._client_backend_status_last_request_at: float = 0.0
         self._pending_client_backend_status_requests: Dict[str, Dict[str, Any]] = {}
+        self._pending_client_pressure_snapshot_requests: Dict[str, Dict[str, Any]] = {}
+        self._pressure_snapshot_timeout_seconds = CLIENT_PRESSURE_SNAPSHOT_TIMEOUT_SECONDS
         self._payload_logger = logging.getLogger(PAYLOAD_LOGGER_NAME)
         self._payload_logger.setLevel(logging.DEBUG)
         self._payload_logger.propagate = False
@@ -921,6 +926,39 @@ class _PluginRuntime:
         if isinstance(response, Mapping):
             return dict(response)
         return None
+
+    def _record_client_pressure_snapshot(self, request_id: str, snapshot: Mapping[str, Any]) -> None:
+        try:
+            normalized = parse_work_snapshot(snapshot)
+        except PressureAbValidationError as exc:
+            raise ValueError(f"invalid pressure snapshot: {exc}") from exc
+        pending = self._pending_client_pressure_snapshot_requests.get(request_id)
+        if pending is None:
+            return
+        pending["response"] = normalized
+        event = pending.get("event")
+        if isinstance(event, threading.Event):
+            event.set()
+
+    def _request_client_pressure_snapshot(self, *, timeout: float) -> Optional[Dict[str, Any]]:
+        request_id = uuid.uuid4().hex
+        pending: Dict[str, Any] = {"event": threading.Event(), "response": None}
+        self._pending_client_pressure_snapshot_requests[request_id] = pending
+        try:
+            self.broadcaster.publish(
+                {
+                    "event": "OverlayClientPressureSnapshotRequest",
+                    "request_id": request_id,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
+            )
+            event = pending["event"]
+            if isinstance(event, threading.Event):
+                event.wait(max(0.0, float(timeout)))
+            response = pending.get("response")
+            return dict(response) if isinstance(response, Mapping) else None
+        finally:
+            self._pending_client_pressure_snapshot_requests.pop(request_id, None)
 
     def get_backend_status(self) -> Dict[str, Any]:
         fresh_runtime_status = self._fresh_client_backend_status(max_age=CLIENT_RUNTIME_STATUS_REQUEST_INTERVAL_SECONDS)
@@ -3043,6 +3081,22 @@ class _PluginRuntime:
                     raise ValueError("client_runtime_backend_status payload contained an invalid backend_status")
                 self._record_client_backend_status(request_id, normalised)
                 return {"status": "ok"}
+            if command == "client_runtime_pressure_snapshot":
+                request_id = str(payload.get("request_id") or "").strip()
+                if not request_id:
+                    raise ValueError("client_runtime_pressure_snapshot payload requires 'request_id'")
+                snapshot = payload.get("snapshot")
+                if not isinstance(snapshot, Mapping):
+                    raise ValueError("client_runtime_pressure_snapshot payload requires 'snapshot'")
+                self._record_client_pressure_snapshot(request_id, snapshot)
+                return {"status": "ok"}
+            if command == "pressure_snapshot":
+                snapshot = self._request_client_pressure_snapshot(
+                    timeout=self._pressure_snapshot_timeout_seconds,
+                )
+                if snapshot is None:
+                    return {"status": "unavailable", "reason": "client_snapshot_timeout"}
+                return {"status": "ok", "snapshot": snapshot}
             if command == "backend_status":
                 return self.get_backend_status()
             if command == "profile_set":

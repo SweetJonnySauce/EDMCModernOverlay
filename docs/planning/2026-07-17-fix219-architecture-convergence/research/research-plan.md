@@ -2,7 +2,10 @@
 
 ## Status
 
-Completed on 2026-07-19. Requirements clarification was explicitly declared complete before this focused pass began. This phase changed planning documents only; it did not modify implementation code or create the detailed design.
+Completed on 2026-07-19 and reopened for a focused Step 3 amendment on 2026-07-21.
+Requirements clarification was explicitly declared complete before the original pass; Question
+35 records the user-approved pressure-reduction and clean-baseline amendment. The amendment
+changes planning documents only and does not authorize or modify implementation code.
 
 ## Scope
 
@@ -35,12 +38,14 @@ The project-level success criterion is that GNOME on Wayland and GNOME on X11 ar
 | R.5 | Map reusable contract tests, migration tests, and Phase 19 invariant coverage | Completed |
 | R.6 | Define the pre-migration performance baseline and regression comparison method | Completed |
 | R.7 | Define support/evidence workflow, diagnostic extensions, and current EDMC compliance findings | Completed |
+| R.8 | Record stable helper-query/repaint pressure, safety constraints, A/B method, and clean-baseline evidence rules | Completed |
 
 ## Initial Sources
 
 - Current repository source and tests
 - Relevant Git history
 - `/tmp/handoff-20260717-135402.md` as an index whose claims must be independently verified
+- `/tmp/handoff-20260721-062740.md` as the Step 3 incident, evidence, and requirements amendment
 - `docs/refactoring/fix219_cross_platform_overlay_architecture_research.md`
 - `docs/refactoring/fix219_backend_architecture_refactor_plan.md`
 - `docs/refactoring/fix219_backend_architecture_followup_cleanup_plan.md`
@@ -61,6 +66,7 @@ Focused notes:
 - `contract-tests-and-migration.md`
 - `performance-baseline.md`
 - `validation-evidence-and-compliance.md`
+- `gnome-helper-pressure-and-repaint.md`
 
 ## Authoritative external sources
 

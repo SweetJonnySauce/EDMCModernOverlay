@@ -261,6 +261,25 @@ def test_presentation_cycle_tracks_persistent_wrong_monitor_mismatch_and_backs_o
         runtime_state=state,
         health_cache_jitter_seconds=lambda: 0.0,
     )
+    clock.now += 0.5
+    refreshed = run_gnome_shell_helper_presentation_cycle(
+        presentation_refresh_requested=True,
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_borderless_target()),
+        fetch_presentation=fetch_presentation,
+        clock=clock,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+    )
+    clock.now += 0.5
+    backed_off_again = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_borderless_target()),
+        fetch_presentation=fetch_presentation,
+        clock=clock,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+    )
 
     assert first.attempts == 2
     assert first.presentation_status is not None
@@ -281,7 +300,11 @@ def test_presentation_cycle_tracks_persistent_wrong_monitor_mismatch_and_backs_o
     assert third.should_show_overlay is True
     assert third.presentation_status is not None
     assert GNOME_HELPER_REASON_PERSISTENT_APPLIED_RECT_MISMATCH in third.presentation_status.degrade_reasons
-    assert len(presentation_calls) == 4
+    assert refreshed.presentation_skipped is False
+    assert refreshed.attempts == 2
+    assert backed_off_again.presentation_skipped is True
+    assert backed_off_again.presentation_skip_reason == GNOME_HELPER_REASON_PERSISTENT_APPLIED_RECT_MISMATCH
+    assert len(presentation_calls) == 6
 
 
 def test_persistent_wrong_monitor_backoff_preserves_mapped_suppressed_visibility_policy() -> None:
@@ -1008,7 +1031,13 @@ def test_shell_raster_bridge_refreshes_before_short_lease_expires(
     )
     clock = _Clock()
     state = GnomeHelperPresentationRuntimeState()
+    target_calls = 0
     calls: list[HelperPresentationRequest] = []
+
+    def fetch_target() -> dict[str, object]:
+        nonlocal target_calls
+        target_calls += 1
+        return _target_payload(_borderless_target())
 
     def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
         calls.append(request)
@@ -1025,24 +1054,27 @@ def test_shell_raster_bridge_refreshes_before_short_lease_expires(
         )
 
     first = run_gnome_shell_helper_presentation_cycle(
+        previous_surface_action="mapped_suppressed",
         fetch_health=_health_payload,
-        fetch_target=lambda: _target_payload(_borderless_target()),
+        fetch_target=fetch_target,
         fetch_presentation=fetch_presentation,
         clock=clock,
         runtime_state=state,
     )
     clock.now += 0.5
     skipped = run_gnome_shell_helper_presentation_cycle(
+        previous_surface_action="mapped_suppressed",
         fetch_health=_health_payload,
-        fetch_target=lambda: _target_payload(_borderless_target()),
+        fetch_target=fetch_target,
         fetch_presentation=fetch_presentation,
         clock=clock,
         runtime_state=state,
     )
     clock.now += 0.3
     refreshed = run_gnome_shell_helper_presentation_cycle(
+        previous_surface_action="mapped_suppressed",
         fetch_health=_health_payload,
-        fetch_target=lambda: _target_payload(_borderless_target()),
+        fetch_target=fetch_target,
         fetch_presentation=fetch_presentation,
         clock=clock,
         runtime_state=state,
@@ -1050,9 +1082,11 @@ def test_shell_raster_bridge_refreshes_before_short_lease_expires(
 
     assert first.shell_raster_frame_presented is True
     assert skipped.presentation_skipped is True
-    assert skipped.presentation_skip_reason == "fresh_matching_presentation"
+    assert skipped.presentation_skip_reason == "suppressed_poll_throttle"
+    assert skipped.target_poll_skipped is True
     assert refreshed.presentation_skipped is False
     assert refreshed.shell_raster_frame_presented is True
+    assert target_calls == 2
     assert len(calls) == 2
 
 
@@ -2367,6 +2401,51 @@ def test_presentation_cycle_skips_fresh_matching_apply_for_same_signature() -> N
     assert len(presentation_calls) == 1
 
 
+def test_presentation_cycle_refresh_request_bypasses_matching_cache_once() -> None:
+    clock = _Clock()
+    state = GnomeHelperPresentationRuntimeState()
+    presentation_calls: list[HelperPresentationRequest] = []
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        presentation_calls.append(request)
+        return _presentation_payload(request)
+
+    first = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=_target_payload,
+        fetch_presentation=fetch_presentation,
+        clock=clock,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+    )
+    clock.now += 0.5
+    refreshed = run_gnome_shell_helper_presentation_cycle(
+        presentation_refresh_requested=True,
+        fetch_health=_health_payload,
+        fetch_target=_target_payload,
+        fetch_presentation=fetch_presentation,
+        clock=clock,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+    )
+    clock.now += 0.5
+    cached_again = run_gnome_shell_helper_presentation_cycle(
+        fetch_health=_health_payload,
+        fetch_target=_target_payload,
+        fetch_presentation=fetch_presentation,
+        clock=clock,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+    )
+
+    assert first.presentation_skipped is False
+    assert refreshed.presentation_skipped is False
+    assert refreshed.attempts == 1
+    assert cached_again.presentation_skipped is True
+    assert cached_again.presentation_skip_reason == "fresh_matching_presentation"
+    assert len(presentation_calls) == 2
+
+
 def test_presentation_cycle_bypasses_skip_when_requested_rect_changes() -> None:
     clock = _Clock()
     state = GnomeHelperPresentationRuntimeState()
@@ -2720,13 +2799,182 @@ def test_presentation_cycle_suppressed_target_poll_throttles_without_timed_reapp
     assert len(presentation_calls) == 1
 
 
+def test_guarded_stable_target_query_uses_and_rearms_monotonic_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(GNOME_HELPER_FULLSCREEN_HANDOFF_GUARD_ENV, "1")
+    clock = _Clock()
+    state = GnomeHelperPresentationRuntimeState()
+    target_calls = 0
+    presentation_calls: list[HelperPresentationRequest] = []
+
+    def fetch_target() -> dict[str, object]:
+        nonlocal target_calls
+        target_calls += 1
+        return _target_payload(_target_window(hasFocus=False))
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        presentation_calls.append(request)
+        return _presentation_payload(request)
+
+    def run_cycle():
+        return run_gnome_shell_helper_presentation_cycle(
+            previous_surface_action="mapped_suppressed",
+            fetch_health=_health_payload,
+            fetch_target=fetch_target,
+            fetch_presentation=fetch_presentation,
+            prepare_surface=lambda _preparation: True,
+            shell_raster_frame_provider=lambda *_args: ShellRasterFrameBuildResult(
+                reason="target_not_fullscreen"
+            ),
+            shell_raster_runtime_enabled=True,
+            suppress_pyqt_fallback_on_shell_raster_failure=True,
+            clock=clock,
+            runtime_state=state,
+            health_cache_jitter_seconds=lambda: 0.0,
+        )
+
+    assert run_cycle().surface_preparation_action == "stabilizing"
+    clock.now += 0.5
+    assert run_cycle().surface_preparation_action == "apply"
+    clock.now += 0.5
+    cached = run_cycle()
+    clock.now += 1.0
+    expired = run_cycle()
+    clock.now += 0.5
+    cached_again = run_cycle()
+
+    assert cached.target_poll_skipped is True
+    assert cached.presentation_skip_reason == "suppressed_poll_throttle"
+    assert expired.target_poll_skipped is False
+    assert expired.presentation_skip_reason == "fresh_matching_presentation"
+    assert cached_again.target_poll_skipped is True
+    assert target_calls == 3
+    assert len(presentation_calls) == 1
+
+
+def test_guarded_stable_target_query_explicit_refresh_bypasses_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(GNOME_HELPER_FULLSCREEN_HANDOFF_GUARD_ENV, "1")
+    clock = _Clock()
+    state = GnomeHelperPresentationRuntimeState()
+    target_calls = 0
+    presentation_calls: list[HelperPresentationRequest] = []
+
+    def fetch_target() -> dict[str, object]:
+        nonlocal target_calls
+        target_calls += 1
+        return _target_payload(_target_window(hasFocus=False))
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        presentation_calls.append(request)
+        return _presentation_payload(request)
+
+    def run_cycle(*, refresh: bool = False):
+        return run_gnome_shell_helper_presentation_cycle(
+            previous_surface_action="mapped_suppressed",
+            presentation_refresh_requested=refresh,
+            fetch_health=_health_payload,
+            fetch_target=fetch_target,
+            fetch_presentation=fetch_presentation,
+            prepare_surface=lambda _preparation: True,
+            shell_raster_frame_provider=lambda *_args: ShellRasterFrameBuildResult(
+                reason="target_not_fullscreen"
+            ),
+            shell_raster_runtime_enabled=True,
+            suppress_pyqt_fallback_on_shell_raster_failure=True,
+            clock=clock,
+            runtime_state=state,
+            health_cache_jitter_seconds=lambda: 0.0,
+        )
+
+    run_cycle()
+    clock.now += 0.5
+    run_cycle()
+    clock.now += 0.5
+    refreshed = run_cycle(refresh=True)
+    clock.now += 0.5
+    cached_again = run_cycle()
+
+    assert refreshed.target_poll_skipped is False
+    assert refreshed.presentation_skipped is False
+    assert refreshed.attempts == 1
+    assert cached_again.target_poll_skipped is True
+    assert target_calls == 3
+    assert len(presentation_calls) == 2
+
+
+def test_suppressed_target_loss_clears_deadline_and_recovery_queries_immediately() -> None:
+    clock = _Clock()
+    state = GnomeHelperPresentationRuntimeState()
+    targets = [
+        _target_payload(_target_window(hasFocus=False)),
+        {
+            **_target_payload(),
+            "status": "target_not_found",
+            "target": None,
+            "candidate_count": 0,
+        },
+        _target_payload(_target_window(hasFocus=False)),
+    ]
+    target_calls = 0
+
+    def fetch_target() -> dict[str, object]:
+        nonlocal target_calls
+        target_calls += 1
+        return targets.pop(0)
+
+    first = run_gnome_shell_helper_presentation_cycle(
+        previous_surface_action="mapped_suppressed",
+        fetch_health=_health_payload,
+        fetch_target=fetch_target,
+        fetch_presentation=_presentation_payload,
+        clock=clock,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+    )
+    clock.now += 1.5
+    lost = run_gnome_shell_helper_presentation_cycle(
+        previous_surface_action="mapped_suppressed",
+        fetch_health=_health_payload,
+        fetch_target=fetch_target,
+        fetch_presentation=_presentation_payload,
+        clock=clock,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+    )
+    clock.now += 0.1
+    recovered = run_gnome_shell_helper_presentation_cycle(
+        previous_surface_action="mapped_suppressed",
+        fetch_health=_health_payload,
+        fetch_target=fetch_target,
+        fetch_presentation=_presentation_payload,
+        clock=clock,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+    )
+
+    assert first.presentation_ready is True
+    assert lost.target_found is False
+    assert recovered.presentation_ready is True
+    assert recovered.target_poll_skipped is False
+    assert target_calls == 3
+
+
 @pytest.mark.parametrize(
     ("target_overrides", "first_surface_action", "second_surface_action"),
     [
         ({"targetToken": "meta:22"}, "", ""),
+        ({"frameRect": {"x": 1100, "y": 220, "width": 1280, "height": 997}}, "", ""),
+        ({"bufferRect": {"x": 1086, "y": 208, "width": 1308, "height": 1026}}, "", ""),
         ({"monitorRect": {"x": 3440, "y": 0, "width": 3440, "height": 1440}}, "", ""),
+        ({"monitor": 1}, "", ""),
+        ({"outputName": "HDMI-1"}, "", ""),
+        ({"monitorScale": 1.25}, "", ""),
         ({"hasFocus": False}, "", ""),
         ({"showingOnWorkspace": False}, "", ""),
+        ({"workspace": "1"}, "", ""),
         ({"minimized": True}, "", ""),
         ({"fullscreen": True}, "", ""),
         ({}, "", "mapped_suppressed"),

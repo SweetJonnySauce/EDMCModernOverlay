@@ -135,6 +135,19 @@ def test_extension_emits_structured_dev_mode_diagnostics() -> None:
     assert "shell_raster_region_count" in source
 
 
+def test_extension_health_exposes_only_bounded_pressure_counters_and_actor_counts() -> None:
+    source = _source()
+
+    assert "const PRESSURE_COUNTER_MAX = 1000000;" in source
+    assert "this._pressureCounters = {" in source
+    assert "target_queries: 0" in source
+    assert "presentation_calls: 0" in source
+    assert "pressure_counters: {...this._pressureCounters}" in source
+    assert "actor_counts: this._shellActorCounts()" in source
+    assert "this._incrementPressureCounter('target_queries');" in source
+    assert "this._incrementPressureCounter('presentation_calls');" in source
+
+
 def test_extension_skips_redundant_move_resize_when_frame_already_matches() -> None:
     source = _source()
 

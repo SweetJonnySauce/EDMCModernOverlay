@@ -433,3 +433,35 @@ Yes. Architectural convergence is complete only when:
 Temporary migration routes are removed per migrated backend after that backend passes its convergence validation; removal does not wait for all desired future backends. Specifically, the old GNOME consumer-dispatch path, direct generic imports, obsolete `gnome_shell_raster` production identity/override, and old-versus-new architecture toggle must be removed after GNOME acceptance.
 
 Intentional diagnostic, performance-tracing, or narrowly scoped behavioral rollback toggles may remain only after an explicit retention decision. They must not preserve a second architecture or become requirements for future backends.
+
+## Question 35: Step 3 pressure reduction and baseline restart
+
+After the reduced pre-migration matrix exposed sustained stable-state GNOME helper queries,
+high repaint-request counts, and a desktop-instability incident in which the helper was a
+possible load amplifier but not a proven root cause, should Step 3 pause capture, reduce
+unnecessary steady-state work, run a controlled helper-disabled/helper-enabled A/B, and then
+restart a clean baseline rather than mix pre- and post-optimization samples?
+
+### Answer
+
+Yes. Amend the existing fix219 PDD and Step 3 rather than create a separate project.
+
+Before resuming performance capture:
+
+- disable capture diagnostics and establish a quiet normal-use configuration;
+- add test-first, backend-owned stable-target query caching or rate limiting with an injected
+  monotonic clock and explicit invalidation/recovery rules;
+- diagnose repaint-request sources and suppress only work proven to leave rendered output
+  unchanged, while preserving TTL/metadata refresh and all required repaint triggers;
+- keep generic follow/runtime code free of compositor-specific imports and raw helper/backend
+  enum dispatch;
+- run a controlled four-cell A/B that separates the cost of an enabled idle extension from the
+  incremental cost of the client's helper loop; and
+- repeat the manual startup, focus, transition, placement, Alt-Tab, Overview, and quiet-soak
+  contracts before restarting the matrix.
+
+The 12 accepted reduced-v2 captures remain immutable historical pre-optimization/incident-era
+evidence. They cannot contribute to post-optimization thresholds or be relabeled as part of the
+new baseline. After the pressure-reduction and A/B gates pass, create a new manifest/evidence
+identity and restart the coherent 42-capture matrix at 0/42. Numeric thresholds remain unset
+until that repeated baseline is complete and reviewed.

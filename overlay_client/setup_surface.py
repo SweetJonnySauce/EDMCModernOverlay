@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import uuid
 from pathlib import Path
 import math
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
@@ -154,8 +155,24 @@ class SetupSurfaceMixin:
         self._last_backend_mismatch_signature: Optional[Tuple[str, str, str, str, bool]] = None
         self._last_backend_presentation = None
         self._last_backend_presentation_log = None
+        self._pressure_snapshot_origin_id = uuid.uuid4().hex
+        self._backend_work_counts: Dict[str, int] = {
+            "cycles": 0,
+            "helper_health_calls": 0,
+            "helper_target_calls": 0,
+            "helper_presentation_calls": 0,
+        }
         self._backend_presentation_visibility_state = BackendPresentationVisibilityState()
         self._backend_presentation_content_suppressed: bool = False
+        self._shell_raster_frame_cache_identity: object | None = None
+        self._shell_raster_frame_cache_result: object | None = None
+        self._shell_raster_frame_work_counts: Dict[str, int] = {
+            "requests": 0,
+            "builds": 0,
+            "unchanged_reuses": 0,
+            "uncacheable": 0,
+            "failures": 0,
+        }
         self._platform_controller = PlatformController(
             self,
             _CLIENT_LOGGER,
@@ -226,8 +243,23 @@ class SetupSurfaceMixin:
         )
         self._dev_mode_enabled: bool = dev_mode_active
         self._repaint_metrics: Dict[str, Any] = {
-            "enabled": dev_mode_active or DEBUG_CONFIG_ENABLED,
-            "counts": {"total": 0, "ingest": 0, "purge": 0},
+            "enabled": True,
+            "counts": {
+                "total": 0,
+                "ingest": 0,
+                "purge": 0,
+                "plugin_group_clear": 0,
+                "override_reload": 0,
+                "override_payload": 0,
+                "controller_target": 0,
+                "explicit_refresh": 0,
+                "other": 0,
+                "immediate": 0,
+                "debounce_started": 0,
+                "debounce_coalesced": 0,
+                "backend_refresh": 0,
+                "qt_update": 0,
+            },
             "last_ts": None,
             "burst_current": 0,
             "burst_max": 0,

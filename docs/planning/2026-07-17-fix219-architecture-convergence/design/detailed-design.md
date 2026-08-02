@@ -9,8 +9,14 @@
 | 6 | 6.3 | Define the converged architecture, contracts, and data models | Completed |
 | 6 | 6.4 | Define migration, error handling, testing, validation, and compliance gates | Completed |
 | 6 | 6.5 | Review the detailed design with the user | Completed |
+| 7 | 7.1 | Record the Step 3 helper-pressure and repaint findings | Completed |
+| 7 | 7.2 | Amend stable-query, repaint, diagnostics, and evidence requirements | Completed |
+| 7 | 7.3 | Define the controlled helper A/B and clean-baseline gate | Completed |
+| 7 | 7.4 | Reconcile the amendment with the implementation plan | Completed |
+| 7 | 7.5 | Review and approve the synchronized amendment with the user | Completed |
 
-This document is the proposed detailed design. It does not authorize implementation. Implementation planning begins only after explicit user approval of this design.
+This document is the approved design amended on 2026-07-21 for the Step 3 pressure-reduction
+and clean-baseline work. It does not authorize implementation by itself.
 
 ## Overview
 
@@ -39,6 +45,8 @@ The converged system has these defining properties:
 7. EDMC, the overlay client, and external helpers form a bounded hierarchical ownership chain.
 8. The migration is contract-first and reversible until parity and the required validation matrix are proven.
 9. Overlay content, rendering commands, layout/group payloads, third-party integrations, and non-backend preferences remain behaviorally compatible.
+10. Stable GNOME operation avoids unnecessary helper queries and unchanged repaint work while
+    preserving prompt transition, recovery, and explicit-refresh behavior.
 
 ### Design principles
 
@@ -64,6 +72,8 @@ In scope:
 - Versioned backend settings/status control plane.
 - Cached or pushed plugin status that does not wait synchronously from Tk callbacks.
 - Support/evidence artifacts, privacy-conscious diagnostics, performance comparison, EDMC compliance, and reusable backend contract tests.
+- Step 3 pressure reduction for stable GNOME helper queries and unchanged repaint requests,
+  followed by controlled helper A/B evidence and a clean post-optimization baseline.
 - A future-backend implementation guide and deterministic paper/example backend.
 
 Out of scope:
@@ -171,10 +181,33 @@ The architecture migration must preserve:
 2. A pre-migration baseline covers stable windowed/fullscreen states, transitions, monitor handoffs, Alt-Tab, and Overview at 100% and 125%.
 3. Candidate stages compare presentation latency, helper work, raster work, repaint work, idle CPU, transition timing, and visible smoothness.
 4. Invariant failures and visible black/intermediate surfaces always block acceptance.
-5. Numeric performance tolerances are fixed from baseline variance before migrated comparisons and cannot be silently retuned.
+5. Migration-regression tolerances are fixed from the coherent baseline variance before migrated
+   comparisons and cannot be silently retuned. The earlier A/B uses distinct pressure-reduction
+   acceptance bounds that are recorded in its report and never written to `thresholds.json`.
 6. Final release evidence contains an explicit yes/no EDMC compliance table.
 7. The stale EDMC Python baseline is updated to the current upstream tested baseline before implementation/release validation.
 8. `load.py` or hook-flow changes require harness tests; pure services require unit tests; mixed changes require both.
+9. Stable matching GNOME target/presentation state is cached behind a bounded monotonic deadline;
+   the transition guard cannot by itself force a synchronous helper query every generic follow
+   cycle.
+10. Cache invalidation or bypass is immediate for explicit presentation refresh, failed or
+    unavailable results, target loss/recovery, presenter or mode transitions, stale raster
+    state, and relevant focus, monitor, geometry, workspace, minimize, fullscreen, or exposure
+    changes. Recovery cannot wait behind a long stable cache.
+11. The cold-start deferred-remap refresh bypasses the GNOME cache exactly once and then returns
+    to the stable no-op path.
+12. Repeated payloads with identical rendered output may refresh TTL and metadata without
+    scheduling Qt update, rebuilding frames, or refreshing backend presentation. Every visual,
+    expiry, animation, scale, mode/monitor, visibility/recovery, or explicit-refresh change that
+    requires repaint remains preserved.
+13. High-frequency diagnostics are dev-gated and aggregated. Normal measurement records bounded
+    counters, state changes, and normalized failures rather than one journal event per stable
+    query or repaint request.
+14. The 12 accepted reduced-v2 captures remain immutable pre-optimization/incident-era evidence.
+    They cannot be mixed with the clean post-optimization baseline or used to derive its
+    thresholds.
+15. Step 3 resumes the 42-capture matrix only after pressure reduction, controlled helper A/B,
+    and manual regression checks pass; the clean matrix uses a new identity and starts at 0/42.
 
 ### Completion requirements
 
@@ -517,6 +550,13 @@ class PresentationService(Protocol):
 Generic intent describes what is required, not how a compositor accomplishes it. It includes requested display mode, target/monitor geometry, normalized coordinate-space metadata, visibility, frame availability/revision, and interaction intent.
 
 Generic code cannot request `managed_pyqt`, `shell_raster`, GNOME Overview behavior, D-Bus actions, or target tokens. `PresentationSnapshot.presenter_label` is an opaque diagnostic string and is never a dispatch input.
+
+The presentation service may receive a backend-neutral explicit-refresh intent. A backend owns
+the cache and invalidation policy that satisfies it. For GNOME, stable target/presentation
+snapshots use an injected monotonic deadline, while target, geometry, focus, monitor, workspace,
+minimize/fullscreen, presenter-transition, helper-health, stale-raster, exposure-recovery, and
+explicit-refresh changes can force immediate backend work. Generic follow code never inspects a
+GNOME helper or presenter enum to decide this.
 
 ### Input policy service
 
@@ -943,6 +983,10 @@ Required normalized events include:
 
 Events use bounded ring buffers and safe correlation IDs. Tokens, raw owner IDs, target handles, personal paths, window titles, and arbitrary exception payloads are prohibited.
 
+Stable helper queries, repaint requests, Qt paints, and Shell raster build/reuse/skip work use
+bounded aggregate counters for performance evidence. Per-cycle query/repaint journal events are
+diagnostic-only and must be disabled for quiet A/B and baseline measurement.
+
 ## Error Handling
 
 ### Error-handling rules
@@ -1011,7 +1055,7 @@ Migration stages are architecture constraints, not an implementation authorizati
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| M1.1 | Capture the versioned pre-migration performance baseline and scenario manifest | Planned |
+| M1.1 | Reduce unnecessary stable helper/repaint work, pass controlled A/B, then capture the versioned clean pre-migration baseline and scenario manifest | In progress |
 | M1.2 | Add behavioral contracts, normalized results, and three-axis status beside existing types | Planned |
 | M1.3 | Add the paper backend and reusable contract suite | Planned |
 | M1.4 | Add architecture scans for generic/private boundary rules | Planned |
@@ -1220,6 +1264,12 @@ XWayland smoke covers startup, basic tracking/presentation, degraded reporting, 
 
 ### Performance gate
 
+Step 3 is a corrective pre-migration gate as well as a capture gate. Before a clean baseline is
+accepted, the shipped architecture must first remove proven unnecessary stable helper-query and
+unchanged repaint pressure. This correction stays behind backend-owned/pure seams and preserves
+all Phase 19, cold-start remap, one-shot refresh, focus, click-through, transition, monitor, and
+privacy contracts.
+
 The versioned scenario manifest fixes:
 
 - environment and versions;
@@ -1238,6 +1288,35 @@ Collected measures:
 - client and GNOME Shell idle CPU over a fixed interval;
 - invariant failures and manual visible-hitch notes.
 
+Query and repaint measurements remain distinct:
+
+- helper target-query and presentation-call rates;
+- repaint requests before Qt scheduling;
+- Qt `update()`/paint counts;
+- Shell raster build/reuse/skip and frame-transfer work.
+
+The initial controlled A/B uses stable windowed Elite on monitor A at 100%, with identical
+fixture, display, refresh, warm-up, and observation settings and Firefox stopped:
+
+| Cell | Overlay client | GNOME helper extension |
+| --- | --- | --- |
+| A1 | Stopped | Disabled |
+| A2 | Running in documented unavailable/fallback state | Disabled |
+| B1 | Stopped | Enabled, full helper, diagnostics off |
+| B2 | Running | Enabled, full helper, diagnostics off |
+
+Each cell receives a five-minute warm-up and three 60-second samples in an interleaved order
+where practical. Evidence includes allowlisted aggregate CPU, context switches, RSS, bounded GPU
+utilization/VRAM, helper calls, repaint/paint/raster work, actor counts, and relevant normalized
+warning/assertion counts. Report median plus p95 or range and distinguish enabled-idle extension
+cost from client-driven helper-loop cost.
+
+The A/B produces reviewed **pressure-reduction acceptance bounds** for stable query/repaint work,
+resource load, and safety. These bounds decide whether Step 3 may proceed to manual regression
+and clean baseline capture. They are not the versioned comparison artifact. The complete clean
+42-capture baseline later produces **migration-regression thresholds** in `thresholds.json` for
+Steps 8, 16, 17, and 24.
+
 Gate policy:
 
 1. Any presentation invariant failure is automatic failure.
@@ -1245,10 +1324,20 @@ Gate policy:
 3. A sustained regression must exceed both a relative threshold and absolute noise floor to trigger investigation.
 4. Increased helper/raster work without behavior need triggers investigation even when latency is stable.
 5. Idle CPU cannot materially increase.
-6. Final numeric thresholds are selected from pre-migration variance and committed before candidate comparison.
-7. Threshold changes require a documented rationale and re-review.
+6. Final migration-regression thresholds are selected from coherent post-optimization baseline
+   variance and committed before candidate comparison.
+7. Pressure-bound or migration-threshold changes require a documented rationale and re-review;
+   neither may be silently retuned.
+8. Visible Shell instability stops measurement immediately; reproducing the Firefox failure is
+   not an acceptance test.
+9. The 12 accepted reduced-v2 captures and two superseded long-form captures are retained under
+   their original identities as historical evidence and never enter migration-regression
+   threshold calculations.
+10. After A/B and manual regression checks pass, a new manifest/evidence identity starts the
+    representative 14-scenario by three-repetition baseline at 0/42.
 
-Detailed traces stay dev-gated. Release builds retain only cheap status counters and bounded normalized failures.
+Detailed traces stay dev-gated. Quiet A/B and baseline runs disable per-query/per-repaint traces;
+release builds retain only cheap status counters and bounded normalized failures.
 
 ### EDMC compliance gate
 
@@ -1339,6 +1428,13 @@ Before project completion, native X11 GNOME/Mutter validation, XWayland smoke, E
 - GNOME helper protocol 3 has no client ownership, non-preemption, renewal, or independent expiry.
 - Existing tests strongly cover selection, helper IPC, raster, transitions, Qt behavior, plugin harness wiring, and collectors, but some intentionally anchor the transitional architecture.
 - Existing raster/helper/repaint diagnostics are sufficient for a repeatable comparison harness; a separate benchmark framework is unnecessary.
+- The observed transition-guard path can defeat the existing 1.5-second suppressed-target poll
+  and drive synchronous GNOME Shell target enumeration at the generic 500 ms follow cadence.
+- Existing payload visual snapshots already deduplicate supported payload content; repaint
+  optimization must locate the remaining request source and keep request, Qt paint, and Shell
+  raster work as separate contracts.
+- The first 12 reduced-v2 captures precede pressure reduction and therefore remain historical
+  evidence rather than a partial post-optimization baseline.
 - GNOME Shell is the necessary authority for native-Wayland presentation, while X11 can rely on operational ICCCM/EWMH evidence with environment-specific validation.
 - EDMC hooks run on Tk's main loop, making synchronous preference status waits and backend-specific D-Bus cleanup compliance failures.
 
@@ -1413,6 +1509,9 @@ Rejected because file movement alone does not correct ownership and combines unn
 - Other Wayland compositors remain unimplemented regardless of detection.
 - A Mutter X11 policy remains conditional on validation evidence.
 - Performance numeric tolerances are deliberately unset until baseline variance exists.
+- Stable-query and unchanged-repaint pressure-reduction acceptance bounds remain provisional
+  until the quiet A/B is reviewed; migration-regression thresholds remain unset until the
+  coherent repeated baseline is complete.
 - Capture policy is vocabulary-only until a concrete backend requirement exists.
 - Backend settings/status compatibility may break; content/rendering and non-backend compatibility may not.
 
@@ -1434,6 +1533,7 @@ Rejected because file movement alone does not correct ownership and combines unn
 | 23, 24 | One GNOME identity, backend-owned presenters, filtered user override |
 | 25, 26 | Future-backend guide/contract suite and unimplemented Wayland descriptors |
 | 33 | Privacy-conscious collector and normalized backend report |
+| 35 | Stable helper/repaint pressure reduction, controlled A/B, historical evidence preservation, and clean baseline restart |
 
 ### Appendix G: Authoritative references
 
@@ -1447,6 +1547,7 @@ Project artifacts:
 - `../research/backend-contracts-and-control-plane.md`
 - `../research/contract-tests-and-migration.md`
 - `../research/performance-baseline.md`
+- `../research/gnome-helper-pressure-and-repaint.md`
 - `../research/validation-evidence-and-compliance.md`
 
 External references:

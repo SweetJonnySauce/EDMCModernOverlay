@@ -1,12 +1,16 @@
 """Follow/window orchestration and platform hooks mixin for the overlay window."""
+
 from __future__ import annotations
 
+import json
 import logging
+import math
+import os
 import sys
 import time
-from typing import Optional, Tuple
+from typing import Callable, Mapping, Optional, Tuple
 
-from PyQt6.QtCore import Qt, QPoint, QRect, QSize
+from PyQt6.QtCore import Qt, QPoint, QRect, QSize, QTimer
 from PyQt6.QtGui import QGuiApplication, QWindow, QScreen
 from PyQt6.QtWidgets import QApplication
 
@@ -28,6 +32,153 @@ from overlay_client.follow_geometry import (
     _convert_native_rect_to_qt,
 )
 from overlay_client.window_tracking import WindowState
+from overlay_client.work_counters import WORK_COUNTER_MAX, increment_bounded_counter
+
+
+_BACKEND_PERFORMANCE_DIAGNOSTICS_ENV = "EDMC_OVERLAY_GNOME_PRESENTATION_DIAGNOSTICS"
+_BACKEND_PERFORMANCE_EVENT_PREFIX = "BACKEND_PERFORMANCE_SAMPLE "
+_BACKEND_PERFORMANCE_PAINT_COUNT_MAX = 1_000_000
+
+
+def _performance_number(value: object) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(numeric) or numeric < 0:
+        return 0.0
+    return round(numeric, 6)
+
+
+def _performance_count(value: object) -> int:
+    if isinstance(value, bool):
+        return 0
+    if not isinstance(value, (int, float, str)):
+        return 0
+    try:
+        numeric = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, numeric)
+
+
+def _performance_mapping(value: object) -> Mapping[str, object]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _build_backend_performance_sample(
+    result: BackendPresentationCycleResult,
+    *,
+    elapsed_ms: float,
+    qt_widget_visible: bool = False,
+    qt_window_exposed: bool = False,
+    qt_paint_count: object = 0,
+    target_has_focus: bool = False,
+    prepared_surface_requires_mapping: bool = False,
+    qt_geometry_match: bool = False,
+) -> dict[str, object]:
+    """Build one allowlisted dev-only presentation sample without private target data."""
+
+    diagnostics = _performance_mapping(result.diagnostics)
+    raster_metrics = _performance_mapping(diagnostics.get("shell_raster_metrics"))
+    raster_request = _performance_mapping(raster_metrics.get("request"))
+    raster_status = _performance_mapping(raster_metrics.get("status"))
+    helper_metrics = _performance_mapping(raster_status.get("helper"))
+    helper_call_skipped = bool(
+        raster_request.get("helper_call_skipped", raster_status.get("helper_call_skipped", False))
+    )
+    frame_preparation_skipped = bool(raster_request.get("frame_preparation_skipped", False))
+    cache_hit = bool(raster_request.get("cache_hit", False))
+    has_raster_request = bool(raster_request)
+    return {
+        "schema_version": 1,
+        "event": "backend_presentation_cycle",
+        "presentation_cycle_ms": _performance_number(elapsed_ms),
+        "helper_health_calls": 1 if diagnostics.get("health_cache_hit") is False else 0,
+        "helper_target_calls": 1 if diagnostics.get("target_poll_skipped") is False else 0,
+        "helper_presentation_calls": (
+            0 if diagnostics.get("presentation_skipped") is True else _performance_count(diagnostics.get("attempts", 0))
+        ),
+        "transition_state": str(diagnostics.get("transition_state", "")),
+        "transition_elapsed_ms": _performance_number(
+            _performance_number(diagnostics.get("transition_elapsed_seconds", 0.0)) * 1000.0
+        ),
+        "raster_builds": 1 if has_raster_request and not cache_hit and not helper_call_skipped else 0,
+        "raster_reuses": 1 if has_raster_request and cache_hit else 0,
+        "raster_skips": 1 if has_raster_request and helper_call_skipped else 0,
+        "raster_bytes": _performance_count(raster_request.get("byte_size", 0)),
+        "raster_regions": _performance_count(raster_request.get("region_count", 0)),
+        "raster_encode_ms": _performance_number(raster_request.get("encode_ms", 0.0)),
+        "raster_build_ms": _performance_number(raster_request.get("build_ms", 0.0)),
+        "helper_decode_ms": _performance_number(helper_metrics.get("helper_decode_ms", 0.0)),
+        "helper_apply_ms": _performance_number(helper_metrics.get("helper_apply_ms", 0.0)),
+        "frame_builds": 1 if has_raster_request and not helper_call_skipped and not frame_preparation_skipped else 0,
+        "qt_widget_visible": bool(qt_widget_visible),
+        "qt_window_exposed": bool(qt_window_exposed),
+        "qt_paint_count": min(_performance_count(qt_paint_count), _BACKEND_PERFORMANCE_PAINT_COUNT_MAX),
+        "target_has_focus": bool(target_has_focus),
+        "prepared_surface_requires_mapping": bool(prepared_surface_requires_mapping),
+        "qt_geometry_match": bool(qt_geometry_match),
+    }
+
+
+def _backend_performance_diagnostics_enabled() -> bool:
+    return os.getenv(_BACKEND_PERFORMANCE_DIAGNOSTICS_ENV, "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _record_backend_work_counts(target: object, result: BackendPresentationCycleResult) -> None:
+    """Accumulate fixed work counts without logging per-cycle details."""
+
+    counts = getattr(target, "_backend_work_counts", None)
+    if not isinstance(counts, dict):
+        return
+    increment_bounded_counter(counts, "cycles", limit=WORK_COUNTER_MAX)
+    diagnostics = _performance_mapping(result.diagnostics)
+    if diagnostics.get("health_cache_hit") is False:
+        increment_bounded_counter(counts, "helper_health_calls", limit=WORK_COUNTER_MAX)
+    if diagnostics.get("target_poll_skipped") is False:
+        increment_bounded_counter(counts, "helper_target_calls", limit=WORK_COUNTER_MAX)
+    if diagnostics.get("presentation_skipped") is True:
+        return
+    attempts = min(_performance_count(diagnostics.get("attempts", 0)), WORK_COUNTER_MAX)
+    current = max(0, int(counts.get("helper_presentation_calls", 0)))
+    counts["helper_presentation_calls"] = min(WORK_COUNTER_MAX, current + attempts)
+
+
+def _log_backend_performance_sample(
+    result: BackendPresentationCycleResult,
+    *,
+    elapsed_ms: float,
+    qt_widget_visible: bool,
+    qt_window_exposed: bool,
+    qt_paint_count: int,
+    target_has_focus: bool,
+    prepared_surface_requires_mapping: bool,
+    qt_geometry_match: bool,
+) -> None:
+    if not _backend_performance_diagnostics_enabled():
+        return
+    sample = _build_backend_performance_sample(
+        result,
+        elapsed_ms=elapsed_ms,
+        qt_widget_visible=qt_widget_visible,
+        qt_window_exposed=qt_window_exposed,
+        qt_paint_count=qt_paint_count,
+        target_has_focus=target_has_focus,
+        prepared_surface_requires_mapping=prepared_surface_requires_mapping,
+        qt_geometry_match=qt_geometry_match,
+    )
+    _CLIENT_LOGGER.debug(
+        "%s%s",
+        _BACKEND_PERFORMANCE_EVENT_PREFIX,
+        json.dumps(sample, sort_keys=True, separators=(",", ":")),
+    )
+
 
 _CLIENT_LOGGER = logging.getLogger("EDMC.ModernOverlay.Client")
 
@@ -81,7 +232,9 @@ class FollowSurfaceMixin:
         self._interaction_controller.set_click_through(transparent, force=True, reason="external_set_click_through")
 
     def _restore_drag_interactivity(self) -> None:
-        self._interaction_controller.restore_drag_interactivity(self._drag_enabled, self._drag_active, self.format_scale_debug)
+        self._interaction_controller.restore_drag_interactivity(
+            self._drag_enabled, self._drag_active, self.format_scale_debug
+        )
 
     def _set_children_click_through(self, transparent: bool) -> None:
         for child_name in ("message_label",):
@@ -137,6 +290,8 @@ class FollowSurfaceMixin:
         self._apply_follow_state(state)
 
     def _refresh_backend_presentation(self) -> bool:
+        cycle_started_ns = time.perf_counter_ns()
+        presentation_refresh_requested = bool(getattr(self, "_backend_presentation_refresh_requested", False))
         try:
             result = run_backend_presentation_cycle(
                 getattr(self, "_client_backend_status", None),
@@ -145,6 +300,7 @@ class FollowSurfaceMixin:
                 previous_surface_action=str(getattr(self, "_last_backend_presentation_surface_action", "")),
                 title_bar_compensation_enabled=bool(getattr(self, "_title_bar_enabled", False)),
                 title_bar_compensation_height=int(getattr(self, "_title_bar_height", 0) or 0),
+                presentation_refresh_requested=presentation_refresh_requested,
                 prepare_surface=self._prepare_backend_presentation_surface,
                 raster_frame_provider=getattr(self, "_build_backend_shell_raster_content_frame", None),
             )
@@ -153,10 +309,32 @@ class FollowSurfaceMixin:
             return True
         if result is None:
             return False
+        _record_backend_work_counts(self, result)
+        if presentation_refresh_requested:
+            self._backend_presentation_refresh_requested = False
+        if _backend_performance_diagnostics_enabled():
+            (
+                qt_widget_visible,
+                qt_window_exposed,
+                qt_paint_count,
+                target_has_focus,
+                prepared_surface_requires_mapping,
+                qt_geometry_match,
+            ) = self._backend_qt_presentation_diagnostics(result)
+            _log_backend_performance_sample(
+                result,
+                elapsed_ms=(time.perf_counter_ns() - cycle_started_ns) / 1_000_000.0,
+                qt_widget_visible=qt_widget_visible,
+                qt_window_exposed=qt_window_exposed,
+                qt_paint_count=qt_paint_count,
+                target_has_focus=target_has_focus,
+                prepared_surface_requires_mapping=prepared_surface_requires_mapping,
+                qt_geometry_match=qt_geometry_match,
+            )
         self._last_backend_presentation = result
         if result.reset_surface_state:
             self._reset_backend_presentation_surface_state()
-        currently_visible = self.isVisible()
+        currently_visible = self._backend_presentation_surface_is_mapped(result)
         decision = decide_backend_presentation_visibility(
             result.visibility_snapshot,
             keep_overlay_visible=bool(getattr(self, "_keep_overlay_visible", False)),
@@ -179,6 +357,10 @@ class FollowSurfaceMixin:
         if self.isVisible():
             self.hide()
         self._backend_managed_surface_prepared = False
+        self._backend_managed_surface_mapping_generation = 0
+        self._backend_managed_surface_remapped_generation = -1
+        self._backend_managed_surface_remap_pending_generation = -1
+        self._backend_presentation_refresh_requested = False
         self._last_backend_surface_preparation_key = ()
         self._backend_presentation_visibility_state = BackendPresentationVisibilityState()
         self._last_backend_presentation_surface_action = BACKEND_PRESENTATION_SURFACE_HIDDEN
@@ -232,6 +414,10 @@ class FollowSurfaceMixin:
                 self._platform_controller.prepare_window(window)
             self._platform_controller.apply_click_through(True)
             self._backend_managed_surface_prepared = False
+            self._backend_managed_surface_mapping_generation = 0
+            self._backend_managed_surface_remapped_generation = -1
+            self._backend_managed_surface_remap_pending_generation = -1
+            self._backend_presentation_refresh_requested = False
             self._last_backend_surface_preparation_key = ()
             _CLIENT_LOGGER.debug(
                 "Prepared backend fullscreen surface rect=%s screen=%s reason=%s; %s",
@@ -282,11 +468,14 @@ class FollowSurfaceMixin:
                 return True
 
             identity_refresh_required = (
-                force_recovery
-                or screen_changed
-                or not bool(getattr(self, "_backend_managed_surface_prepared", False))
+                force_recovery or screen_changed or not bool(getattr(self, "_backend_managed_surface_prepared", False))
             )
             if identity_refresh_required:
+                self._backend_managed_surface_mapping_generation = (
+                    int(getattr(self, "_backend_managed_surface_mapping_generation", 0)) + 1
+                )
+                self._backend_managed_surface_remapped_generation = -1
+                self._backend_managed_surface_remap_pending_generation = -1
                 self._interaction_controller.prepare_window_flags_for_click_through(
                     True,
                     reason="backend_presentation_windowed_prepare",
@@ -357,6 +546,91 @@ class FollowSurfaceMixin:
             return True
         return False
 
+    def _backend_window_exposure_state(self) -> bool | None:
+        try:
+            window = self.windowHandle()
+            is_exposed = getattr(window, "isExposed", None) if window is not None else None
+            if not callable(is_exposed):
+                return None
+            return bool(is_exposed())
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return None
+
+    def _backend_qt_presentation_diagnostics(
+        self,
+        result: BackendPresentationCycleResult,
+    ) -> tuple[bool, bool, int, bool, bool, bool]:
+        widget_visible = bool(self.isVisible())
+        window_exposed = self._backend_window_exposure_state()
+        paint_stats = getattr(self, "_paint_stats", None)
+        paint_count = paint_stats.get("paint_count", 0) if isinstance(paint_stats, Mapping) else 0
+        snapshot = result.visibility_snapshot
+        return (
+            widget_visible,
+            bool(window_exposed),
+            min(_performance_count(paint_count), _BACKEND_PERFORMANCE_PAINT_COUNT_MAX),
+            bool(snapshot.target_has_focus),
+            bool(snapshot.prepared_surface_requires_mapping),
+            self._backend_qt_geometry_matches(result.prime_rect),
+        )
+
+    def _backend_qt_geometry_matches(self, target: tuple[int, int, int, int] | None) -> bool:
+        if target is None:
+            return False
+        try:
+            geometry = self.frameGeometry()
+            actual = (geometry.x(), geometry.y(), geometry.width(), geometry.height())
+            expected = tuple(int(value) for value in target)
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return False
+        return all(abs(actual_value - expected_value) <= 2 for actual_value, expected_value in zip(actual, expected))
+
+    def _backend_managed_surface_requires_remap(self, result: BackendPresentationCycleResult) -> bool:
+        if not result.visibility_snapshot.prepared_surface_requires_mapping or not self.isVisible():
+            return False
+        if self._backend_window_exposure_state() is not False:
+            return False
+        generation = int(getattr(self, "_backend_managed_surface_mapping_generation", 0))
+        pending_generation = int(getattr(self, "_backend_managed_surface_remap_pending_generation", -1))
+        if pending_generation == generation:
+            return False
+        attempted_generation = int(getattr(self, "_backend_managed_surface_remapped_generation", -1))
+        return attempted_generation != generation
+
+    def _backend_presentation_surface_is_mapped(self, result: BackendPresentationCycleResult) -> bool:
+        generation = int(getattr(self, "_backend_managed_surface_mapping_generation", 0))
+        pending_generation = int(getattr(self, "_backend_managed_surface_remap_pending_generation", -1))
+        if pending_generation == generation:
+            return True
+        widget_visible = bool(self.isVisible())
+        if not widget_visible or not result.visibility_snapshot.prepared_surface_requires_mapping:
+            return widget_visible
+        if self._backend_window_exposure_state() is not False:
+            return True
+        return not self._backend_managed_surface_requires_remap(result)
+
+    def _schedule_backend_managed_surface_remap(self, callback: Callable[[], None]) -> None:
+        QTimer.singleShot(0, callback)
+
+    def _complete_backend_managed_surface_remap(self, generation: int) -> None:
+        pending_generation = int(getattr(self, "_backend_managed_surface_remap_pending_generation", -1))
+        if pending_generation != generation:
+            return
+        self._backend_managed_surface_remap_pending_generation = -1
+        try:
+            self.show()
+            window = self.windowHandle()
+            if window is not None:
+                self._platform_controller.prepare_window(window)
+            self._platform_controller.apply_click_through(True)
+            self._backend_presentation_refresh_requested = True
+            _CLIENT_LOGGER.debug(
+                "Remapped backend managed-windowed Qt surface after deferred unexposed recovery; %s",
+                self.format_scale_debug(),
+            )
+        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+            _CLIENT_LOGGER.debug("Deferred backend managed-windowed remap failed: %s", exc, exc_info=exc)
+
     def _screen_for_backend_presentation_rect(self, rect: tuple[int, int, int, int]) -> QScreen | None:
         x, y, width, height = rect
         center = QPoint(x + max(0, width // 2), y + max(0, height // 2))
@@ -387,6 +661,10 @@ class FollowSurfaceMixin:
         result: BackendPresentationCycleResult,
     ) -> None:
         def _apply_helper_click_through() -> None:
+            generation = int(getattr(self, "_backend_managed_surface_mapping_generation", 0))
+            pending_generation = int(getattr(self, "_backend_managed_surface_remap_pending_generation", -1))
+            if pending_generation == generation:
+                return
             self._platform_controller.apply_click_through(True)
 
         def _hide_backend_surface() -> None:
@@ -394,17 +672,34 @@ class FollowSurfaceMixin:
             self.hide()
 
         def _show_with_backend_prime() -> None:
+            controlled_remap = self._backend_managed_surface_requires_remap(result)
             self._set_backend_presentation_content_suppressed(decision.content_suppressed, reason=decision.reason)
             self._interaction_controller.prepare_window_flags_for_click_through(
                 True,
                 reason="backend_presentation_pre_show",
             )
+            if controlled_remap:
+                self.hide()
             self._prime_backend_presentation_map_geometry(result)
+            if controlled_remap:
+                generation = int(getattr(self, "_backend_managed_surface_mapping_generation", 0))
+                self._backend_managed_surface_remapped_generation = generation
+                self._backend_managed_surface_remap_pending_generation = generation
+                self._schedule_backend_managed_surface_remap(
+                    lambda: self._complete_backend_managed_surface_remap(generation)
+                )
+                _CLIENT_LOGGER.debug(
+                    "Scheduled deferred backend managed-windowed remap after unexposed state; %s",
+                    self.format_scale_debug(),
+                )
+                return
             self.show()
 
         new_state = self._visibility_helper.update_visibility(
             decision.show,
-            is_visible_fn=lambda: self.isVisible(),
+            is_visible_fn=(lambda: self._backend_presentation_surface_is_mapped(result))
+            if decision.show
+            else (lambda: self.isVisible()),
             show_fn=_show_with_backend_prime,
             hide_fn=_hide_backend_surface,
             raise_fn=lambda: None,
@@ -609,7 +904,9 @@ class FollowSurfaceMixin:
     def _apply_follow_state(self, state: WindowState) -> None:
         self._lost_window_logged = False
 
-        tracker_qt_tuple, tracker_native_tuple, normalisation_info, desired_tuple = self._normalise_tracker_geometry(state)
+        tracker_qt_tuple, tracker_native_tuple, normalisation_info, desired_tuple = self._normalise_tracker_geometry(
+            state
+        )
 
         target_tuple = self._resolve_and_apply_geometry(tracker_qt_tuple, desired_tuple)
         self._post_process_follow_state(state, target_tuple)
@@ -858,11 +1155,15 @@ class FollowSurfaceMixin:
         window_handle.setTransientParent(parent_window)
         self._transient_parent_window = parent_window
         self._transient_parent_id = identifier
-        _CLIENT_LOGGER.debug("Set overlay transient parent to Elite window %s; %s", identifier, self.format_scale_debug())
+        _CLIENT_LOGGER.debug(
+            "Set overlay transient parent to Elite window %s; %s", identifier, self.format_scale_debug()
+        )
 
     def _handle_missing_follow_state(self) -> None:
         if not self._lost_window_logged:
-            _CLIENT_LOGGER.debug("Elite Dangerous window not found; waiting for window to appear; %s", self.format_scale_debug())
+            _CLIENT_LOGGER.debug(
+                "Elite Dangerous window not found; waiting for window to appear; %s", self.format_scale_debug()
+            )
             self._lost_window_logged = True
         if self._last_follow_state is None:
             if self._keep_overlay_visible:
@@ -1047,16 +1348,10 @@ class FollowSurfaceMixin:
         within_preferred_height = size_height <= 0 or actual_height <= size_height + tolerance
 
         width_constrained = (
-            width_diff > 0
-            and min_width > 0
-            and actual_width >= (min_width - tolerance)
-            and within_preferred_width
+            width_diff > 0 and min_width > 0 and actual_width >= (min_width - tolerance) and within_preferred_width
         )
         height_constrained = (
-            height_diff > 0
-            and min_height > 0
-            and actual_height >= (min_height - tolerance)
-            and within_preferred_height
+            height_diff > 0 and min_height > 0 and actual_height >= (min_height - tolerance) and within_preferred_height
         )
 
         if width_constrained or height_constrained:

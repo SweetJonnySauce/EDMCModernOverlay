@@ -1,0 +1,610 @@
+{
+  "schema_version": 1,
+  "manifest_id": "fix219_gnome46_pre_migration_v1",
+  "capture_route": "shipped_pre_migration",
+  "target_environment": {
+    "operating_system": "linux",
+    "distribution": "ubuntu",
+    "distribution_version": "24.04.4",
+    "session_type": "wayland",
+    "desktop": "gnome",
+    "compositor": "mutter",
+    "compositor_version": "46.0"
+  },
+  "reference_versions": {
+    "plugin": "1.0.0",
+    "client": "1.0.0",
+    "helper_protocol": 3,
+    "source_revision": "3d2332869454d6561995203752fd239a558a95a5"
+  },
+  "payload_fixtures": [
+    {
+      "fixture_id": "representative_payload_v1",
+      "repository_path": "tests/archive/display_all.json",
+      "sha256": "3766f57248d032c8a01844de0994fe31f0211211a3292660a442aa9d68b923f9"
+    }
+  ],
+  "diagnostic_configurations": [
+    {
+      "configuration_id": "performance_diagnostics_v1",
+      "toggles": {
+        "developer_mode": true,
+        "client_raster_timing": true,
+        "helper_raster_timing": true,
+        "presentation_timing": true,
+        "repaint_metrics": true,
+        "idle_cpu_sampling": true,
+        "detailed_traces": true,
+        "visual_debug_overlays": false
+      }
+    }
+  ],
+  "clock_domains": {
+    "client_elapsed": "client_perf_counter",
+    "helper_elapsed": "gnome_shell_monotonic"
+  },
+  "timing": {
+    "warm_up_seconds": 30,
+    "observation_seconds": 60,
+    "idle_cpu_seconds": 60,
+    "repetitions": 5
+  },
+  "display_configurations": [
+    {
+      "configuration_id": "dual_ultrawide_scale_100",
+      "scale_percent": 100,
+      "orientation": "horizontal",
+      "primary_monitor": "monitor_b",
+      "compositor_coordinate_space": "gnome_shell_global_logical",
+      "negative_coordinate_space": "primary_monitor_relative_logical",
+      "monitors": [
+        {
+          "monitor_id": "monitor_a",
+          "compositor_logical_x": 0,
+          "compositor_logical_y": 0,
+          "primary_relative_logical_x": -3440,
+          "primary_relative_logical_y": 0,
+          "logical_width": 3440,
+          "logical_height": 1440,
+          "physical_width_px": 3440,
+          "physical_height_px": 1440
+        },
+        {
+          "monitor_id": "monitor_b",
+          "compositor_logical_x": 3440,
+          "compositor_logical_y": 0,
+          "primary_relative_logical_x": 0,
+          "primary_relative_logical_y": 0,
+          "logical_width": 3440,
+          "logical_height": 1440,
+          "physical_width_px": 3440,
+          "physical_height_px": 1440
+        }
+      ]
+    },
+    {
+      "configuration_id": "dual_ultrawide_scale_125",
+      "scale_percent": 125,
+      "orientation": "horizontal",
+      "primary_monitor": "monitor_b",
+      "compositor_coordinate_space": "gnome_shell_global_logical",
+      "negative_coordinate_space": "primary_monitor_relative_logical",
+      "monitors": [
+        {
+          "monitor_id": "monitor_a",
+          "compositor_logical_x": 0,
+          "compositor_logical_y": 0,
+          "primary_relative_logical_x": -2752,
+          "primary_relative_logical_y": 0,
+          "logical_width": 2752,
+          "logical_height": 1152,
+          "physical_width_px": 3440,
+          "physical_height_px": 1440
+        },
+        {
+          "monitor_id": "monitor_b",
+          "compositor_logical_x": 2752,
+          "compositor_logical_y": 0,
+          "primary_relative_logical_x": 0,
+          "primary_relative_logical_y": 0,
+          "logical_width": 2752,
+          "logical_height": 1152,
+          "physical_width_px": 3440,
+          "physical_height_px": 1440
+        }
+      ]
+    }
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "scale_100_stable_windowed_monitor_a",
+      "display_configuration_id": "dual_ultrawide_scale_100",
+      "action": "stable",
+      "start_mode": "windowed",
+      "end_mode": "windowed",
+      "start_monitor": "monitor_a",
+      "end_monitor": "monitor_a",
+      "interaction": "none",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_100_stable_borderless_fullscreen_monitor_a",
+      "display_configuration_id": "dual_ultrawide_scale_100",
+      "action": "stable",
+      "start_mode": "borderless_fullscreen",
+      "end_mode": "borderless_fullscreen",
+      "start_monitor": "monitor_a",
+      "end_monitor": "monitor_a",
+      "interaction": "none",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_100_windowed_to_fullscreen_monitor_a",
+      "display_configuration_id": "dual_ultrawide_scale_100",
+      "action": "mode_transition",
+      "start_mode": "windowed",
+      "end_mode": "borderless_fullscreen",
+      "start_monitor": "monitor_a",
+      "end_monitor": "monitor_a",
+      "interaction": "none",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_100_fullscreen_to_windowed_monitor_a",
+      "display_configuration_id": "dual_ultrawide_scale_100",
+      "action": "mode_transition",
+      "start_mode": "borderless_fullscreen",
+      "end_mode": "windowed",
+      "start_monitor": "monitor_a",
+      "end_monitor": "monitor_a",
+      "interaction": "none",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_100_stable_windowed_monitor_b",
+      "display_configuration_id": "dual_ultrawide_scale_100",
+      "action": "stable",
+      "start_mode": "windowed",
+      "end_mode": "windowed",
+      "start_monitor": "monitor_b",
+      "end_monitor": "monitor_b",
+      "interaction": "none",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_100_stable_borderless_fullscreen_monitor_b",
+      "display_configuration_id": "dual_ultrawide_scale_100",
+      "action": "stable",
+      "start_mode": "borderless_fullscreen",
+      "end_mode": "borderless_fullscreen",
+      "start_monitor": "monitor_b",
+      "end_monitor": "monitor_b",
+      "interaction": "none",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_100_windowed_to_fullscreen_monitor_b",
+      "display_configuration_id": "dual_ultrawide_scale_100",
+      "action": "mode_transition",
+      "start_mode": "windowed",
+      "end_mode": "borderless_fullscreen",
+      "start_monitor": "monitor_b",
+      "end_monitor": "monitor_b",
+      "interaction": "none",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_100_fullscreen_to_windowed_monitor_b",
+      "display_configuration_id": "dual_ultrawide_scale_100",
+      "action": "mode_transition",
+      "start_mode": "borderless_fullscreen",
+      "end_mode": "windowed",
+      "start_monitor": "monitor_b",
+      "end_monitor": "monitor_b",
+      "interaction": "none",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_100_fullscreen_handoff_a_to_b",
+      "display_configuration_id": "dual_ultrawide_scale_100",
+      "action": "monitor_handoff",
+      "start_mode": "borderless_fullscreen",
+      "end_mode": "borderless_fullscreen",
+      "start_monitor": "monitor_a",
+      "end_monitor": "monitor_b",
+      "interaction": "none",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_100_fullscreen_handoff_b_to_a",
+      "display_configuration_id": "dual_ultrawide_scale_100",
+      "action": "monitor_handoff",
+      "start_mode": "borderless_fullscreen",
+      "end_mode": "borderless_fullscreen",
+      "start_monitor": "monitor_b",
+      "end_monitor": "monitor_a",
+      "interaction": "none",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_100_alt_tab_stable_windowed",
+      "display_configuration_id": "dual_ultrawide_scale_100",
+      "action": "shell_interaction",
+      "start_mode": "windowed",
+      "end_mode": "windowed",
+      "start_monitor": "monitor_a",
+      "end_monitor": "monitor_a",
+      "interaction": "alt_tab",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_100_alt_tab_stable_fullscreen",
+      "display_configuration_id": "dual_ultrawide_scale_100",
+      "action": "shell_interaction",
+      "start_mode": "borderless_fullscreen",
+      "end_mode": "borderless_fullscreen",
+      "start_monitor": "monitor_a",
+      "end_monitor": "monitor_a",
+      "interaction": "alt_tab",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_100_alt_tab_windowed_to_fullscreen",
+      "display_configuration_id": "dual_ultrawide_scale_100",
+      "action": "shell_interaction",
+      "start_mode": "windowed",
+      "end_mode": "borderless_fullscreen",
+      "start_monitor": "monitor_a",
+      "end_monitor": "monitor_a",
+      "interaction": "alt_tab",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_100_alt_tab_fullscreen_to_windowed",
+      "display_configuration_id": "dual_ultrawide_scale_100",
+      "action": "shell_interaction",
+      "start_mode": "borderless_fullscreen",
+      "end_mode": "windowed",
+      "start_monitor": "monitor_a",
+      "end_monitor": "monitor_a",
+      "interaction": "alt_tab",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_100_overview_stable_windowed",
+      "display_configuration_id": "dual_ultrawide_scale_100",
+      "action": "shell_interaction",
+      "start_mode": "windowed",
+      "end_mode": "windowed",
+      "start_monitor": "monitor_a",
+      "end_monitor": "monitor_a",
+      "interaction": "overview",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_100_overview_stable_fullscreen",
+      "display_configuration_id": "dual_ultrawide_scale_100",
+      "action": "shell_interaction",
+      "start_mode": "borderless_fullscreen",
+      "end_mode": "borderless_fullscreen",
+      "start_monitor": "monitor_a",
+      "end_monitor": "monitor_a",
+      "interaction": "overview",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_100_overview_windowed_to_fullscreen",
+      "display_configuration_id": "dual_ultrawide_scale_100",
+      "action": "shell_interaction",
+      "start_mode": "windowed",
+      "end_mode": "borderless_fullscreen",
+      "start_monitor": "monitor_a",
+      "end_monitor": "monitor_a",
+      "interaction": "overview",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_100_overview_fullscreen_to_windowed",
+      "display_configuration_id": "dual_ultrawide_scale_100",
+      "action": "shell_interaction",
+      "start_mode": "borderless_fullscreen",
+      "end_mode": "windowed",
+      "start_monitor": "monitor_a",
+      "end_monitor": "monitor_a",
+      "interaction": "overview",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_125_stable_windowed_monitor_a",
+      "display_configuration_id": "dual_ultrawide_scale_125",
+      "action": "stable",
+      "start_mode": "windowed",
+      "end_mode": "windowed",
+      "start_monitor": "monitor_a",
+      "end_monitor": "monitor_a",
+      "interaction": "none",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_125_stable_borderless_fullscreen_monitor_a",
+      "display_configuration_id": "dual_ultrawide_scale_125",
+      "action": "stable",
+      "start_mode": "borderless_fullscreen",
+      "end_mode": "borderless_fullscreen",
+      "start_monitor": "monitor_a",
+      "end_monitor": "monitor_a",
+      "interaction": "none",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_125_windowed_to_fullscreen_monitor_a",
+      "display_configuration_id": "dual_ultrawide_scale_125",
+      "action": "mode_transition",
+      "start_mode": "windowed",
+      "end_mode": "borderless_fullscreen",
+      "start_monitor": "monitor_a",
+      "end_monitor": "monitor_a",
+      "interaction": "none",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_125_fullscreen_to_windowed_monitor_a",
+      "display_configuration_id": "dual_ultrawide_scale_125",
+      "action": "mode_transition",
+      "start_mode": "borderless_fullscreen",
+      "end_mode": "windowed",
+      "start_monitor": "monitor_a",
+      "end_monitor": "monitor_a",
+      "interaction": "none",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_125_stable_windowed_monitor_b",
+      "display_configuration_id": "dual_ultrawide_scale_125",
+      "action": "stable",
+      "start_mode": "windowed",
+      "end_mode": "windowed",
+      "start_monitor": "monitor_b",
+      "end_monitor": "monitor_b",
+      "interaction": "none",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_125_stable_borderless_fullscreen_monitor_b",
+      "display_configuration_id": "dual_ultrawide_scale_125",
+      "action": "stable",
+      "start_mode": "borderless_fullscreen",
+      "end_mode": "borderless_fullscreen",
+      "start_monitor": "monitor_b",
+      "end_monitor": "monitor_b",
+      "interaction": "none",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_125_windowed_to_fullscreen_monitor_b",
+      "display_configuration_id": "dual_ultrawide_scale_125",
+      "action": "mode_transition",
+      "start_mode": "windowed",
+      "end_mode": "borderless_fullscreen",
+      "start_monitor": "monitor_b",
+      "end_monitor": "monitor_b",
+      "interaction": "none",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_125_fullscreen_to_windowed_monitor_b",
+      "display_configuration_id": "dual_ultrawide_scale_125",
+      "action": "mode_transition",
+      "start_mode": "borderless_fullscreen",
+      "end_mode": "windowed",
+      "start_monitor": "monitor_b",
+      "end_monitor": "monitor_b",
+      "interaction": "none",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_125_fullscreen_handoff_a_to_b",
+      "display_configuration_id": "dual_ultrawide_scale_125",
+      "action": "monitor_handoff",
+      "start_mode": "borderless_fullscreen",
+      "end_mode": "borderless_fullscreen",
+      "start_monitor": "monitor_a",
+      "end_monitor": "monitor_b",
+      "interaction": "none",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_125_fullscreen_handoff_b_to_a",
+      "display_configuration_id": "dual_ultrawide_scale_125",
+      "action": "monitor_handoff",
+      "start_mode": "borderless_fullscreen",
+      "end_mode": "borderless_fullscreen",
+      "start_monitor": "monitor_b",
+      "end_monitor": "monitor_a",
+      "interaction": "none",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_125_alt_tab_stable_windowed",
+      "display_configuration_id": "dual_ultrawide_scale_125",
+      "action": "shell_interaction",
+      "start_mode": "windowed",
+      "end_mode": "windowed",
+      "start_monitor": "monitor_a",
+      "end_monitor": "monitor_a",
+      "interaction": "alt_tab",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_125_alt_tab_stable_fullscreen",
+      "display_configuration_id": "dual_ultrawide_scale_125",
+      "action": "shell_interaction",
+      "start_mode": "borderless_fullscreen",
+      "end_mode": "borderless_fullscreen",
+      "start_monitor": "monitor_a",
+      "end_monitor": "monitor_a",
+      "interaction": "alt_tab",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_125_alt_tab_windowed_to_fullscreen",
+      "display_configuration_id": "dual_ultrawide_scale_125",
+      "action": "shell_interaction",
+      "start_mode": "windowed",
+      "end_mode": "borderless_fullscreen",
+      "start_monitor": "monitor_a",
+      "end_monitor": "monitor_a",
+      "interaction": "alt_tab",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_125_alt_tab_fullscreen_to_windowed",
+      "display_configuration_id": "dual_ultrawide_scale_125",
+      "action": "shell_interaction",
+      "start_mode": "borderless_fullscreen",
+      "end_mode": "windowed",
+      "start_monitor": "monitor_a",
+      "end_monitor": "monitor_a",
+      "interaction": "alt_tab",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_125_overview_stable_windowed",
+      "display_configuration_id": "dual_ultrawide_scale_125",
+      "action": "shell_interaction",
+      "start_mode": "windowed",
+      "end_mode": "windowed",
+      "start_monitor": "monitor_a",
+      "end_monitor": "monitor_a",
+      "interaction": "overview",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_125_overview_stable_fullscreen",
+      "display_configuration_id": "dual_ultrawide_scale_125",
+      "action": "shell_interaction",
+      "start_mode": "borderless_fullscreen",
+      "end_mode": "borderless_fullscreen",
+      "start_monitor": "monitor_a",
+      "end_monitor": "monitor_a",
+      "interaction": "overview",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_125_overview_windowed_to_fullscreen",
+      "display_configuration_id": "dual_ultrawide_scale_125",
+      "action": "shell_interaction",
+      "start_mode": "windowed",
+      "end_mode": "borderless_fullscreen",
+      "start_monitor": "monitor_a",
+      "end_monitor": "monitor_a",
+      "interaction": "overview",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    },
+    {
+      "scenario_id": "scale_125_overview_fullscreen_to_windowed",
+      "display_configuration_id": "dual_ultrawide_scale_125",
+      "action": "shell_interaction",
+      "start_mode": "borderless_fullscreen",
+      "end_mode": "windowed",
+      "start_monitor": "monitor_a",
+      "end_monitor": "monitor_a",
+      "interaction": "overview",
+      "payload_fixture_id": "representative_payload_v1",
+      "diagnostic_configuration_id": "performance_diagnostics_v1",
+      "workload": "idle_then_representative"
+    }
+  ],
+  "outside_gate": [
+    {
+      "case_id": "mixed_scale",
+      "classification": "deferred",
+      "reason_code": "mixed_per_monitor_scale_not_in_initial_gate"
+    },
+    {
+      "case_id": "vertical_layout",
+      "classification": "deferred",
+      "reason_code": "vertical_layout_not_in_initial_gate"
+    },
+    {
+      "case_id": "primary_monitor_change",
+      "classification": "deferred",
+      "reason_code": "runtime_primary_change_not_in_initial_gate"
+    },
+    {
+      "case_id": "exclusive_fullscreen",
+      "classification": "unsupported",
+      "reason_code": "exclusive_fullscreen_not_supported"
+    }
+  ]
+}

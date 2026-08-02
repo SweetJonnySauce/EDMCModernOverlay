@@ -35,10 +35,17 @@ class LegacyRenderPipeline:
         self._legacy_cache_signature: Optional[Tuple[Any, ...]] = None
         self._legacy_render_cache: Optional[Dict[str, Any]] = None
         self._last_payload_results: Optional[Dict[str, Any]] = None
+        self._visual_revision: int = 0
 
     def mark_dirty(self) -> None:
+        self._visual_revision += 1
         self._legacy_cache_dirty = True
         self._legacy_cache_signature = None
+
+    def render_identity(self, context: RenderContext, snapshot: PayloadSnapshot) -> Tuple[Any, ...]:
+        """Return the current deterministic visual identity without building commands."""
+
+        return (self._visual_revision, self._legacy_render_signature(context, snapshot))
 
     def _legacy_render_signature(self, context: RenderContext, snapshot: PayloadSnapshot) -> Tuple[Any, ...]:
         transform = context.mapper.transform

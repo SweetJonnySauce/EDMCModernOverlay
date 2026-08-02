@@ -58,7 +58,15 @@ Phase status: **In progress**
 | --- | --- | --- | --- |
 | 1.1 | 1 | Converged pure models and shadow status envelope | Completed |
 | 1.2 | 2 | Behavioral contracts and paper-backend suite | Completed |
-| 1.3 | 3 | Repeatable pre-migration performance baseline | Not started |
+| 1.3 | 3 | Performance evidence schema, capture adapter, reduced oracle, and tooling | Completed |
+| 1.4 | 3 | Cold-start/remap correction and capture-rotation robustness | Completed |
+| 1.5 | 3 | Pre-optimization reduced-v2 matrix retained as historical evidence | Paused at 12/42 |
+| 1.6 | 3 | Quiet diagnostic configuration and normal-use state | Completed |
+| 1.7 | 3 | Backend-owned stable-target query pressure reduction | Completed |
+| 1.8 | 3 | Proven unchanged-repaint suppression | Completed |
+| 1.9 | 3 | Controlled helper-disabled/helper-enabled A/B and reviewed pressure bounds | In progress; automated gate passed, live preflight blocked |
+| 1.10 | 3 | Manual behavior regression and quiet-soak validation | Not started |
+| 1.11 | 3 | Clean post-optimization 42-capture baseline and migration-regression thresholds | Not started |
 
 ### Phase 2: One Composition Root
 
@@ -262,7 +270,9 @@ Run one deterministic paper runtime from construction through target appearance,
 
 **Objective**
 
-Create the scenario manifest and summary tooling, then capture the required current-behavior baseline before production routing changes begin.
+Create the scenario manifest and summary tooling, reduce proven unnecessary stable helper-query
+and unchanged repaint pressure in the shipped architecture, then capture a coherent clean
+current-behavior baseline before production routing changes begin.
 
 **Implementation guidance**
 
@@ -270,24 +280,249 @@ Create the scenario manifest and summary tooling, then capture the required curr
 - Add a versioned scenario manifest for stable windowed/fullscreen, both transition directions, both monitor handoffs, Alt-Tab, and Overview at 100% and 125%.
 - Add a small pure summary tool for median, p95, maximum, counts, helper/raster work, and idle CPU.
 - Store raw sanitized captures and summaries under the release validation evidence tree; never store secrets or personal paths.
-- Determine investigation thresholds from repeated baseline variance and record them before Step 5.
+- Disable capture diagnostics before pressure measurement and ordinary use. Quiet runs retain
+  only allowlisted bounded counters, state changes, and normalized failures.
+- Test and correct the existing GNOME stable-target suppression rather than add an overlapping
+  throttle. Use backend-owned explicit state and an injected monotonic clock; the active
+  transition guard cannot by itself force target enumeration every 500 ms cycle.
+- Preserve immediate invalidation/recovery for explicit presentation refresh, failed/unavailable
+  responses, target loss/recovery, presenter or mode transitions, stale raster state, and
+  relevant focus, monitor, geometry, workspace, minimize, fullscreen, and exposure changes.
+- Preserve the cold-start deferred-remap one-shot refresh: it bypasses matching-success and
+  mismatch suppression exactly once, then returns to steady no-op behavior.
+- Audit existing visual-snapshot deduplication before changing repaint behavior. Suppress only
+  work proven to leave rendered output unchanged, and keep repaint requests, Qt update/paint,
+  and Shell raster build/reuse as separate measured contracts.
+- Run the four-cell helper-disabled/helper-enabled A/B after implementation and before restarting
+  the matrix. Stop immediately on visible Shell instability; Firefox failure reproduction is not
+  part of acceptance.
+- Preserve the 12 accepted reduced-v2 captures and the two superseded long-form captures under
+  their original identities. They are historical pre-optimization evidence and cannot be mixed
+  into the clean baseline or threshold population.
+- After A/B and manual regression gates pass, create a new post-optimization evidence identity
+  and restart the representative 14-scenario by three-repetition matrix at 0/42.
+- Derive pressure-reduction acceptance bounds from the quiet A/B and record them in its report;
+  they do not populate `thresholds.json`.
+- Determine migration-regression investigation thresholds from the complete coherent baseline
+  variance and record them in `thresholds.json` before Step 5.
 
 **Test requirements**
 
 - Unit tests for manifest validation, sample aggregation, clock-domain separation, redaction, and threshold comparison.
+- Unit tests for stable matching cycles, monotonic deadline expiry, transition-guard interaction,
+  forced refresh, errors/recovery, target and presentation invalidation inputs, stale raster
+  state, and the post-remap exactly-once refresh contract.
+- Unit tests for visual fingerprints and unchanged repaint suppression, including TTL-only and
+  metadata-only refresh plus every supported content/style/geometry/group/override/expiry/
+  animation/scale/mode/monitor/visibility recovery trigger.
+- No harness test is selected while this remains in pure/runtime services. If `load.py`, EDMC
+  hooks, plugin lifecycle, or Tk wiring is touched, add and run a harness test before landing.
+- Controlled GNOME A/B at stable windowed monitor A/100%: A1 client stopped/helper disabled, A2
+  client running/helper disabled, B1 client stopped/helper enabled with diagnostics off, and B2
+  both running with diagnostics off. Use five-minute warm-up and three 60-second samples per cell
+  with interleaved order where practical.
 - Manual baseline capture on GNOME Shell 46/Ubuntu 24.04.4 using fixed fixture, geometry, warm-up, duration, and repetitions.
 - Run:
-  - `.venv/bin/python -m pytest overlay_client/tests/test_backend_performance_summary.py tests/test_debug_collectors.py -q`
+  - `.venv/bin/python -m pytest overlay_client/tests/test_gnome_helper_presentation_runtime.py overlay_client/tests/test_payload_dedupe.py overlay_client/tests/test_repaint_debounce.py overlay_client/tests/test_follow_surface_mixin.py -q`
+  - `.venv/bin/python -m pytest overlay_client/tests/test_backend_performance_capture.py overlay_client/tests/test_backend_performance_summary.py tests/test_debug_collectors.py -q`
+  - `make check`
+  - `make test`
   - `git diff --check`
 - This step cannot be marked complete without the manual baseline; if the target environment is unavailable, Steps 1–2 may stand but production routing must not proceed.
 
 **Integration**
 
-The manifest and thresholds become the comparison gate for Steps 8, 16, 17, and 24. Existing release behavior is the oracle.
+The clean post-optimization manifest and migration-regression thresholds become the comparison
+gate for Steps 8, 16, 17, and 24. The pressure-reduced shipped architecture is the oracle. The
+12 incident-era captures remain diagnostic history and do not define candidate thresholds.
 
 **Demo**
 
-Generate a sanitized baseline summary and comparison-ready artifact for every required scenario using the shipped architecture.
+Demonstrate materially reduced stable helper-query/repaint request rates with no startup,
+unfocused attachment, focus, transition, placement, Alt-Tab, Overview, click-through, or privacy
+regression, then generate a sanitized comparison-ready baseline for all 42 repetitions using the
+shipped architecture.
+
+**Execution sequence**
+
+1. Stage 1.6 restores a quiet normal-use configuration and proves per-query diagnostic journal
+   events are absent before measurement.
+2. Stage 1.7 adds RED unit tests for the transition-guard/stable-cache interaction, implements
+   the smallest backend-owned correction, and proves every invalidation/recovery contract.
+3. Stage 1.8 uses bounded per-reason evidence to locate unchanged repaint requests, adds RED unit
+   tests at the smallest pure seam, and suppresses no-op scheduling without weakening fallbacks.
+4. Stage 1.9 runs the controlled four-cell A/B and derives reviewed pressure-reduction acceptance
+   bounds from repeated quiet measurements rather than intuition or one favorable sample. These
+   bounds stay in the A/B report and do not become `thresholds.json`.
+5. Stage 1.10 repeats two terminal-focused clean starts, one game-focused start, both mode
+   transitions, both-monitor placement, Alt-Tab, Overview, and one quiet soak.
+6. Stage 1.11 creates a new manifest/evidence identity, restarts at 0/42, completes manual Phase
+   19 review, analyzes variance, freezes reviewed migration-regression thresholds, and only then
+   completes Step 3.
+
+**Progress evidence — 2026-07-20 (automated tooling complete; manual gate pending)**
+
+- Added a strict standard-JSON schema-v1 manifest/capture/summary/threshold boundary, separate
+  client/helper clock-domain enforcement, privacy rejection, deterministic nearest-rank p95,
+  normalized helper/raster/repaint/frame/CPU aggregation, invariant-first blocking, and fixed
+  dual-threshold comparison in `overlay_client/backend/performance_evidence.py`.
+- Added a thin validate/summarize/compare CLI, a committed 36-scenario GNOME 46 manifest for
+  uniform 100%/125% left-of-primary dual-monitor layouts, and an exact manual capture,
+  invariant-review, evidence-layout, and threshold-freeze workflow. The manifest distinguishes
+  Mutter/Qt's normalized global geometry from its validated primary-relative negative
+  projection so evidence records real compositor values without losing the design's negative
+  coverage.
+- The legacy broad capture scripts were rejected for committed evidence because they include
+  command lines and unsanitized logs. Added a diagnostics-gated allowlist-only event at the
+  existing generic presentation-cycle seam, a pure capture adapter, and an interactive runner
+  that enforces the fixed warm-up/idle/observation intervals and manual checklist before strict
+  revalidation and write. Unit tests prove private target/title/path fields cannot enter the
+  event or normalized artifact.
+- Added `overlay_client/tests/test_backend_performance_summary.py`; the focused unit/collector
+  gate passes with 85 tests. Headless pytest passes with 1,280 passed and 41 skipped.
+  `make check` and `make test`, using the repository's intact `overlay_client/.venv` because the
+  documented root `.venv` is absent, pass with 1,316 passed and 21 skipped; whole-repository
+  Ruff and configured mypy also pass.
+- No production selector, launcher, presentation decision, helper default, `load.py`, Tk hook,
+  content payload, or settings behavior changed. The new follow-surface timing/log call is a
+  no-op unless the explicit capture diagnostic flag is enabled; capture adaptation remains pure
+  and additive.
+- The manual baseline is not captured. The host matches Ubuntu 24.04.4/GNOME Shell 46 and has
+  two matching 3440x1440 displays. A host-session recheck on 2026-07-20 confirmed EDMC, Elite,
+  and the overlay client running; helper version `1.0.0`/protocol `3` healthy on D-Bus with its
+  full target/presentation feature gate; and live rectangle-matched
+  `target_found`/`presentation_applied` cycles. The 100% topology is now verified with the
+  secondary monitor physically left of the primary; observed coordinates are `(0, 0)` and
+  `(3440, 0)`, with a validated primary-relative projection of `(-3440, 0)` and `(0, 0)`.
+  The client is capture-configured and emitted real allowlisted events, but the first 100%
+  managed-windowed repetition was aborted before artifact write. Fixture messages and repaint
+  requests reached the client while Qt paint counts remained zero; backend diagnostics
+  incorrectly reported the surface mapped/content-visible, and the user saw no overlay content.
+  A borderless-fullscreen round trip restored the windowed overlay and changed paint counts from
+  zero to 6-12 per interval, isolating a cold-start managed-windowed remap/exposure defect rather
+  than payload loss. The matrix is blocked at 0/180 accepted repetitions. Corrected cold-start
+  managed-windowed presentation,
+  the later 125% reconfiguration, five repetitions of every scenario, manual Phase 19 review,
+  sanitized summaries, and variance-derived frozen thresholds remain required.
+- Step 03, checklist item 3, and Phase stage 1.3 therefore remain incomplete/in progress.
+  Step 05 production routing remains gated. No placeholder threshold artifact was created.
+- A local test-first correction now treats `QWindow.isExposed()` as mapping proof for surfaces
+  covered by the normalized `prepared_surface_requires_mapping` contract and allows one
+  controlled post-policy remap per managed-surface generation. Repeated terminal-focused host
+  starts proved that a same-stack hide/show is nondeterministic, so the controlled remap now
+  hides and primes synchronously, then shows and reapplies platform/click-through state on the
+  next Qt event-loop turn. The diagnostics event adds only widget-visible, window-exposed,
+  target-focused, mapping-required, geometry-agreement, and bounded paint-count fields; no
+  compositor-specific type or enum entered generic follow code. The final Step 03 focused gate
+  passes with 126 tests. Host diagnostics then proved that focus corrected attachment without any
+  target/requested-rectangle change: the focus transition caused one helper presentation call
+  after unfocused cycles had reused a pre-remap cached success. A one-shot generic presentation-
+  refresh request now crosses the consumer boundary after deferred map completion, while the
+  GNOME runtime privately bypasses its cache for that cycle. Backend boundary/consumer/runtime/
+  follow tests pass with 139 tests, and `make check`/`make test` each pass with 1,336 passed/21
+  skipped; whole-repository Ruff and configured mypy also pass. Two clean terminal-focused starts
+  then passed without focusing Elite, followed by repeated successful live transitions in both
+  windowed-to-borderless/fullscreen and borderless/fullscreen-to-windowed directions. Three
+  reviewed return-to-windowed sequences completed with visible/exposed, geometry-matched Qt
+  surfaces and no warning/error or failure marker. One possible brief missing-overlay observation
+  was not reproducible and remains a watch item rather than a recorded invariant failure. The
+  manual pre-capture gate is complete and the matrix is ready to restart at repetition 1, but it
+  remains 0/180 and this step is not complete.
+- The first observation exposed and then test-first corrected an offset-only capture-runner bug
+  when `overlay_client.log` rotates. The runner now follows a stable inode/offset cursor through
+  numeric rotations and rejects incomplete history. Capture tests pass 15/15, the Step 03 focused
+  gate passes 130 tests, and `make check`/`make test` each pass with 1,340 passed/21 skipped. The
+  full repetition was rerun twice and independently validated with zero manual failures and an
+  empty prohibited-field scan. Those captures are preserved with the superseded full v1 oracle.
+- The user approved a reduced v2 oracle: 14 representative scenarios, three repetitions, and
+  10-second warm-up/15-second idle/30-second observation timing. It retains both scales,
+  presenters, mode directions, monitors, bidirectional fullscreen handoff, Alt-Tab, and Overview
+  while removing redundant cross-products. The active matrix restarts at 0/42; Step 03 remains
+  incomplete until all reduced captures, summaries, manual review, and thresholds pass.
+
+**Progress amendment — 2026-07-21 (matrix paused for pressure reduction)**
+
+- The reduced-v2 matrix reached 12/42 accepted captures: three repetitions each for 100% stable
+  windowed monitor A, stable borderless-fullscreen monitor A, windowed-to-fullscreen monitor A,
+  and fullscreen-to-windowed monitor A. All 12 documents independently validated, all eight
+  manual invariant fields were false, and prohibited-field scans were empty.
+- During later desktop instability, the helper journal showed 3,601 target-query-start events in
+  30 minutes—exactly two per second—while the client was stable. Reduced captures also showed
+  approximately 816–841 repaint requests per 30 seconds even though managed paint and Shell
+  raster-build counts were much lower. The overlay/helper is not established as the Firefox/
+  Mutter failure's cause, but it is a plausible load amplifier and unnecessary stable work must
+  be reduced before more baseline capture.
+- Code review identified that the existing 1.5-second suppressed-target poll is bypassed while
+  the transition guard is enabled, which is the leading explanation for querying at the generic
+  500 ms follow cadence. Existing payload visual snapshots already deduplicate supported content,
+  so repaint work requires source attribution before selecting a suppression seam.
+- Stage 1.5 is therefore paused at 12/42. Those captures and the two superseded full-oracle
+  captures remain immutable historical evidence. No threshold artifact exists, and none may be
+  created from this partial or mixed population.
+- Stages 1.6–1.10 now gate a new coherent baseline. After they pass, Stage 1.11 creates a new
+  evidence identity and starts at 0/42; continuing with monitor B under the old identity is not
+  permitted.
+
+**Progress amendment — 2026-07-21 (Stage 1.6 quiet state complete)**
+
+- The client shadow and developer settings now disable development mode, repaint-detail logging,
+  tracing, payload logging, visual outlines, and the debug overlay while retaining repaint
+  debounce. No persisted EDMC development-mode override was present.
+- The user-local helper developer configuration was backed up before editing. Only diagnostics
+  changed from enabled to disabled; enabled full-helper mode and all unrelated fields were
+  preserved. After the supported helper reload, health remained healthy at helper version 1.0.0
+  and protocol 3 with diagnostics reported disabled.
+- A bounded 10-second host-session probe issued 20 real target-state calls with zero failures and
+  produced zero filtered per-query or repaint-detail journal events. No target response or private
+  diagnostic field was retained.
+- SHA-256 verification passed for all 12 reduced-v2 and both superseded full-v1 captures. No
+  capture, manifest identity, summary, migration threshold, runtime code, or production route
+  changed. Stage 1.7 is next and remains not started.
+
+**Progress amendment — 2026-07-21 (Stage 1.7 stable-target pressure complete)**
+
+- Added focused unit coverage before runtime edits for guarded stable cycles, monotonic deadline
+  expiry/rearming, explicit one-shot refresh, target loss/recovery, stale raster refresh, and the
+  complete target/presentation signature inputs named by the design.
+- RED produced 9 expected failures with 102 passes. The existing transition guard defeated the
+  target-query cache, the target throttle hid a required Shell-raster lease refresh, and frame/
+  buffer/monitor/output/scale/workspace changes were treated as unchanged.
+- Corrected the existing backend-owned cache rather than adding another throttle: guarded stable
+  mapped-suppressed cycles now reuse matching state inside the 1.5-second injected-monotonic
+  deadline. Pending transitions, forced refresh, failures, surface preparation/recovery, stale
+  raster work, and exposure-key changes bypass or invalidate it.
+- Expanded the private presentation signature with the missing geometry, monitor, scale, output,
+  and workspace facts. Generic follow/consumer interfaces and compositor boundaries are unchanged.
+- Focused query/follow tests passed with 111 tests; backend-consumer tests passed with 35 tests;
+  targeted ruff, compileall, and `git diff --check` passed. Full project gates remain scheduled
+  after the integrated query-plus-repaint milestone. Stage 1.8 is next and remains not started.
+
+**Progress amendment — 2026-07-21 (Stage 1.8 unchanged-repaint suppression complete)**
+
+- Attributed the historical request, Qt paint, Shell-frame preparation, raster encode/reuse, and
+  helper-presentation layers separately. For example, 841 requests corresponded to 49 managed
+  paints in one stable capture, while a Shell-raster capture recorded 60 frame preparations but
+  only one raster build and 59 payload reuses. Request volume was not treated as material-work
+  volume.
+- Extended the existing supported message/rect/vector visual fingerprint rather than adding a
+  competing dedupe system. TTL and incidental metadata refresh expiry/lifecycle state without
+  dirtying pixels; plugin/group/override changes and animation bypass preserve repaint; unknown
+  or malformed visual state takes the safe repaint fallback.
+- Added fixed-cardinality saturating counters for ingest outcomes, repaint request/scheduling
+  paths, Qt update/paint work, and Shell-frame preparation outcomes. Detailed traces remain
+  gated and no per-cycle release log was added.
+- Added a deterministic render identity and reused only successful Shell-frame preparation
+  results with complete matching content, renderer settings, target geometry, monitor/output,
+  scale, workspace, visibility/mode, request, and diagnostic state. Incomplete state or failure
+  is never cached; backend-owned lease refresh and helper presentation remain authoritative.
+- Focused RED recorded 11 expected failures and 59 passes. Focused GREEN passed 70 tests; the
+  integrated query/repaint/follow slice passed 151; the backend-consumer boundary passed 35;
+  targeted Ruff and compileall passed. The milestone `make check` and `make test` gates each
+  passed with 1,379 tests and 21 existing environment/runtime skips; repository Ruff and mypy
+  passed through `make check`.
+- No `load.py`, EDMC hook/lifecycle, Tk wiring, compositor-private generic dispatch, capture,
+  evidence identity, threshold, Task 07 A/B, or production route changed. No harness test was
+  required. Stage 1.9 is next and remains not started; the capture hold remains active.
 
 ## Step 4: Add the backend registry and prove selection/construction identity in shadow mode
 

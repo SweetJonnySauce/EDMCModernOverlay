@@ -623,7 +623,7 @@ class OverlayWindow(SetupSurfaceMixin, InteractionSurfaceMixin, QWidget, RenderS
             painter.end()
             stats = getattr(self, "_paint_stats", None)
             if isinstance(stats, dict):
-                stats["paint_count"] = stats.get("paint_count", 0) + 1
+                stats["paint_count"] = min(self._REPAINT_COUNT_MAX, stats.get("paint_count", 0) + 1)
             super().paintEvent(event)
             return
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -631,7 +631,7 @@ class OverlayWindow(SetupSurfaceMixin, InteractionSurfaceMixin, QWidget, RenderS
         painter.end()
         stats = getattr(self, "_paint_stats", None)
         if isinstance(stats, dict):
-            stats["paint_count"] = stats.get("paint_count", 0) + 1
+            stats["paint_count"] = min(self._REPAINT_COUNT_MAX, stats.get("paint_count", 0) + 1)
         super().paintEvent(event)
 
     # External control -----------------------------------------------------

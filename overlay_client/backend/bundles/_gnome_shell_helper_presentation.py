@@ -110,8 +110,14 @@ class GnomeHelperPresentationSignature:
     """Backend-owned no-op key for a helper presentation request."""
 
     target_token: str
+    target_frame_rect: tuple[int, int, int, int] | None
+    target_buffer_rect: tuple[int, int, int, int] | None
     requested_rect: tuple[int, int, int, int] | None
+    target_monitor: int | None
+    target_output_name: str
     monitor_rect: tuple[int, int, int, int] | None
+    target_monitor_scale: float | None
+    target_workspace: str
     rect_source: str
     visibility_action: str
     target_has_focus: bool
@@ -178,9 +184,7 @@ class GnomeHelperPresentationRuntimeState:
     surface_preparation_loss_samples: int = 0
     next_surface_preparation_retry_at: float = 0.0
     next_surface_recovery_at: float = 0.0
-    presentation_transition_state: PresentationTransitionState = field(
-        default_factory=PresentationTransitionState
-    )
+    presentation_transition_state: PresentationTransitionState = field(default_factory=PresentationTransitionState)
     shell_raster_managed_commit_pending: bool = False
 
 
@@ -264,11 +268,7 @@ class GnomeHelperPresentationCycleResult:
             return False
         if self.surface_preparation is not None and not self.surface_preparation_ready:
             return False
-        return (
-            self.target_found
-            and self.request is not None
-            and self.request.action.value == "attach"
-        )
+        return self.target_found and self.request is not None and self.request.action.value == "attach"
 
     def to_log_payload(self) -> dict[str, object]:
         """Return a compact, stable diagnostics payload for log/debug consumers."""
@@ -313,7 +313,8 @@ class GnomeHelperPresentationCycleResult:
             ),
             "presentation_diagnostics": (
                 dict(self.presentation_status.presentation_diagnostics)
-                if self.presentation_status is not None and self.presentation_status.presentation_diagnostics is not None
+                if self.presentation_status is not None
+                and self.presentation_status.presentation_diagnostics is not None
                 else None
             ),
             "attempts": self.attempts,
@@ -372,6 +373,7 @@ def run_gnome_shell_helper_presentation_cycle(
     previous_surface_action: str = "",
     title_bar_compensation_enabled: bool = False,
     title_bar_compensation_height: int = 0,
+    presentation_refresh_requested: bool = False,
     fetch_health: Callable[[], object] | None = None,
     fetch_target: Callable[[], object] | None = None,
     fetch_presentation: Callable[[HelperPresentationRequest], object] | None = None,
@@ -424,10 +426,13 @@ def run_gnome_shell_helper_presentation_cycle(
             ),
         )
 
-    if not transition_guard_enabled and _should_skip_suppressed_target_poll(
-        state,
-        previous_surface_action=previous_surface_action,
-        now_monotonic=now,
+    if (
+        not presentation_refresh_requested
+        and _should_skip_suppressed_target_poll(
+            state,
+            previous_surface_action=previous_surface_action,
+            now_monotonic=now,
+        )
     ):
         return GnomeHelperPresentationCycleResult(
             health_status=health_status,
@@ -540,11 +545,7 @@ def run_gnome_shell_helper_presentation_cycle(
             request,
             shell_raster_runtime_enabled=shell_raster_runtime_enabled,
         )
-        if (
-            transition_clear_reason
-            and not shell_raster_transition_clear_requested
-            and not transition_guard_enabled
-        ):
+        if transition_clear_reason and not shell_raster_transition_clear_requested and not transition_guard_enabled:
             shell_raster_transition_clear_requested = True
             shell_raster_transition_clear_reason = transition_clear_reason
             shell_raster_transition_clear_succeeded = _clear_shell_raster_frame_for_managed_pyqt_transition(
@@ -553,6 +554,7 @@ def run_gnome_shell_helper_presentation_cycle(
                 reason=transition_clear_reason,
             )
             if not shell_raster_transition_clear_succeeded:
+                state.next_suppressed_target_poll_at = 0.0
                 presentation_status = _shell_raster_transition_clear_failed_status(
                     target_status,
                     request,
@@ -615,6 +617,7 @@ def run_gnome_shell_helper_presentation_cycle(
         )
         if (
             attempt == 1
+            and not presentation_refresh_requested
             and surface_preparation_decision.ready
             and not surface_preparation_decision.should_apply
             and not (transition_guard_enabled and state.shell_raster_managed_commit_pending)
@@ -654,6 +657,7 @@ def run_gnome_shell_helper_presentation_cycle(
             )
         if (
             attempt == 1
+            and not presentation_refresh_requested
             and surface_preparation_decision.ready
             and not surface_preparation_decision.should_apply
             and _should_skip_persistent_mismatch_apply(state, signature)
@@ -1085,9 +1089,7 @@ def _runtime_state_has_shell_raster_presentation(state: GnomeHelperPresentationR
     ):
         return True
     status = state.last_presentation_status
-    if status is not None and (
-        status.renderer == SHELL_RASTER_FRAME_RENDERER or status.shell_raster_frame is not None
-    ):
+    if status is not None and (status.renderer == SHELL_RASTER_FRAME_RENDERER or status.shell_raster_frame is not None):
         return True
     return False
 
@@ -1301,9 +1303,7 @@ def _surface_preparation_decision(
         )
 
     pending_samples = (
-        state.pending_surface_preparation_samples + 1
-        if candidate == state.pending_surface_preparation
-        else 1
+        state.pending_surface_preparation_samples + 1 if candidate == state.pending_surface_preparation else 1
     )
     if pending_samples < GNOME_HELPER_MANAGED_SURFACE_STABLE_SAMPLES:
         return GnomeHelperSurfacePreparationDecision(
@@ -1472,8 +1472,12 @@ def _health_status_with_cache(
     health_status = probe_gnome_shell_helper_health(health_fetcher, clock=clock)
     if health_status.healthy:
         state.cached_health_status = health_status
-        state.health_cache_expires_at = now_monotonic + GNOME_HELPER_HEALTH_CACHE_SECONDS + _bounded_health_jitter(
-            health_cache_jitter_seconds,
+        state.health_cache_expires_at = (
+            now_monotonic
+            + GNOME_HELPER_HEALTH_CACHE_SECONDS
+            + _bounded_health_jitter(
+                health_cache_jitter_seconds,
+            )
         )
     else:
         state.cached_health_status = None
@@ -1559,6 +1563,7 @@ def _held_shell_raster_transition_result(
     health_cache_hit: bool,
     decision: PresentationTransitionDecision,
 ) -> GnomeHelperPresentationCycleResult:
+    state.next_suppressed_target_poll_at = 0.0
     return GnomeHelperPresentationCycleResult(
         health_status=health_status,
         target_status=target_status,
@@ -1692,7 +1697,24 @@ def _should_skip_suppressed_target_poll(
         return False
     if now_monotonic >= state.next_suppressed_target_poll_at:
         return False
+    if state.presentation_transition_state.mode is PresentationTransitionMode.FULLSCREEN_HANDOFF:
+        return False
+    if state.shell_raster_managed_commit_pending or state.pending_surface_preparation is not None:
+        return False
     if state.last_target_status is None or state.last_request is None or state.last_presentation_status is None:
+        return False
+    if state.last_signature is None or state.last_signature.visibility_action != previous_surface_action:
+        return False
+    if _shell_raster_frame_refresh_due(
+        state,
+        state.last_request,
+        now_monotonic=now_monotonic,
+    ):
+        return False
+    if (
+        state.surface_preparation_loss_samples >= GNOME_HELPER_SURFACE_LOSS_RECOVERY_SAMPLES
+        and now_monotonic >= state.next_surface_recovery_at
+    ):
         return False
     return _cached_presentation_is_matching_success(
         state,
@@ -1905,9 +1927,13 @@ def _update_presentation_cache(
         if target_status is not None and request is not None
         else None
     )
-    if request is not None and presentation_status is not None and _presentation_status_is_matching_success(
-        presentation_status,
-        request,
+    if (
+        request is not None
+        and presentation_status is not None
+        and _presentation_status_is_matching_success(
+            presentation_status,
+            request,
+        )
     ):
         state.last_signature = signature
         state.last_success_at = now_monotonic
@@ -1990,8 +2016,14 @@ def _presentation_signature(
         return None
     return GnomeHelperPresentationSignature(
         target_token=request.target_token,
+        target_frame_rect=_rect_signature(target.frame_rect),
+        target_buffer_rect=_rect_signature(target.buffer_rect),
         requested_rect=_rect_signature(request.content_rect),
+        target_monitor=target.monitor,
+        target_output_name=target.output_name,
         monitor_rect=_rect_signature(target.monitor_rect),
+        target_monitor_scale=target.monitor_scale,
+        target_workspace=target.workspace,
         rect_source=request.rect_source,
         visibility_action=str(previous_surface_action or ""),
         target_has_focus=bool(target.has_focus),
@@ -2024,9 +2056,8 @@ def _rect_signature(rect: HelperRect | None) -> tuple[int, int, int, int] | None
 
 
 def _rects_overlap(left: HelperRect, right: HelperRect) -> bool:
-    return (
-        max(left.x, right.x) < min(left.x + left.width, right.x + right.width)
-        and max(left.y, right.y) < min(left.y + left.height, right.y + right.height)
+    return max(left.x, right.x) < min(left.x + left.width, right.x + right.width) and max(left.y, right.y) < min(
+        left.y + left.height, right.y + right.height
     )
 
 

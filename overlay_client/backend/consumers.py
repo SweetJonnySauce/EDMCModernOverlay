@@ -33,7 +33,9 @@ class BackendPresentationCycleResult:
     prime_rect: tuple[int, int, int, int] | None = None
     prime_rect_source: str = "unavailable"
     diagnostics: Mapping[str, object] = field(default_factory=dict)
-    visibility_snapshot: BackendPresentationVisibilitySnapshot = field(default_factory=BackendPresentationVisibilitySnapshot)
+    visibility_snapshot: BackendPresentationVisibilitySnapshot = field(
+        default_factory=BackendPresentationVisibilitySnapshot
+    )
     log_prefix: str = "Backend presentation"
     reset_surface_state: bool = False
 
@@ -278,6 +280,7 @@ def run_backend_presentation_cycle(
     previous_surface_action: str = "",
     title_bar_compensation_enabled: bool = False,
     title_bar_compensation_height: int = 0,
+    presentation_refresh_requested: bool = False,
     gnome_runner: GnomePresentationCycleRunner | None = None,
     prepare_surface: BackendPresentationSurfacePreparer | None = None,
     raster_frame_provider: BackendRasterFrameProvider | None = None,
@@ -296,6 +299,7 @@ def run_backend_presentation_cycle(
             previous_surface_action=previous_surface_action,
             title_bar_compensation_enabled=title_bar_compensation_enabled,
             title_bar_compensation_height=title_bar_compensation_height,
+            presentation_refresh_requested=presentation_refresh_requested,
             prepare_surface=prepare_surface,
             shell_raster_frame_provider=raster_frame_provider,
             shell_raster_runtime_enabled=_gnome_shell_raster_selected(status),
@@ -347,7 +351,9 @@ def _gnome_shell_raster_unavailable_result(
 
 
 def _gnome_shell_helper_presentation_runner() -> GnomePresentationCycleRunner:
-    from overlay_client.backend.bundles._gnome_shell_helper_presentation import run_gnome_shell_helper_presentation_cycle
+    from overlay_client.backend.bundles._gnome_shell_helper_presentation import (
+        run_gnome_shell_helper_presentation_cycle,
+    )
 
     return run_gnome_shell_helper_presentation_cycle
 
