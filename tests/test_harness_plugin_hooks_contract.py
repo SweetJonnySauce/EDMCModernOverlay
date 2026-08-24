@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -87,100 +84,13 @@ def test_plugin_stop_clears_globals_and_hooks_become_noop(harness_runtime: tuple
     load.dashboard_entry(cmdr="HookCmdr", is_beta=False, entry={"Flags": 1, "ShipID": 42})
 
 
-def test_plugin_stop_clears_shell_raster_frame_when_enabled(
-    harness_runtime: tuple[object, Any],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _harness, _runtime = harness_runtime
-    calls: list[str] = []
+def test_plugin_lifecycle_source_is_backend_neutral() -> None:
+    source = Path(load.__file__).read_text(encoding="utf-8")
 
-    monkeypatch.setenv(load.GNOME_SHELL_RASTER_BRIDGE_ENV, "1")
-    monkeypatch.setattr(load, "_clear_shell_raster_frame_via_backend", lambda: calls.append("clear") or True)
-
-    assert load._clear_shell_raster_frame_on_stop() is True
-
-    assert calls == ["clear"]
-
-
-def test_plugin_stop_clears_shell_raster_frame_when_backend_selected(
-    harness_runtime: tuple[object, Any],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _harness, runtime = harness_runtime
-    calls: list[str] = []
-
-    runtime._preferences.manual_backend_override = "gnome_shell_raster"
-    monkeypatch.delenv(load.GNOME_SHELL_RASTER_BRIDGE_ENV, raising=False)
-    monkeypatch.setattr(load, "_clear_shell_raster_frame_via_backend", lambda: calls.append("clear") or True)
-
-    assert load._clear_shell_raster_frame_on_stop() is True
-
-    assert calls == ["clear"]
-
-
-def test_plugin_startup_clears_shell_raster_frame_when_enabled(
-    harness_runtime: tuple[object, Any],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _harness, _runtime = harness_runtime
-    calls: list[str] = []
-
-    monkeypatch.setenv(load.GNOME_SHELL_RASTER_BRIDGE_ENV, "1")
-    monkeypatch.setattr(load, "_clear_shell_raster_frame_via_backend", lambda: calls.append("clear") or True)
-
-    assert load._clear_shell_raster_frame_on_startup() is True
-
-    assert calls == ["clear"]
-
-
-def test_plugin_startup_clears_shell_raster_frame_when_backend_selected(
-    harness_runtime: tuple[object, Any],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _harness, runtime = harness_runtime
-    calls: list[str] = []
-
-    runtime._preferences.manual_backend_override = "gnome_shell_raster"
-    monkeypatch.delenv(load.GNOME_SHELL_RASTER_BRIDGE_ENV, raising=False)
-    monkeypatch.setattr(load, "_clear_shell_raster_frame_via_backend", lambda: calls.append("clear") or True)
-
-    assert load._clear_shell_raster_frame_on_startup() is True
-
-    assert calls == ["clear"]
-
-
-def test_shell_raster_startup_clear_backend_import_does_not_require_pyqt6() -> None:
-    script = """
-import builtins
-import subprocess
-
-real_import = builtins.__import__
-
-def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
-    if name == "PyQt6" or name.startswith("PyQt6."):
-        raise ModuleNotFoundError("No module named 'PyQt6'")
-    return real_import(name, globals, locals, fromlist, level)
-
-def fake_run(*args, **kwargs):
-    raise FileNotFoundError("gdbus")
-
-builtins.__import__ = guarded_import
-subprocess.run = fake_run
-
-import load
-
-assert load._clear_shell_raster_frame_via_backend() is False
-"""
-    repo_root = Path(__file__).resolve().parents[1]
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(repo_root)
-    result = subprocess.run(
-        [sys.executable, "-c", script],
-        cwd=repo_root,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
-
-    assert result.returncode == 0, result.stderr
+    for prohibited in (
+        "_gnome_shell_helper_presentation",
+        "GNOME_SHELL_RASTER_BRIDGE_ENV",
+        "GNOME_SHELL_RASTER_BACKEND_VALUE",
+        "_clear_shell_raster_frame",
+    ):
+        assert prohibited not in source

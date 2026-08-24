@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Iterator
 
@@ -32,10 +33,15 @@ def runtime_for_backend_status(
 
 def test_backend_status_cli_roundtrip_returns_plugin_hint_report(runtime_for_backend_status: object) -> None:
     runtime = runtime_for_backend_status
-    runtime._request_client_backend_status = lambda **_kwargs: None
+    published: list[dict[str, object]] = []
+    runtime.broadcaster.publish = lambda payload: published.append(dict(payload))
 
+    started_at = time.monotonic()
     response = runtime._handle_cli_payload({"cli": "backend_status"})
+    elapsed = time.monotonic() - started_at
 
+    assert elapsed < 0.05
+    assert published and published[-1]["event"] == "OverlayClientBackendStatusRequest"
     assert isinstance(response, dict)
     assert response["status"] == "ok"
     backend_status = response["backend_status"]
@@ -48,6 +54,13 @@ def test_backend_status_cli_roundtrip_returns_plugin_hint_report(runtime_for_bac
     assert report["source"] == "plugin_hint"
     assert report["support_label"] == "native_wayland / kwin_wayland"
     assert report["classification"] == "true_overlay"
+
+
+def test_backend_status_runtime_has_no_pending_network_wait_state(runtime_for_backend_status: object) -> None:
+    runtime = runtime_for_backend_status
+
+    assert not hasattr(runtime, "_pending_client_backend_status_requests")
+    assert not hasattr(runtime, "_request_client_backend_status")
 
 
 def test_backend_status_cli_roundtrip_prefers_client_runtime_report(runtime_for_backend_status: object) -> None:

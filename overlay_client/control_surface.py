@@ -6,9 +6,9 @@ import math
 import os
 import sys
 import time
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, Sequence, cast
 
-from PyQt6.QtGui import QGuiApplication, QPainter
+from PyQt6.QtGui import QGuiApplication, QPainter, QPixmap
 
 from overlay_client.backend import ProbeSource
 from overlay_client.backend.pressure_ab import build_work_snapshot
@@ -27,6 +27,9 @@ from overlay_client.viewport_helper import BASE_HEIGHT, BASE_WIDTH, ScaleMode
 from overlay_client.viewport_transform import LegacyMapper, build_viewport
 from overlay_client.work_counters import WORK_COUNTER_MAX, increment_bounded_counter
 
+if TYPE_CHECKING:
+    from overlay_client.overlay_state import OverlayWindowState
+
 _CLIENT_LOGGER = logging.getLogger("EDMC.ModernOverlay.Client")
 
 DEFAULT_WINDOW_BASE_HEIGHT = 960
@@ -41,6 +44,15 @@ TRANSPARENCY_WARNING_BODY_COLOR = "#ffa500"
 
 class ControlSurfaceMixin:
     """Setter/status surface, cycle helpers, repaint scheduling, and config toggles."""
+
+    _cycle_current_id: str | None
+    _grid_pixmap: QPixmap | None
+    _grid_pixmap_params: tuple[int, int, int, int] | None
+    _last_backend_mismatch_signature: tuple[
+        str, str, str, str, bool, str, str, str, str, str, str, bool, str, str
+    ] | None
+    _plugin_backend_status_hint: Mapping[str, object] | None
+    _repaint_log_last: dict[str, object] | None
 
     _REPAINT_COUNT_MAX = WORK_COUNTER_MAX
 
@@ -107,16 +119,17 @@ class ControlSurfaceMixin:
         )
 
     def set_keep_overlay_visible(self, visible: bool) -> None:
+        overlay_state = cast("OverlayWindowState", self)
         flag = bool(visible)
-        if flag == self._keep_overlay_visible:
+        if flag == overlay_state._keep_overlay_visible:
             return
-        self._keep_overlay_visible = flag
+        overlay_state._keep_overlay_visible = flag
         if flag:
             self._interaction_controller.handle_keep_overlay_visible_enter()
             self._update_follow_visibility(True)
             if sys.platform.startswith("linux"):
                 self._interaction_controller.restore_drag_interactivity(
-                    self._drag_enabled,
+                    overlay_state._drag_enabled,
                     self._drag_active,
                     self.format_scale_debug,
                 )
@@ -195,57 +208,61 @@ class ControlSurfaceMixin:
             self.update()
 
     def set_debug_overlay(self, enabled: bool) -> None:
+        overlay_state = cast("OverlayWindowState", self)
         flag = bool(enabled)
-        if flag == self._show_debug_overlay:
+        if flag == overlay_state._show_debug_overlay:
             return
-        self._show_debug_overlay = flag
+        overlay_state._show_debug_overlay = flag
         _CLIENT_LOGGER.debug("Debug overlay %s", "enabled" if flag else "disabled")
         self.update()
 
     def set_scale_mode(self, mode: str) -> None:
+        overlay_state = cast("OverlayWindowState", self)
         value = str(mode or "fit").strip().lower()
         if value not in {"fit", "fill"}:
             value = "fit"
-        if value == self._scale_mode:
+        if value == overlay_state._scale_mode:
             return
-        self._scale_mode = value
+        overlay_state._scale_mode = value
         _CLIENT_LOGGER.debug("Overlay scale mode set to %s", value)
         self._publish_metrics()
         self.update()
 
     def set_payload_nudge(self, enabled: Optional[bool], gutter: Optional[int] = None) -> None:
+        overlay_state = cast("OverlayWindowState", self)
         changed = False
         if enabled is not None:
             flag = bool(enabled)
-            if flag != self._payload_nudge_enabled:
-                self._payload_nudge_enabled = flag
+            if flag != overlay_state._payload_nudge_enabled:
+                overlay_state._payload_nudge_enabled = flag
                 changed = True
         if gutter is not None:
             try:
                 numeric = int(gutter)
             except (TypeError, ValueError):
-                numeric = self._payload_nudge_gutter
+                numeric = overlay_state._payload_nudge_gutter
             numeric = max(0, min(numeric, 500))
-            if numeric != self._payload_nudge_gutter:
-                self._payload_nudge_gutter = numeric
+            if numeric != overlay_state._payload_nudge_gutter:
+                overlay_state._payload_nudge_gutter = numeric
                 changed = True
         if changed:
             _CLIENT_LOGGER.debug(
                 "Payload nudge updated: enabled=%s gutter=%d",
-                self._payload_nudge_enabled,
-                self._payload_nudge_gutter,
+                overlay_state._payload_nudge_enabled,
+                overlay_state._payload_nudge_gutter,
             )
             self.update()
 
     def set_payload_log_delay(self, delay_seconds: Optional[float]) -> None:
+        overlay_state = cast("OverlayWindowState", self)
         try:
             numeric = float(delay_seconds)
         except (TypeError, ValueError):
             numeric = self._payload_log_delay
         numeric = max(0.0, numeric)
-        if math.isclose(numeric, self._payload_log_delay_base, rel_tol=1e-9, abs_tol=1e-9):
+        if math.isclose(numeric, overlay_state._payload_log_delay_base, rel_tol=1e-9, abs_tol=1e-9):
             return
-        self._payload_log_delay_base = numeric
+        overlay_state._payload_log_delay_base = numeric
         self._update_payload_log_delay_for_mode(self.controller_mode_state())
         now = time.monotonic()
         for key in self._group_log_pending_base.keys():
@@ -253,10 +270,11 @@ class ControlSurfaceMixin:
         _CLIENT_LOGGER.debug("Payload log delay updated to %.2fs", self._payload_log_delay)
 
     def set_cycle_payload_enabled(self, enabled: Optional[bool]) -> None:
+        overlay_state = cast("OverlayWindowState", self)
         flag = bool(enabled)
-        if flag == self._cycle_payload_enabled:
+        if flag == overlay_state._cycle_payload_enabled:
             return
-        self._cycle_payload_enabled = flag
+        overlay_state._cycle_payload_enabled = flag
         if flag:
             _CLIENT_LOGGER.debug("Payload ID cycling enabled")
             self._sync_cycle_items()
@@ -267,12 +285,13 @@ class ControlSurfaceMixin:
         self.update()
 
     def set_cycle_payload_copy_enabled(self, enabled: Optional[bool]) -> None:
+        overlay_state = cast("OverlayWindowState", self)
         if enabled is None:
             return
         flag = bool(enabled)
-        if flag == self._cycle_copy_clipboard:
+        if flag == overlay_state._cycle_copy_clipboard:
             return
-        self._cycle_copy_clipboard = flag
+        overlay_state._cycle_copy_clipboard = flag
         _CLIENT_LOGGER.debug("Copy payload ID on cycle %s", "enabled" if flag else "disabled")
 
     def cycle_payload_step(self, step: int) -> None:
@@ -484,27 +503,28 @@ class ControlSurfaceMixin:
         )
 
     def set_font_bounds(self, min_point: Optional[float], max_point: Optional[float]) -> None:
+        overlay_state = cast("OverlayWindowState", self)
         changed = False
         if min_point is not None:
             try:
                 min_value = float(min_point)
             except (TypeError, ValueError):
-                min_value = self._font_min_point
+                min_value = overlay_state._font_min_point
             min_value = max(1.0, min(min_value, 48.0))
-            if not math.isclose(min_value, self._font_min_point, rel_tol=1e-3):
-                self._font_min_point = min_value
+            if not math.isclose(min_value, overlay_state._font_min_point, rel_tol=1e-3):
+                overlay_state._font_min_point = min_value
                 changed = True
         if max_point is not None:
             try:
                 max_value = float(max_point)
             except (TypeError, ValueError):
-                max_value = self._font_max_point
-            max_value = max(self._font_min_point, min(max_value, 72.0))
-            if not math.isclose(max_value, self._font_max_point, rel_tol=1e-3):
-                self._font_max_point = max_value
+                max_value = overlay_state._font_max_point
+            max_value = max(overlay_state._font_min_point, min(max_value, 72.0))
+            if not math.isclose(max_value, overlay_state._font_max_point, rel_tol=1e-3):
+                overlay_state._font_max_point = max_value
                 changed = True
-        if self._font_max_point < self._font_min_point:
-            self._font_max_point = self._font_min_point
+        if overlay_state._font_max_point < overlay_state._font_min_point:
+            overlay_state._font_max_point = overlay_state._font_min_point
             changed = True
         if changed:
             _CLIENT_LOGGER.debug(
@@ -609,12 +629,13 @@ class ControlSurfaceMixin:
         self._status_bottom_margin = self._status_presenter.status_bottom_margin
 
     def set_debug_overlay_corner(self, corner: Optional[str]) -> None:
+        overlay_state = cast("OverlayWindowState", self)
         normalised = self._normalise_debug_corner(corner)
-        if normalised == self._debug_overlay_corner:
+        if normalised == overlay_state._debug_overlay_corner:
             return
-        self._debug_overlay_corner = normalised
-        _CLIENT_LOGGER.debug("Debug overlay corner updated to %s", self._debug_overlay_corner)
-        if self._show_debug_overlay:
+        overlay_state._debug_overlay_corner = normalised
+        _CLIENT_LOGGER.debug("Debug overlay corner updated to %s", overlay_state._debug_overlay_corner)
+        if overlay_state._show_debug_overlay:
             self.update()
 
     def _show_overlay_status_message(self, status: str) -> None:
@@ -705,6 +726,7 @@ class ControlSurfaceMixin:
                 )
 
     def _request_repaint(self, reason: str, *, immediate: bool = False) -> None:
+        overlay_state = cast("OverlayWindowState", self)
         self._record_repaint_event(reason)
         counts = self._repaint_metrics.get("counts", {})
         debounce_enabled = bool(getattr(self, "_repaint_debounce_enabled", True))
@@ -715,7 +737,7 @@ class ControlSurfaceMixin:
             if should_log:
                 path_label = "immediate" if effective_immediate else "debounced"
                 now = time.monotonic()
-                last = self._repaint_log_last or {}
+                last = overlay_state._repaint_log_last or {}
                 if (
                     last.get("reason") != reason
                     or last.get("path") != path_label
@@ -818,13 +840,14 @@ class ControlSurfaceMixin:
             measure_stats["cache_reset"] = 0
 
     def set_background_opacity(self, opacity: float) -> None:
+        overlay_state = cast("OverlayWindowState", self)
         try:
             value = float(opacity)
         except (TypeError, ValueError):
             value = 0.0
         value = max(0.0, min(1.0, value))
-        if value != self._background_opacity:
-            self._background_opacity = value
+        if value != overlay_state._background_opacity:
+            overlay_state._background_opacity = value
             self._invalidate_grid_cache()
             self.update()
 
@@ -839,12 +862,13 @@ class ControlSurfaceMixin:
             self.update()
 
     def set_drag_enabled(self, enabled: bool) -> None:
+        overlay_state = cast("OverlayWindowState", self)
         enabled_flag = bool(enabled)
-        if enabled_flag != self._drag_enabled:
-            self._drag_enabled = enabled_flag
+        if enabled_flag != overlay_state._drag_enabled:
+            overlay_state._drag_enabled = enabled_flag
             _CLIENT_LOGGER.debug(
                 "Drag enabled set to %s (platform=%s); %s",
-                self._drag_enabled,
+                overlay_state._drag_enabled,
                 QGuiApplication.platformName(),
                 self.format_scale_debug(),
             )
@@ -857,31 +881,33 @@ class ControlSurfaceMixin:
         _CLIENT_LOGGER.debug("Legacy scale control ignored (requested scale_x=%s)", scale)
 
     def set_gridlines(self, *, enabled: bool, spacing: Optional[int] = None) -> None:
+        overlay_state = cast("OverlayWindowState", self)
         self._gridlines_enabled = bool(enabled)
         if spacing is not None:
             try:
                 numeric = int(spacing)
             except (TypeError, ValueError):
-                numeric = self._gridline_spacing
-            self._gridline_spacing = max(10, numeric)
+                numeric = overlay_state._gridline_spacing
+            overlay_state._gridline_spacing = max(10, numeric)
         self._invalidate_grid_cache()
         self.update()
 
     def set_title_bar_compensation(self, enabled: Optional[bool], height: Optional[int]) -> None:
+        overlay_state = cast("OverlayWindowState", self)
         changed = False
         if enabled is not None:
             flag = bool(enabled)
-            if flag != self._title_bar_enabled:
-                self._title_bar_enabled = flag
+            if flag != overlay_state._title_bar_enabled:
+                overlay_state._title_bar_enabled = flag
                 changed = True
         if height is not None:
             try:
                 numeric = int(height)
             except (TypeError, ValueError):
-                numeric = self._title_bar_height
+                numeric = overlay_state._title_bar_height
             numeric = max(0, numeric)
-            if numeric != self._title_bar_height:
-                self._title_bar_height = numeric
+            if numeric != overlay_state._title_bar_height:
+                overlay_state._title_bar_height = numeric
                 changed = True
         if changed:
             if self._follow_controller.wm_override is not None:
@@ -907,12 +933,13 @@ class ControlSurfaceMixin:
         )
 
     def set_log_retention(self, retention: int) -> None:
+        overlay_state = cast("OverlayWindowState", self)
         try:
             value = int(retention)
         except (TypeError, ValueError):
-            value = self._log_retention
+            value = overlay_state._log_retention
         value = max(1, value)
-        self._log_retention = value
+        overlay_state._log_retention = value
 
     def handle_legacy_payload(self, payload: Dict[str, Any]) -> None:
         self._handle_legacy(payload)
@@ -1019,28 +1046,29 @@ class ControlSurfaceMixin:
         self._request_repaint("controller_target", immediate=True)
 
     def update_platform_context(self, context_payload: Optional[Dict[str, Any]]) -> None:
+        overlay_state = cast("OverlayWindowState", self)
         if context_payload is None:
             return
         plugin_backend_hint = context_payload.get("shadow_backend_status")
         if not isinstance(plugin_backend_hint, Mapping):
             plugin_backend_hint = None
-        session = str(context_payload.get("session_type") or self._platform_context.session_type)
-        compositor = str(context_payload.get("compositor") or self._platform_context.compositor)
+        session = str(context_payload.get("session_type") or overlay_state._platform_context.session_type)
+        compositor = str(context_payload.get("compositor") or overlay_state._platform_context.compositor)
         override_value = context_payload.get("manual_backend_override")
         if override_value is None:
-            manual_backend_override = self._platform_context.manual_backend_override
+            manual_backend_override = overlay_state._platform_context.manual_backend_override
         else:
             manual_backend_override = str(override_value or "").strip().lower()
             if manual_backend_override == "auto":
                 manual_backend_override = ""
         flatpak_value = context_payload.get("flatpak")
         if flatpak_value is None:
-            flatpak_flag = self._platform_context.flatpak
+            flatpak_flag = overlay_state._platform_context.flatpak
         else:
             flatpak_flag = bool(flatpak_value)
         flatpak_app_value = context_payload.get("flatpak_app")
         if flatpak_app_value is None:
-            flatpak_app_label = self._platform_context.flatpak_app
+            flatpak_app_label = overlay_state._platform_context.flatpak_app
         else:
             flatpak_app_label = str(flatpak_app_value)
         new_context = PlatformContext(
@@ -1064,15 +1092,15 @@ class ControlSurfaceMixin:
         mismatch_signature = None
         if plugin_signature is not None and plugin_signature != client_signature:
             mismatch_signature = plugin_signature + client_signature
-        if mismatch_signature is not None and mismatch_signature != self._last_backend_mismatch_signature:
+        if mismatch_signature is not None and mismatch_signature != overlay_state._last_backend_mismatch_signature:
             _CLIENT_LOGGER.info(
                 "Plugin backend hint differs from client runtime selection: plugin=%s client=%s",
                 format_status_report_line(plugin_backend_hint) if plugin_backend_hint is not None else "none",
                 format_status_report_line(client_backend_status),
             )
-            self._last_backend_mismatch_signature = mismatch_signature
+            overlay_state._last_backend_mismatch_signature = mismatch_signature
         elif mismatch_signature is None:
-            self._last_backend_mismatch_signature = None
+            overlay_state._last_backend_mismatch_signature = None
 
         if client_signature != getattr(self, "_last_client_backend_status_signature", None):
             _CLIENT_LOGGER.debug(
@@ -1081,8 +1109,8 @@ class ControlSurfaceMixin:
             )
             self._last_client_backend_status_signature = client_signature
 
-        if new_context != self._platform_context:
-            self._platform_context = new_context
+        if new_context != overlay_state._platform_context:
+            overlay_state._platform_context = new_context
             self._platform_controller.update_context(new_context)
             self._platform_controller.update_backend_status(client_backend_status)
             self._platform_controller.prepare_window(self.windowHandle())

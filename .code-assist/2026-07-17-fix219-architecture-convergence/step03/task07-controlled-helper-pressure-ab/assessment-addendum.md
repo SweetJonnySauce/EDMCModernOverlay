@@ -23,8 +23,9 @@ resulting documentation changes.
 
 ## Current disposition
 
-Task 07 is both **implementation-blocked** and **host-preflight-blocked**. Do not start an A1,
-A2, B1, or B2 acceptance cell yet.
+Task 07 automated remediation is **complete**. Stages 7.R1-7.R6 passed on 2026-08-02 and the
+implementation blocker is cleared. Stage 7.6 live preflight is ready for separate authorization
+but remains not started; therefore no A1, A2, B1, or B2 acceptance cell has begun.
 
 The July 21 automated results remain valid historical evidence for the exact coverage they ran:
 
@@ -77,6 +78,12 @@ Required outcome: implement and test one end-to-end path from four immutable cel
 a complete validated run and deterministic report. The report must refuse partial, unsafe,
 schema-invalid, or privacy-invalid inputs.
 
+Remediation update: Stages 7.R2-7.R3 resolved this finding. The strict immutable four-file loader
+feeds one frozen run model; a separate pure report module aggregates the runner's nested metrics,
+calculates all five required contrasts, validates reviewed report-only bounds/provenance, and
+renders deterministic sanitized Markdown. An end-to-end test proves four temporary cell files
+reach in-memory Markdown. No real report is created before live evidence exists.
+
 ### 3. GPU collection always reports unavailable
 
 `_gpu_sample()` returns only when `nvidia-smi` is absent. Its intended subprocess implementation
@@ -117,6 +124,16 @@ malformed output cleanly, and cover both paths with unit tests before accepting 
     acceptance but leaves no automatically generated sanitized stop record. Any diagnostic stop
     must be documented manually without retaining raw journal or host-identifying material.
 
+Remediation update: Stage 7.R4 resolved the GPU finding and all ten runner integrity gaps. The
+runner now requires exact paired client arguments and live authoritative A2/B2 route state;
+proves helper absence only through `NameHasOwner=false`; validates enabled helper identity,
+mode, diagnostics, counters, actors, and origin; rechecks state and continuity through warm-up
+and every observation; rejects restarts, decreases, saturation, clock drift, malformed providers,
+and provider availability changes; uses bounded JSON journal windows and bounded multi-GPU
+aggregates; and emits only strict accepted cells or sanitized exclusive-create stop evidence.
+Continuous operator observation remains mandatory for visible failure classes, while repeated
+Mutter assertions and sustained high Shell CPU are machine-enforced during both timed phases.
+
 ## Reopened Phase 7 work
 
 The original Stage 7.3-7.5 work remains historical implementation and validation evidence, but
@@ -124,19 +141,20 @@ its acceptance must be reopened through the remediation stages below.
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 7.R1 | Prove and repair the real socket-level client snapshot lifecycle | Pending |
-| 7.R2 | Add strict sample/cell/run schemas, privacy rejection, and state/provenance validation | Pending |
-| 7.R3 | Add compatible aggregation, four-cell contrasts, reviewed-bound inputs, and report rendering | Pending |
-| 7.R4 | Harden runner state, GPU, timing, restart/saturation, warning, and safety contracts | Pending |
-| 7.R5 | Add the missing unit and harness coverage and rerun focused RED/GREEN | Pending |
-| 7.R6 | Rerun integrated and project gates and review the implementation before live use | Pending |
-| 7.6 | Establish the fixed quiet host workload and pass live preflight | Blocked by 7.R1-7.R6 |
+| 7.R1 | Prove and repair the real socket-level client snapshot lifecycle | Completed |
+| 7.R2 | Add strict sample/cell/run schemas, privacy rejection, and state/provenance validation | Completed |
+| 7.R3 | Add compatible aggregation, four-cell contrasts, reviewed-bound inputs, and report rendering | Completed |
+| 7.R4 | Harden runner state, GPU, timing, restart/saturation, warning, and safety contracts | Completed |
+| 7.R5 | Add the missing unit and harness coverage and rerun focused RED/GREEN | Completed |
+| 7.R6 | Rerun integrated and project gates and review the implementation before live use | Completed |
+| 7.6 | Establish the fixed quiet host workload and pass live preflight | Ready; not started |
 | 7.7 | Run the interleaved four-cell protocol and collect all 12 samples | Not started |
 | 7.8 | Review privacy/safety, derive report-only bounds, and synchronize authority | Not started |
 
-Phase status: **In progress; implementation remediation required before live preflight**.
+Remediation phase status: **Completed; Stages 7.R1-7.R6 passed**. Task 07 remains in progress at
+the separately authorized live Stage 7.6.
 
-## Required test expansion
+## Required test expansion — Stage 7.R5 result
 
 Test selection remains mixed:
 
@@ -147,10 +165,11 @@ Test selection remains mixed:
   client absence/malformed response/timeout/shutdown cleanup, and neighboring CLI behavior; and
 - the manual GNOME four-cell gate after every automated gate passes.
 
-At minimum, add coverage for the existing plan's U5-U12 and H1-H3 cases. A test must exercise a
-real `SocketBroadcaster` connection rather than replacing `publish()` with an immediate callback.
-The runner's complete `_capture()` orchestration must be tested with injected clocks/providers so
-tests do not wait for the live 300/60-second intervals.
+Stage 7.R5 completed the plan's U5-U12 and H1-H3 coverage. The H1-H3 tests exercise a real
+`SocketBroadcaster` connection rather than replacing `publish()` with an immediate callback. All
+four runner cells complete `_capture()` orchestration with injected clocks/providers, so tests do
+not wait for the live 300/60-second intervals. Direct provider, endpoint safety, early validation,
+and success/stop/failure output cases close the remaining orchestration gaps.
 
 After remediation, rerun and record:
 
@@ -220,15 +239,59 @@ floors, explain attribution, prohibit favorable-singleton reasoning, and require
 Bounds and provenance belong only in `pressure-ab-report.md`; do not create or modify
 `thresholds.json`.
 
-## Handoff entry point
+## R6 completion disposition
 
-The next session should begin with Stage 7.R1, adding a real socket lifecycle RED test before
-changing production code. Preserve the intentionally dirty Step 03 worktree, historical 12/42
-reduced-v2 captures, two superseded full-v1 captures, absent migration threshold artifact, and
-Stage 3.16 commit boundary. Do not run a live A/B cell until 7.R1-7.R6 are complete and reviewed.
+Stage 7.R6 completed on 2026-08-02. Preserve the cumulative remediation worktree, historical
+12/42 reduced-v2 captures, two superseded full-v1 captures, absent migration threshold/report
+artifacts, and Stage 3.16 commit boundary. Any later session may begin Stage 7.6 only with
+separate live-work authorization and a fresh host preflight; R6 completion does not itself start
+or authorize a cell.
 
 Suggested skills:
 
 - `code-assist` for the test-first remediation sequence;
 - `handoff` when creating or resuming the next session handoff; and
 - `review-repository` only if broader repository orientation is needed before resuming.
+
+## Final R6 completion audit
+
+### Demonstrated defects resolved
+
+1. The EDMC Python baseline and checker now match the official 3.13.9 32-bit tested runtime and
+   fail mismatched release validation unless the explicit development override equals `1`.
+2. Tk-facing backend status reads no longer wait for the client. They queue a refresh and return
+   cache or a backend-neutral hint immediately; later client pushes update a synchronized cache.
+3. `load.py` no longer imports, selects, or clears GNOME raster presentation. Client launcher
+   startup/shutdown retains sole cleanup ownership and its regression tests pass.
+
+### Required validation result
+
+- Focused Task 07: 232 passed.
+- Dedicated real-socket snapshot harness: 8 passed.
+- Integrated helper/query/repaint/harness: 159 passed.
+- Runner orchestration: 105 passed.
+- All harness marker: 43 passed, 6 condition-based skips.
+- Full headless: 1,558 passed, 20 expected PyQt-disabled skips.
+- GUI-enabled `make check`: Ruff passed, mypy passed 92 source files, 1,595 tests passed.
+- GUI-enabled `make test`: 1,595 passed.
+- Explicit Ruff, mypy, compileall, runner help, patch hygiene, boundary, privacy, and artifact
+  checks: passed.
+
+The managed sandbox cannot bind loopback sockets; its all-harness attempt produced five fixture
+errors while the other 38 harnesses passed. The unchanged permitted localhost run passed all 43
+selected harnesses. Windows-only Pester and the Windows Python 3.13+ `tmp_path` workaround were
+not applicable on this Linux host.
+
+### EDMC compliance decision
+
+Every item in the detailed design's 17-row compliance gate is **Yes**, with exact evidence in
+`docs/compliance/edmc_compliance.md`. The six repository-level compliance categories are also
+Yes: core alignment; supported APIs/helpers; logging/versioning; responsive Tk-safe runtime;
+preferences/UI integration; and dependency/debug-HTTP handling.
+
+### Constraints preserved
+
+Historical evidence remains exactly 12 reduced-v2 plus two superseded full-v1 captures. No live
+cell, host/helper/client mutation, `pressure-ab-report.md`, `thresholds.json`, clean baseline
+identity, commit, or push occurred. Branch/HEAD remain `backend-refactor-implementation` at
+`14576dd` with the cumulative intentionally dirty remediation worktree.

@@ -8,7 +8,7 @@ import math
 import os
 import sys
 import time
-from typing import Callable, Mapping, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, Mapping, Optional, Tuple, cast
 
 from PyQt6.QtCore import Qt, QPoint, QRect, QSize, QTimer
 from PyQt6.QtGui import QGuiApplication, QWindow, QScreen
@@ -24,6 +24,7 @@ from overlay_client.backend.presentation_policy import (
 from overlay_client.backend.surface_preparation import (
     BACKEND_PRESENTATION_SURFACE_PREPARATION_FULLSCREEN_MONITOR,
     BACKEND_PRESENTATION_SURFACE_PREPARATION_MANAGED_WINDOWED,
+    BackendPresentationSurfacePreparation,
 )
 from overlay_client.follow_geometry import (
     ScreenInfo,
@@ -33,6 +34,9 @@ from overlay_client.follow_geometry import (
 )
 from overlay_client.window_tracking import WindowState
 from overlay_client.work_counters import WORK_COUNTER_MAX, increment_bounded_counter
+
+if TYPE_CHECKING:
+    from overlay_client.overlay_state import OverlayWindowState
 
 
 _BACKEND_PERFORMANCE_DIAGNOSTICS_ENV = "EDMC_OVERLAY_GNOME_PRESENTATION_DIAGNOSTICS"
@@ -190,13 +194,25 @@ DEFAULT_WINDOW_BASE_HEIGHT = 960
 class FollowSurfaceMixin:
     """Follow/window orchestration, platform hooks, and visibility helpers."""
 
+    _last_backend_presentation: BackendPresentationCycleResult | None
+    _last_backend_presentation_log: tuple[object, ...] | None
+    _last_backend_surface_preparation_key: tuple[object, ...]
+    _last_device_ratio_log: tuple[str, float, float, float] | None
+    _last_follow_state: WindowState | None
+    _last_normalised_tracker: tuple[tuple[int, int, int, int], tuple[int, int, int, int], str, float, float] | None
+    _last_raw_window_log: tuple[int, int, int, int] | None
+    _last_screen_name: str | None
+    _last_set_geometry: tuple[int, int, int, int] | None
+    _transient_parent_id: str | None
+
     def _apply_drag_state(self) -> None:
+        overlay_state = cast("OverlayWindowState", self)
         window = self.windowHandle()
         _CLIENT_LOGGER.debug(
             "Applying drag state: drag_enabled=%s transparent=%s move_mode=%s window=%s flags=%s",
             self._drag_enabled,
             not self._drag_enabled,
-            self._move_mode,
+            overlay_state._move_mode,
             bool(window),
             hex(int(window.flags())) if window is not None else "none",
         )
@@ -205,12 +221,13 @@ class FollowSurfaceMixin:
             self._move_mode = False
             self._drag_active = False
             self._follow_controller.set_drag_state(self._drag_active, self._move_mode)
-            if self._cursor_saved:
-                self.setCursor(self._saved_cursor)
-                self._cursor_saved = False
+            if overlay_state._cursor_saved:
+                self.setCursor(overlay_state._saved_cursor)
+                overlay_state._cursor_saved = False
         self.raise_()
 
     def _poll_modifiers(self) -> None:
+        overlay_state = cast("OverlayWindowState", self)
         if not self._drag_enabled or self._drag_active:
             return
         modifiers = QApplication.queryKeyboardModifiers()
@@ -218,15 +235,15 @@ class FollowSurfaceMixin:
         if alt_down and not self._move_mode:
             self._move_mode = True
             self._suspend_follow(0.75)
-            if not self._cursor_saved:
-                self._saved_cursor = self.cursor()
-                self._cursor_saved = True
+            if not overlay_state._cursor_saved:
+                overlay_state._saved_cursor = self.cursor()
+                overlay_state._cursor_saved = True
             self.setCursor(Qt.CursorShape.OpenHandCursor)
         elif not alt_down and self._move_mode:
             self._move_mode = False
-            if self._cursor_saved:
-                self.setCursor(self._saved_cursor)
-                self._cursor_saved = False
+            if overlay_state._cursor_saved:
+                self.setCursor(overlay_state._saved_cursor)
+                overlay_state._cursor_saved = False
 
     def _set_click_through(self, transparent: bool) -> None:
         self._interaction_controller.set_click_through(transparent, force=True, reason="external_set_click_through")
@@ -365,9 +382,9 @@ class FollowSurfaceMixin:
         self._backend_presentation_visibility_state = BackendPresentationVisibilityState()
         self._last_backend_presentation_surface_action = BACKEND_PRESENTATION_SURFACE_HIDDEN
 
-    def _prepare_backend_presentation_surface(self, preparation: object) -> bool:
-        mode = str(getattr(preparation, "mode", "") or "")
-        rect = getattr(preparation, "rect", None)
+    def _prepare_backend_presentation_surface(self, preparation: BackendPresentationSurfacePreparation) -> bool:
+        mode = preparation.mode
+        rect = preparation.rect
         try:
             x, y, width, height = (int(rect[0]), int(rect[1]), int(rect[2]), int(rect[3]))
         except (TypeError, ValueError, IndexError):
@@ -874,14 +891,15 @@ class FollowSurfaceMixin:
         *,
         scale_y: float = 1.0,
     ) -> Tuple[Tuple[int, int, int, int], int]:
+        overlay_state = cast("OverlayWindowState", self)
         adjusted, offset = _apply_title_bar_offset(
             geometry,
-            title_bar_enabled=self._title_bar_enabled,
-            title_bar_height=self._title_bar_height,
+            title_bar_enabled=overlay_state._title_bar_enabled,
+            title_bar_height=overlay_state._title_bar_height,
             scale_y=scale_y,
-            previous_offset=self._last_title_bar_offset,
+            previous_offset=overlay_state._last_title_bar_offset,
         )
-        self._last_title_bar_offset = offset
+        overlay_state._last_title_bar_offset = offset
         return adjusted, offset
 
     def _apply_aspect_guard(
@@ -891,13 +909,14 @@ class FollowSurfaceMixin:
         original_geometry: Optional[Tuple[int, int, int, int]] = None,
         applied_title_offset: int = 0,
     ) -> Tuple[int, int, int, int]:
-        adjusted, self._aspect_guard_skip_logged = _apply_aspect_guard(
+        overlay_state = cast("OverlayWindowState", self)
+        adjusted, overlay_state._aspect_guard_skip_logged = _apply_aspect_guard(
             geometry,
             base_width=DEFAULT_WINDOW_BASE_WIDTH,
             base_height=DEFAULT_WINDOW_BASE_HEIGHT,
             original_geometry=original_geometry,
             applied_title_offset=applied_title_offset,
-            aspect_guard_skip_logged=self._aspect_guard_skip_logged,
+            aspect_guard_skip_logged=overlay_state._aspect_guard_skip_logged,
         )
         return adjusted
 
@@ -920,6 +939,7 @@ class FollowSurfaceMixin:
         Optional[Tuple[str, float, float, float]],
         Tuple[int, int, int, int],
     ]:
+        overlay_state = cast("OverlayWindowState", self)
         tracker_global_x = state.global_x if state.global_x is not None else state.x
         tracker_global_y = state.global_y if state.global_y is not None else state.y
         width = max(1, state.width)
@@ -930,7 +950,7 @@ class FollowSurfaceMixin:
             width,
             height,
         )
-        if tracker_native_tuple != self._last_raw_window_log:
+        if tracker_native_tuple != overlay_state._last_raw_window_log:
             _CLIENT_LOGGER.debug(
                 "Raw tracker window geometry: pos=(%d,%d) size=%dx%d",
                 tracker_global_x,
@@ -938,13 +958,13 @@ class FollowSurfaceMixin:
                 width,
                 height,
             )
-            self._last_raw_window_log = tracker_native_tuple
+            overlay_state._last_raw_window_log = tracker_native_tuple
 
         tracker_qt_tuple, normalisation_info = self._convert_native_rect_to_qt(tracker_native_tuple)
         if normalisation_info is not None and tracker_qt_tuple != tracker_native_tuple:
             screen_name, norm_scale_x, norm_scale_y, device_ratio = normalisation_info
             snapshot = (tracker_native_tuple, tracker_qt_tuple, screen_name, norm_scale_x, norm_scale_y)
-            if snapshot != self._last_normalised_tracker:
+            if snapshot != overlay_state._last_normalised_tracker:
                 _CLIENT_LOGGER.debug(
                     "Normalised tracker geometry using screen '%s': native=%s scale=%.3fx%.3f dpr=%.3f -> qt=%s",
                     screen_name,
@@ -954,9 +974,9 @@ class FollowSurfaceMixin:
                     device_ratio,
                     tracker_qt_tuple,
                 )
-                self._last_normalised_tracker = snapshot
+                overlay_state._last_normalised_tracker = snapshot
         else:
-            self._last_normalised_tracker = None
+            overlay_state._last_normalised_tracker = None
 
         window_handle = self.windowHandle()
         if window_handle is not None:
@@ -970,8 +990,13 @@ class FollowSurfaceMixin:
                 window_dpr = 0.0
             if window_dpr and normalisation_info is not None:
                 screen_name, norm_scale_x, norm_scale_y, device_ratio = normalisation_info
-                snapshot = (screen_name, float(window_dpr), norm_scale_x, norm_scale_y)
-                if snapshot != self._last_device_ratio_log:
+                device_ratio_snapshot: tuple[str, float, float, float] = (
+                    screen_name,
+                    float(window_dpr),
+                    norm_scale_x,
+                    norm_scale_y,
+                )
+                if device_ratio_snapshot != overlay_state._last_device_ratio_log:
                     _CLIENT_LOGGER.debug(
                         "Device pixel ratio diagnostics: window_dpr=%.3f screen='%s' scale_x=%.3f scale_y=%.3f device_ratio=%.3f",
                         float(window_dpr),
@@ -980,7 +1005,7 @@ class FollowSurfaceMixin:
                         norm_scale_y,
                         device_ratio,
                     )
-                    self._last_device_ratio_log = snapshot
+                    overlay_state._last_device_ratio_log = device_ratio_snapshot
 
         scale_y = normalisation_info[2] if normalisation_info is not None else 1.0
         desired_tuple, applied_title_offset = self._apply_title_bar_offset(tracker_qt_tuple, scale_y=scale_y)
@@ -1068,13 +1093,14 @@ class FollowSurfaceMixin:
         state: WindowState,
         target_tuple: Tuple[int, int, int, int],
     ) -> None:
+        overlay_state = cast("OverlayWindowState", self)
         def _ensure_parent(identifier: str) -> None:
             self._ensure_transient_parent(state)
 
         def _fullscreen_hint() -> bool:
             if (
                 not sys.platform.startswith("linux")
-                or self._fullscreen_hint_logged
+                or overlay_state._fullscreen_hint_logged
                 or self._window_controller._fullscreen_hint_logged  # internal flag mirrors hint emission
                 or not state.is_foreground
             ):
@@ -1090,7 +1116,7 @@ class FollowSurfaceMixin:
                     "Overlay running in compositor-managed mode; for true fullscreen use borderless windowed in Elite or enable compositor vsync. (%s)",
                     self.format_scale_debug(),
                 )
-                self._fullscreen_hint_logged = True
+                overlay_state._fullscreen_hint_logged = True
                 return True
             return False
 
@@ -1117,13 +1143,14 @@ class FollowSurfaceMixin:
             is_visible_fn=lambda: self.isVisible(),
         )
         # Mirror controller flag back to overlay state for future checks.
-        self._fullscreen_hint_logged = self._window_controller._fullscreen_hint_logged
+        overlay_state._fullscreen_hint_logged = self._window_controller._fullscreen_hint_logged
 
     def _ensure_transient_parent(self, state: WindowState) -> None:
+        overlay_state = cast("OverlayWindowState", self)
         if not sys.platform.startswith("linux"):
             return
         if not self._platform_controller.uses_transient_parent():
-            if self._transient_parent_window is not None:
+            if overlay_state._transient_parent_window is not None:
                 window_handle = self.windowHandle()
                 if window_handle is not None:
                     try:
@@ -1132,7 +1159,7 @@ class FollowSurfaceMixin:
                         _CLIENT_LOGGER.debug("Failed to clear transient parent on Wayland: %s", exc)
                     except Exception as exc:  # pragma: no cover - unexpected Qt errors
                         _CLIENT_LOGGER.warning("Unexpected error clearing transient parent on Wayland: %s", exc)
-                self._transient_parent_window = None
+                overlay_state._transient_parent_window = None
                 self._transient_parent_id = None
             return
         identifier = state.identifier
@@ -1153,19 +1180,20 @@ class FollowSurfaceMixin:
         if parent_window is None:
             return
         window_handle.setTransientParent(parent_window)
-        self._transient_parent_window = parent_window
+        overlay_state._transient_parent_window = parent_window
         self._transient_parent_id = identifier
         _CLIENT_LOGGER.debug(
             "Set overlay transient parent to Elite window %s; %s", identifier, self.format_scale_debug()
         )
 
     def _handle_missing_follow_state(self) -> None:
+        overlay_state = cast("OverlayWindowState", self)
         if not self._lost_window_logged:
             _CLIENT_LOGGER.debug(
                 "Elite Dangerous window not found; waiting for window to appear; %s", self.format_scale_debug()
             )
             self._lost_window_logged = True
-        if self._last_follow_state is None:
+        if overlay_state._last_follow_state is None:
             if self._keep_overlay_visible:
                 self._update_follow_visibility(True)
                 if sys.platform.startswith("linux"):

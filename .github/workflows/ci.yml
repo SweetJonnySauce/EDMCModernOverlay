@@ -1,6 +1,7 @@
 name: CI
 
 env:
+  ALLOW_EDMC_PYTHON_MISMATCH: "1"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 on:
@@ -57,7 +58,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "3.13"
           cache: "pip"
 
       - name: Install dependencies

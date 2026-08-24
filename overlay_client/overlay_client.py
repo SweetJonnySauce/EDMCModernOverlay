@@ -9,7 +9,7 @@ import math
 import os
 import sys
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, cast
 
 CLIENT_DIR = Path(__file__).resolve().parent
 ROOT_DIR = CLIENT_DIR.parent
@@ -75,6 +75,9 @@ from overlay_client.setup_surface import SetupSurfaceMixin  # type: ignore  # no
 from overlay_client.backend import ProbeSource  # type: ignore  # noqa: E402
 from overlay_client.backend.status import format_status_report_line  # type: ignore  # noqa: E402
 from overlay_client.platform_context import _backend_status_signature, _client_backend_status  # type: ignore  # noqa: E402
+
+if TYPE_CHECKING:
+    from overlay_client.overlay_state import OverlayWindowState
 
 _LOGGER_NAME = "EDMC.ModernOverlay.Client"
 _CLIENT_LOGGER = logging.getLogger(_LOGGER_NAME)
@@ -522,6 +525,7 @@ class OverlayWindow(SetupSurfaceMixin, InteractionSurfaceMixin, QWidget, RenderS
         )
 
     def _update_message_font(self) -> None:
+        overlay_state = cast("OverlayWindowState", self)
         mapper = self._compute_legacy_mapper()
         state = self._viewport_state()
         target_point = viewport_scaled_point_size(
@@ -533,11 +537,11 @@ class OverlayWindow(SetupSurfaceMixin, InteractionSurfaceMixin, QWidget, RenderS
             mapper,
             use_physical=True,
         )
-        if not math.isclose(target_point, self._debug_message_point_size, rel_tol=1e-3):
+        if not math.isclose(target_point, overlay_state._debug_message_point_size, rel_tol=1e-3):
             font = self.message_label.font()
             font.setPointSizeF(target_point)
             self.message_label.setFont(font)
-            self._debug_message_point_size = target_point
+            overlay_state._debug_message_point_size = target_point
             self._publish_metrics()
 
     def _update_label_fonts(self) -> None:
@@ -554,10 +558,11 @@ class OverlayWindow(SetupSurfaceMixin, InteractionSurfaceMixin, QWidget, RenderS
         self._mark_legacy_cache_dirty()
 
     def _notify_font_bounds_changed(self) -> None:
+        overlay_state = cast("OverlayWindowState", self)
         current = (self._font_min_point, self._font_max_point)
-        if self._last_font_notice == current:
+        if overlay_state._last_font_notice == current:
             return
-        self._last_font_notice = current
+        overlay_state._last_font_notice = current
         text = "Font bounds: {:.1f} – {:.1f} pt".format(*current)
         payload = {
             "type": "message",
@@ -615,11 +620,16 @@ class OverlayWindow(SetupSurfaceMixin, InteractionSurfaceMixin, QWidget, RenderS
         super().showEvent(event)
         self._handle_show_event()
 
+    def _clear_transparent_surface(self, painter: QPainter) -> None:
+        """Start a translucent overlay frame without pixels from the prior frame."""
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+        painter.fillRect(self.rect(), Qt.GlobalColor.transparent)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+
     def paintEvent(self, event) -> None:  # type: ignore[override]
         painter = QPainter(self)
+        self._clear_transparent_surface(painter)
         if getattr(self, "_backend_presentation_content_suppressed", False):
-            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
-            painter.fillRect(self.rect(), Qt.GlobalColor.transparent)
             painter.end()
             stats = getattr(self, "_paint_stats", None)
             if isinstance(stats, dict):
@@ -641,6 +651,7 @@ class OverlayWindow(SetupSurfaceMixin, InteractionSurfaceMixin, QWidget, RenderS
         return self._gridlines_enabled
 
     def set_data_client(self, client: OverlayDataClient) -> None:
+        overlay_state = cast("OverlayWindowState", self)
         self._data_client = client
         self._publish_metrics()
         if self._window_tracker and hasattr(self._window_tracker, "set_monitor_provider"):
@@ -648,32 +659,34 @@ class OverlayWindow(SetupSurfaceMixin, InteractionSurfaceMixin, QWidget, RenderS
                 self._window_tracker.set_monitor_provider(self.monitor_snapshots)  # type: ignore[attr-defined]
             except Exception as exc:
                 _CLIENT_LOGGER.debug("Window tracker rejected monitor provider hook: %s", exc)
-        if self._window_tracker and self._follow_enabled:
+        if self._window_tracker and overlay_state._follow_enabled:
             self._start_tracking()
             self._refresh_follow_geometry()
         else:
             self._stop_tracking()
 
     def set_window_tracker(self, tracker: Optional[WindowTracker]) -> None:
+        overlay_state = cast("OverlayWindowState", self)
         self._window_tracker = tracker
         if tracker and hasattr(tracker, "set_monitor_provider"):
             try:
                 tracker.set_monitor_provider(self.monitor_snapshots)  # type: ignore[attr-defined]
             except Exception as exc:
                 _CLIENT_LOGGER.debug("Window tracker rejected monitor provider hook: %s", exc)
-        if tracker and self._follow_enabled:
+        if tracker and overlay_state._follow_enabled:
             self._start_tracking()
             self._refresh_follow_geometry()
         else:
             self._stop_tracking()
 
     def set_follow_enabled(self, enabled: bool) -> None:
+        overlay_state = cast("OverlayWindowState", self)
         if not enabled:
             _CLIENT_LOGGER.debug("Follow mode cannot be disabled; ignoring request.")
             return
-        if self._follow_enabled:
+        if overlay_state._follow_enabled:
             return
-        self._follow_enabled = True
+        overlay_state._follow_enabled = True
         self._lost_window_logged = False
         self._suspend_follow(0.5)
         self._start_tracking()

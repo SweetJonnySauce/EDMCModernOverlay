@@ -7,7 +7,7 @@ import sys
 import uuid
 from pathlib import Path
 import math
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple
 
 from PyQt6.QtCore import Qt, QTimer, QPoint
 from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QPixmap, QGuiApplication
@@ -19,6 +19,7 @@ from overlay_client.client_config import InitialClientSettings
 from overlay_client.controller_mode import ControllerModeProfile, ControllerModeTracker, ModeProfile
 from overlay_client.data_client import OverlayDataClient
 from overlay_client.backend import ProbeSource
+from overlay_client.backend.consumers import BackendPresentationCycleResult
 from overlay_client.backend.presentation_policy import BackendPresentationVisibilityState
 from overlay_client.backend.status import format_status_report_line
 from overlay_client.debug_config import DEBUG_CONFIG_ENABLED, DebugConfig
@@ -142,9 +143,11 @@ class SetupSurfaceMixin:
         self._transient_parent_window = None
         self._fullscreen_hint_logged: bool = False
         self._follow_enabled: bool = True
-        self._last_logged_scale: Optional[Tuple[float, float, float]] = None
+        self._last_logged_scale: Optional[
+            Tuple[float, float, float, float, float, float, float, float, str, bool, bool]
+        ] = None
         self._platform_context = _initial_platform_context(initial)
-        self._plugin_backend_status_hint: Optional[Dict[str, Any]] = None
+        self._plugin_backend_status_hint: Optional[Mapping[str, object]] = None
         self._client_backend_status = _client_backend_status(
             self._platform_context,
             source=ProbeSource.INITIAL_HINTS,
@@ -152,9 +155,11 @@ class SetupSurfaceMixin:
             env=os.environ,
         )
         self._last_client_backend_status_signature = _backend_status_signature(self._client_backend_status)
-        self._last_backend_mismatch_signature: Optional[Tuple[str, str, str, str, bool]] = None
-        self._last_backend_presentation = None
-        self._last_backend_presentation_log = None
+        self._last_backend_mismatch_signature: Optional[
+            Tuple[str, str, str, str, bool, str, str, str, str, str, str, bool, str, str]
+        ] = None
+        self._last_backend_presentation: BackendPresentationCycleResult | None = None
+        self._last_backend_presentation_log: tuple[object, ...] | None = None
         self._pressure_snapshot_origin_id = uuid.uuid4().hex
         self._backend_work_counts: Dict[str, int] = {
             "cycles": 0,
@@ -268,7 +273,7 @@ class SetupSurfaceMixin:
         if debug_config.repaint_debounce_enabled is not None:
             self._repaint_debounce_enabled = bool(debug_config.repaint_debounce_enabled)
         self._repaint_debounce_log: bool = bool(getattr(debug_config, "log_repaint_debounce", False))
-        self._repaint_log_last: Optional[Dict[str, Any]] = None
+        self._repaint_log_last: Optional[Dict[str, object]] = None
         self._repaint_timer = QTimer(self)
         self._repaint_timer.setSingleShot(True)
         self._repaint_timer.setInterval(self._REPAINT_DEBOUNCE_MS)

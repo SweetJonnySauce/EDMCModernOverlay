@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate plugin Python compatibility against EDMC's tested minimum baseline."""
+"""Validate plugin Python compatibility against EDMC's tested runtime baseline."""
 from __future__ import annotations
 
 import os
@@ -39,32 +39,43 @@ def _current_arch() -> str:
     return platform.architecture()[0].lower()
 
 
+def _runtime_mismatch(
+    expected_version: Tuple[int, int, int],
+    expected_arch: Optional[str],
+    actual_version: Tuple[int, int, int],
+    actual_arch: str,
+) -> Optional[str]:
+    expected_series = expected_version[:2]
+    version_matches = actual_version[:2] == expected_series and actual_version >= expected_version
+    arch_matches = expected_arch is None or actual_arch == expected_arch
+    if version_matches and arch_matches:
+        return None
+    expected = f"{expected_version[0]}.{expected_version[1]}.{expected_version[2]}+"
+    expected += f" in the {expected_series[0]}.{expected_series[1]} series"
+    if expected_arch:
+        expected += f" ({expected_arch})"
+    actual = f"{actual_version[0]}.{actual_version[1]}.{actual_version[2]} ({actual_arch})"
+    return f"Python {actual} does not match tested EDMC runtime {expected}"
+
+
 def main() -> None:
-    minimum_version, preferred_arch = _load_expected()
+    expected_version, expected_arch = _load_expected()
     actual_version = _current_version()
     actual_arch = _current_arch()
+    mismatch = _runtime_mismatch(expected_version, expected_arch, actual_version, actual_arch)
+    if mismatch:
+        if os.environ.get(ALLOW_ENV) == "1":
+            print(f"[check-edmc-python] WARNING: {mismatch} (override via {ALLOW_ENV})")
+            return
+        raise SystemExit(f"[check-edmc-python] ERROR: {mismatch} (set {ALLOW_ENV}=1 to bypass)")
 
-    if actual_version < minimum_version:
-        message = (
-            f"Python version too old: requires >= {minimum_version}, "
-            f"found {actual_version}"
-        )
-        if os.environ.get(ALLOW_ENV):
-            print(f"[check-edmc-python] WARNING: {message} (override via {ALLOW_ENV})")
-            raise SystemExit(0)
-        raise SystemExit(f"[check-edmc-python] ERROR: {message} (set {ALLOW_ENV}=1 to bypass)")
-
-    if preferred_arch and preferred_arch != actual_arch:
-        print(
-            "[check-edmc-python] WARNING: "
-            f"Preferred EDMC baseline arch is {preferred_arch}, found {actual_arch}; "
-            "continuing because version compatibility floor is satisfied."
-        )
-
+    expected_text = f"{expected_version[0]}.{expected_version[1]}.{expected_version[2]}+"
+    expected_text += f" in the {expected_version[0]}.{expected_version[1]} series"
+    if expected_arch:
+        expected_text += f" ({expected_arch})"
     print(
         "[check-edmc-python] OK: "
-        f"Python {actual_version} ({actual_arch}) meets minimum baseline >= {minimum_version} "
-        f"from {BASELINE_PATH}"
+        f"Python {actual_version} ({actual_arch}) matches tested baseline {expected_text} from {BASELINE_PATH}"
     )
 
 

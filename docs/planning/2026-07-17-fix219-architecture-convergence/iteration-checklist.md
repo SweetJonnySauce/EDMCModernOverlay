@@ -2,8 +2,8 @@
 
 ## Outcome
 
-Current status: **Post-Task-06 iteration passed — Stage 1.8 is complete; Stage 1.9 is ready but
-not started**
+Current status: **Task 07 automated-remediation iteration passed — Stages 7.R1-7.R6 are complete;
+Stage 7.6 live preflight is ready but not started**
 
 Prior synchronization status: **Synchronization reviewed and approved — Stage 1.6 required
 separate authorization**
@@ -12,8 +12,9 @@ The amendment is correctly scoped inside the existing fix219 PDD. Requirements, 
 design boundaries, test selection, safety rules, and evidence-preservation decisions are
 sufficient. No new PDD, product-requirements round, or external research pass is required.
 
-The Task 06 implementation and review are complete. The controlled Task 07 A/B, later manual
-gates, new baseline, and production routing remain unauthorized and not started.
+The Task 06 implementation and review and the Task 07 automated remediation are complete. The
+controlled Task 07 live A/B, later manual gates, new baseline, and production routing remain
+unauthorized and not started.
 
 ## Phase tracking
 
@@ -374,3 +375,114 @@ Phase status: **In progress**.
 
 Stage 1.9 / 3.13 is **in progress but incomplete**. Resume only after the user establishes the
 approved stable windowed monitor-A/100% workload with Firefox stopped.
+
+## Task-07 automated-remediation iteration — 2026-08-02
+
+### Outcome
+
+The Task 07 automated-remediation iteration passed. The deep assessment's socket, evidence,
+reporting, runner, coverage, EDMC-parity, Tk-responsiveness, and backend-boundary findings are
+resolved with direct unit, harness, integrated, project, GUI-enabled, static, and source-review
+evidence. Stages 7.R1-7.R6 are complete.
+
+Task 07 itself remains **in progress and incomplete**. This iteration did not inspect current live
+host readiness, mutate helper/client state, start an A/B cell, create a report or bounds, resume
+the historical matrix, create a clean-baseline identity, commit, or push. The July 21 host
+observation above remains historical rather than current preflight evidence. Stage 7.6 is ready
+for a separately authorized fresh live preflight; Stages 7.7-7.8 remain not started.
+
+### Phase tracking
+
+| Stage | Description | Status |
+| --- | --- | --- |
+| 12.1 | Verify checklist authority, branch/HEAD, dirty-tree preservation, and live-work boundary | Completed |
+| 12.2 | Audit remediation stages, TDD evidence, and required unit/harness touchpoint selection | Completed |
+| 12.3 | Audit integrated gates, backend boundary, and EDMC compliance results | Completed |
+| 12.4 | Audit historical evidence, prohibited artifacts, and cross-record consistency | Completed |
+| 12.5 | Record the Task 07 readiness decision and remaining authorization gate | Completed |
+
+Phase 12 status: **Completed**.
+
+### Authority and scope
+
+| ID | Check | Yes/No | Evidence and action |
+| --- | --- | --- | --- |
+| A1 | Was this iteration checklist explicitly requested? | Yes | The user requested an iteration checklist after loading the August 2 Task 07 handoff. |
+| A2 | Does the checklist use the approved Task 07 and detailed-design contracts? | Yes | The authoritative task, detailed design, Task 07 plan/progress/context/addendum, compliance tracker, repository instructions, and current Git state were reviewed. |
+| A3 | Did this iteration authorize or perform live Stage 7.6 work? | No | Correctly excluded. No live host/helper/client inspection or mutation, warm-up, sample, or A/B cell was authorized or performed. |
+| A4 | Was the intentionally dirty cumulative remediation tree preserved? | Yes | Branch `backend-refactor-implementation` remains at HEAD `14576dd79fdbcbd97b85efb87cc9c087af490d55`; no reset, discard, staging, commit, or push occurred. |
+
+### Remediation completion
+
+| ID | Check | Yes/No | Evidence and action |
+| --- | --- | --- | --- |
+| R1 | Is the real socket snapshot lifecycle non-self-blocking, correlated, bounded, and shutdown-safe? | Yes | Stage 7.R1's dedicated real-socket harness passes request/response, malformed/wrong response, timeout, pending cleanup, shutdown wake, and neighboring-command ownership cases. |
+| R2 | Are sample, cell, run, provenance, continuity, privacy, and unavailable-value contracts strict? | Yes | Stage 7.R2 rejects unknown/prohibited fields, invalid bounds/state/timing, mixed origins, incomplete cells, and partial four-file runs. |
+| R3 | Is compatible aggregation/reporting complete without leaking bounds into migration thresholds? | Yes | Stage 7.R3 provides three-repetition statistics, five fixed contrasts, reviewed report-only bounds, unavailable semantics, and deterministic sanitized in-memory Markdown. |
+| R4 | Does the runner prove cell state and enforce timing, providers, continuity, and safety? | Yes | Stage 7.R4 proves A2 fallback and B2 helper routing, uses injected bounded providers and exact 300/60/3 timing, rejects restart/decrease/saturation, and emits exclusive success or stop output. |
+| R5 | Are the planned U5-U12, H1-H3, orchestration, and output-failure cases covered? | Yes | Stage 7.R5's named traceability audit and added tests close the residual provider, endpoint, all-cell orchestration, validation, and write-failure gaps. |
+| R6 | Did the cumulative audit resolve every demonstrated pre-live defect? | Yes | Stage 7.R6 updated EDMC runtime parity, removed the synchronous preferences wait and plugin-private GNOME cleanup, reran affected gates, and recorded all R1-R6 checks as passing. |
+
+Remediation phase status: **Completed**.
+
+### Test selection and validation
+
+| ID | Check | Yes/No | Evidence and action |
+| --- | --- | --- | --- |
+| T1 | Was test type selected before each behavior change? | Yes | Pure schemas, analysis, providers, and runner orchestration use unit tests; socket, `load.py`, preferences, hook, and lifecycle behavior use harness tests. Mixed changes retain both. |
+| T2 | Did the final focused Task 07 and real-socket gates pass? | Yes | Focused Task 07 passed 232 tests; the dedicated real-socket harness passed 8. |
+| T3 | Did integrated, orchestration, compliance, and all-harness gates pass? | Yes | Integrated helper/query/repaint passed 159; runner orchestration passed 105; compliance slice passed 51; localhost-permitted harness selection passed 43 with six condition-based skips. |
+| T4 | Did full headless and GUI-enabled project gates pass? | Yes | Headless passed 1,558 with 20 expected PyQt-disabled skips; offscreen `make check` and `make test` each passed 1,595, with Ruff and mypy passing in `make check`. |
+| T5 | Did explicit static/build and patch-hygiene gates pass? | Yes | Full Ruff, mypy over 92 source files, compileall, runner `--help`, and `git diff --check` passed. The checklist-only update reran `git diff --check`; no behavior test was required for this documentation-only iteration. |
+| T6 | Were environment limitations reported without becoming acceptance evidence? | Yes | Five sandbox bind-fixture errors were discarded and the unchanged harness command was rerun with localhost permission. The local Python 3.12.3/64-bit parity failure is expected; only the explicit development override exits zero, and it is not release-parity evidence. |
+
+Test files added or updated by the remediation:
+
+- `tests/test_check_edmc_python.py` (added)
+- `tests/test_harness_backend_status_roundtrip.py`
+- `tests/test_harness_plugin_hooks_contract.py`
+- `tests/test_harness_pressure_ab_snapshot.py`
+- `overlay_client/tests/test_pressure_ab.py`
+- `overlay_client/tests/test_backend_pressure_ab_runner.py`
+
+### EDMC compliance review
+
+| AGENTS.md category | Yes/No | Evidence and action |
+| --- | --- | --- |
+| Stay aligned with EDMC core | Yes | The checked baseline is Python 3.13.9+ in the 3.13 series on 32-bit Windows; plugin layout, `load.py`, `plugin_start3`, and dated upstream monitoring evidence pass. |
+| Use only supported plugin API and helpers | Yes | Supported typed config, monitor, session/user-agent, namespaced settings, and external-client shadow boundaries are retained. |
+| Adopt EDMC logging/versioning patterns | Yes | Plugin-name logger wiring, exception context, no plugin operational `print`, and real `config.appversion` gates pass the compliance audit. |
+| Keep runtime responsive and Tk-safe | Yes | Preferences status reads are cache-first/non-blocking, network work stays off Tk hooks, and worker/socket shutdown is bounded and harness-tested. |
+| Integrate prefs/UI hooks correctly | Yes | `plugin_prefs`, `prefs_changed`, `myNotebook`, typed/locale-aware parsing, and frame-return behavior pass focused tests. |
+| Package dependencies and debug HTTP responsibly | Yes | Isolated-environment project gates, declared/vendored dependency scope, importable directory naming, and `config.debug_senders` routing pass. |
+
+All 17 detailed-design EDMC compliance items and all six repository compliance categories are
+recorded as **Yes** in `docs/compliance/edmc_compliance.md`. This is automated/plugin compliance
+evidence, not a claim that the local development interpreter matches the Windows release runtime.
+
+### Evidence and artifact state
+
+| ID | Check | Yes/No | Evidence and action |
+| --- | --- | --- | --- |
+| E1 | Are the historical capture populations preserved? | Yes | Exactly 12 reduced-v2 captures and two superseded full-v1 captures remain under their original identities; no historical capture changed. |
+| E2 | Does a live `pressure-ab-report.md` or reviewed pressure-bound population exist? | No | Correctly absent because no accepted live cell has run. Synthetic in-memory report tests are not acceptance evidence. |
+| E3 | Does migration `thresholds.json` exist or contain A/B-derived values? | No | Correctly absent. Task 07 bounds remain report-only, and migration thresholds remain deferred to the later coherent 42-capture baseline. |
+| E4 | Has a clean post-optimization manifest/evidence identity been created? | No | Correctly deferred until the A/B and manual regression gates pass. |
+| E5 | Has any A1/A2/B1/B2 cell, warm-up, or sample started? | No | Correctly not started. Stage 7.6 requires separate authorization and a fresh passing host preflight first. |
+| E6 | Do the Task 07 records agree on current status? | Yes | Plan, progress, context, addendum, compliance record, and this checklist agree that remediation is complete while Stage 7.6 is ready but unstarted and Stages 7.7-7.8 are unstarted. |
+
+### Readiness decision
+
+- Return to requirements clarification: **No**.
+- Conduct additional prerequisite research: **No**.
+- Reopen or amend the detailed design: **No**.
+- Perform another automated remediation iteration: **No**.
+- Mark Task 07 / Stage 1.9 / working Stage 3.13 complete: **No**.
+- Start Stage 7.7 capture cells or Stage 7.8 report work: **No**.
+- Resume the historical capture matrix or create the clean baseline identity: **No**.
+- Commit or push the cumulative Step 03 increment: **No; Stage 3.16 remains the commit boundary**.
+- Proceed next to Stage 7.6: **Ready for a separately authorized fresh live preflight, but not started**.
+
+The next authorized iteration must expand the Stage 7.6 operational plan and exact stop rules,
+then perform only the fresh host preflight. It must not begin an A/B cell unless that later work is
+separately authorized and every preflight condition passes.

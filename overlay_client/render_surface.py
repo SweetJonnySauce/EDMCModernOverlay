@@ -132,6 +132,10 @@ _LINE_WIDTH_DEFAULTS_FALLBACK: Dict[str, int] = {
 class RenderSurfaceMixin:
     """Rendering, payload, and debug helpers for the overlay window."""
 
+    _last_logged_scale: tuple[float, float, float, float, float, float, float, float, str, bool, bool] | None
+    _shell_raster_frame_cache_result: object | None
+    _text_cache_context: tuple[str, tuple[str, ...], float] | None
+
     def _update_auto_legacy_scale(self, width: int, height: int) -> None:
         mapper = self._compute_legacy_mapper()
         try:

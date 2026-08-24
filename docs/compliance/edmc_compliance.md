@@ -39,9 +39,15 @@ These are EDMC best practices. Evaluate the code to make sure it's adhering to t
 - Performance awareness: efficient enough without premature micro-optimizations; measure before tuning.
 
 ## Checks (run per release or compliance review)
-- Confirm target Python compatibility meets or exceeds the minimum version stated in EDMC core `docs/Releasing`; baseline (as of this review) is Python 3.10.3, with 32-bit Windows as the preferred EDMC release parity runtime. Update this file if the baseline changes. This applies to the EDMC plugin runtime; the controller/client run in their own environments and require Python >= 3.10.
-- Run `python3 scripts/check_edmc_python.py` to enforce the minimum compatibility baseline in `docs/compliance/edmc_python_version.txt` (the check fails only when the interpreter is below the minimum; `ALLOW_EDMC_PYTHON_MISMATCH=1` is an emergency non-release/dev override).
-  - CI runs this via `.github/workflows/ci.yml` on both Python 3.10 and 3.12 without override to prove backward compatibility and newer-runtime support.
+- Confirm the target Python series, tested patch floor, and architecture match EDMC core
+  `docs/Releasing`; the 2026-08-02 upstream review records Python 3.13.9+ in the 3.13 series,
+  32-bit Windows. This applies to the EDMC plugin runtime; the controller/client remain Python
+  >= 3.10.
+- Run `python3 scripts/check_edmc_python.py` to enforce the tested runtime in
+  `docs/compliance/edmc_python_version.txt`. `ALLOW_EDMC_PYTHON_MISMATCH=1` is only an explicit
+  non-release/development override.
+  - CI exercises Python 3.10 compatibility and Python 3.13, with the override because hosted
+    Linux runners are 64-bit and therefore cannot establish Windows release parity.
 - Re-scan imports to ensure only supported EDMC APIs/helpers (`config`, `monitor`, `theme`, `timeout_session`, etc.) are used in plugin code.
 - Verify logger wiring (`plugin_name`, folder name, logger name) aligns and that `logger.exception`/`exc_info` is used instead of `print`.
 - Confirm long-running or network work runs in worker threads and that Tk widgets are only touched on the main thread.
@@ -60,7 +66,8 @@ These are EDMC best practices. Evaluate the code to make sure it's adhering to t
 Use this evidence checklist for each release when deciding the `Stay aligned with EDMC core` status.
 
 ### Required evidence
-- `python3 scripts/check_edmc_python.py` passes (minimum compatibility baseline met).
+- `python3 scripts/check_edmc_python.py` passes in a matching runtime, or the current work is
+  explicitly non-release/development and records the mismatch plus override evidence.
 - `load.py` exists at plugin root.
 - `plugin_start3` exists in `load.py`.
 - Plugin metadata maps to plugin folder naming (`name = PLUGIN_NAME` and `plugin_name = PLUGIN_NAME`).
@@ -72,10 +79,81 @@ Use this evidence checklist for each release when deciding the `Stay aligned wit
 
 ### Status rubric
 - Mark `Yes` when required evidence is satisfied and any waived sub-requirement is explicitly recorded in `Exceptions`.
-- Mark `No` when minimum Python compatibility fails, plugin entrypoint/structure evidence is missing, or a waived sub-requirement is not documented as an exception.
+- Mark `No` when tested-runtime parity is falsely claimed, plugin entrypoint/structure evidence is
+  missing, or a waived sub-requirement is not documented as an exception.
 
 ### Exception handling
 - If a release intentionally waives EDMC Releases/Discussions logging or parity-environment artifacts, record that waiver in `Exceptions` with release scope and rationale.
 
 ## Exceptions
 - 0.9.0 waiver: EDMC Releases/Discussions review findings log is not required for 0.9.0 release sign-off.
+
+## Upstream monitoring evidence
+
+### 2026-08-02 — fix219 remediation review
+
+- Checked official EDMC `main` `.python-version`, `docs/Releasing.md`, `PLUGINS.md`, GitHub
+  Releases, and public Discussions before the R6 project gates.
+- Current source targets Python 3.13; `docs/Releasing.md` names 3.13.9 32-bit as the tested Windows
+  runtime. Updated the repository baseline/check from the stale permissive 3.10.3 minimum.
+- Latest stable release observed: 6.1.2 (published 2026-01-29). The 6.1 series adds the Plugin
+  Browser/registration system, strengthens plugin versioning guidance, deprecates `util.gzip`,
+  moves downloaded ship/module data expectations, and changes config persistence internals.
+- Public Plugin Development discussions were reviewed. The two most recently updated entries were
+  #2504 (Courier Mission Plugin, updated 2026-06-16) and #2506 (`system_url()` behavior, updated
+  2026-06-08); neither adds a compositor, Tk ownership, socket, preferences-hook, or helper API
+  requirement affecting this remediation.
+- Follow-up: continue watching Releases and Discussions weekly and immediately before release;
+  this dated review proves only the state checked above.
+
+## Implementation Results — 2026-08-02 fix219 R6
+
+### Detailed-design compliance gate
+
+| Compliance item | Yes/No | Current evidence |
+| --- | --- | --- |
+| Current upstream tested EDMC Python/architecture baseline recorded | Yes | Official sources checked 2026-08-02; baseline is `3.13.9 32bit`; checker tests pass. |
+| Own importable plugin directory and `load.py` | Yes | Directory is `EDMCModernOverlay` and root `load.py` exists. |
+| `plugin_start3` entry point | Yes | `load.py` exports `plugin_start3`. |
+| Dated EDMC release/discussion monitoring evidence | Yes | The dated evidence above records official sources, release 6.1.2, and current Plugin Development discussions. |
+| Supported EDMC imports/helpers only | Yes | Plugin code uses documented `config`, `monitor`, `timeout_session`, logging, and UI surfaces; no unsupported EDMC-core import was found. |
+| EDMC monitor helpers used for player state where applicable | Yes | `load.py` imports and uses `monitor.game_running` and `monitor.is_live_galaxy`. |
+| `timeout_session`/EDMC user agent and debug routing for HTTP | Yes | `version_helper.py` prefers `timeout_session.new_session`, applies the EDMC user agent, and retains a bounded fallback. |
+| Namespaced typed config and locale numeric parsing | Yes | Preferences use `edmc_modern_overlay.*`, typed getters, `config.set`, and `number_from_string`; the external client shadow file remains outside EDMC. |
+| Logger name/exception handling and no operational `print` | Yes | Plugin logger is `EDMCModernOverlay`; operational plugin paths use logging with exception context. CLI progress output is confined to the standalone runner. |
+| `config.appversion` gates real version differences | Yes | `version_helper.py` gates session/debug behavior using parsed `config.appversion`. |
+| Long/network work absent from Tk hook path | Yes | Version checks use a worker; backend-status reads queue refresh and return cache/shadow immediately. Harness timing proves the silent-client path is non-blocking. |
+| Tk access main-thread/shutdown safe | Yes | Preferences widgets are built/used by EDMC hooks; no worker touches Tk and no shutdown `event_generate` path was found. |
+| Worker/process ownership and bounded joins | Yes | Lifecycle/socket tests cover bounded stop, pending wake, repeated stop, and teardown; the full harness suite passes. |
+| No backend-private cleanup in `load.py` | Yes | Source contract test rejects GNOME private imports/constants/cleanup; launcher cleanup regressions pass. |
+| Preferences hooks/`myNotebook`/widget returns correct | Yes | `plugin_prefs` constructs the `myNotebook` panel, returns its frame, and `prefs_changed` applies it; `plugin_app` intentionally has no main-window widget. |
+| Dependencies tested and packaged from isolated environment | Yes | Validation ran in `overlay_client/.venv`; Linux installer/release-excludes tests pass in the full suite, and runtime requirements remain explicitly declared/vendored by scope. |
+| Debug HTTP respects `config.debug_senders` | Yes | `_apply_debug_sender` reads EDMC `config.debug_senders`; focused logging/version tests pass. |
+
+All 17 required results are Yes. The four known failures named by the detailed design are
+resolved. This closes automated remediation only; it does not claim a matching Windows release
+runtime or authorize the separate live pressure A/B.
+
+### Repository compliance categories
+
+| AGENTS.md category | Yes/No | Reason |
+| --- | --- | --- |
+| Stay aligned with EDMC core | Yes | Current tested runtime, plugin layout/entry point, and dated upstream monitoring are recorded and tested. |
+| Use only supported plugin API and helpers | Yes | Supported monitor/config/session helpers, namespaced typed settings, and the external-client shadow boundary are preserved. |
+| Adopt EDMC logging/versioning patterns | Yes | Plugin-name logger wiring, exception context, user agent, and real `config.appversion` gates pass their focused tests. |
+| Keep runtime responsive and Tk-safe | Yes | Network work is off the Tk path; status reads are non-blocking; socket/worker shutdown is bounded and harness-tested. |
+| Integrate prefs/UI hooks | Yes | `plugin_prefs`, `prefs_changed`, `myNotebook`, locale parsing, and frame-return behavior pass focused persistence/harness tests. |
+| Package dependencies and debug HTTP responsibly | Yes | Isolated-environment full/install tests pass, runtime dependencies remain declared/vendored by scope, and debug sender routing is tested. |
+
+### Exact validation evidence
+
+- `overlay_client/.venv/bin/python -m pytest tests/test_check_edmc_python.py -q`: 9 passed.
+- Compliance-focused pytest slice: 51 passed.
+- `overlay_client/.venv/bin/python -m pytest -m harness -q` with localhost permission: 43 passed,
+  6 skipped, 1,529 deselected.
+- `QT_QPA_PLATFORM=offscreen make check PYTHON=overlay_client/.venv/bin/python`: Ruff passed,
+  mypy passed 92 source files, and 1,595 tests passed.
+- `QT_QPA_PLATFORM=offscreen make test PYTHON=overlay_client/.venv/bin/python`: 1,595 passed.
+- Explicit full Ruff, mypy, compileall, runner help, and `git diff --check`: passed.
+- Direct checker without override: expected failure on local Python 3.12.3/64-bit. Direct checker
+  with `ALLOW_EDMC_PYTHON_MISMATCH=1`: explicit development warning and exit 0.

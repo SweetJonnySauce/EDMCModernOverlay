@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional, Tuple
+from typing import TYPE_CHECKING, Optional, Tuple, cast
 
 from PyQt6.QtCore import Qt, QRect
 from PyQt6.QtWidgets import QWidget
+
+if TYPE_CHECKING:
+    from overlay_client.overlay_state import OverlayWindowState
 
 _CLIENT_LOGGER = logging.getLogger("EDMC.ModernOverlay.Client")
 
@@ -14,11 +17,12 @@ class InteractionSurfaceMixin:
     """Handles interaction/event overrides for the overlay window."""
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
+        overlay_state = cast("OverlayWindowState", self)
         QWidget.resizeEvent(self, event)
         self._invalidate_grid_cache()
         size = event.size()
-        if self._enforcing_follow_size:
-            self._enforcing_follow_size = False
+        if overlay_state._enforcing_follow_size:
+            overlay_state._enforcing_follow_size = False
             self._update_auto_legacy_scale(max(size.width(), 1), max(size.height(), 1))
             return
         expected_size: Optional[Tuple[int, int]] = None
@@ -37,6 +41,7 @@ class InteractionSurfaceMixin:
         self._publish_metrics()
 
     def mousePressEvent(self, event) -> None:  # type: ignore[override]
+        overlay_state = cast("OverlayWindowState", self)
         if (
             event.button() == Qt.MouseButton.LeftButton
             and self._drag_enabled
@@ -46,9 +51,9 @@ class InteractionSurfaceMixin:
             self._follow_controller.set_drag_state(self._drag_active, self._move_mode)
             self._suspend_follow(1.0)
             self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            if not self._cursor_saved:
-                self._saved_cursor = self.cursor()
-                self._cursor_saved = True
+            if not overlay_state._cursor_saved:
+                overlay_state._saved_cursor = self.cursor()
+                overlay_state._cursor_saved = True
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             _CLIENT_LOGGER.debug(
                 "Drag initiated at pos=%s offset=%s (from %s) move_mode=%s",
@@ -70,14 +75,15 @@ class InteractionSurfaceMixin:
         QWidget.mouseMoveEvent(self, event)
 
     def mouseReleaseEvent(self, event) -> None:  # type: ignore[override]
+        overlay_state = cast("OverlayWindowState", self)
         if self._drag_active and event.button() == Qt.MouseButton.LeftButton:
             self._drag_active = False
             self._follow_controller.set_drag_state(self._drag_active, self._move_mode)
             self._suspend_follow(0.5)
             self.raise_()
-            if self._cursor_saved:
-                self.setCursor(self._saved_cursor)
-                self._cursor_saved = False
+            if overlay_state._cursor_saved:
+                self.setCursor(overlay_state._saved_cursor)
+                overlay_state._cursor_saved = False
             self._apply_drag_state()
             _CLIENT_LOGGER.debug("Drag finished; overlay frame=%s", self.frameGeometry())
             event.accept()
@@ -85,10 +91,11 @@ class InteractionSurfaceMixin:
         QWidget.mouseReleaseEvent(self, event)
 
     def moveEvent(self, event) -> None:  # type: ignore[override]
+        overlay_state = cast("OverlayWindowState", self)
         QWidget.moveEvent(self, event)
         frame = self.frameGeometry()
         current = (frame.x(), frame.y())
-        if current != self._last_move_log:
+        if current != overlay_state._last_move_log:
             screen_desc = self._describe_screen(self.windowHandle().screen() if self.windowHandle() else None)
             _CLIENT_LOGGER.debug(
                 "Overlay moveEvent: pos=(%d,%d) frame=%s last_set=%s monitor=%s; %s",
@@ -110,4 +117,4 @@ class InteractionSurfaceMixin:
                     reason="moveEvent delta",
                     classification="wm_intervention",
                 )
-            self._last_move_log = current
+            overlay_state._last_move_log = current

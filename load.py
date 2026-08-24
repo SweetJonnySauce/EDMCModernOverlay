@@ -202,8 +202,6 @@ PLUGIN_VERSION = MODERN_OVERLAY_VERSION
 DEV_BUILD = is_dev_build(MODERN_OVERLAY_VERSION)
 LOGGER_NAME = PLUGIN_NAME
 LOG_TAG = PLUGIN_NAME
-GNOME_SHELL_RASTER_BRIDGE_ENV = "EDMC_OVERLAY_GNOME_SHELL_RASTER_BRIDGE"
-GNOME_SHELL_RASTER_BACKEND_VALUE = "gnome_shell_raster"
 
 DEFAULT_WINDOW_BASE_WIDTH = 1280
 DEFAULT_WINDOW_BASE_HEIGHT = 960
@@ -252,69 +250,6 @@ def _coerce_float(value: Any) -> Optional[float]:
         return float(value)
     except (TypeError, ValueError):
         return None
-
-
-def _env_flag(name: str) -> Optional[bool]:
-    """Parse a boolean environment flag, returning None when unset/invalid."""
-    value = os.environ.get(name)
-    if value is None:
-        return None
-    token = value.strip().lower()
-    if token in {"1", "true", "yes", "on"}:
-        return True
-    if token in {"0", "false", "no", "off"}:
-        return False
-    return None
-
-
-def _clear_shell_raster_frame_via_backend() -> bool:
-    if __package__:
-        from .overlay_client.backend.bundles._gnome_shell_helper_presentation import (
-            clear_gnome_shell_raster_frame_via_gdbus,
-        )
-    else:  # pragma: no cover - EDMC loads as top-level module
-        from overlay_client.backend.bundles._gnome_shell_helper_presentation import (
-            clear_gnome_shell_raster_frame_via_gdbus,
-        )
-
-    return bool(clear_gnome_shell_raster_frame_via_gdbus())
-
-
-def _shell_raster_cleanup_enabled(preferences: Any = None) -> bool:
-    if _env_flag(GNOME_SHELL_RASTER_BRIDGE_ENV) is True:
-        return True
-    subject = preferences if preferences is not None else _preferences
-    manual_backend_override = _normalise_manual_backend_override(
-        getattr(subject, "manual_backend_override", "") if subject is not None else "",
-        "",
-    )
-    return manual_backend_override == GNOME_SHELL_RASTER_BACKEND_VALUE
-
-
-def _clear_shell_raster_frame_on_stop() -> bool:
-    if not _shell_raster_cleanup_enabled():
-        return False
-    try:
-        cleared = _clear_shell_raster_frame_via_backend()
-    except Exception as exc:
-        LOGGER.debug("Failed to clear GNOME Shell raster frame on plugin stop: %s", exc, exc_info=exc)
-        return False
-    if cleared:
-        LOGGER.debug("Cleared GNOME Shell raster frame on plugin stop")
-    return cleared
-
-
-def _clear_shell_raster_frame_on_startup() -> bool:
-    if not _shell_raster_cleanup_enabled():
-        return False
-    try:
-        cleared = _clear_shell_raster_frame_via_backend()
-    except Exception as exc:
-        LOGGER.debug("Failed to clear GNOME Shell raster frame on plugin startup: %s", exc, exc_info=exc)
-        return False
-    if cleared:
-        LOGGER.debug("Cleared GNOME Shell raster frame on plugin startup")
-    return cleared
 
 
 def _load_edmc_config_module() -> Optional[Any]:
@@ -514,7 +449,6 @@ PAYLOAD_LOG_FILE_NAME = "overlay-payloads.log"
 PAYLOAD_LOG_DIR_NAME = PLUGIN_NAME
 PAYLOAD_LOG_MAX_BYTES = 512 * 1024
 CONNECTION_LOG_INTERVAL_SECONDS = 5.0
-CLIENT_RUNTIME_STATUS_TIMEOUT_SECONDS = 1.0
 CLIENT_RUNTIME_STATUS_FRESH_SECONDS = 5.0
 CLIENT_RUNTIME_STATUS_REQUEST_INTERVAL_SECONDS = 2.0
 CLIENT_PRESSURE_SNAPSHOT_TIMEOUT_SECONDS = 1.0
@@ -589,6 +523,7 @@ class _PluginRuntime:
             log_debug=_log_debug,
             connection_log_interval=CONNECTION_LOG_INTERVAL_SECONDS,
             ingest_callback=self._handle_cli_payload,
+            deferred_ingest_commands=frozenset({"pressure_snapshot"}),
         )
         self.watchdog: Optional[OverlayWatchdog] = None
         self._legacy_tcp_server: Optional[LegacyOverlayTCPServer] = None
@@ -619,8 +554,9 @@ class _PluginRuntime:
         self._client_backend_status_cache: Optional[Dict[str, Any]] = None
         self._client_backend_status_cached_at: float = 0.0
         self._client_backend_status_last_request_at: float = 0.0
-        self._pending_client_backend_status_requests: Dict[str, Dict[str, Any]] = {}
+        self._client_backend_status_lock = threading.Lock()
         self._pending_client_pressure_snapshot_requests: Dict[str, Dict[str, Any]] = {}
+        self._pressure_snapshot_requests_lock = threading.Lock()
         self._pressure_snapshot_timeout_seconds = CLIENT_PRESSURE_SNAPSHOT_TIMEOUT_SECONDS
         self._payload_logger = logging.getLogger(PAYLOAD_LOGGER_NAME)
         self._payload_logger.setLevel(logging.DEBUG)
@@ -728,7 +664,6 @@ class _PluginRuntime:
         if not self._running:
             return PLUGIN_NAME
 
-        _clear_shell_raster_frame_on_startup()
         self._start_prefs_worker()
         self._start_keep_overlay_visible_monitor_if_needed()
         self._start_version_status_check()
@@ -743,16 +678,16 @@ class _PluginRuntime:
     def stop(self) -> None:
         with self._lock:
             if not self._running:
+                self._cancel_pending_client_pressure_snapshot_requests()
                 self._hotkeys.stop()
                 self._stop_prefs_worker()
-                _clear_shell_raster_frame_on_stop()
                 return
             self._running = False
+        self._cancel_pending_client_pressure_snapshot_requests()
         self._hotkeys.stop()
         unregister_publisher()
         unregister_grouping_store()
         _log("Plugin stopping")
-        _clear_shell_raster_frame_on_stop()
         self._cancel_config_timers()
         self._cancel_version_notice_timers()
         self._stop_legacy_tcp_server()
@@ -880,32 +815,29 @@ class _PluginRuntime:
         return payload
 
     def _fresh_client_backend_status(self, *, max_age: float) -> Optional[Dict[str, Any]]:
-        cached = self._client_backend_status_cache
-        if cached is None:
-            return None
-        if time.monotonic() - self._client_backend_status_cached_at > max_age:
-            return None
-        return dict(cached)
+        with self._client_backend_status_lock:
+            cached = self._client_backend_status_cache
+            if cached is None:
+                return None
+            if time.monotonic() - self._client_backend_status_cached_at > max_age:
+                return None
+            return dict(cached)
 
-    def _record_client_backend_status(self, request_id: str, status: Mapping[str, Any]) -> None:
+    def _record_client_backend_status(self, _request_id: str, status: Mapping[str, Any]) -> None:
         payload = self._coerce_client_backend_status_payload(status)
         if payload is None:
             return
-        self._client_backend_status_cache = dict(payload)
-        self._client_backend_status_cached_at = time.monotonic()
-        pending = self._pending_client_backend_status_requests.get(request_id)
-        if pending is None:
-            return
-        pending["response"] = dict(payload)
-        event = pending.get("event")
-        if isinstance(event, threading.Event):
-            event.set()
+        with self._client_backend_status_lock:
+            self._client_backend_status_cache = dict(payload)
+            self._client_backend_status_cached_at = time.monotonic()
 
-    def _request_client_backend_status(self, *, timeout: float) -> Optional[Dict[str, Any]]:
+    def _queue_client_backend_status_refresh(self) -> bool:
+        now = time.monotonic()
+        with self._client_backend_status_lock:
+            if now - self._client_backend_status_last_request_at < CLIENT_RUNTIME_STATUS_REQUEST_INTERVAL_SECONDS:
+                return False
+            self._client_backend_status_last_request_at = now
         request_id = uuid.uuid4().hex
-        pending: Dict[str, Any] = {"event": threading.Event(), "response": None}
-        self._pending_client_backend_status_requests[request_id] = pending
-        self._client_backend_status_last_request_at = time.monotonic()
         try:
             self.broadcaster.publish(
                 {
@@ -916,34 +848,31 @@ class _PluginRuntime:
             )
         except Exception as exc:
             LOGGER.debug("Failed to publish backend status request to client: %s", exc)
-            self._pending_client_backend_status_requests.pop(request_id, None)
-            return None
-        event = pending["event"]
-        if isinstance(event, threading.Event):
-            event.wait(timeout)
-        response = pending.get("response")
-        self._pending_client_backend_status_requests.pop(request_id, None)
-        if isinstance(response, Mapping):
-            return dict(response)
-        return None
+            return False
+        return True
 
     def _record_client_pressure_snapshot(self, request_id: str, snapshot: Mapping[str, Any]) -> None:
         try:
             normalized = parse_work_snapshot(snapshot)
         except PressureAbValidationError as exc:
             raise ValueError(f"invalid pressure snapshot: {exc}") from exc
-        pending = self._pending_client_pressure_snapshot_requests.get(request_id)
-        if pending is None:
-            return
-        pending["response"] = normalized
-        event = pending.get("event")
+        with self._pressure_snapshot_requests_lock:
+            pending = self._pending_client_pressure_snapshot_requests.get(request_id)
+            if pending is None:
+                return
+            pending["response"] = normalized
+            event = pending.get("event")
         if isinstance(event, threading.Event):
             event.set()
 
     def _request_client_pressure_snapshot(self, *, timeout: float) -> Optional[Dict[str, Any]]:
         request_id = uuid.uuid4().hex
         pending: Dict[str, Any] = {"event": threading.Event(), "response": None}
-        self._pending_client_pressure_snapshot_requests[request_id] = pending
+        with self._lock:
+            if not self._running:
+                return None
+            with self._pressure_snapshot_requests_lock:
+                self._pending_client_pressure_snapshot_requests[request_id] = pending
         try:
             self.broadcaster.publish(
                 {
@@ -955,10 +884,21 @@ class _PluginRuntime:
             event = pending["event"]
             if isinstance(event, threading.Event):
                 event.wait(max(0.0, float(timeout)))
-            response = pending.get("response")
+            with self._pressure_snapshot_requests_lock:
+                response = pending.get("response")
             return dict(response) if isinstance(response, Mapping) else None
         finally:
-            self._pending_client_pressure_snapshot_requests.pop(request_id, None)
+            with self._pressure_snapshot_requests_lock:
+                self._pending_client_pressure_snapshot_requests.pop(request_id, None)
+
+    def _cancel_pending_client_pressure_snapshot_requests(self) -> None:
+        with self._pressure_snapshot_requests_lock:
+            pending_requests = tuple(self._pending_client_pressure_snapshot_requests.values())
+            self._pending_client_pressure_snapshot_requests.clear()
+        for pending in pending_requests:
+            event = pending.get("event")
+            if isinstance(event, threading.Event):
+                event.set()
 
     def get_backend_status(self) -> Dict[str, Any]:
         fresh_runtime_status = self._fresh_client_backend_status(max_age=CLIENT_RUNTIME_STATUS_REQUEST_INTERVAL_SECONDS)
@@ -970,19 +910,7 @@ class _PluginRuntime:
                 "report": dict(report) if isinstance(report, Mapping) else build_status_report(fresh_runtime_status),
             }
 
-        should_request_runtime = (
-            time.monotonic() - self._client_backend_status_last_request_at
-            >= CLIENT_RUNTIME_STATUS_REQUEST_INTERVAL_SECONDS
-        )
-        if should_request_runtime:
-            runtime_status = self._request_client_backend_status(timeout=CLIENT_RUNTIME_STATUS_TIMEOUT_SECONDS)
-            if runtime_status is not None:
-                report = runtime_status.get("report")
-                return {
-                    "status": "ok",
-                    "backend_status": dict(runtime_status),
-                    "report": dict(report) if isinstance(report, Mapping) else build_status_report(runtime_status),
-                }
+        self._queue_client_backend_status_refresh()
 
         cached_runtime_status = self._fresh_client_backend_status(max_age=CLIENT_RUNTIME_STATUS_FRESH_SECONDS)
         if cached_runtime_status is not None:

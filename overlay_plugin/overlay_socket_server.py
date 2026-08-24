@@ -6,11 +6,12 @@ import json
 import queue
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional, Set, Tuple
+from typing import Any, Callable, Dict, FrozenSet, Optional, Set, Tuple
 
 
 LogFunc = Callable[[str], None]
 IngestFunc = Callable[[Dict[str, Any]], Optional[Dict[str, Any]]]
+CLIENT_CLOSE_TIMEOUT_SECONDS = 0.25
 
 
 @dataclass
@@ -21,9 +22,11 @@ class SocketBroadcaster:
     port: int = 0
     log: LogFunc = lambda _msg: None  # noqa: E731 - simple default noop logger
     ingest_callback: Optional[IngestFunc] = None
+    deferred_ingest_commands: FrozenSet[str] = frozenset()
     log_debug: Optional[LogFunc] = None
     connection_log_interval: float = 0.0
     _loop: Optional[asyncio.AbstractEventLoop] = field(default=None, init=False)
+    _main_task: Optional[asyncio.Task[None]] = field(default=None, init=False)
     _thread: Optional[threading.Thread] = field(default=None, init=False)
     _stop_event: threading.Event = field(default_factory=threading.Event, init=False)
     _ready_event: threading.Event = field(default_factory=threading.Event, init=False)
@@ -67,7 +70,7 @@ class SocketBroadcaster:
         except queue.Full:
             pass
         if self._loop and self._loop.is_running():
-            self._loop.call_soon_threadsafe(lambda: None)
+            self._loop.call_soon_threadsafe(self._cancel_main_task)
         if self._thread:
             worker = self._thread
             worker.join(timeout=5.0)
@@ -77,6 +80,7 @@ class SocketBroadcaster:
                 if worker.is_alive():
                     self.log("Broadcast server thread failed to terminate cleanly; abandoning join")
         self._loop = None
+        self._main_task = None
         self._thread = None
         self._clients.clear()
 
@@ -101,7 +105,10 @@ class SocketBroadcaster:
         self._loop = loop
         asyncio.set_event_loop(loop)
         try:
-            loop.run_until_complete(self._server_main())
+            self._main_task = loop.create_task(self._server_main())
+            loop.run_until_complete(self._main_task)
+        except asyncio.CancelledError:
+            pass
         except Exception as exc:  # pragma: no cover - defensive
             self._start_error = exc
             self.log(f"Broadcast server loop terminated with error: {exc}")
@@ -124,25 +131,34 @@ class SocketBroadcaster:
         self.log(f"Broadcast server listening on {self.host}:{self.port}")
         self._ready_event.set()
 
-        async with server:
-            while not self._stop_event.is_set():
-                try:
-                    message = await self._loop.run_in_executor(None, self._queue.get)
-                except Exception:  # pragma: no cover - defensive
-                    await asyncio.sleep(0.1)
-                    continue
-                if message is None:
-                    continue
-                await self._broadcast(message)
-
-        for _reader, writer in list(self._clients):
-            try:
+        try:
+            async with server:
+                while not self._stop_event.is_set():
+                    try:
+                        message = await self._loop.run_in_executor(None, self._queue.get)
+                    except Exception:  # pragma: no cover - defensive
+                        await asyncio.sleep(0.1)
+                        continue
+                    if message is None:
+                        continue
+                    await self._broadcast(message)
+        finally:
+            clients = list(self._clients)
+            for _reader, writer in clients:
                 writer.close()
-                await writer.wait_closed()
-            except Exception:
-                pass
-        self._clients.clear()
-        self._cancel_connection_log_timer()
+            await asyncio.gather(
+                *(self._wait_writer_closed(writer) for _reader, writer in clients),
+                return_exceptions=True,
+            )
+            self._clients.clear()
+            self._cancel_connection_log_timer()
+
+    def _cancel_main_task(self) -> None:
+        for _reader, writer in list(self._clients):
+            writer.close()
+        task = self._main_task
+        if task is not None and not task.done():
+            task.cancel()
 
     async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         peer = writer.get_extra_info("peername")
@@ -164,7 +180,12 @@ class SocketBroadcaster:
                     continue
                 response: Optional[Dict[str, Any]] = None
                 try:
-                    response = self.ingest_callback(message)
+                    command = message.get("cli") if isinstance(message, dict) else None
+                    if command in self.deferred_ingest_commands:
+                        loop = asyncio.get_running_loop()
+                        response = await loop.run_in_executor(None, self.ingest_callback, message)
+                    else:
+                        response = self.ingest_callback(message)
                 except Exception as exc:
                     meta = message.get("meta", {}) if isinstance(message, dict) else {}
                     self.log(
@@ -185,11 +206,8 @@ class SocketBroadcaster:
             pass
         finally:
             self._clients.discard((reader, writer))
-            try:
-                writer.close()
-                await writer.wait_closed()
-            except Exception:
-                pass
+            writer.close()
+            await self._wait_writer_closed(writer)
         self._queue_connection_log("disconnected", peer)
 
     async def _broadcast(self, message: str) -> None:
@@ -207,11 +225,15 @@ class SocketBroadcaster:
         for reader_writer in stale:
             self._clients.discard(reader_writer)
             _reader, writer = reader_writer
-            try:
-                writer.close()
-                await writer.wait_closed()
-            except Exception:
-                pass
+            writer.close()
+            await self._wait_writer_closed(writer)
+
+    @staticmethod
+    async def _wait_writer_closed(writer: asyncio.StreamWriter) -> None:
+        try:
+            await asyncio.wait_for(writer.wait_closed(), timeout=CLIENT_CLOSE_TIMEOUT_SECONDS)
+        except Exception:
+            pass
 
     def _queue_connection_log(self, action: str, peer: Any) -> None:
         log_fn = self.log_debug or self.log
