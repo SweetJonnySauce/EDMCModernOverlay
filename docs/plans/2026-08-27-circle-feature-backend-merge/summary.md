@@ -15,6 +15,10 @@ explicit exclusion and must be restored after the merge begins.
 - `research/merge-assessment.md` — branch/divergence/conflict evidence.
 - `design/detailed-design.md` — standalone integration design.
 - `implementation/plan.md` — staged execution and validation plan.
+- `implementation/orchestration-prompt.md` — Codex CLI goal prompt with
+  isolated code-task-generator and code-assist contexts.
+- `implementation/execution-status.md` — restart-safe execution dashboard and
+  context-window record.
 - `progress.md` — live execution tracker.
 
 ## Next Step

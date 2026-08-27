@@ -32,3 +32,13 @@ The merge has been assessed but not started. The target branch is
 Record the exact command and outcome for each merge, diff, test, and manual
 overlay step below this section. Do not mark a phase complete until its stages
 and required tests are complete.
+
+### Documentation isolation
+
+- `git status --short` confirmed that the only uncommitted paths were
+  `docs/plans/2026-08-27-circle-feature-backend-merge/summary.md`, the
+  execution dashboard, and the orchestration prompt. These plan artifacts are
+  being committed separately before the merge begins.
+- `git add ...` was blocked before staging: Git could not create
+  `.git/index.lock` because the repository's Git metadata is read-only in this
+  execution environment. No files were staged or committed.
