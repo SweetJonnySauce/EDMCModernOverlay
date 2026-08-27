@@ -198,8 +198,19 @@ def _work_area_offset_presentation_payload(request: HelperPresentationRequest) -
     )
 
 
-def test_presentation_cycle_retries_once_when_applied_rect_readback_lags() -> None:
+def test_presentation_cycle_retries_once_when_applied_rect_readback_lags_despite_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(GNOME_HELPER_PRESENTATION_DIAGNOSTICS_ENV, "1")
     calls: list[HelperPresentationRequest] = []
+    diagnostics = {
+        "schema": 1,
+        "requestedRect": {"x": 1080, "y": 253, "width": 1280, "height": 960},
+        "target": {"monitor": 0},
+        "placement": {"moveResizeAction": "move_to_monitor_then_resize"},
+        "before": {"monitor": 1},
+        "after": {"monitor": 0},
+    }
 
     def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
         calls.append(request)
@@ -207,8 +218,9 @@ def test_presentation_cycle_retries_once_when_applied_rect_readback_lags() -> No
             return _presentation_payload(
                 request,
                 applied_rect={"x": 0, "y": 29, "width": 1280, "height": 960},
+                presentation_diagnostics=diagnostics,
             )
-        return _presentation_payload(request)
+        return _presentation_payload(request, presentation_diagnostics=diagnostics)
 
     result = run_gnome_shell_helper_presentation_cycle(
         fetch_health=_health_payload,
@@ -224,6 +236,8 @@ def test_presentation_cycle_retries_once_when_applied_rect_readback_lags() -> No
     assert result.presentation_status.rect_match is True
     assert result.presentation_ready is True
     assert len(calls) == 2
+    assert all(call.include_presentation_diagnostics for call in calls)
+    assert result.presentation_status.presentation_diagnostics == diagnostics
 
 
 def test_presentation_cycle_tracks_persistent_wrong_monitor_mismatch_and_backs_off() -> None:

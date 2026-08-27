@@ -2,7 +2,7 @@
 
 ## Checklist
 
-- [ ] Step 1: Add guarded monitor transfer to normal GNOME presentation (validated; local commit blocked).
+- [x] Step 1: Add guarded monitor transfer to normal GNOME presentation.
 - [ ] Step 2: Prove the native-helper readback and backend boundary contracts.
 - [ ] Step 3: Deploy the helper update and validate live GNOME Wayland handoff.
 
@@ -10,8 +10,8 @@
 
 | Phase | Description | Status |
 | --- | --- | --- |
-| 1 | Helper normal-path correction | Blocked pending required local commit |
-| 2 | Contract validation and observability | Pending |
+| 1 | Helper normal-path correction | Completed |
+| 2 | Contract validation and observability | Blocked on required local commit |
 | 3 | Live GNOME Wayland delivery | Pending |
 
 ### Phase 1: Helper normal-path correction
@@ -21,15 +21,16 @@
 | 1.1 | Add source-contract coverage for monitor mismatch, match, invalid state, and failure fallback | Completed |
 | 1.2 | Implement conditional `move_to_monitor` before the existing frame-resize operation | Completed |
 | 1.3 | Run focused helper tests and inspect the staged helper-only scope | Completed |
-| 1.4 | Create the required conventional local commit after validation | Blocked: Git metadata is read-only in the sandbox. |
+| 1.4 | Create the required conventional local commit after validation | Completed in `fa94da3c76a4136fe7f034e45fa2fbc9a7c0d9cd`. |
 
 ### Phase 2: Contract validation and observability
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 2.1 | Preserve and prove applied-rectangle mismatch/retry/backoff behavior | Pending |
-| 2.2 | Make the normal-path transfer decision diagnosable without changing the helper protocol | Pending |
-| 2.3 | Verify the architecture boundary and run the required automated gates | Pending |
+| 2.1 | Preserve and prove applied-rectangle mismatch/retry/backoff behavior | Completed |
+| 2.2 | Make the normal-path transfer decision diagnosable without changing the helper protocol | Completed |
+| 2.3 | Verify the architecture boundary and run the required automated gates | Completed with retained remediation-01 logs; root `make check` remains environment-limited |
+| 2.4 | Create the required conventional local commit after validation | Blocked: sandbox Git metadata is read-only |
 
 ### Phase 3: Live GNOME Wayland delivery
 

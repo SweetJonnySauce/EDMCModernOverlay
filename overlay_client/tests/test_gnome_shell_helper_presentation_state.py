@@ -350,6 +350,43 @@ def test_validate_presentation_accepts_applied_rect_within_tolerance() -> None:
     assert status.true_overlay_ready is True
 
 
+def test_validate_presentation_keeps_normal_path_diagnostics_observational() -> None:
+    target = _target_status()
+    default_request = build_gnome_shell_helper_presentation_request(target)
+    request = build_gnome_shell_helper_presentation_request(
+        target,
+        include_presentation_diagnostics=True,
+    )
+    diagnostics = {
+        "schema": 1,
+        "requestedRect": {"x": 1080, "y": 253, "width": 1280, "height": 960},
+        "target": {"monitor": 0},
+        "placement": {"moveResizeAction": "move_to_monitor_then_resize"},
+        "before": {"monitor": 1},
+        "after": {"monitor": 0},
+    }
+
+    status = validate_gnome_shell_helper_presentation_payload(
+        _presentation_payload(
+            applied_rect={"x": 3440, "y": 253, "width": 1280, "height": 960},
+            presentation_diagnostics=diagnostics,
+        ),
+        health_status=_health_status(),
+        target_status=target,
+        request=request,
+        observed_at_monotonic=210.0,
+        now_monotonic=210.0,
+    )
+
+    assert "include_presentation_diagnostics" not in default_request.to_payload()
+    assert request.to_payload()["include_presentation_diagnostics"] is True
+    assert status.presentation_diagnostics == diagnostics
+    assert status.rect_match is False
+    assert status.state is HelperPresentationState.DEGRADED
+    assert status.true_overlay_ready is False
+    assert "applied_rect_mismatch" in status.degrade_reasons
+
+
 def test_validate_presentation_accepts_shell_raster_renderer_when_requested() -> None:
     target = _target_status(
         target=_target_window(

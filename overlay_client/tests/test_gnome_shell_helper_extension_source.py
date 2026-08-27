@@ -244,6 +244,29 @@ def test_extension_gates_apply_presentation_diagnostics_behind_request_flag() ->
     assert "presentation_diagnostics" in source
 
 
+def test_extension_normal_path_diagnostics_retain_guarded_transfer_evidence() -> None:
+    source = _source()
+
+    assert "const presentationDiagnostics = (options.includePresentationDiagnostics || strategyProbeDiagnostics)" in source
+    assert "schema: 1," in source
+    assert "requestedRect," in source
+    assert "appliedRect: result.appliedRect," in source
+    assert "monitor: targetPayload?.monitor ?? null," in source
+    for action in (
+        "move_to_monitor_then_resize",
+        "skipped_matching_frame",
+        "move_to_monitor_unavailable_then_resize",
+        "move_to_monitor_error_then_resize",
+    ):
+        assert f"moveResizeAction = '{action}';" in source
+    assert "placement: {\n                moveResizeAction," in source
+    assert "before: {\n                frameRect: preFrameRect," in source
+    assert "monitor: preMonitor ?? null," in source
+    assert "after: {\n                frameRect: postFrameRect," in source
+    assert "monitor: postMonitor ?? null," in source
+    assert "if (presentationDiagnostics) {\n            payload.presentation_diagnostics = presentationDiagnostics;" in source
+
+
 def test_extension_degrades_apply_presentation_when_readback_mismatches_requested_rect() -> None:
     source = _source()
 
