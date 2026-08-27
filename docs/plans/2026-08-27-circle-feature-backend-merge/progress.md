@@ -2,7 +2,7 @@
 
 ## Current State
 
-The merge has been assessed but not started. The target branch is
+Phase 1 preflight is complete; no merge has started. The target branch is
 `backend-refactor-implementation`; the source is
 `feature/circle-shape-pyqt-rendering`.
 
@@ -15,12 +15,15 @@ The merge has been assessed but not started. The target branch is
 | Merge base | `8e375cc`. |
 | Dry-run merge | Two textual conflicts: render surface and render-surface tests. |
 | Managed configuration | Preserve target `overlay_groupings.json`; do not stage source change. |
+| Phase 1 target tip | Verified local target `6d308e6df0107f440b601bfb571341e0286c1b80`; `origin/backend-refactor-implementation` remains `9856ff9fa066bf973f9f8b94b4454afbb006c60c`. |
+| Phase 1 backup | `refs/backup/circle-feature-backend-merge/backend-refactor-implementation-20260827T163928Z` resolves to `6d308e6df0107f440b601bfb571341e0286c1b80`. |
 
 ## Execution Checklist
 
 - [x] Assess branch divergence and three-way merge conflicts.
 - [x] Decide grouping-configuration treatment.
 - [x] Record architecture, conflict, and validation strategy.
+- [x] Freeze and verify the target branch, including a local backup ref.
 - [ ] Start the non-committing merge.
 - [ ] Resolve and stage source/test conflicts.
 - [ ] Run validation gates.
@@ -82,3 +85,41 @@ and required tests are complete.
   `https://github.com/SweetJonnySauce/EDMCModernOverlay.git`.
 - This confirms the external DNS blocker remains; it did not modify refs,
   start a merge, or change the managed grouping configuration.
+
+### Phase 1 / Stage 1.1–1.4 — final fresh remediation context
+
+- The user subsequently ran `git fetch origin` successfully in their host
+  terminal and reported zero output. The sandbox did not rerun `git fetch`,
+  `git ls-remote`, or any other network command.
+- Local verification commands were: `git branch --show-current`; `git status
+  --short`; `git diff --cached --name-only`; `git rev-parse -q --verify
+  MERGE_HEAD`; `git rev-parse HEAD`; `git rev-parse
+  refs/remotes/origin/backend-refactor-implementation`; `git rev-parse
+  refs/remotes/origin/feature/circle-shape-pyqt-rendering`; `git rev-parse
+  feature/circle-shape-pyqt-rendering`; `git merge-base
+  backend-refactor-implementation feature/circle-shape-pyqt-rendering`; and
+  `git reflog show --date=iso-strict -n 3` for both origin refs.
+- Results: target branch `backend-refactor-implementation`; no pre-documentation
+  worktree or staged paths; `MERGE_HEAD` absent; target
+  `6d308e6df0107f440b601bfb571341e0286c1b80`; origin target
+  `9856ff9fa066bf973f9f8b94b4454afbb006c60c`; source and origin source
+  `0d789cbbea77dac500eb7b249d71df67c1dbde9c`; merge base
+  `8e375cce40acc0d9400bde43d6aa01070929adb4`. The origin reflogs show those
+  current refs; source/base still match the assessment.
+- `git log --oneline 9856ff9..HEAD` and `git diff --name-only 9856ff9..HEAD`
+  showed only the explainable target-only merge-tracking documentation commits
+  (`932ec52`, `bf0dd0b`, and `6d308e6`). Both merge-base ancestry checks
+  succeeded.
+- With guards satisfied and no existing backup ref, `git update-ref
+  refs/backup/circle-feature-backend-merge/backend-refactor-implementation-20260827T163928Z
+  6d308e6df0107f440b601bfb571341e0286c1b80` created the one required backup;
+  `git rev-parse` and `git for-each-ref` verified that it resolves exactly to
+  the target SHA.
+- `git diff --exit-code -- overlay_groupings.json` and `git diff --cached
+  --exit-code -- overlay_groupings.json` both succeeded. No merge, staging, or
+  grouping-configuration modification occurred.
+- Test selection: no unit or harness tests were added or run, because this task
+  changes no executable behavior and only creates a Git ref plus tracking
+  documentation. Residual risk: source/target topology can change after this
+  preflight; the main orchestrator must repeat the non-network Step 2 guard
+  before starting the merge.

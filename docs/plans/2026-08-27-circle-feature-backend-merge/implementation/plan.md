@@ -2,7 +2,7 @@
 
 ## Checklist
 
-- [ ] Step 1: Freeze and verify the target branch.
+- [x] Step 1: Freeze and verify the target branch.
 - [ ] Step 2: Create a non-committing merge and preserve managed configuration.
 - [ ] Step 3: Resolve renderer and test conflicts against the backend baseline.
 - [ ] Step 4: Review auto-merged runtime behavior and run automated gates.
@@ -12,7 +12,7 @@
 
 | Phase | Description | Status |
 | --- | --- | --- |
-| 1 | Preflight and scope confirmation | Blocked: remote fetch unavailable |
+| 1 | Preflight and scope confirmation | Completed |
 | 2 | Non-committing merge and configuration preservation | Ready |
 | 3 | Conflict resolution and runtime review | Ready |
 | 4 | Automated and manual validation | Ready |
@@ -22,10 +22,30 @@
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 1.1 | Fetch remote refs and verify a clean target worktree | Blocked: both permitted fetch attempts failed DNS resolution |
-| 1.2 | Create a local backup ref for the target tip | Blocked pending a successful fetch |
-| 1.3 | Confirm source branch, merge base, and intended scope | Completed |
+| 1.1 | Fetch remote refs and verify a clean target worktree | Completed: user confirmed successful host-terminal `git fetch origin`; local post-fetch guards were clean/no-merge. |
+| 1.2 | Create a local backup ref for the target tip | Completed: `refs/backup/circle-feature-backend-merge/backend-refactor-implementation-20260827T163928Z` resolves to `6d308e6df0107f440b601bfb571341e0286c1b80`. |
+| 1.3 | Confirm source branch, merge base, and intended scope | Completed: source remains `0d789cbbea77dac500eb7b249d71df67c1dbde9c`; base remains `8e375cce40acc0d9400bde43d6aa01070929adb4`; target-only advances are documented tracking commits. |
 | 1.4 | Record preservation of target `overlay_groupings.json` | Completed |
+
+#### Phase 1 verification evidence
+
+- The user ran `git fetch origin` successfully in the host terminal (zero
+  output) after the documented sandbox DNS failures. Per the remediation scope,
+  the sandbox did not retry any network Git command.
+- Local commands confirmed `backend-refactor-implementation` at
+  `6d308e6df0107f440b601bfb571341e0286c1b80`, clean/no-staged-path state, and
+  absent `MERGE_HEAD`; `origin/backend-refactor-implementation` is
+  `9856ff9fa066bf973f9f8b94b4454afbb006c60c` and
+  `origin/feature/circle-shape-pyqt-rendering` is
+  `0d789cbbea77dac500eb7b249d71df67c1dbde9c`.
+- `git reflog show` confirmed the refreshed local origin refs; `git log` and
+  `git diff --name-only 9856ff9..HEAD` show that the target-only advance is
+  limited to merge-tracking documentation. `git merge-base` remains
+  `8e375cce40acc0d9400bde43d6aa01070929adb4`.
+- `git diff --exit-code -- overlay_groupings.json` and its cached equivalent
+  succeeded. No unit or harness tests were selected or run because this is
+  Git/documentation-only work; residual risk is limited to subsequent topology
+  changes before Step 2, which requires a new pre-merge guard check.
 
 ### Phase 2: Non-committing merge and configuration preservation
 
