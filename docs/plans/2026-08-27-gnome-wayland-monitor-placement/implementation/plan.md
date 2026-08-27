@@ -2,7 +2,7 @@
 
 ## Checklist
 
-- [ ] Step 1: Add guarded monitor transfer to normal GNOME presentation.
+- [ ] Step 1: Add guarded monitor transfer to normal GNOME presentation (validated; local commit blocked).
 - [ ] Step 2: Prove the native-helper readback and backend boundary contracts.
 - [ ] Step 3: Deploy the helper update and validate live GNOME Wayland handoff.
 
@@ -10,7 +10,7 @@
 
 | Phase | Description | Status |
 | --- | --- | --- |
-| 1 | Helper normal-path correction | Pending |
+| 1 | Helper normal-path correction | Blocked pending required local commit |
 | 2 | Contract validation and observability | Pending |
 | 3 | Live GNOME Wayland delivery | Pending |
 
@@ -18,9 +18,10 @@
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 1.1 | Add source-contract coverage for monitor mismatch, match, invalid state, and failure fallback | Pending |
-| 1.2 | Implement conditional `move_to_monitor` before the existing frame-resize operation | Pending |
-| 1.3 | Run focused helper tests and inspect the staged helper-only scope | Pending |
+| 1.1 | Add source-contract coverage for monitor mismatch, match, invalid state, and failure fallback | Completed |
+| 1.2 | Implement conditional `move_to_monitor` before the existing frame-resize operation | Completed |
+| 1.3 | Run focused helper tests and inspect the staged helper-only scope | Completed |
+| 1.4 | Create the required conventional local commit after validation | Blocked: Git metadata is read-only in the sandbox. |
 
 ### Phase 2: Contract validation and observability
 

@@ -3490,6 +3490,11 @@ class HelperHealthService {
         const currentFrameRect = this._rectPayload(this._safeCall(window, 'get_frame_rect'));
         const preBufferRect = this._rectPayload(this._safeCall(window, 'get_buffer_rect'));
         const preMonitor = this._safeCall(window, 'get_monitor');
+        const targetMonitor = this._normaliseMonitorIndex(options.targetPayload?.monitor);
+        const currentMonitor = this._normaliseMonitorIndex(preMonitor);
+        const monitorTransferRequired = targetMonitor !== null &&
+            currentMonitor !== null &&
+            currentMonitor !== targetMonitor;
         if (strategyProbe) {
             strategyProbeDiagnostics = this._applyPresentationStrategyProbe(
                 window,
@@ -3511,11 +3516,28 @@ class HelperHealthService {
                 degradeReasons.push('placement_unproven');
             }
         } else {
+            let monitorTransferAction = '';
+            if (monitorTransferRequired) {
+                if (typeof window?.move_to_monitor === 'function') {
+                    try {
+                        window.move_to_monitor(targetMonitor);
+                        monitorTransferAction = 'move_to_monitor';
+                    } catch (_error) {
+                        degradeReasons.push('monitor_transfer_error');
+                        monitorTransferAction = 'move_to_monitor_error';
+                    }
+                } else {
+                    unsupportedFeatures.push('move_to_monitor');
+                    degradeReasons.push('monitor_transfer_unavailable');
+                    monitorTransferAction = 'move_to_monitor_unavailable';
+                }
+            }
             try {
                 if (
                     currentFrameRect &&
                     this._rectIsValid(currentFrameRect) &&
-                    this._rectsMatchWithinTolerance(currentFrameRect, requestedRect, rectTolerance)
+                    this._rectsMatchWithinTolerance(currentFrameRect, requestedRect, rectTolerance) &&
+                    targetMonitor !== null && currentMonitor === targetMonitor
                 ) {
                     placement = true;
                     appliedRect = currentFrameRect;
@@ -3529,7 +3551,15 @@ class HelperHealthService {
                         requestedRect.height,
                     );
                     placement = true;
-                    moveResizeAction = 'move_resize_frame';
+                    if (monitorTransferAction === 'move_to_monitor') {
+                        moveResizeAction = 'move_to_monitor_then_resize';
+                    } else if (monitorTransferAction === 'move_to_monitor_unavailable') {
+                        moveResizeAction = 'move_to_monitor_unavailable_then_resize';
+                    } else if (monitorTransferAction === 'move_to_monitor_error') {
+                        moveResizeAction = 'move_to_monitor_error_then_resize';
+                    } else {
+                        moveResizeAction = 'move_resize_frame';
+                    }
                 } else if (typeof window?.move_frame === 'function') {
                     window.move_frame(false, requestedRect.x, requestedRect.y);
                     unsupportedFeatures.push('resize_frame');

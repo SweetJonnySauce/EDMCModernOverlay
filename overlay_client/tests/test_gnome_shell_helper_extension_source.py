@@ -158,6 +158,43 @@ def test_extension_skips_redundant_move_resize_when_frame_already_matches() -> N
     assert "window.make_above()" in source
 
 
+def test_extension_moves_valid_monitor_mismatch_before_normal_resize() -> None:
+    source = _source()
+
+    assert "const targetMonitor = this._normaliseMonitorIndex(options.targetPayload?.monitor);" in source
+    assert "const currentMonitor = this._normaliseMonitorIndex(preMonitor);" in source
+    assert "const monitorTransferRequired =" in source
+    assert "currentMonitor !== targetMonitor" in source
+    assert "if (monitorTransferRequired) {" in source
+    assert "window.move_to_monitor(targetMonitor);" in source
+    assert "moveResizeAction = 'move_to_monitor_then_resize';" in source
+    assert "window.move_resize_frame(" in source
+    assert source.index("window.move_to_monitor(targetMonitor);") < source.index("window.move_resize_frame(")
+
+
+def test_extension_requires_matching_monitor_for_matching_frame_noop() -> None:
+    source = _source()
+
+    assert "targetMonitor !== null && currentMonitor === targetMonitor" in source
+    assert "moveResizeAction = 'skipped_matching_frame';" in source
+
+
+def test_extension_keeps_resize_and_readback_fallback_for_invalid_or_failed_transfer() -> None:
+    source = _source()
+
+    assert "targetMonitor !== null" in source
+    assert "currentMonitor !== null" in source
+    assert "typeof window?.move_to_monitor === 'function'" in source
+    assert "unsupportedFeatures.push('move_to_monitor');" in source
+    assert "degradeReasons.push('monitor_transfer_unavailable');" in source
+    assert "degradeReasons.push('monitor_transfer_error');" in source
+    assert "moveResizeAction = 'move_to_monitor_unavailable_then_resize';" in source
+    assert "moveResizeAction = 'move_to_monitor_error_then_resize';" in source
+    assert "const frameRect = this._rectPayload(this._safeCall(window, 'get_frame_rect'));" in source
+    assert "const postMonitor = this._safeCall(window, 'get_monitor');" in source
+    assert "degradeReasons.push('applied_rect_mismatch');" in source
+
+
 def test_extension_honors_request_rect_tolerance_for_move_resize_noop() -> None:
     source = _source()
 
