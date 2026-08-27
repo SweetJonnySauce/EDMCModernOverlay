@@ -73,3 +73,12 @@ and required tests are complete.
 - No backup ref, merge, staging, managed-configuration change, unit test, or
   harness test was performed. The unchanged failed fetch command must not be
   run again without an external network-state change.
+
+### Post-block connectivity probe
+
+- After a user-reported possible network recovery, the read-only command
+  `git ls-remote --heads origin` was run once. It again failed with
+  `Could not resolve host: github.com` for
+  `https://github.com/SweetJonnySauce/EDMCModernOverlay.git`.
+- This confirms the external DNS blocker remains; it did not modify refs,
+  start a merge, or change the managed grouping configuration.

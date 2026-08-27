@@ -5,7 +5,7 @@
 | Step | Status | Evidence | Next action |
 | --- | --- | --- | --- |
 | 0 | Completed | Only the four merge-plan artifacts were uncommitted; they were isolated in `9d0f4fe` (`docs(plan): add circle merge orchestration`). | Commit this tracking record, then begin fresh-context Step 1 preflight. |
-| 1 | Blocked: fetch retry limit reached | Both permitted fresh-context `git fetch origin` attempts failed with `Could not resolve host: github.com`; latest local target `932ec52`, source `0d789cb`, base `8e375cc`, clean/no-merge state. | Stop until network/DNS is restored or the user provides direction; do not retry unchanged fetch. |
+| 1 | Blocked: GitHub DNS remains unavailable | Both permitted fresh-context `git fetch origin` attempts and a subsequent read-only `git ls-remote --heads origin` probe failed with `Could not resolve host: github.com`; latest local target `bf0dd0b`, source `0d789cb`, base `8e375cc`, clean/no-merge state. | Stop until network/DNS is restored or the user provides direction; do not retry unchanged fetch. |
 | 2 | Pending | Dry-run identified two textual conflicts. | Begin non-committing merge; restore managed grouping config. |
 | 3 | Pending | Known conflicts: render surface and render-surface tests. | Use isolated task contexts to resolve/review. |
 | 4 | Pending | Required focused, GUI, EDMC, and project gates are listed in the plan. | Run after integration resolves. |
