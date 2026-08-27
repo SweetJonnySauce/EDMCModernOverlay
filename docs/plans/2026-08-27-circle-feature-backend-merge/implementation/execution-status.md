@@ -4,7 +4,7 @@
 
 | Step | Status | Evidence | Next action |
 | --- | --- | --- | --- |
-| 0 | Blocked: Git metadata write access | Worktree inspection found only merge-plan documentation changes; `git add` could not create `.git/index.lock` because Git metadata is read-only in this environment. | Restore write access to this repository's Git metadata, then repeat Step 0 restart recovery. |
+| 0 | Completed | Only the four merge-plan artifacts were uncommitted; they were isolated in `9d0f4fe` (`docs(plan): add circle merge orchestration`). | Commit this tracking record, then begin fresh-context Step 1 preflight. |
 | 1 | Pending | Merge assessment recorded target `40d3a40`, source `0d789cb`, base `8e375cc`. | Fetch and revalidate refs; create backup ref. |
 | 2 | Pending | Dry-run identified two textual conflicts. | Begin non-committing merge; restore managed grouping config. |
 | 3 | Pending | Known conflicts: render surface and render-surface tests. | Use isolated task contexts to resolve/review. |

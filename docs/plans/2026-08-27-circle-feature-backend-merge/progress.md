@@ -42,3 +42,6 @@ and required tests are complete.
 - `git add ...` was blocked before staging: Git could not create
   `.git/index.lock` because the repository's Git metadata is read-only in this
   execution environment. No files were staged or committed.
+- Git metadata write access was subsequently verified. The four in-scope plan
+  artifacts were committed separately as `9d0f4fe`
+  (`docs(plan): add circle merge orchestration`) before beginning merge work.
