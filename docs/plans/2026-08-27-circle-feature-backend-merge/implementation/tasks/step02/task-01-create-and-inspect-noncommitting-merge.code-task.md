@@ -50,10 +50,13 @@ progress tracker, and dashboard completely before performing Git operations.
 1. Run non-network pre-merge guards immediately before the merge. Confirm the
    current branch is exactly `backend-refactor-implementation`; `MERGE_HEAD` is
    absent; `git status --short` is empty; `git diff --cached --name-only` is
-   empty; the local target/source tips and merge base still match the recorded
-   Phase 1 evidence; and the required backup ref resolves to the current target
-   `HEAD`. Do not fetch, push, switch branches, clean, reset, or overwrite
-   anything. If any guard fails, stop with exact evidence and request direction.
+   empty; the source tip and merge base still match the recorded Phase 1
+   evidence; and the required backup ref resolves to the recorded Phase 1
+   target SHA. The current target may be ahead of that backup only when the
+   intervening paths are approved merge-tracking documentation and their
+   commits are recorded; otherwise stop with exact evidence and request
+   direction. Do not fetch, push, switch branches, clean, reset, or overwrite
+   anything.
 2. The only merge command is exactly:
    `git merge --no-commit --no-ff feature/circle-shape-pyqt-rendering`.
    Do not add merge strategies, use fast-forward mode, commit, abort, retry a
@@ -99,7 +102,10 @@ progress tracker, and dashboard completely before performing Git operations.
 ## Dependencies
 
 - Phase 1 is complete, including the verified target/source topology and the
-  local backup ref at the target tip.
+  local backup ref at the then-current target tip. The target can advance only
+  through separately committed merge-tracking documentation before this task;
+  the pre-merge guard must verify that limited advance rather than require the
+  historical backup ref to move.
 - The task artifact and all prior documentation must be committed or otherwise
   absent from the worktree before the clean-worktree guard; this task may not
   hide, stage, or discard them.
@@ -134,8 +140,9 @@ progress tracker, and dashboard completely before performing Git operations.
    - When the branch, clean-worktree, empty-index, no-`MERGE_HEAD`, local
      topology, and backup-ref guards are inspected without network access
    - Then the merge starts only on `backend-refactor-implementation` with the
-     recorded Phase 1 baseline intact, or the task stops without changing Git
-     state and reports the exact blocking evidence.
+     recorded Phase 1 backup intact and only documented target-only advances,
+     or the task stops without changing Git state and reports the exact
+     blocking evidence.
 
 2. **Specified non-committing merge is created exactly once**
    - Given all pre-merge guards pass
