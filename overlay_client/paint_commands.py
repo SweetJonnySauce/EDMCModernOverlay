@@ -119,6 +119,40 @@ class _RectPaintCommand(_LegacyPaintCommand):
 
 
 @dataclass
+class _CirclePaintCommand(_LegacyPaintCommand):
+    pen: QPen = field(default_factory=lambda: QPen(Qt.PenStyle.NoPen))
+    brush: QBrush = field(default_factory=lambda: QBrush(Qt.BrushStyle.NoBrush))
+    x: int = 0
+    y: int = 0
+    width: int = 0
+    height: int = 0
+    cycle_anchor: Optional[Tuple[int, int]] = None
+    trace_fn: Optional[Callable[[str, Mapping[str, Any]], None]] = None
+
+    def paint(self, window: "OverlayWindow", painter: QPainter, offset_x: int, offset_y: int) -> None:
+        pen = self.pen
+        brush = self.brush
+        if window._payload_opacity_percent() < 100:
+            if pen.style() != Qt.PenStyle.NoPen:
+                pen = QPen(pen)
+                pen.setColor(window._apply_payload_opacity_color(pen.color()))
+            if brush.style() != Qt.BrushStyle.NoBrush:
+                brush = QBrush(brush)
+                brush.setColor(window._apply_payload_opacity_color(brush.color()))
+        painter.setPen(pen)
+        painter.setBrush(brush)
+        draw_x = int(round(self.x + offset_x))
+        draw_y = int(round(self.y + offset_y))
+        painter.drawEllipse(draw_x, draw_y, self.width, self.height)
+        if self.trace_fn:
+            self.trace_fn("trace:complete", {"kind": "circle"})
+        if self.cycle_anchor:
+            anchor_x = int(round(self.cycle_anchor[0] + offset_x))
+            anchor_y = int(round(self.cycle_anchor[1] + offset_y))
+            window._register_cycle_anchor(self.legacy_item.item_id, anchor_x, anchor_y)
+
+
+@dataclass
 class _VectorPaintCommand(_LegacyPaintCommand):
     vector_payload: Mapping[str, Any] = field(default_factory=dict)
     scale: float = 1.0

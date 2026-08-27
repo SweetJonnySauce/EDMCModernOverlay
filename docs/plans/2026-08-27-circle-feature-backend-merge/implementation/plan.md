@@ -3,20 +3,20 @@
 ## Checklist
 
 - [x] Step 1: Freeze and verify the target branch.
-- [ ] Step 2: Create a non-committing merge and preserve managed configuration.
-- [ ] Step 3: Resolve renderer and test conflicts against the backend baseline.
-- [ ] Step 4: Review auto-merged runtime behavior and run automated gates.
-- [ ] Step 5: Perform manual overlay checks and commit the validated merge.
+- [x] Step 2: Create a non-committing merge and preserve managed configuration.
+- [x] Step 3: Resolve renderer and test conflicts against the backend baseline.
+- [x] Step 4: Review auto-merged runtime behavior and run automated gates.
+- [x] Step 5: Record the unrelated native-Wayland blocker and commit the reviewed merge.
 
 ## Phase Status
 
 | Phase | Description | Status |
 | --- | --- | --- |
 | 1 | Preflight and scope confirmation | Completed |
-| 2 | Non-committing merge and configuration preservation | Ready |
-| 3 | Conflict resolution and runtime review | Ready |
-| 4 | Automated and manual validation | Ready |
-| 5 | Commit and handoff | Ready |
+| 2 | Non-committing merge and configuration preservation | Completed |
+| 3 | Conflict resolution and runtime review | Completed |
+| 4 | Automated and manual validation | Completed for circle-merge scope |
+| 5 | Commit and handoff | In progress |
 
 ### Phase 1: Preflight and scope confirmation
 
@@ -51,33 +51,33 @@
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 2.1 | Start `git merge --no-commit --no-ff feature/circle-shape-pyqt-rendering` | Ready |
-| 2.2 | Restore target `overlay_groupings.json` to index and worktree | Ready |
-| 2.3 | Inspect staged files and confirm the configuration file is absent | Ready |
+| 2.1 | Start `git merge --no-commit --no-ff feature/circle-shape-pyqt-rendering` | Completed: merge ran once and produced only the two predicted unresolved paths. |
+| 2.2 | Restore target `overlay_groupings.json` to index and worktree | Completed: mandatory target-HEAD restore succeeded immediately after the merge. |
+| 2.3 | Inspect staged files and confirm the configuration file is absent | Completed: both path-scoped diffs succeeded; cached names/stat exclude the grouping file; full initial scope was recorded. |
 
 ### Phase 3: Conflict resolution and runtime review
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 3.1 | Resolve `render_surface.py` with backend architecture as baseline | Ready |
-| 3.2 | Resolve `test_render_surface_mixin.py` as a union of backend and circle coverage | Ready |
-| 3.3 | Review the auto-merged legacy processor and paint command paths | Ready |
+| 3.1 | Resolve `render_surface.py` with backend architecture as baseline | Completed: backend structure retained; circle/stroke/miter integration staged; syntax and paint checks passed. |
+| 3.2 | Resolve `test_render_surface_mixin.py` as a union of backend and circle coverage | Completed: union staged; focused GUI renderer/paint suites passed (40). |
+| 3.3 | Review the auto-merged legacy processor and paint command paths | Completed: one transform-snapshot defect corrected with regression coverage; focused processor/paint suites passed (50). |
 
 ### Phase 4: Automated and manual validation
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 4.1 | Run focused shape, paint, renderer, and TCP harness tests | Ready |
-| 4.2 | Run GUI-enabled renderer tests, EDMC Python compatibility, and `make check` | Ready |
-| 4.3 | Inspect circles and rectangles on a live overlay | Ready |
+| 4.1 | Run focused shape, paint, renderer, and TCP harness tests | Completed: the prescribed GUI-enabled mixed unit/harness suite passed (100). |
+| 4.2 | Run GUI-enabled renderer tests, EDMC Python compatibility, and `make check` | Completed: authorized non-release compatibility override passed; host-terminal `make check` passed (1,662 tests); whitespace and staged-integrity checks passed. |
+| 4.3 | Inspect circles and rectangles on a live overlay | Completed for circle-merge scope: the user confirmed the rendering contract on X11. Native GNOME Wayland placed the overlay on the wrong monitor before circle inspection; research confirmed a separate backend placement defect, and the user explicitly authorized this merge without treating Wayland rendering as passed. |
 
 ### Phase 5: Commit and handoff
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 5.1 | Recheck staged diff, conflict markers, and configuration preservation | Ready |
-| 5.2 | Commit only after all gates pass | Ready |
-| 5.3 | Record the commit, tests, and manual-verification result | Ready |
+| 5.1 | Recheck staged diff, conflict markers, and configuration preservation | Completed: cached whitespace and conflict-marker scans are clean; no unresolved paths exist; `overlay_groupings.json` remains excluded. |
+| 5.2 | Commit the reviewed merge | In progress: user authorized commit after the native-Wayland fault was isolated as unrelated to circle work. |
+| 5.3 | Record the commit, tests, and manual-verification result | Pending commit creation. |
 
 ## Step 1: Freeze and verify the target branch
 
@@ -176,3 +176,16 @@ validated feature.
 
 **Demo:** A live overlay renders the intended shape variants, and the merge
 commit contains no managed grouping configuration change.
+
+### Manual-validation disposition
+
+- X11: passed, as confirmed by the user.
+- Wayland: native GNOME Wayland presented the overlay one monitor right before
+  circle inspection. Research isolated that as a pre-existing backend placement
+  defect outside this merge's staged scope. The user explicitly authorized
+  committing the circle merge; this is a deferral, **not** a Wayland rendering
+  pass. Track remediation separately under
+  `docs/plans/2026-08-27-gnome-wayland-monitor-placement/`.
+- Do not treat Fill-mode gallery placement as a physical concentricity test:
+  preserved per-ID grouping transforms can offset logically concentric circles.
+- No live overlay may be started or sent without explicit user approval.

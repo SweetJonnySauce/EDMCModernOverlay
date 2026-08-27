@@ -22,6 +22,7 @@ from overlay_client.legacy_processor import TraceCallback
 from overlay_client.legacy_store import LegacyItem
 from overlay_client.offscreen_logger import log_offscreen_payload
 from overlay_client.paint_commands import (
+    _CirclePaintCommand,
     _LegacyPaintCommand,
     _MessagePaintCommand,
     _RectPaintCommand,
@@ -117,6 +118,12 @@ class _MeasuredText:
     descent: int
 
 
+@dataclass(frozen=True)
+class _StrokeWidthSpec:
+    """Internal opt-in stroke policy for bounded legacy shapes."""
+
+    explicit_logical_width: Optional[float] = None
+    default_pixel_width: Optional[int] = None
 _LINE_WIDTH_DEFAULTS_FALLBACK: Dict[str, int] = {
     "grid": 1,
     "legacy_rect": 2,
@@ -661,7 +668,7 @@ class RenderSurfaceMixin:
         offset_x: float,
         offset_y: float,
     ) -> Tuple[float, float, float, float] | None:
-        if isinstance(command, _RectPaintCommand):
+        if isinstance(command, (_RectPaintCommand, _CirclePaintCommand)):
             left = float(command.x) + offset_x
             top = float(command.y) + offset_y
             right = left + float(command.width)
@@ -851,7 +858,7 @@ class RenderSurfaceMixin:
                     "line_spacing": int(command.line_spacing),
                 }
             )
-        elif isinstance(command, _RectPaintCommand):
+        elif isinstance(command, (_RectPaintCommand, _CirclePaintCommand)):
             payload.update(
                 {
                     "x": int(command.x),
@@ -950,11 +957,16 @@ class RenderSurfaceMixin:
             if int(getattr(command, "text_width", 0) or 0) <= 0:
                 return False
             return self._shell_raster_qcolor_visible(command.color)
-        if isinstance(command, _RectPaintCommand):
+        if isinstance(command, (_RectPaintCommand, _CirclePaintCommand)):
             item = command.legacy_item.data
-            width = self._safe_float(item.get("w"), default=0.0)
-            height = self._safe_float(item.get("h"), default=0.0)
-            if width <= 0.0 or height <= 0.0:
+            if isinstance(command, _CirclePaintCommand):
+                visible_geometry = self._safe_float(item.get("radius"), default=0.0) > 0.0
+            else:
+                visible_geometry = (
+                    self._safe_float(item.get("w"), default=0.0) > 0.0
+                    and self._safe_float(item.get("h"), default=0.0) > 0.0
+                )
+            if not visible_geometry:
                 return False
             return self._shell_raster_pen_visible(command.pen) or self._shell_raster_brush_visible(command.brush)
         if isinstance(command, _VectorPaintCommand):
@@ -1031,6 +1043,8 @@ class RenderSurfaceMixin:
             return "message"
         if isinstance(command, _RectPaintCommand):
             return "rect"
+        if isinstance(command, _CirclePaintCommand):
+            return "circle"
         if isinstance(command, _VectorPaintCommand):
             return "vector"
         return "legacy"
@@ -1571,6 +1585,15 @@ class RenderSurfaceMixin:
                 )
             elif legacy_item.kind == "rect":
                 command = self._build_rect_command(
+                    legacy_item,
+                    mapper,
+                    group_key,
+                    group_transform,
+                    overlay_hint,
+                    collect_only=collect_only,
+                )
+            elif legacy_item.kind == "circle":
+                command = self._build_circle_command(
                     legacy_item,
                     mapper,
                     group_key,
@@ -2145,39 +2168,27 @@ class RenderSurfaceMixin:
         )
         return command
 
-    def _build_rect_command(
+    def _build_bounded_shape_command(
         self,
         legacy_item: LegacyItem,
         mapper: LegacyMapper,
         group_key: GroupKey,
         group_transform: Optional[GroupTransform],
         overlay_bounds_hint: Optional[_OverlayBounds],
+        *,
+        kind: str,
+        pen: QPen,
+        brush: QBrush,
+        stroke_width: _StrokeWidthSpec,
+        raw_x: float,
+        raw_y: float,
+        raw_w: float,
+        raw_h: float,
         collect_only: bool = False,
-    ) -> Optional[_RectPaintCommand]:
+    ) -> _LegacyPaintCommand:
         item = legacy_item.data
         item_id = legacy_item.item_id
         plugin_name = legacy_item.plugin
-        border_spec = str(item.get("color", "white"))
-        fill_spec = str(item.get("fill", "#00000000"))
-
-        if not border_spec or border_spec.lower() == "none":
-            pen = QPen(Qt.PenStyle.NoPen)
-        else:
-            border_color = QColor(border_spec)
-            if not border_color.isValid():
-                pen = QPen(Qt.PenStyle.NoPen)
-            else:
-                pen = QPen(border_color)
-                pen.setWidth(self._line_width("legacy_rect"))
-
-        if not fill_spec or fill_spec.lower() == "none":
-            brush = QBrush(Qt.BrushStyle.NoBrush)
-        else:
-            fill_color = QColor(fill_spec)
-            if not fill_color.isValid():
-                fill_color = QColor("#00000000")
-            brush = QBrush(fill_color)
-
         state = self._viewport_state()
         offset_x, offset_y = self._group_offsets(group_transform)
         group_ctx = build_group_context(
@@ -2193,6 +2204,14 @@ class RenderSurfaceMixin:
         fill = group_ctx.fill
         transform_context = group_ctx.transform_context
         scale = group_ctx.scale
+        if pen.style() != Qt.PenStyle.NoPen:
+            if stroke_width.explicit_logical_width is not None:
+                resolved_width = max(1, int(round(stroke_width.explicit_logical_width * scale)))
+            else:
+                resolved_width = stroke_width.default_pixel_width
+            if resolved_width is not None:
+                pen = QPen(pen)
+                pen.setWidth(resolved_width)
         selected_anchor = group_ctx.selected_anchor
         base_anchor_point = group_ctx.base_anchor_point
         anchor_for_transform = group_ctx.anchor_for_transform
@@ -2204,11 +2223,7 @@ class RenderSurfaceMixin:
         if trace_enabled and not collect_only:
             def trace_fn(stage: str, details: Mapping[str, Any]) -> None:
                 self._log_legacy_trace(plugin_name, item_id, stage, details)
-            self._trace_paint_phase(plugin_name, item_id, kind="rect")
-        raw_x = float(item.get("x", 0))
-        raw_y = float(item.get("y", 0))
-        raw_w = float(item.get("w", 0))
-        raw_h = float(item.get("h", 0))
+            self._trace_paint_phase(plugin_name, item_id, kind=kind)
         transformed_overlay, base_overlay_points, reference_overlay_bounds, effective_anchor = self._compute_rect_transform(
             plugin_name,
             item_id,
@@ -2254,7 +2269,8 @@ class RenderSurfaceMixin:
             base_min_y = min(base_ys)
             base_max_y = max(base_ys)
             base_overlay_bounds = (base_min_x, base_min_y, base_max_x, base_max_y)
-        command = _RectPaintCommand(
+        command_type = _RectPaintCommand if kind == "rect" else _CirclePaintCommand
+        command = command_type(
             group_key=group_key,
             group_transform=group_transform,
             legacy_item=legacy_item,
@@ -2285,7 +2301,7 @@ class RenderSurfaceMixin:
             self._log_legacy_trace(
                 plugin_name,
                 item_id,
-                "paint:rect_output",
+                f"paint:{kind}_output",
                 {
                     "adjusted_x": min_x_overlay,
                     "adjusted_y": min_y_overlay,
@@ -2299,6 +2315,107 @@ class RenderSurfaceMixin:
                 },
             )
         return command
+
+    def _build_rect_command(
+        self,
+        legacy_item: LegacyItem,
+        mapper: LegacyMapper,
+        group_key: GroupKey,
+        group_transform: Optional[GroupTransform],
+        overlay_bounds_hint: Optional[_OverlayBounds],
+        collect_only: bool = False,
+    ) -> _LegacyPaintCommand:
+        item = legacy_item.data
+        border_spec = str(item.get("color", "white"))
+        fill_spec = str(item.get("fill", "#00000000"))
+
+        if not border_spec or border_spec.lower() == "none":
+            pen = QPen(Qt.PenStyle.NoPen)
+        else:
+            border_color = QColor(border_spec)
+            if not border_color.isValid():
+                pen = QPen(Qt.PenStyle.NoPen)
+            else:
+                pen = QPen(border_color)
+                if "thickness" in item:
+                    pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
+
+        if not fill_spec or fill_spec.lower() == "none":
+            brush = QBrush(Qt.BrushStyle.NoBrush)
+        else:
+            fill_color = QColor(fill_spec)
+            if not fill_color.isValid():
+                fill_color = QColor("#00000000")
+            brush = QBrush(fill_color)
+
+        return self._build_bounded_shape_command(
+            legacy_item,
+            mapper,
+            group_key,
+            group_transform,
+            overlay_bounds_hint,
+            kind="rect",
+            pen=pen,
+            brush=brush,
+            stroke_width=_StrokeWidthSpec(
+                explicit_logical_width=item.get("thickness"),
+                default_pixel_width=None if "thickness" in item else self._line_width("legacy_rect"),
+            ),
+            raw_x=float(item.get("x", 0)),
+            raw_y=float(item.get("y", 0)),
+            raw_w=float(item.get("w", 0)),
+            raw_h=float(item.get("h", 0)),
+            collect_only=collect_only,
+        )
+
+    def _build_circle_command(
+        self,
+        legacy_item: LegacyItem,
+        mapper: LegacyMapper,
+        group_key: GroupKey,
+        group_transform: Optional[GroupTransform],
+        overlay_bounds_hint: Optional[_OverlayBounds],
+        collect_only: bool = False,
+    ) -> _LegacyPaintCommand:
+        item = legacy_item.data
+        border_spec = str(item.get("color", "white"))
+        fill_spec = str(item.get("fill", "#00000000"))
+
+        if not border_spec or border_spec.lower() == "none":
+            pen = QPen(Qt.PenStyle.NoPen)
+        else:
+            border_color = QColor(border_spec)
+            if not border_color.isValid():
+                pen = QPen(Qt.PenStyle.NoPen)
+            else:
+                pen = QPen(border_color)
+
+        if not fill_spec or fill_spec.lower() == "none":
+            brush = QBrush(Qt.BrushStyle.NoBrush)
+        else:
+            fill_color = QColor(fill_spec)
+            brush = QBrush(fill_color) if fill_color.isValid() else QBrush(Qt.BrushStyle.NoBrush)
+
+        radius = float(item.get("radius", 0))
+        raw_x = float(item.get("x", 0)) - radius
+        raw_y = float(item.get("y", 0)) - radius
+        diameter = radius * 2.0
+        return self._build_bounded_shape_command(
+            legacy_item,
+            mapper,
+            group_key,
+            group_transform,
+            overlay_bounds_hint,
+            kind="circle",
+            pen=pen,
+            brush=brush,
+            stroke_width=_StrokeWidthSpec(explicit_logical_width=item.get("thickness")),
+            raw_x=raw_x,
+            raw_y=raw_y,
+            raw_w=diameter,
+            raw_h=diameter,
+            collect_only=collect_only,
+        )
 
     def _build_vector_command(
         self,
@@ -2918,6 +3035,8 @@ class RenderSurfaceMixin:
             if width <= 0.0 or height <= 0.0:
                 return False
             return True
+        if isinstance(command, _CirclePaintCommand):
+            return self._safe_float(command.legacy_item.data.get("radius"), default=0.0) > 0.0
         if isinstance(command, _VectorPaintCommand):
             points = command.legacy_item.data.get("points")
             return bool(points)
