@@ -22,8 +22,8 @@
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 1.1 | Fetch remote refs and verify a clean target worktree | Blocked: `git fetch origin` DNS failure |
-| 1.2 | Create a local backup ref for the target tip | Blocked pending successful fetch and clean worktree |
+| 1.1 | Fetch remote refs and verify a clean target worktree | Blocked: both permitted fetch attempts failed DNS resolution |
+| 1.2 | Create a local backup ref for the target tip | Blocked pending a successful fetch |
 | 1.3 | Confirm source branch, merge base, and intended scope | Completed |
 | 1.4 | Record preservation of target `overlay_groupings.json` | Completed |
 

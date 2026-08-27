@@ -59,3 +59,17 @@ and required tests are complete.
 - No unit or harness tests ran because this is Git/documentation-only work.
   Residual risk: remote topology cannot be considered current until fetch
   succeeds. A single fresh remediation context may retry the failed command.
+
+### Phase 1 / Stage 1.1 — retry limit reached
+
+- A second fresh code-assist context performed the single permitted retry of
+  `git fetch origin`; it failed with the same `Could not resolve host:
+  github.com` DNS error.
+- Its pre-fetch checks found a clean target worktree at
+  `932ec52aa4312c459c3298219b69d9a523d1c715`, source
+  `0d789cbbea77dac500eb7b249d71df67c1dbde9c`, merge base
+  `8e375cce40acc0d9400bde43d6aa01070929adb4`, no staged paths, and no
+  `MERGE_HEAD`.
+- No backup ref, merge, staging, managed-configuration change, unit test, or
+  harness test was performed. The unchanged failed fetch command must not be
+  run again without an external network-state change.
