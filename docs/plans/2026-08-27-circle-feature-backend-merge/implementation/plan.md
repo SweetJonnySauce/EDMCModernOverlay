@@ -16,7 +16,7 @@
 | 2 | Non-committing merge and configuration preservation | Completed |
 | 3 | Conflict resolution and runtime review | Completed |
 | 4 | Automated and manual validation | Completed for circle-merge scope |
-| 5 | Commit and handoff | In progress |
+| 5 | Commit and handoff | Completed |
 
 ### Phase 1: Preflight and scope confirmation
 
@@ -76,8 +76,8 @@
 | Stage | Description | Status |
 | --- | --- | --- |
 | 5.1 | Recheck staged diff, conflict markers, and configuration preservation | Completed: cached whitespace and conflict-marker scans are clean; no unresolved paths exist; `overlay_groupings.json` remains excluded. |
-| 5.2 | Commit the reviewed merge | In progress: user authorized commit after the native-Wayland fault was isolated as unrelated to circle work. |
-| 5.3 | Record the commit, tests, and manual-verification result | Pending commit creation. |
+| 5.2 | Commit the reviewed merge | Completed: `64bf390` (`Merge branch 'feature/circle-shape-pyqt-rendering' into backend-refactor-implementation`) was created locally; no push was performed. |
+| 5.3 | Record the commit, tests, and manual-verification result | Completed: validation and the explicit X11-only manual-verification disposition are recorded in this plan and its progress artifacts. |
 
 ## Step 1: Freeze and verify the target branch
 

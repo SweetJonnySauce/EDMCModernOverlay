@@ -9,7 +9,7 @@
 | 2 | Completed | Merge ran once; immediate target-HEAD grouping restore succeeded; 69-path initial scope was captured with only the two predicted unresolved paths. | Main-orchestrator scope review, then generate fresh Step 3 task(s). |
 | 3 | Completed | Both conflicts resolved manually; focused GUI renderer/paint passed (40), and processor/paint passed (50) after one scoped transform-snapshot fix. | Generate fresh Step 4 validation task. |
 | 4 | Completed for circle-merge scope | Mixed unit/harness pytest passed (100); authorized compatibility override passed; host-terminal `make check` passed (1,662); whitespace, staged marker, staged-scope, and grouping-exclusion checks passed. X11 rendering passed. Native GNOME Wayland placed the overlay on the wrong monitor before circle inspection; research confirmed that it is a separate backend defect. | Preserve the native-Wayland result as a follow-up defect; do not claim a Wayland rendering pass. |
-| 5 | In progress | The user explicitly authorized committing the reviewed circle merge after the native-Wayland placement defect was isolated as unrelated to the staged circle scope. | Create the local merge commit without pushing, then record its SHA. |
+| 5 | Completed | The user explicitly authorized the local merge after the native-Wayland placement defect was isolated as unrelated. Commit `64bf390` (`Merge branch 'feature/circle-shape-pyqt-rendering' into backend-refactor-implementation`) was created without pushing. | Track native GNOME Wayland monitor placement separately. |
 
 ## Context-Window Record
 
@@ -32,8 +32,8 @@ Add one row for each completed code-task-generator or code-assist context.
 ## Restart-Recovery Notes
 
 - The target branch must remain `backend-refactor-implementation`.
-- Latest verified merge state: `HEAD` `44da98d`, `MERGE_HEAD` `0d789cb`, and
-  71 staged files (4,871 additions / 100 deletions).
+- Completed merge state: `64bf390` is the local merge commit of source
+  `0d789cb`; there is no active `MERGE_HEAD` state.
 - Preserve target `overlay_groupings.json`; it must not appear in the staged
   merge diff.
 - Never trust this dashboard without reconciling it against plan statuses, Git

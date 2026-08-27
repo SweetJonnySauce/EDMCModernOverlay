@@ -2,17 +2,16 @@
 
 ## Current State
 
-The no-commit merge remains active on `backend-refactor-implementation` with
-source `feature/circle-shape-pyqt-rendering`. At the latest verification,
-`HEAD` was `44da98d`, `MERGE_HEAD` was `0d789cb`, and the active source merge
-contained 71 staged files (4,871 additions and 100 deletions). Conflict
-resolution and automated validation are complete: the user ran the GUI-enabled
-`make check` in the host terminal successfully, and the authorized non-release
-EDMC Python mismatch override passed with its expected warning. The user also
-confirmed the rendering contract on X11. Native GNOME Wayland then placed the
-overlay one monitor right before circle inspection. The user authorized merge
-completion after research established that this is a separate backend-placement
-defect, not a circle change; no Wayland rendering pass is claimed.
+The circle feature is merged locally into `backend-refactor-implementation` as
+`64bf390` (`Merge branch 'feature/circle-shape-pyqt-rendering' into
+backend-refactor-implementation`). Conflict resolution and automated validation
+are complete: the user ran the GUI-enabled `make check` in the host terminal
+successfully, and the authorized non-release EDMC Python mismatch override
+passed with its expected warning. The user also confirmed the rendering contract
+on X11. Native GNOME Wayland then placed the overlay one monitor right before
+circle inspection. The user authorized merge completion after research
+established that this is a separate backend-placement defect, not a circle
+change; no Wayland rendering pass is claimed. No push was performed.
 
 ## Evidence Recorded
 
@@ -20,7 +19,7 @@ defect, not a circle change; no Wayland rendering pass is claimed.
 | --- | --- |
 | Target branch state | Clean at assessment time; current commit `40d3a40`. |
 | Source branch state | Circle feature tip `0d789cb`. |
-| Active merge state | `backend-refactor-implementation` at `44da98d` with `MERGE_HEAD` `0d789cb`; 71 staged files, 4,871 additions, and 100 deletions. |
+| Merge result | Local merge commit `64bf390`, merging source `0d789cb` into `backend-refactor-implementation`; no push performed. |
 | Merge base | `8e375cc`. |
 | Dry-run merge | Two textual conflicts: render surface and render-surface tests. |
 | Managed configuration | Preserve target `overlay_groupings.json`; do not stage source change. |
@@ -39,7 +38,7 @@ defect, not a circle change; no Wayland rendering pass is claimed.
 - [x] Resolve and stage source/test conflicts.
 - [x] Run automated validation gates.
 - [x] Record manual overlay result and the separate native-Wayland blocker.
-- [ ] Commit the reviewed merge.
+- [x] Commit the reviewed merge as `64bf390` without pushing.
 
 ## Commands to Record When Executed
 
