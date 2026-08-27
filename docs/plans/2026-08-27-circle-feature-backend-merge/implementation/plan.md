@@ -12,7 +12,7 @@
 
 | Phase | Description | Status |
 | --- | --- | --- |
-| 1 | Preflight and scope confirmation | Ready |
+| 1 | Preflight and scope confirmation | Blocked: remote fetch unavailable |
 | 2 | Non-committing merge and configuration preservation | Ready |
 | 3 | Conflict resolution and runtime review | Ready |
 | 4 | Automated and manual validation | Ready |
@@ -22,8 +22,8 @@
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 1.1 | Fetch remote refs and verify a clean target worktree | Ready |
-| 1.2 | Create a local backup ref for the target tip | Ready |
+| 1.1 | Fetch remote refs and verify a clean target worktree | Blocked: `git fetch origin` DNS failure |
+| 1.2 | Create a local backup ref for the target tip | Blocked pending successful fetch and clean worktree |
 | 1.3 | Confirm source branch, merge base, and intended scope | Completed |
 | 1.4 | Record preservation of target `overlay_groupings.json` | Completed |
 
