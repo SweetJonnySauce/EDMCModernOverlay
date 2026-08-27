@@ -1,8 +1,10 @@
 from typing import Any, Dict, Tuple
 
-from PyQt6.QtGui import QColor
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QBrush, QColor, QPen
 
 from overlay_client.paint_commands import (
+    _CirclePaintCommand,
     _MessagePaintCommand,
     _RectPaintCommand,
     _VectorPaintCommand,
@@ -16,10 +18,11 @@ class _StubLegacyItem:
 
 
 class _StubWindow:
-    def __init__(self) -> None:
+    def __init__(self, payload_opacity: int = 100) -> None:
         self._font_family = "StubFont"
         self._font_fallbacks = ()
         self._registered: Dict[str, Tuple[int, int]] = {}
+        self._payload_opacity = payload_opacity
 
     def _register_cycle_anchor(self, item_id: str, x: int, y: int) -> None:
         self._registered[item_id] = (x, y)
@@ -40,10 +43,12 @@ class _StubWindow:
         return 10.0
 
     def _apply_payload_opacity_color(self, color):
-        return color
+        adjusted = QColor(color)
+        adjusted.setAlpha(round(color.alpha() * self._payload_opacity / 100))
+        return adjusted
 
     def _payload_opacity_percent(self) -> int:
-        return 100
+        return self._payload_opacity
 
 
 class _RecordingPainter:
@@ -107,6 +112,103 @@ def test_rect_paint_draws_with_offsets():
     )
     cmd.paint(window, painter, offset_x=10, offset_y=20)
     assert ("drawRect", 11, 22, 3, 4) in painter.calls
+
+
+def test_circle_paint_draws_offset_bounds_with_style_trace_and_anchor():
+    window = _StubWindow()
+    painter = _RecordingPainter()
+    trace_events = []
+    pen = QPen(QColor("#123456"))
+    pen.setWidth(7)
+    brush = QBrush(QColor("#abcdef"))
+    cmd = _CirclePaintCommand(
+        group_key=("g", None),
+        group_transform=None,
+        legacy_item=_StubLegacyItem("item-circle"),
+        bounds=None,
+        pen=pen,
+        brush=brush,
+        x=10,
+        y=20,
+        width=30,
+        height=40,
+        cycle_anchor=(8, 9),
+        trace_fn=lambda event, payload: trace_events.append((event, payload)),
+    )
+
+    cmd.paint(window, painter, offset_x=3, offset_y=4)
+
+    assert ("drawEllipse", 13, 24, 30, 40) in painter.calls
+    assert not [call for call in painter.calls if call[0] == "drawRect"]
+    active_pen = next(call[1] for call in painter.calls if call[0] == "setPen")
+    active_brush = next(call[1] for call in painter.calls if call[0] == "setBrush")
+    assert active_pen.width() == 7
+    assert active_pen.color() == QColor("#123456")
+    assert active_brush.color() == QColor("#abcdef")
+    assert window._registered["item-circle"] == (11, 13)
+    assert trace_events == [("trace:complete", {"kind": "circle"})]
+
+
+def test_circle_paint_preserves_transparent_pen_and_brush_at_reduced_opacity():
+    window = _StubWindow(payload_opacity=50)
+    painter = _RecordingPainter()
+    no_pen = QPen(Qt.PenStyle.NoPen)
+    no_brush = QBrush(Qt.BrushStyle.NoBrush)
+    cmd = _CirclePaintCommand(
+        group_key=("g", None),
+        group_transform=None,
+        legacy_item=_StubLegacyItem("item-transparent-circle"),
+        bounds=None,
+        pen=no_pen,
+        brush=no_brush,
+        x=1,
+        y=2,
+        width=3,
+        height=4,
+    )
+
+    cmd.paint(window, painter, offset_x=0, offset_y=0)
+
+    active_pen = next(call[1] for call in painter.calls if call[0] == "setPen")
+    active_brush = next(call[1] for call in painter.calls if call[0] == "setBrush")
+    assert active_pen is no_pen
+    assert active_pen.style() == Qt.PenStyle.NoPen
+    assert active_brush is no_brush
+    assert active_brush.style() == Qt.BrushStyle.NoBrush
+
+
+def test_circle_paint_uses_opacity_adjusted_pen_and_brush_copies():
+    window = _StubWindow(payload_opacity=50)
+    painter = _RecordingPainter()
+    pen = QPen(QColor(10, 20, 30, 201))
+    pen.setWidth(5)
+    brush = QBrush(QColor(40, 50, 60, 181))
+    original_pen_alpha = pen.color().alpha()
+    original_brush_alpha = brush.color().alpha()
+    cmd = _CirclePaintCommand(
+        group_key=("g", None),
+        group_transform=None,
+        legacy_item=_StubLegacyItem("item-opaque-circle"),
+        bounds=None,
+        pen=pen,
+        brush=brush,
+        x=1,
+        y=2,
+        width=3,
+        height=4,
+    )
+
+    cmd.paint(window, painter, offset_x=0, offset_y=0)
+
+    active_pen = next(call[1] for call in painter.calls if call[0] == "setPen")
+    active_brush = next(call[1] for call in painter.calls if call[0] == "setBrush")
+    assert active_pen is not pen
+    assert active_pen.width() == 5
+    assert active_pen.color().alpha() == 100
+    assert active_brush is not brush
+    assert active_brush.color().alpha() == 90
+    assert pen.color().alpha() == original_pen_alpha
+    assert brush.color().alpha() == original_brush_alpha
 
 
 def test_vector_paint_invokes_render_with_adapter(monkeypatch):

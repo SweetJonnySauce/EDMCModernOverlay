@@ -40,11 +40,13 @@ overlay.send_raw({
 | `text` | string | Optional. Non-empty makes this a message. Empty string clears a message by `id`. |
 | `color` | string | Optional. Named color or `#RRGGBB`/`#AARRGGBB`. Defaults to `white` for messages/shapes. |
 | `size` | enum | Optional. Message size preset: `small`, `normal`, `large`, or `huge` (case-insensitive). Defaults to `normal`. **Note:** top-level `size` applies to messages only. |
-| `x` / `y` | integer | Optional. Top-left corner in the 1280x960 legacy canvas. |
+| `x` / `y` | integer | Optional. `rect` uses a top-left corner; `circle` uses a centre, both in the 1280x960 legacy canvas. |
 | `ttl` | integer | Optional. Seconds before expiry. `0` (or any value <= 0) makes the payload persistent. Default is `4`. |
-| `shape` | string | Optional. Shape name (e.g., `rect`, `vect`). |
-| `fill` | string | Optional. Fill color for `shape="rect"`. |
+| `shape` | string | Optional. Shape name (e.g., `rect`, `circle`, `vect`). |
+| `fill` | string | Optional. Fill color for `rect` or `circle`; empty or `"none"` is transparent. |
 | `w` / `h` | integer | Optional. Width/height for `shape="rect"`. |
+| `radius` | integer | Required, strictly positive radius for `shape="circle"`. |
+| `thickness` | integer | Required, strictly positive border width for `shape="circle"`; optional, strictly positive border width for `shape="rect"`. An explicit value uses legacy-canvas units and scales with the shape. Omitting it for `rect` preserves the existing client-controlled default. |
 | `vector` | array | Optional. Vector points for `shape="vect"`. |
 | `plugin` | string | Optional. Source plugin label for attribution/grouping. |
 | `command` | string | Optional. `exit` clears all; `noop` does nothing; other values are ignored. |
@@ -107,11 +109,39 @@ overlay.send_raw({
     "y": 50,
     "w": 300,
     "h": 80,
+    "thickness": 2,
     "ttl": 6,
 })
 ```
 
-### Example 3: Vector with marker label size
+### Example 3: Circle
+
+```python
+from EDMCOverlay import edmcoverlay
+
+overlay = edmcoverlay.Overlay()
+overlay.send_raw({
+    "id": "legacy-circle-1",
+    "shape": "circle",
+    "color": "#80d0ff",
+    "fill": "#1a1a1acc",
+    "x": 100,
+    "y": 200,
+    "radius": 50,
+    "thickness": 2,
+    "ttl": 7,
+    "plugin": "CirclePlugin",
+})
+```
+
+Raw/TCP normalization retains supported shape thickness fields for the client.
+It does not make the geometry decision: the client warns and drops a missing,
+non-numeric, zero, or negative circle `radius`/`thickness`, or an explicitly
+supplied invalid rectangle `thickness`, before that payload can replace a
+visible same-ID shape. An omitted rectangle thickness keeps the existing client
+default.
+
+### Example 4: Vector with marker label size
 
 ```python
 from EDMCOverlay import edmcoverlay
@@ -128,7 +158,7 @@ overlay.send_raw({
 })
 ```
 
-### Example 4: Clear by ID
+### Example 5: Clear by ID
 
 ```python
 from EDMCOverlay import edmcoverlay
@@ -144,8 +174,12 @@ Clears are resolved by `id`; other fields are ignored when `text` is empty.
 
 ## Runtime behavior
 
-- Messages with the same `id` replace the existing entry and refresh the TTL.
+- Messages and shapes with the same `id` replace the existing entry and refresh the TTL.
 - Empty `text` removes the message immediately.
+- A `shape="circle"` uses centre `x`/`y`, positive `radius` and `thickness`, the requested `color` border, and an optional transparent `fill`. It is a shape primitive, not a `marker: "circle"` vector point.
+- Explicit `thickness` for `circle` or `rect` is a logical legacy-canvas width;
+  the renderer scales, rounds, and clamps it to at least one physical pixel.
+  Omitted rectangle thickness keeps the current client-controlled width.
 - Vector payloads with insufficient points are dropped (unless a single point has `marker` or `text`).
 - Size presets are derived from the overlay font settings; adjust the "Font Step" and base font size in preferences to tune `small`/`large`/`huge`.
 - Plugin ownership is inferred from `id` prefixes (case-insensitive). If your payloads do not include a `plugin` field, add prefixes via `define_plugin_group` so the overlay can attribute payloads correctly.

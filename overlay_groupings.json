@@ -594,6 +594,15 @@
         "payloadJustification": "left",
         "markerLabelPosition": "below",
         "controllerPreviewBoxMode": "last"
+      },
+      "NeutronDancer Alert": {
+        "idPrefixes": [
+          "neutrondancer-alert-"
+        ],
+        "idPrefixGroupAnchor": "nw",
+        "payloadJustification": "left",
+        "markerLabelPosition": "below",
+        "controllerPreviewBoxMode": "last"
       }
     }
   },

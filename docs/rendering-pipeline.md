@@ -27,7 +27,13 @@ This document explains how a payload travels from EDMC into the Modern Overlay c
 
 1. `process_legacy_payload()` (in `overlay_client/legacy_processor.py`) normalises each payload type:
    - `message` → text payload with color/position/size metadata.
-   - `shape:rect` → rectangle payload with fill/border data.
+   - `shape:rect` → rectangle payload with fill/border data and an optional,
+     positive explicit logical thickness. Omitting it retains the legacy
+     client-configured border width.
+   - `shape:circle` → circle payload with centre coordinates, positive radius,
+     positive border thickness, fill/border data, and normal TTL/storage
+     metadata. Raw/TCP normalization retains its fields; client validation drops
+     invalid geometry before a same-ID drawable item can be stored or replaced.
    - `shape:vect` → vector payload with ordered points, optional markers/text. Marker label `size` accepts
      legacy presets (`small`, `normal`, `large`, `huge`); payload-level `size`/`text_size` provides the
      default, per-point `size` overrides it, missing/invalid values fall back to `normal`, and `size` is
@@ -59,11 +65,26 @@ For every legacy item, the window builds a paint command. Each builder emits inp
 
 ### Rectangles (`_build_rect_command`)
 
-1. Build pen/brush from payload colors and compute remapped rectangle corners via `remap_rect_points()`.  
+1. Build pen/brush from payload colors and compute remapped rectangle corners via `remap_rect_points()`. An explicit thickness is a logical value resolved at the shared bounded-shape boundary; an omitted rectangle uses its existing pixel-width setting unchanged.
 2. Emit:
    - `paint:rect_input`
    - `paint:rect_output` (both overlay-space and pixel-space bounds)  
 3. Resulting `_RectPaintCommand` does not emit additional traces during painting.
+
+### Circles (`_build_circle_command`)
+
+1. Derive a logical bounding square from the centre and radius: left/top are
+   `x - radius` / `y - radius`; width/height are `2 * radius`.
+2. Send that square through the same legacy rectangle/group/viewport mapping as
+   rectangles, including group placement, anchors, and cycle-target bounds.
+3. Build the requested border pen from `color` and `thickness`, and the fill
+   brush from `fill`; empty or `none` fill uses no brush. The shared bounded
+   shape path scales explicit logical widths with the group scale, rounds them,
+   and clamps them to one physical pixel. The shared payload opacity behaviour
+   is applied after width resolution when the command paints.
+4. This path intentionally adds no `paint:circle_*` trace stage. It reuses the
+   established bounded-shape mapping rather than introducing a separate circle
+   trace protocol.
 
 ### Vectors (`_build_vector_command`)
 
@@ -76,8 +97,12 @@ For every legacy item, the window builds a paint command. Each builder emits inp
 1. `OverlayWindow` iterates paint commands per group.  
 2. `_MessagePaintCommand.paint()` sets the font, draws the text, then logs `render_message:draw`.  
 3. `_RectPaintCommand.paint()` draws rectangles with the configured pen/brush.  
-4. `_VectorPaintCommand.paint()` calls `render_vector()`, which draws each segment/marker and emits `render_vector:scaled_points`.  
-5. Each paint command can register a cycle anchor so the “cycle payload IDs” developer feature knows where to highlight focus points.
+4. `_CirclePaintCommand.paint()` uses bounded `QPainter.drawEllipse` with the
+   transformed square, requested pen/fill, and payload opacity. A non-uniform
+   legacy viewport mapping can turn that mapped square into an ellipse by
+   design.
+5. `_VectorPaintCommand.paint()` calls `render_vector()`, which draws each segment/marker and emits `render_vector:scaled_points`.
+6. Each paint command can register a cycle anchor so the “cycle payload IDs” developer feature knows where to highlight focus points.
 
 ## 8. Trace stage quick reference
 
