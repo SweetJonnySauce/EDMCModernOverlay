@@ -8,6 +8,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from overlay_client.backend.presentation_runtime import PresentationRuntimeBackend
     from overlay_client.platform_integration import PlatformContext
     from overlay_client.window_tracking import MonitorProvider, WindowTracker
 
@@ -237,6 +238,7 @@ class BackendBundle:
     presentation: PresentationBackend
     input_policy: InputPolicyBackend
     helper_ipc: HelperIpcBackend | None = None
+    presentation_runtime: PresentationRuntimeBackend | None = None
 
     @property
     def uses_helper(self) -> bool:

@@ -513,6 +513,18 @@ def test_backend_presentation_cycle_wraps_gnome_helper_result_when_helper_availa
     assert result.diagnostics["prepared_surface_allows_unfocused_content"] is False
 
 
+def test_native_gnome_bundle_owns_an_inactive_future_shell_raster_profile():
+    bundle = gnome_shell_wayland.build_gnome_shell_wayland_bundle()
+
+    runtime = bundle.presentation_runtime
+
+    assert runtime is not None
+    assert runtime.profile.owns_helper_presentation is True
+    assert runtime.profile.supports_fullscreen_shell_raster is True
+    assert runtime.profile.fullscreen_shell_raster_active is False
+    assert runtime.profile.suppress_managed_pyqt_fallback_on_shell_raster_failure is False
+
+
 def test_backend_presentation_cycle_transports_generic_surface_reset_action():
     status = BackendSelectionStatus(
         probe=PlatformProbeResult(
@@ -678,6 +690,18 @@ def test_backend_presentation_cycle_enables_shell_raster_when_selected():
     assert result is not None
     assert observed["shell_raster_runtime_enabled"] is True
     assert observed["suppress_pyqt_fallback_on_shell_raster_failure"] is True
+
+
+def test_legacy_shell_raster_bundle_owns_an_active_shell_raster_profile():
+    bundle = gnome_shell_wayland.build_gnome_shell_raster_bundle()
+
+    runtime = bundle.presentation_runtime
+
+    assert runtime is not None
+    assert runtime.profile.owns_helper_presentation is True
+    assert runtime.profile.supports_fullscreen_shell_raster is True
+    assert runtime.profile.fullscreen_shell_raster_active is True
+    assert runtime.profile.suppress_managed_pyqt_fallback_on_shell_raster_failure is True
 
 
 def test_backend_presentation_cycle_selected_shell_raster_without_helper_consumes_follow_path():
@@ -915,6 +939,14 @@ def test_backend_presentation_cycle_returns_none_for_non_gnome_backend():
     result = run_backend_presentation_cycle(status, gnome_runner=lambda **_: _FakeGnomePresentationResult())
 
     assert result is None
+
+
+@pytest.mark.parametrize(
+    "bundle_builder",
+    [native_x11.build_native_x11_bundle, xwayland_compat.build_xwayland_compat_bundle],
+)
+def test_x11_bundles_do_not_expose_a_gnome_presentation_runtime(bundle_builder):
+    assert bundle_builder().presentation_runtime is None
 
 
 def test_derive_linux_backend_status_preserves_xwayland_compat_identity_for_wayland_xcb_path():

@@ -4,22 +4,22 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable, Mapping, Optional
+from typing import TYPE_CHECKING, Mapping, Optional
 
-from overlay_client.backend.contracts import BackendBundle, BackendInstance, HelperKind
+from overlay_client.backend.contracts import BackendBundle, BackendInstance
 from overlay_client.backend.presentation_policy import BackendPresentationVisibilitySnapshot
+from overlay_client.backend.presentation_runtime import (
+    BackendPresentationRuntimeRequest,
+    PresentationCycleRunner,
+    RasterFrameProvider,
+    SurfacePreparer,
+)
 from overlay_client.backend.probe import ProbeInputs, ProbeSource, collect_platform_probe
 from overlay_client.backend.selector import BackendSelector
 from overlay_client.backend.status import BackendSelectionStatus
-from overlay_client.backend.surface_preparation import (
-    BACKEND_PRESENTATION_SURFACE_PREPARATION_MANAGED_WINDOWED,
-    BackendPresentationSurfacePreparation,
-)
+from overlay_client.backend.surface_preparation import BACKEND_PRESENTATION_SURFACE_PREPARATION_MANAGED_WINDOWED
 
 if TYPE_CHECKING:
-    from overlay_client.backend import HelperPresentationRequest, HelperTargetStatus
-    from overlay_client.backend.bundles._gnome_shell_helper_presentation import GnomeHelperPresentationCycleResult
-    from overlay_client.backend.shell_raster_frame import ShellRasterFrameBuildResult
     from overlay_client.platform_integration import PlatformContext
     from overlay_client.window_tracking import MonitorProvider, WindowTracker
 
@@ -255,21 +255,14 @@ def uses_transient_parent(bundle: BackendBundle) -> bool:
 def requires_focus_safe_overlay_flags(status: Optional[BackendSelectionStatus]) -> bool:
     """Return whether the selected backend needs non-focus-stealing overlay window flags."""
 
-    return _gnome_shell_helper_presentation_available(status)
+    runtime = _presentation_runtime_for_status(status)
+    return runtime is not None and runtime.helper_presentation_available(status)
 
 
 def platform_label_for_bundle(bundle: BackendBundle) -> str:
     """Return the current human-readable platform label for a bundle-backed runtime path."""
 
     return bundle.capabilities.platform_label
-
-
-GnomePresentationCycleRunner = Callable[..., "GnomeHelperPresentationCycleResult"]
-BackendPresentationSurfacePreparer = Callable[[BackendPresentationSurfacePreparation], bool]
-BackendRasterFrameProvider = Callable[
-    ["HelperTargetStatus | None", "HelperPresentationRequest | None", bool],
-    "ShellRasterFrameBuildResult",
-]
 
 
 def run_backend_presentation_cycle(
@@ -281,55 +274,48 @@ def run_backend_presentation_cycle(
     title_bar_compensation_enabled: bool = False,
     title_bar_compensation_height: int = 0,
     presentation_refresh_requested: bool = False,
-    gnome_runner: GnomePresentationCycleRunner | None = None,
-    prepare_surface: BackendPresentationSurfacePreparer | None = None,
-    raster_frame_provider: BackendRasterFrameProvider | None = None,
+    gnome_runner: PresentationCycleRunner | None = None,
+    prepare_surface: SurfacePreparer | None = None,
+    raster_frame_provider: RasterFrameProvider | None = None,
 ) -> BackendPresentationCycleResult | None:
     """Run a backend-owned runtime presentation cycle when the selected backend exposes one."""
 
-    if not _gnome_shell_helper_presentation_available(status):
-        if _gnome_shell_raster_selected(status):
-            return _gnome_shell_raster_unavailable_result(status)
+    runtime = _presentation_runtime_for_status(status)
+    if runtime is None:
         return None
-    runner = gnome_runner or _gnome_shell_helper_presentation_runner()
-    return _backend_result_from_gnome_helper_result(
-        runner(
+    runtime_result = runtime.run_presentation_cycle(
+        status,
+        BackendPresentationRuntimeRequest(
             standalone_mode=standalone_mode,
             keep_overlay_visible=keep_overlay_visible,
             previous_surface_action=previous_surface_action,
             title_bar_compensation_enabled=title_bar_compensation_enabled,
             title_bar_compensation_height=title_bar_compensation_height,
             presentation_refresh_requested=presentation_refresh_requested,
+            presentation_cycle_runner=gnome_runner,
             prepare_surface=prepare_surface,
-            shell_raster_frame_provider=raster_frame_provider,
-            shell_raster_runtime_enabled=_gnome_shell_raster_selected(status),
-            suppress_pyqt_fallback_on_shell_raster_failure=_gnome_shell_raster_selected(status),
-        )
+            raster_frame_provider=raster_frame_provider,
+        ),
     )
+    if runtime_result is None:
+        return None
+    if runtime_result.helper_unavailable:
+        return _helper_presentation_unavailable_result()
+    if runtime_result.presentation_result is None:
+        return None
+    return _backend_result_from_helper_presentation_result(runtime_result.presentation_result)
 
 
-def _gnome_shell_helper_presentation_available(status: Optional[BackendSelectionStatus]) -> bool:
-    selected_backend = getattr(status, "selected_backend", None)
-    if getattr(selected_backend, "instance", None) not in {
-        BackendInstance.GNOME_SHELL_WAYLAND,
-        BackendInstance.GNOME_SHELL_RASTER,
-    }:
-        return False
-    for helper_state in getattr(status, "helper_states", ()):
-        if getattr(helper_state, "helper", None) is HelperKind.GNOME_SHELL_EXTENSION and helper_state.available:
-            return True
-    return False
+def _presentation_runtime_for_status(status: Optional[BackendSelectionStatus]):
+    if status is None:
+        return None
+    try:
+        return resolve_linux_bundle_from_status(status).presentation_runtime
+    except ValueError:
+        return None
 
 
-def _gnome_shell_raster_selected(status: Optional[BackendSelectionStatus]) -> bool:
-    selected_backend = getattr(status, "selected_backend", None)
-    return getattr(selected_backend, "instance", None) is BackendInstance.GNOME_SHELL_RASTER
-
-
-def _gnome_shell_raster_unavailable_result(
-    status: Optional[BackendSelectionStatus],
-) -> BackendPresentationCycleResult:
-    del status
+def _helper_presentation_unavailable_result() -> BackendPresentationCycleResult:
     return BackendPresentationCycleResult(
         should_show_overlay=False,
         diagnostics={
@@ -350,38 +336,30 @@ def _gnome_shell_raster_unavailable_result(
     )
 
 
-def _gnome_shell_helper_presentation_runner() -> GnomePresentationCycleRunner:
-    from overlay_client.backend.bundles._gnome_shell_helper_presentation import (
-        run_gnome_shell_helper_presentation_cycle,
-    )
-
-    return run_gnome_shell_helper_presentation_cycle
-
-
-def _backend_result_from_gnome_helper_result(
-    result: "GnomeHelperPresentationCycleResult",
+def _backend_result_from_helper_presentation_result(
+    result: object,
 ) -> BackendPresentationCycleResult:
     return BackendPresentationCycleResult(
         should_show_overlay=bool(result.should_show_overlay and result.presentation_status is not None),
-        scale_size=_scale_size_from_gnome_helper_result(result),
-        prime_rect=_prime_rect_from_gnome_helper_result(result),
-        prime_rect_source=_prime_rect_source_from_gnome_helper_result(result),
-        diagnostics=_diagnostics_from_gnome_helper_result(result),
-        visibility_snapshot=_visibility_snapshot_from_gnome_helper_result(result),
+        scale_size=_scale_size_from_helper_presentation_result(result),
+        prime_rect=_prime_rect_from_helper_presentation_result(result),
+        prime_rect_source=_prime_rect_source_from_helper_presentation_result(result),
+        diagnostics=_diagnostics_from_helper_presentation_result(result),
+        visibility_snapshot=_visibility_snapshot_from_helper_presentation_result(result),
         log_prefix="GNOME helper presentation",
         reset_surface_state=bool(getattr(result, "managed_surface_reset_requested", False)),
     )
 
 
-def _diagnostics_from_gnome_helper_result(
-    result: "GnomeHelperPresentationCycleResult",
+def _diagnostics_from_helper_presentation_result(
+    result: object,
 ) -> dict[str, object]:
     payload = dict(result.to_log_payload())
     target = result.target_status.target if result.target_status is not None else None
     payload.update(
         {
-            "prime_rect": _prime_rect_payload_from_gnome_helper_result(result),
-            "prime_rect_source": _prime_rect_source_from_gnome_helper_result(result),
+            "prime_rect": _prime_rect_payload_from_helper_presentation_result(result),
+            "prime_rect_source": _prime_rect_source_from_helper_presentation_result(result),
             "target_available": bool(result.target_found),
             "target_has_focus": bool(target.has_focus) if target is not None else False,
             "target_showing_on_workspace": bool(target.showing_on_workspace) if target is not None else False,
@@ -394,17 +372,17 @@ def _diagnostics_from_gnome_helper_result(
             "presentation_rect_match": bool(
                 result.presentation_status is not None and result.presentation_status.rect_match
             ),
-            "prepared_surface_requires_mapping": _prepared_surface_requires_mapping_from_gnome_helper_result(result),
+            "prepared_surface_requires_mapping": _prepared_surface_requires_mapping_from_helper_presentation_result(result),
             "prepared_surface_allows_unfocused_content": (
-                _prepared_surface_allows_unfocused_content_from_gnome_helper_result(result)
+                _prepared_surface_allows_unfocused_content_from_helper_presentation_result(result)
             ),
         }
     )
     return payload
 
 
-def _visibility_snapshot_from_gnome_helper_result(
-    result: "GnomeHelperPresentationCycleResult",
+def _visibility_snapshot_from_helper_presentation_result(
+    result: object,
 ) -> BackendPresentationVisibilitySnapshot:
     target = result.target_status.target if result.target_status is not None else None
     return BackendPresentationVisibilitySnapshot(
@@ -416,15 +394,15 @@ def _visibility_snapshot_from_gnome_helper_result(
         presentation_attachable=bool(result.should_show_overlay and result.presentation_status is not None),
         overlay_window_found=bool(result.presentation_status is not None and result.presentation_status.overlay_token),
         presentation_rect_match=bool(result.presentation_status is not None and result.presentation_status.rect_match),
-        prepared_surface_requires_mapping=_prepared_surface_requires_mapping_from_gnome_helper_result(result),
-        prepared_surface_allows_unfocused_content=_prepared_surface_allows_unfocused_content_from_gnome_helper_result(
+        prepared_surface_requires_mapping=_prepared_surface_requires_mapping_from_helper_presentation_result(result),
+        prepared_surface_allows_unfocused_content=_prepared_surface_allows_unfocused_content_from_helper_presentation_result(
             result
         ),
     )
 
 
-def _prepared_surface_requires_mapping_from_gnome_helper_result(
-    result: "GnomeHelperPresentationCycleResult",
+def _prepared_surface_requires_mapping_from_helper_presentation_result(
+    result: object,
 ) -> bool:
     surface_preparation = getattr(result, "surface_preparation", None)
     return (
@@ -435,14 +413,14 @@ def _prepared_surface_requires_mapping_from_gnome_helper_result(
     )
 
 
-def _prepared_surface_allows_unfocused_content_from_gnome_helper_result(
-    result: "GnomeHelperPresentationCycleResult",
+def _prepared_surface_allows_unfocused_content_from_helper_presentation_result(
+    result: object,
 ) -> bool:
-    return _prepared_surface_requires_mapping_from_gnome_helper_result(result)
+    return _prepared_surface_requires_mapping_from_helper_presentation_result(result)
 
 
-def _scale_size_from_gnome_helper_result(
-    result: "GnomeHelperPresentationCycleResult",
+def _scale_size_from_helper_presentation_result(
+    result: object,
 ) -> tuple[int, int] | None:
     rect = None
     if result.presentation_status is not None and result.presentation_status.applied_rect is not None:
@@ -454,8 +432,8 @@ def _scale_size_from_gnome_helper_result(
     return (rect.width, rect.height)
 
 
-def _prime_rect_from_gnome_helper_result(
-    result: "GnomeHelperPresentationCycleResult",
+def _prime_rect_from_helper_presentation_result(
+    result: object,
 ) -> tuple[int, int, int, int] | None:
     rect = None
     if (
@@ -473,18 +451,18 @@ def _prime_rect_from_gnome_helper_result(
     return (rect.x, rect.y, rect.width, rect.height)
 
 
-def _prime_rect_payload_from_gnome_helper_result(
-    result: "GnomeHelperPresentationCycleResult",
+def _prime_rect_payload_from_helper_presentation_result(
+    result: object,
 ) -> dict[str, int] | None:
-    rect = _prime_rect_from_gnome_helper_result(result)
+    rect = _prime_rect_from_helper_presentation_result(result)
     if rect is None:
         return None
     x, y, width, height = rect
     return {"x": x, "y": y, "width": width, "height": height}
 
 
-def _prime_rect_source_from_gnome_helper_result(
-    result: "GnomeHelperPresentationCycleResult",
+def _prime_rect_source_from_helper_presentation_result(
+    result: object,
 ) -> str:
     if (
         result.presentation_status is not None
