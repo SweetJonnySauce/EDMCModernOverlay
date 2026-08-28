@@ -35,4 +35,4 @@
 
 ## Commit
 
-- `18d9d9b feat(gnome): enable native fullscreen raster route` — local only; no push.
+- `29ddbe1 feat(gnome): enable native fullscreen raster route` — local only; no push.
