@@ -34,7 +34,7 @@ artifacts for that approach.
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 1.1 | Add a bundle-owned GNOME presentation runtime/profile seam | Completed |
+| 1.1 | Add a bundle-owned GNOME presentation runtime/profile seam | Completed: remediation restored the normal native profile to capable-but-inactive; legacy raster remains active |
 | 1.2 | Move raw GNOME/raster selection decisions out of generic consumer dispatch | Completed |
 | 1.3 | Prove X11/xcompat remain outside the GNOME runtime path | Completed |
 
@@ -42,9 +42,9 @@ artifacts for that approach.
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 2.1 | Select real-content raster for eligible `gnome_shell_wayland` fullscreen targets | Completed |
-| 2.2 | Preserve managed PyQt for windowed targets | Completed |
-| 2.3 | Fail closed when fullscreen raster cannot be built or proven | Completed |
+| 2.1 | Select real-content raster for eligible `gnome_shell_wayland` fullscreen targets | Completed — normal bundle profile now selects the existing neutral real-content provider route |
+| 2.2 | Preserve managed PyQt for windowed targets | Completed — existing helper-cycle windowed/partial/ambiguous unit contracts passed unchanged |
+| 2.3 | Fail closed when fullscreen raster cannot be built or proven | Completed — native profile now forwards existing fallback suppression; failure contracts passed unchanged |
 
 ### Phase 3: Transition and lifecycle safety
 
