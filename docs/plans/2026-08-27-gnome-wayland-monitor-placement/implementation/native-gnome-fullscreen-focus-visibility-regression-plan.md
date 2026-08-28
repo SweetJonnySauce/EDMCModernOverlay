@@ -1,44 +1,83 @@
 # Native GNOME Fullscreen Raster Focus-Visibility Regression: Implementation Plan
 
-**Status:** In progress — Step 1 committed; Step 2 remains pending automated
-project gates and user-gated live validation.
+**Status:** Safety rollback implemented — the direct unchecked-preference
+authorization was unsafe and has been restored to the prior fullscreen
+actor-continuity behavior. The checkbox behavior remains unresolved; do not
+treat this historical plan as authority for another direct authorization change.
 
 ## Checklist
 
-- [x] Step 1: Make the unchecked preference suppress unfocused native-GNOME fullscreen raster content.
-- [ ] Step 2: Validate preference behavior and preserve native-GNOME presenter safety.
+- [x] Step 1: Attempt the unchecked-preference actor suppression and record its live black-screen regression.
+- [x] Safety rollback: Restore the prior fullscreen Shell-raster actor-continuity authorization.
+- [ ] Follow-up design: Define safe renderer-level content suppression that preserves actor continuity.
+- [ ] Live rollback check: Verify the black screen is gone without claiming unchecked-preference hiding.
 
 ## Phase Status
 
 | Phase | Description | Status |
 | --- | --- | --- |
-| 1 | Restore the focus-visibility contract in the native GNOME bundle | Completed |
-| 2 | Automated and live acceptance | Planned |
+| 1 | Restore the focus-visibility contract in the native GNOME bundle | Superseded — direct preference-to-actor authorization is unsafe; safety rollback is complete |
+| 2 | Automated and live acceptance | Blocked — rollback needs user verification, then a new content-suppression design |
 
 ### Phase 1: Restore the focus-visibility contract in the native GNOME bundle
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 1.1 | Remove the fullscreen geometry exception that authorizes an unfocused Shell-raster target | Completed |
-| 1.2 | Prove checked and unchecked preference behavior through the helper request/result contract | Completed — focused runtime, extension-source, and frame suites passed (152 tests). |
+| 1.1 | Remove the fullscreen geometry exception that authorizes an unfocused Shell-raster target | Superseded — removal activated unsafe actor suspension; rollback restored the exception as an actor-continuity guard |
+| 1.2 | Prove checked and unchecked preference behavior through the helper request/result contract | Failed live acceptance — unit coverage modeled the helper response but not compositor focus-return safety |
 
 ### Phase 2: Automated and live acceptance
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 2.1 | Run focused unit/source-contract coverage and the project gates | Planned |
-| 2.2 | Verify focus-loss and focus-return behavior in a live GNOME Wayland session | Planned |
+| 2.1 | Run focused unit/source-contract coverage and the project gates | Completed — focused suite: 152 passed; elevated `make check` and `make test`: Ruff/mypy clean and 1,675 tests passed each. The ordinary sandbox run was blocked only by five loopback-socket fixture setups. |
+| 2.2 | Verify focus-loss and focus-return behavior in a live GNOME Wayland session | Failed — user observed a black screen on click/focus return after the Step 1 change |
 
 ## Scope and diagnosis
 
-The native `gnome_shell_wayland` fullscreen Shell-raster route currently computes
-`allow_unfocused_target` as either the `keep_overlay_visible` preference **or**
-a full-monitor fullscreen geometry match. The latter path makes the helper keep
-rendering an unfocused Elite target even when the preference is unchecked.
+Before Step 1, the native `gnome_shell_wayland` fullscreen Shell-raster route
+computed `allow_unfocused_target` as either the `keep_overlay_visible`
+preference **or** a full-monitor fullscreen geometry match. That latter path
+made the helper keep rendering an unfocused Elite target even when the
+preference was unchecked. Step 1 removed the geometry exception; this plan now
+records the remaining validation work.
 
 This plan corrects only that authorization decision. It does not alter monitor
 placement, Shell-raster eligibility, geometry, presenter ownership, click-through,
 or the X11/xcompat backends.
+
+## Live regression addendum (2026-08-28)
+
+The Step 1 implementation proved that sending `allow_unfocused_target=False`
+causes the helper to classify an unfocused fullscreen target as
+`target_not_focused`. The extension then calls
+`_clearShellRasterFrame('target_not_focused')`, whose transient path suspends
+(hides) the compositor-owned raster actors. In the affected live fullscreen
+session, clicking/focusing away from and back to Elite produces a black screen.
+
+This establishes that `allow_unfocused_target` is not merely a user-content
+visibility preference. It is also a fullscreen Shell-actor continuity/safety
+control. The preceding fullscreen geometry exception was an over-broad way to
+preserve that continuity, but replacing it with the preference directly is not
+safe either.
+
+Do not apply further direct authorization changes. The next remediation must
+first restore the previously stable actor-continuity behavior, then separately
+design and validate a renderer-level content-suppression mechanism that does
+not hide/detach the Shell raster actor during a normal focus transition. That
+mechanism needs new helper/actor contract coverage and live validation before
+it replaces the stable fallback.
+
+## Safety rollback addendum (2026-08-28)
+
+The approved emergency rollback restored the pre-`8ef91cd` native fullscreen
+full-monitor authorization: an eligible active fullscreen Shell-raster target
+may retain `allow_unfocused_target=True` while focus is transiently elsewhere.
+This preserves the compositor-owned actor across focus return and is covered by
+a focused unit regression test. It deliberately leaves the checkbox ineffective
+for that eligible fullscreen route. A future change must use a renderer-level
+content-suppression contract that does not clear, hide, or detach the actor;
+it requires a new approved design and live GNOME validation.
 
 ## Step 1: Make the unchecked preference suppress unfocused native-GNOME fullscreen raster content
 

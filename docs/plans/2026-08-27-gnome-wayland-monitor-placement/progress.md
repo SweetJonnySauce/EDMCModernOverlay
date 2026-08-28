@@ -5,7 +5,7 @@
 | 1 | Research and remediation design | Completed |
 | 2 | Implementation and automated validation | Completed — elevated local project gates passed |
 | 3 | Manual Wayland validation and merge closure | Completed for the Shell-raster replacement route; old monitor-transfer delivery was superseded |
-| 4 | Native GNOME fullscreen focus-visibility regression | In progress — Step 1 implementation and focused unit validation completed; Step 2 remains. |
+| 4 | Native GNOME fullscreen focus-visibility regression | Safety rollback implemented; live rollback verification and a new renderer-level content-suppression design remain. |
 
 ## Phase 1 stages
 
@@ -23,5 +23,5 @@
 | Stage | Description | Status |
 | --- | --- | --- |
 | 4.1 | Document the preference-bypass diagnosis and test-first correction | Completed |
-| 4.2 | Make unchecked `keep_overlay_visible` suppress unfocused native GNOME Shell-raster content | Completed — native GNOME bundle forwards the preference directly, removes the fullscreen geometry bypass, and focused runtime/source/frame tests passed (152 tests). |
-| 4.3 | Run automated gates and the live focus/placement acceptance matrix | Planned |
+| 4.2 | Make unchecked `keep_overlay_visible` suppress unfocused native GNOME Shell-raster content | Superseded for safety — direct `allow_unfocused_target` control triggered actor suspension and black-screen regression; rollback restored fullscreen actor continuity. |
+| 4.3 | Run automated gates and the live focus/placement acceptance matrix | Blocked — user must first verify the rollback removes the black screen; a new approved renderer-level content-suppression design is required before reattempting the checkbox behavior. |

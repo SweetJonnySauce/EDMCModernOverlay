@@ -1174,7 +1174,7 @@ def test_shell_raster_focus_risk_degrade_keeps_managed_pyqt_suppressed(
     assert calls[0].shell_raster_frame.allow_unfocused_target is False
 
 
-def test_selected_shell_raster_suspends_unfocused_fullscreen_target_when_keep_visible_disabled(
+def test_selected_shell_raster_preserves_fullscreen_actor_continuity_when_unfocused(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, "1")
@@ -1198,24 +1198,17 @@ def test_selected_shell_raster_suspends_unfocused_fullscreen_target_when_keep_vi
     def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
         calls.append(request)
         assert request.shell_raster_frame is not None
-        assert request.shell_raster_frame.allow_unfocused_target is False
+        assert request.shell_raster_frame.allow_unfocused_target is True
         return _presentation_payload(
             request,
-            status="presentation_degraded",
-            applied_rect=None,
+            applied_rect=frame_request.frame_rect.to_payload(),
             renderer="gnome_shell_raster_frame",
-            placement=False,
-            chrome_free=False,
-            stacking=False,
-            click_through=False,
-            focus_safe=False,
-            degrade_reasons=["target_not_focused"],
             shell_raster_frame={
                 "frame_version": frame_request.frame_version,
                 "frame_rect": frame_request.frame_rect.to_payload(),
                 "frame_dimensions": {"x": 0, "y": 0, "width": 3440, "height": 1440},
                 "session_id": "test-session",
-                "cleanup_action": "target_not_focused",
+                "allow_unfocused_target": True,
             },
         )
 
@@ -1233,9 +1226,10 @@ def test_selected_shell_raster_suspends_unfocused_fullscreen_target_when_keep_vi
     )
 
     assert result.presentation_status is not None
-    assert result.presentation_status.state is HelperPresentationState.DEGRADED
-    assert result.shell_raster_frame_presented is False
-    assert result.shell_raster_frame_suspended_for_focus_risk is True
+    assert result.presentation_status.state is HelperPresentationState.APPLIED
+    assert result.presentation_status.rect_match is True
+    assert result.shell_raster_frame_presented is True
+    assert result.shell_raster_frame_suspended_for_focus_risk is False
     assert result.should_show_overlay is False
     assert calls
 
