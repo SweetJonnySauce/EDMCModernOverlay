@@ -1,6 +1,6 @@
 # GNOME Wayland Fullscreen Shell-Raster Routing: Implementation Plan
 
-**Status:** In progress. This supersedes the monitor-transfer approach
+**Status:** Completed. This supersedes the monitor-transfer approach
 for the observed GNOME/Mutter fullscreen failure. It leaves its diagnostics and
 commits intact as evidence; it does not overwrite the in-progress delivery
 artifacts for that approach.
@@ -9,8 +9,8 @@ artifacts for that approach.
 
 - [x] Step 1: Lift native-GNOME presentation configuration behind a bundle-owned seam.
 - [x] Step 2: Enable real-content Shell raster for eligible native-GNOME fullscreen targets.
-- [ ] Step 3: Wire safe presenter transitions and fullscreen failure suppression.
-- [ ] Step 4: Validate the native GNOME route and record live evidence.
+- [x] Step 3: Wire safe presenter transitions and fullscreen failure suppression.
+- [x] Step 4: Validate the native GNOME route and record live evidence.
 
 ## Phase Status
 
@@ -19,8 +19,8 @@ artifacts for that approach.
 | 0 | Evidence and replacement design | Completed |
 | 1 | Backend-boundary seam | Completed |
 | 2 | Fullscreen raster routing | Completed |
-| 3 | Transition/failure wiring | Pending |
-| 4 | Automated and live acceptance | Pending |
+| 3 | Transition/failure wiring | Completed |
+| 4 | Automated and live acceptance | Completed — automated evidence recorded; user confirmed the manual Wayland matrix passes and explicitly waived per-case diagnostic capture |
 
 ### Phase 0: Evidence and replacement design
 
@@ -50,17 +50,17 @@ artifacts for that approach.
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 3.1 | Clear Shell actor before committing managed PyQt | Pending |
-| 3.2 | Clear/reset on target loss, helper loss, and target replacement | Pending |
-| 3.3 | Confirm no duplicate visible surface or focus/input regression | Pending |
+| 3.1 | Clear Shell actor before committing managed PyQt | Completed — deterministic helper-cycle recording proves acknowledged clear before preparation and managed attach |
+| 3.2 | Clear/reset on target loss, helper loss, and target replacement | Completed — guarded HIDE_ALL exits with cached raster ownership clear/reset safely; unavailable helper remains local fail-closed |
+| 3.3 | Confirm no duplicate visible surface or focus/input regression | Completed — focused transition, extension-contract, and architecture suites passed; live acceptance remains Step 4 |
 
 ### Phase 4: Acceptance
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 4.1 | Run focused automated tests and architecture gate | Pending |
-| 4.2 | Run project checks and record limitations | Pending |
-| 4.3 | Perform live GNOME two-monitor acceptance matrix | Pending |
+| 4.1 | Run focused automated tests and architecture gate | Completed — combined focused suite passed: 201 tests; architecture boundary included |
+| 4.2 | Run project checks and record limitations | Completed with environment limitations — scoped Ruff passed; `make check` lacks system Ruff and `make test` lacks usable system PyQt6; root dev dependency install could not reach PyPI |
+| 4.3 | Perform live GNOME two-monitor acceptance matrix | Completed — user confirmed the Wayland matrix passes and explicitly approved skipping diagnostic capture |
 
 ## Step 1: Lift native-GNOME presentation configuration behind a bundle-owned seam
 
