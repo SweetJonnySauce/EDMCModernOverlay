@@ -24,4 +24,4 @@ Unit tests only: no `load.py`, EDMC hook, or lifecycle state changed. A GNOME Sh
 
 ## Commit
 
-- [x] Local conventional commit `62f8e3f4eba0bf36afa3a14345cffb8de256bb70` (`feat(gnome): activate native fullscreen raster route`); no push was performed. Only this task's implementation, tests, routing plan/dashboard, and isolated code-assist documentation were staged.
+- [x] Local implementation commit `33ec919b2ee6e337e026dd1b062938837e435c29` (`feat(gnome): activate native fullscreen raster route`); no push was performed. Only this task's implementation, tests, routing plan/dashboard, and isolated code-assist documentation were staged.
