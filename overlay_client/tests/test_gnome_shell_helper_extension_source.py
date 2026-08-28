@@ -83,6 +83,48 @@ def test_extension_reports_mode_reduced_health_capabilities() -> None:
     assert "feature_gate: helperFeatureGatePayload(this._featureGate)" in source
 
 
+def test_extension_advertises_and_applies_reversible_raster_content_visibility() -> None:
+    source = _source()
+
+    assert "HELPER_CAPABILITY_RASTER_CONTENT_VISIBILITY" in source
+    assert "capabilities.push(HELPER_CAPABILITY_RASTER_CONTENT_VISIBILITY);" in source
+    assert "const contentVisibilityRequest = this._shellRasterContentVisibilityRequest(payload);" in source
+    assert "const contentVisibilityResult = frameResult.visible" in source
+    assert "? this._applyShellRasterContentVisibility({" in source
+    assert "contentVisibility: contentVisibilityRequest.effectiveVisibility," in source
+    assert "contentVisibilitySupported: contentVisibilityRequest.supported," in source
+    assert "contentVisibilityApplied: contentVisibilityResult.applied," in source
+    assert "contentVisibilityDegraded," in source
+    assert "_shellRasterContentVisibilityRequest(payload)" in source
+    assert "_applyShellRasterContentVisibility({ targetToken, contentVisibility })" in source
+
+
+def test_extension_raster_content_visibility_method_preserves_actor_lifecycle() -> None:
+    source = _source()
+    method_start = source.index("_applyShellRasterContentVisibility({ targetToken, contentVisibility }) {")
+    method_end = source.index("\n    _shellRasterFramePayload({", method_start)
+    method = source[method_start:method_end]
+
+    assert "this._shellRasterActorRecords(targetToken)" in method
+    assert "record.actor.set_opacity" in method
+    assert "record.contentVisibility = effectiveVisibility;" in method
+    assert "record.actor.set_reactive?.(false)" in method
+    assert "content_visibility_mutation_failed" in method
+    request_start = source.index("_shellRasterContentVisibilityRequest(payload) {")
+    request_end = source.index("\n    _applyShellRasterContentVisibility(", request_start)
+    assert "content_visibility_malformed" in source[request_start:request_end]
+    for forbidden in (
+        "_clearShellRasterFrame",
+        "_suspendShellRasterFrame",
+        ".hide",
+        "remove_child",
+        ".destroy",
+        "target_not_focused",
+        ".show",
+    ):
+        assert forbidden not in method
+
+
 def test_extension_blocks_target_and_presentation_methods_when_mode_disables_them() -> None:
     source = _source()
 

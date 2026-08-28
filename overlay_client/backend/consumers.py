@@ -7,7 +7,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Mapping, Optional
 
 from overlay_client.backend.contracts import BackendBundle, BackendInstance
-from overlay_client.backend.presentation_policy import BackendPresentationVisibilitySnapshot
+from overlay_client.backend.presentation_policy import (
+    BackendPresentationContentVisibility,
+    BackendPresentationVisibilitySnapshot,
+)
 from overlay_client.backend.presentation_runtime import (
     BackendPresentationRuntimeRequest,
     PresentationCycleRunner,
@@ -73,6 +76,7 @@ class BackendPresentationCycleResult:
             payload.get("surface_preparation_reason"),
             payload.get("prepared_surface_requires_mapping"),
             payload.get("prepared_surface_allows_unfocused_content"),
+            payload.get("retained_content_visibility_available"),
             payload.get("transition_state"),
             payload.get("transition_reason"),
             payload.get("transition_action"),
@@ -274,6 +278,7 @@ def run_backend_presentation_cycle(
     title_bar_compensation_enabled: bool = False,
     title_bar_compensation_height: int = 0,
     presentation_refresh_requested: bool = False,
+    content_visibility: BackendPresentationContentVisibility = BackendPresentationContentVisibility.VISIBLE,
     gnome_runner: PresentationCycleRunner | None = None,
     prepare_surface: SurfacePreparer | None = None,
     raster_frame_provider: RasterFrameProvider | None = None,
@@ -292,6 +297,7 @@ def run_backend_presentation_cycle(
             title_bar_compensation_enabled=title_bar_compensation_enabled,
             title_bar_compensation_height=title_bar_compensation_height,
             presentation_refresh_requested=presentation_refresh_requested,
+            content_visibility=content_visibility,
             presentation_cycle_runner=gnome_runner,
             prepare_surface=prepare_surface,
             raster_frame_provider=raster_frame_provider,
@@ -303,7 +309,10 @@ def run_backend_presentation_cycle(
         return _helper_presentation_unavailable_result()
     if runtime_result.presentation_result is None:
         return None
-    return _backend_result_from_helper_presentation_result(runtime_result.presentation_result)
+    return _backend_result_from_helper_presentation_result(
+        runtime_result.presentation_result,
+        retained_content_visibility_available=runtime_result.retained_content_visibility_available,
+    )
 
 
 def _presentation_runtime_for_status(status: Optional[BackendSelectionStatus]):
@@ -338,14 +347,22 @@ def _helper_presentation_unavailable_result() -> BackendPresentationCycleResult:
 
 def _backend_result_from_helper_presentation_result(
     result: object,
+    *,
+    retained_content_visibility_available: bool = False,
 ) -> BackendPresentationCycleResult:
     return BackendPresentationCycleResult(
         should_show_overlay=bool(result.should_show_overlay and result.presentation_status is not None),
         scale_size=_scale_size_from_helper_presentation_result(result),
         prime_rect=_prime_rect_from_helper_presentation_result(result),
         prime_rect_source=_prime_rect_source_from_helper_presentation_result(result),
-        diagnostics=_diagnostics_from_helper_presentation_result(result),
-        visibility_snapshot=_visibility_snapshot_from_helper_presentation_result(result),
+        diagnostics=_diagnostics_from_helper_presentation_result(
+            result,
+            retained_content_visibility_available=retained_content_visibility_available,
+        ),
+        visibility_snapshot=_visibility_snapshot_from_helper_presentation_result(
+            result,
+            retained_content_visibility_available=retained_content_visibility_available,
+        ),
         log_prefix="GNOME helper presentation",
         reset_surface_state=bool(getattr(result, "managed_surface_reset_requested", False)),
     )
@@ -353,6 +370,8 @@ def _backend_result_from_helper_presentation_result(
 
 def _diagnostics_from_helper_presentation_result(
     result: object,
+    *,
+    retained_content_visibility_available: bool = False,
 ) -> dict[str, object]:
     payload = dict(result.to_log_payload())
     target = result.target_status.target if result.target_status is not None else None
@@ -366,6 +385,7 @@ def _diagnostics_from_helper_presentation_result(
             "target_minimized": bool(target.minimized) if target is not None else False,
             "presentation_available": result.presentation_status is not None,
             "presentation_attachable": bool(result.should_show_overlay and result.presentation_status is not None),
+            "retained_content_visibility_available": bool(retained_content_visibility_available),
             "overlay_window_found": bool(
                 result.presentation_status is not None and result.presentation_status.overlay_token
             ),
@@ -383,6 +403,8 @@ def _diagnostics_from_helper_presentation_result(
 
 def _visibility_snapshot_from_helper_presentation_result(
     result: object,
+    *,
+    retained_content_visibility_available: bool = False,
 ) -> BackendPresentationVisibilitySnapshot:
     target = result.target_status.target if result.target_status is not None else None
     return BackendPresentationVisibilitySnapshot(
@@ -392,6 +414,7 @@ def _visibility_snapshot_from_helper_presentation_result(
         target_minimized=bool(target.minimized) if target is not None else False,
         presentation_available=result.presentation_status is not None,
         presentation_attachable=bool(result.should_show_overlay and result.presentation_status is not None),
+        retained_content_visibility_available=bool(retained_content_visibility_available),
         overlay_window_found=bool(result.presentation_status is not None and result.presentation_status.overlay_token),
         presentation_rect_match=bool(result.presentation_status is not None and result.presentation_status.rect_match),
         prepared_surface_requires_mapping=_prepared_surface_requires_mapping_from_helper_presentation_result(result),

@@ -13,6 +13,7 @@ export const HELPER_COORDINATE_SPACE = 'gnome_shell_global_logical';
 export const HELPER_DEV_MODE_CONFIG_DIR = 'EDMCModernOverlay';
 export const HELPER_DEV_MODE_CONFIG_FILE = 'gnome_helper_dev_mode.json';
 export const HELPER_DEV_MODE_DEFAULT = 'full_helper';
+export const HELPER_CAPABILITY_RASTER_CONTENT_VISIBILITY = 'shell_raster_content_visibility';
 export const HELPER_DEV_MODE_NAMES = Object.freeze([
     'lifecycle_only',
     'dbus_health_only',
@@ -30,4 +31,5 @@ export const HELPER_CAPABILITIES = Object.freeze([
     'capabilities',
     'target_state',
     'presentation_state',
+    HELPER_CAPABILITY_RASTER_CONTENT_VISIBILITY,
 ]);

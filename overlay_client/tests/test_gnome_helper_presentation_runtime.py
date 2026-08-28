@@ -37,6 +37,7 @@ except Exception:  # pragma: no cover - lightweight stub path
 
 from overlay_client.backend import (
     GNOME_SHELL_HELPER_CAPABILITIES,
+    GNOME_SHELL_HELPER_CAPABILITY_RASTER_CONTENT_VISIBILITY,
     GNOME_SHELL_HELPER_COORDINATE_SPACE,
     GNOME_SHELL_HELPER_RECT_SOURCE_FRAME_FALLBACK,
     HELPER_KIND,
@@ -44,12 +45,14 @@ from overlay_client.backend import (
     HELPER_VERSION,
     HelperPresentationRequest,
     HelperPresentationState,
+    HelperRasterContentVisibility,
     HelperRasterFrameRequest,
     HelperRasterFrameRegionRequest,
     HelperRect,
 )
 from overlay_client.backend.bundles.gnome_shell_wayland import build_gnome_shell_wayland_bundle
 from overlay_client.backend.contracts import HelperKind
+from overlay_client.backend.presentation_policy import BackendPresentationContentVisibility
 from overlay_client.backend.presentation_runtime import BackendPresentationRuntimeRequest
 from overlay_client.backend.bundles._gnome_shell_helper_presentation import (
     GNOME_HELPER_BORDERLESS_FULLSCREEN_PREP_ENV,
@@ -1542,6 +1545,252 @@ def test_native_gnome_runtime_routes_eligible_fullscreen_to_real_content_raster(
     assert calls[0].renderer == "gnome_shell_raster_frame"
     assert calls[0].shell_raster_frame is not None
     assert calls[0].shell_raster_frame.frame_version.startswith("phase14-real-content-cropped")
+
+
+def test_native_gnome_runtime_wires_supported_content_visibility_without_losing_fullscreen_continuity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, raising=False)
+    monkeypatch.delenv(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, raising=False)
+    runtime = build_gnome_shell_wayland_bundle().presentation_runtime
+    assert runtime is not None
+    status = type(
+        "NativeGnomeStatus",
+        (),
+        {
+            "helper_states": (
+                type("HelperState", (), {"helper": HelperKind.GNOME_SHELL_EXTENSION, "available": True})(),
+            )
+        },
+    )()
+    runtime_state = GnomeHelperPresentationRuntimeState()
+    calls: list[HelperPresentationRequest] = []
+
+    def provider(
+        _target_status,
+        request: HelperPresentationRequest | None,
+        _include_diagnostics: bool,
+    ) -> ShellRasterFrameBuildResult:
+        assert request is not None
+        rect = request.content_rect
+        assert rect is not None
+        return ShellRasterFrameBuildResult(
+            request=HelperRasterFrameRequest(
+                action="update",
+                frame_version="content-visibility-v1",
+                target_token=request.target_token,
+                target_rect=rect,
+                frame_rect=HelperRect(24, 24, 520, 128),
+                scale=1.0,
+                image_path="/tmp/native-gnome-content-visibility.png",
+                checksum="content-visibility",
+                byte_size=123,
+                stale_timeout_ms=SHELL_RASTER_FRAME_DEFAULT_TIMEOUT_MS,
+            ),
+            eligible=True,
+        )
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        calls.append(request)
+        frame = request.shell_raster_frame
+        assert frame is not None
+        assert frame.content_visibility is not None
+        frame_rect = frame.frame_rect.to_payload()
+        return _presentation_payload(
+            request,
+            requested_rect=frame_rect,
+            applied_rect=frame_rect,
+            renderer="gnome_shell_raster_frame",
+            shell_raster_frame={
+                "frame_version": frame.frame_version,
+                "frame_rect": frame_rect,
+                "content_visibility": frame.content_visibility.value,
+                "content_visibility_supported": True,
+            },
+        )
+
+    def runner(**kwargs):
+        return run_gnome_shell_helper_presentation_cycle(
+            fetch_health=lambda: {
+                **_health_payload(),
+                "capabilities": [
+                    *GNOME_SHELL_HELPER_CAPABILITIES,
+                    GNOME_SHELL_HELPER_CAPABILITY_RASTER_CONTENT_VISIBILITY,
+                ],
+            },
+            fetch_target=lambda: _target_payload(_borderless_target(hasFocus=False)),
+            fetch_presentation=fetch_presentation,
+            clock=lambda: 100.0,
+            runtime_state=runtime_state,
+            health_cache_jitter_seconds=lambda: 0.0,
+            **kwargs,
+        )
+
+    result = runtime.run_presentation_cycle(
+        status,
+        BackendPresentationRuntimeRequest(
+            content_visibility=BackendPresentationContentVisibility.SUPPRESSED,
+            presentation_cycle_runner=runner,
+            raster_frame_provider=provider,
+        ),
+    )
+
+    assert result is not None
+    assert len(calls) == 1
+    frame = calls[0].shell_raster_frame
+    assert frame is not None
+    assert frame.content_visibility is HelperRasterContentVisibility.SUPPRESSED
+    assert frame.allow_unfocused_target is True
+
+
+def test_native_gnome_runtime_keeps_capability_missing_content_visible_without_cache_skipping_restore(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, raising=False)
+    monkeypatch.delenv(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, raising=False)
+    state = GnomeHelperPresentationRuntimeState()
+    calls: list[HelperPresentationRequest] = []
+
+    def provider(
+        _target_status,
+        request: HelperPresentationRequest | None,
+        _include_diagnostics: bool,
+    ) -> ShellRasterFrameBuildResult:
+        assert request is not None
+        rect = request.content_rect
+        assert rect is not None
+        return ShellRasterFrameBuildResult(
+            request=HelperRasterFrameRequest(
+                action="update",
+                frame_version="content-visibility-v1",
+                target_token=request.target_token,
+                target_rect=rect,
+                frame_rect=HelperRect(24, 24, 520, 128),
+                scale=1.0,
+                image_path="/tmp/native-gnome-content-visibility.png",
+                checksum="content-visibility",
+                byte_size=123,
+                stale_timeout_ms=5000,
+            ),
+            eligible=True,
+        )
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        calls.append(request)
+        frame = request.shell_raster_frame
+        assert frame is not None
+        frame_rect = frame.frame_rect.to_payload()
+        shell_raster_frame: dict[str, object] = {
+            "frame_version": frame.frame_version,
+            "frame_rect": frame_rect,
+        }
+        if frame.content_visibility is not None:
+            shell_raster_frame.update(
+                {
+                    "content_visibility": frame.content_visibility.value,
+                    "content_visibility_supported": True,
+                }
+            )
+        return _presentation_payload(
+            request,
+            requested_rect=frame_rect,
+            applied_rect=frame_rect,
+            renderer="gnome_shell_raster_frame",
+            shell_raster_frame=shell_raster_frame,
+        )
+
+    unsupported = run_gnome_shell_helper_presentation_cycle(
+        content_visibility=BackendPresentationContentVisibility.SUPPRESSED,
+        fetch_health=_health_payload,
+        fetch_target=lambda: _target_payload(_borderless_target(hasFocus=False)),
+        fetch_presentation=fetch_presentation,
+        shell_raster_frame_provider=provider,
+        shell_raster_runtime_enabled=True,
+        suppress_pyqt_fallback_on_shell_raster_failure=True,
+        runtime_state=state,
+        health_cache_jitter_seconds=lambda: 0.0,
+        clock=lambda: 100.0,
+    )
+
+    assert unsupported.request is not None
+    unsupported_frame = unsupported.request.shell_raster_frame
+    assert unsupported_frame is not None
+    assert unsupported_frame.content_visibility is None
+    assert unsupported_frame.allow_unfocused_target is True
+    assert unsupported_frame.diagnostics is not None
+    assert unsupported_frame.diagnostics["content_visibility"]["reason"] == (
+        "shell_raster_content_visibility_capability_missing"
+    )
+
+    supported_state = GnomeHelperPresentationRuntimeState()
+    visible = run_gnome_shell_helper_presentation_cycle(
+        content_visibility=BackendPresentationContentVisibility.VISIBLE,
+        fetch_health=lambda: {
+            **_health_payload(),
+            "capabilities": [
+                *GNOME_SHELL_HELPER_CAPABILITIES,
+                GNOME_SHELL_HELPER_CAPABILITY_RASTER_CONTENT_VISIBILITY,
+            ],
+        },
+        fetch_target=lambda: _target_payload(_borderless_target(hasFocus=False)),
+        fetch_presentation=fetch_presentation,
+        shell_raster_frame_provider=provider,
+        shell_raster_runtime_enabled=True,
+        suppress_pyqt_fallback_on_shell_raster_failure=True,
+        runtime_state=supported_state,
+        health_cache_jitter_seconds=lambda: 0.0,
+        clock=lambda: 100.1,
+    )
+
+    suppressed = run_gnome_shell_helper_presentation_cycle(
+        content_visibility=BackendPresentationContentVisibility.SUPPRESSED,
+        fetch_health=lambda: {
+            **_health_payload(),
+            "capabilities": [
+                *GNOME_SHELL_HELPER_CAPABILITIES,
+                GNOME_SHELL_HELPER_CAPABILITY_RASTER_CONTENT_VISIBILITY,
+            ],
+        },
+        fetch_target=lambda: _target_payload(_borderless_target(hasFocus=False)),
+        fetch_presentation=fetch_presentation,
+        shell_raster_frame_provider=provider,
+        shell_raster_runtime_enabled=True,
+        suppress_pyqt_fallback_on_shell_raster_failure=True,
+        runtime_state=supported_state,
+        health_cache_jitter_seconds=lambda: 0.0,
+        clock=lambda: 100.1,
+    )
+
+    restored = run_gnome_shell_helper_presentation_cycle(
+        content_visibility=BackendPresentationContentVisibility.VISIBLE,
+        fetch_health=lambda: {
+            **_health_payload(),
+            "capabilities": [
+                *GNOME_SHELL_HELPER_CAPABILITIES,
+                GNOME_SHELL_HELPER_CAPABILITY_RASTER_CONTENT_VISIBILITY,
+            ],
+        },
+        fetch_target=lambda: _target_payload(_borderless_target(hasFocus=True)),
+        fetch_presentation=fetch_presentation,
+        shell_raster_frame_provider=provider,
+        shell_raster_runtime_enabled=True,
+        suppress_pyqt_fallback_on_shell_raster_failure=True,
+        runtime_state=supported_state,
+        health_cache_jitter_seconds=lambda: 0.0,
+        clock=lambda: 100.2,
+    )
+
+    assert visible.presentation_skipped is False
+    assert suppressed.presentation_skipped is False
+    assert restored.presentation_skipped is False
+    assert len(calls) == 4
+    assert calls[-3].shell_raster_frame is not None
+    assert calls[-3].shell_raster_frame.content_visibility is HelperRasterContentVisibility.VISIBLE
+    assert calls[-2].shell_raster_frame is not None
+    assert calls[-2].shell_raster_frame.content_visibility is HelperRasterContentVisibility.SUPPRESSED
+    assert calls[-1].shell_raster_frame is not None
+    assert calls[-1].shell_raster_frame.content_visibility is HelperRasterContentVisibility.VISIBLE
+    assert calls[-1].shell_raster_frame.allow_unfocused_target is True
 
 
 def test_selected_shell_raster_failure_clears_and_does_not_fallback_to_pyqt(

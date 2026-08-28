@@ -35,6 +35,7 @@ GNOME_SHELL_HELPER_CAPABILITIES = (
     "target_state",
     "presentation_state",
 )
+GNOME_SHELL_HELPER_CAPABILITY_RASTER_CONTENT_VISIBILITY = "shell_raster_content_visibility"
 GNOME_SHELL_HELPER_REQUIRED_CAPABILITIES = GNOME_SHELL_HELPER_CAPABILITIES
 GNOME_SHELL_HELPER_HEALTH_STALE_SECONDS = 10.0
 GNOME_SHELL_HELPER_TARGET_STALE_SECONDS = 2.0
@@ -117,6 +118,13 @@ class HelperPresentationState(str, Enum):
     TARGET_HIDDEN = "target_hidden"
 
 
+class HelperRasterContentVisibility(str, Enum):
+    """Optional GNOME Shell raster-content state, separate from actor lifecycle."""
+
+    VISIBLE = "visible"
+    SUPPRESSED = "suppressed"
+
+
 class HelperBoundaryError(ValueError):
     """Raised when helper-boundary configuration or messages fail validation."""
 
@@ -159,6 +167,11 @@ class HelperHealthStatus:
             return False
         return (float(now_monotonic) - self.observed_at_monotonic) > self.stale_after_seconds
 
+    def supports_capability(self, capability: str) -> bool:
+        """Return whether this healthy helper explicitly advertises *capability*."""
+
+        return self.healthy and str(capability).strip() in self.capabilities
+
     def to_payload(self) -> dict[str, object]:
         return {
             "state": self.state.value,
@@ -175,6 +188,55 @@ class HelperHealthStatus:
             "detail": self.detail,
             "raw_status": self.raw_status,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class HelperRasterContentVisibilityResolution:
+    """Capability-gated raster-content request resolution for the GNOME helper."""
+
+    requested_visibility: HelperRasterContentVisibility
+    effective_visibility: HelperRasterContentVisibility
+    wire_visibility: HelperRasterContentVisibility | None
+    supported: bool
+    degrade_reason: str = ""
+
+
+def resolve_gnome_shell_raster_content_visibility(
+    requested_visibility: HelperRasterContentVisibility,
+    *,
+    health_status: HelperHealthStatus,
+) -> HelperRasterContentVisibilityResolution:
+    """Resolve an optional raster-content request without risking a legacy helper.
+
+    The optional protocol field is emitted only for a healthy helper that has
+    explicitly advertised the capability. Every other outcome retains the
+    established visible actor behavior and leaves the wire field absent.
+    """
+
+    if not isinstance(requested_visibility, HelperRasterContentVisibility):
+        raise HelperBoundaryError("invalid shell raster content visibility")
+    if not health_status.healthy:
+        return HelperRasterContentVisibilityResolution(
+            requested_visibility=requested_visibility,
+            effective_visibility=HelperRasterContentVisibility.VISIBLE,
+            wire_visibility=None,
+            supported=False,
+            degrade_reason="shell_raster_content_visibility_helper_unhealthy",
+        )
+    if not health_status.supports_capability(GNOME_SHELL_HELPER_CAPABILITY_RASTER_CONTENT_VISIBILITY):
+        return HelperRasterContentVisibilityResolution(
+            requested_visibility=requested_visibility,
+            effective_visibility=HelperRasterContentVisibility.VISIBLE,
+            wire_visibility=None,
+            supported=False,
+            degrade_reason="shell_raster_content_visibility_capability_missing",
+        )
+    return HelperRasterContentVisibilityResolution(
+        requested_visibility=requested_visibility,
+        effective_visibility=requested_visibility,
+        wire_visibility=requested_visibility,
+        supported=True,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -468,6 +530,7 @@ class HelperRasterFrameRequest:
     stale_timeout_ms: int
     regions: tuple[HelperRasterFrameRegionRequest, ...] = field(default_factory=tuple)
     allow_unfocused_target: bool = False
+    content_visibility: HelperRasterContentVisibility | None = None
     diagnostics: Mapping[str, object] | None = None
 
     def to_payload(self) -> dict[str, object]:
@@ -485,6 +548,10 @@ class HelperRasterFrameRequest:
             "stale_timeout_ms": self.stale_timeout_ms,
             "allow_unfocused_target": self.allow_unfocused_target,
         }
+        if self.content_visibility is not None:
+            if not isinstance(self.content_visibility, HelperRasterContentVisibility):
+                raise HelperBoundaryError("invalid shell raster content visibility")
+            payload["content_visibility"] = self.content_visibility.value
         if self.regions:
             payload["shell_raster_regions"] = [region.to_payload() for region in self.regions]
             payload["shell_raster_region_count"] = len(self.regions)
@@ -493,6 +560,10 @@ class HelperRasterFrameRequest:
         return payload
 
     def signature(self) -> tuple[object, ...]:
+        if self.content_visibility is not None and not isinstance(
+            self.content_visibility, HelperRasterContentVisibility
+        ):
+            raise HelperBoundaryError("invalid shell raster content visibility")
         return (
             self.action,
             self.frame_version,
@@ -515,6 +586,7 @@ class HelperRasterFrameRequest:
             int(self.byte_size),
             int(self.stale_timeout_ms),
             bool(self.allow_unfocused_target),
+            self.content_visibility.value if self.content_visibility is not None else "",
             tuple(region.signature() for region in self.regions),
         )
 
@@ -606,6 +678,8 @@ class HelperPresentationStatus:
     stale_after_seconds: float = GNOME_SHELL_HELPER_PRESENTATION_STALE_SECONDS
     presentation_diagnostics: Mapping[str, object] | None = None
     shell_raster_frame: Mapping[str, object] | None = None
+    content_visibility: HelperRasterContentVisibility | None = None
+    content_visibility_supported: bool = False
     frame_version: str = ""
     frame_rect: HelperRect | None = None
     frame_dimensions: HelperRect | None = None
@@ -678,6 +752,8 @@ class HelperPresentationStatus:
             "shell_raster_frame": dict(self.shell_raster_frame)
             if self.shell_raster_frame is not None
             else None,
+            "content_visibility": self.content_visibility.value if self.content_visibility is not None else None,
+            "content_visibility_supported": self.content_visibility_supported,
             "frame_version": self.frame_version,
             "frame_rect": self.frame_rect.to_payload() if self.frame_rect is not None else None,
             "frame_dimensions": self.frame_dimensions.to_payload() if self.frame_dimensions is not None else None,
@@ -1623,6 +1699,13 @@ def validate_gnome_shell_helper_presentation_payload(
             shell_raster_frame.get("frame_dimensions", shell_raster_frame.get("frameDimensions"))
         )
         cleanup_action = cleanup_action or _mapping_text(shell_raster_frame, "cleanup_action", "cleanupAction")
+    content_visibility, content_visibility_supported, content_visibility_reason = (
+        _shell_raster_content_visibility_result(
+            shell_raster_frame,
+            request=request,
+            health_status=health_status,
+        )
+    )
     expected_applied_rect = _expected_applied_rect_for_request(
         request,
         renderer=renderer,
@@ -1645,7 +1728,13 @@ def validate_gnome_shell_helper_presentation_payload(
             applied_rect=applied_rect,
             expected_applied_rect=expected_applied_rect,
         )
-        missing_gate_reasons = tuple(dict.fromkeys(request.degrade_reasons + missing_gate_reasons))
+        missing_gate_reasons = tuple(
+            dict.fromkeys(
+                request.degrade_reasons
+                + missing_gate_reasons
+                + ((content_visibility_reason,) if content_visibility_reason else ())
+            )
+        )
         if action is not HelperPresentationAction.ATTACH:
             missing_gate_reasons += ("action_not_attach",)
         if missing_gate_reasons:
@@ -1679,6 +1768,8 @@ def validate_gnome_shell_helper_presentation_payload(
                 stale_after_seconds=stale_after_seconds,
                 presentation_diagnostics=presentation_diagnostics,
                 shell_raster_frame=shell_raster_frame,
+                content_visibility=content_visibility,
+                content_visibility_supported=content_visibility_supported,
                 frame_version=frame_version,
                 frame_rect=frame_rect,
                 frame_dimensions=frame_dimensions,
@@ -1730,6 +1821,8 @@ def validate_gnome_shell_helper_presentation_payload(
         stale_after_seconds=stale_after_seconds,
         presentation_diagnostics=presentation_diagnostics,
         shell_raster_frame=shell_raster_frame,
+        content_visibility=content_visibility,
+        content_visibility_supported=content_visibility_supported,
         frame_version=frame_version,
         frame_rect=frame_rect,
         frame_dimensions=frame_dimensions,
@@ -1903,6 +1996,8 @@ def _helper_presentation_status(
     stale_after_seconds: float = GNOME_SHELL_HELPER_PRESENTATION_STALE_SECONDS,
     presentation_diagnostics: Mapping[str, object] | None = None,
     shell_raster_frame: Mapping[str, object] | None = None,
+    content_visibility: HelperRasterContentVisibility | None = None,
+    content_visibility_supported: bool = False,
     frame_version: str = "",
     frame_rect: HelperRect | None = None,
     frame_dimensions: HelperRect | None = None,
@@ -1940,6 +2035,8 @@ def _helper_presentation_status(
         stale_after_seconds=stale_after_seconds,
         presentation_diagnostics=presentation_diagnostics,
         shell_raster_frame=shell_raster_frame,
+        content_visibility=content_visibility,
+        content_visibility_supported=content_visibility_supported,
         frame_version=frame_version,
         frame_rect=frame_rect,
         frame_dimensions=frame_dimensions,
@@ -2227,6 +2324,35 @@ def _payload_mapping(value: object) -> Mapping[str, object] | None:
     if not isinstance(value, Mapping):
         return None
     return dict(value)
+
+
+def _shell_raster_content_visibility_result(
+    shell_raster_frame: Mapping[str, object] | None,
+    *,
+    request: HelperPresentationRequest,
+    health_status: HelperHealthStatus,
+) -> tuple[HelperRasterContentVisibility | None, bool, str]:
+    """Parse an optional raster-content result without trusting legacy helpers."""
+
+    requested_visibility = (
+        request.shell_raster_frame.content_visibility if request.shell_raster_frame is not None else None
+    )
+    if shell_raster_frame is None or "content_visibility" not in shell_raster_frame:
+        if requested_visibility is not None:
+            return None, False, "shell_raster_content_visibility_result_missing"
+        return None, False, ""
+    raw_visibility = shell_raster_frame.get("content_visibility")
+    if not isinstance(raw_visibility, str):
+        return None, False, "shell_raster_content_visibility_malformed"
+    try:
+        content_visibility = HelperRasterContentVisibility(raw_visibility.strip())
+    except ValueError:
+        return None, False, "shell_raster_content_visibility_malformed"
+    if not _mapping_bool(shell_raster_frame, "content_visibility_supported", "contentVisibilitySupported"):
+        return None, False, "shell_raster_content_visibility_unsupported"
+    if not health_status.supports_capability(GNOME_SHELL_HELPER_CAPABILITY_RASTER_CONTENT_VISIBILITY):
+        return None, False, "shell_raster_content_visibility_capability_missing"
+    return content_visibility, True, ""
 
 
 def _missing_presentation_gate_reasons(

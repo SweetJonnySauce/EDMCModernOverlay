@@ -98,6 +98,8 @@ from overlay_client.backend.helper_ipc import (
     HelperPresentationStatus,
     HelperRect,
 )
+from overlay_client.backend.presentation_policy import BackendPresentationContentVisibility
+from overlay_client.backend.presentation_runtime import BackendPresentationRuntimeResult
 from overlay_client.backend.status import BackendSelectionStatus, HelperCapabilityState
 from overlay_client.platform_integration import PlatformContext
 
@@ -450,7 +452,7 @@ def test_backend_presentation_cycle_wraps_gnome_helper_result_when_helper_availa
             ),
         ),
     )
-    calls: list[tuple[bool, bool, bool, int, bool]] = []
+    calls: list[tuple[bool, bool, bool, int, bool, BackendPresentationContentVisibility]] = []
 
     def fake_runner(
         *,
@@ -460,6 +462,7 @@ def test_backend_presentation_cycle_wraps_gnome_helper_result_when_helper_availa
         title_bar_compensation_enabled: bool = False,
         title_bar_compensation_height: int = 0,
         presentation_refresh_requested: bool = False,
+        content_visibility: BackendPresentationContentVisibility = BackendPresentationContentVisibility.VISIBLE,
         prepare_surface=None,
         shell_raster_frame_provider=None,
         shell_raster_runtime_enabled: bool = False,
@@ -472,6 +475,7 @@ def test_backend_presentation_cycle_wraps_gnome_helper_result_when_helper_availa
                 title_bar_compensation_enabled,
                 title_bar_compensation_height,
                 presentation_refresh_requested,
+                content_visibility,
             )
         )
         assert previous_surface_action == "mapped_visible"
@@ -493,7 +497,7 @@ def test_backend_presentation_cycle_wraps_gnome_helper_result_when_helper_availa
     )
 
     assert isinstance(result, BackendPresentationCycleResult)
-    assert calls == [(False, True, True, 30, True)]
+    assert calls == [(False, True, True, 30, True, BackendPresentationContentVisibility.VISIBLE)]
     assert result.should_show_overlay is True
     assert result.scale_size == (300, 200)
     assert result.prime_rect == (10, 20, 300, 200)
@@ -524,6 +528,66 @@ def test_native_gnome_bundle_owns_an_active_fullscreen_shell_raster_profile_with
     assert runtime.profile.fullscreen_shell_raster_active is True
     assert runtime.profile.suppress_managed_pyqt_fallback_on_shell_raster_failure is True
     assert runtime.profile.helper_unavailable_is_terminal is False
+
+
+def test_native_gnome_bundle_declares_retained_content_visibility_only_for_supported_raster_frame():
+    bundle = gnome_shell_wayland.build_gnome_shell_wayland_bundle()
+    runtime = bundle.presentation_runtime
+    assert runtime is not None
+
+    supported = types.SimpleNamespace(
+        shell_raster_frame_presented=True,
+        presentation_status=types.SimpleNamespace(content_visibility_supported=True),
+    )
+    unsupported = types.SimpleNamespace(
+        shell_raster_frame_presented=True,
+        presentation_status=types.SimpleNamespace(content_visibility_supported=False),
+    )
+
+    assert runtime._retained_content_visibility_available(supported) is True
+    assert runtime._retained_content_visibility_available(unsupported) is False
+
+
+def test_backend_presentation_cycle_exposes_bundle_declared_retained_content_visibility(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Runtime:
+        def run_presentation_cycle(self, _status, _request):
+            return BackendPresentationRuntimeResult(
+                presentation_result=_FakeGnomePresentationResult(),
+                retained_content_visibility_available=True,
+            )
+
+    monkeypatch.setattr("overlay_client.backend.consumers._presentation_runtime_for_status", lambda _status: _Runtime())
+
+    result = run_backend_presentation_cycle(object())
+
+    assert result is not None
+    assert result.visibility_snapshot.retained_content_visibility_available is True
+    assert result.diagnostics["retained_content_visibility_available"] is True
+
+
+def test_backend_presentation_cycle_transports_neutral_content_visibility_to_selected_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed = []
+
+    class _Runtime:
+        def run_presentation_cycle(self, status, request):
+            del status
+            observed.append(request)
+            return BackendPresentationRuntimeResult()
+
+    monkeypatch.setattr("overlay_client.backend.consumers._presentation_runtime_for_status", lambda _status: _Runtime())
+
+    result = run_backend_presentation_cycle(
+        object(),
+        content_visibility=BackendPresentationContentVisibility.SUPPRESSED,
+    )
+
+    assert result is None
+    assert len(observed) == 1
+    assert observed[0].content_visibility is BackendPresentationContentVisibility.SUPPRESSED
 
 
 def test_backend_presentation_cycle_transports_generic_surface_reset_action():

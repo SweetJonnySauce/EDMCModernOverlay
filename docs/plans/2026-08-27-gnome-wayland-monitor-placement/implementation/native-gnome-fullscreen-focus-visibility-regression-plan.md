@@ -1,15 +1,15 @@
 # Native GNOME Fullscreen Raster Focus-Visibility Regression: Implementation Plan
 
-**Status:** Safety rollback implemented — the direct unchecked-preference
-authorization was unsafe and has been restored to the prior fullscreen
-actor-continuity behavior. The checkbox behavior remains unresolved; do not
-treat this historical plan as authority for another direct authorization change.
+**Status: INVALID — DO NOT EXECUTE.** This direct unchecked-preference
+authorization plan caused a live black-screen regression and was rolled back.
+It remains historical evidence only. The replacement authority is
+`implementation/native-gnome-shell-raster-content-suppression-plan.md`.
 
 ## Checklist
 
 - [x] Step 1: Attempt the unchecked-preference actor suppression and record its live black-screen regression.
 - [x] Safety rollback: Restore the prior fullscreen Shell-raster actor-continuity authorization.
-- [ ] Follow-up design: Define safe renderer-level content suppression that preserves actor continuity.
+- [x] Follow-up design: Define safe renderer-level content suppression that preserves actor continuity.
 - [x] Live rollback check: User confirmed the black screen is gone without claiming unchecked-preference hiding.
 
 ## Phase Status
@@ -78,6 +78,11 @@ a focused unit regression test. It deliberately leaves the checkbox ineffective
 for that eligible fullscreen route. A future change must use a renderer-level
 content-suppression contract that does not clear, hide, or detach the actor;
 it requires a new approved design and live GNOME validation.
+
+## Historical failed implementation steps — non-authoritative
+
+The steps below document the rejected approach. They must not be used as an
+implementation task or copied into a new plan.
 
 ## Step 1: Make the unchecked preference suppress unfocused native-GNOME fullscreen raster content
 

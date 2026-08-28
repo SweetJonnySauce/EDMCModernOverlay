@@ -27,6 +27,8 @@ from overlay_client.backend import (
     HelperPresentationRequest,
     HelperPresentationState,
     HelperPresentationStatus,
+    HelperRasterContentVisibility,
+    HelperRasterContentVisibilityResolution,
     HelperRasterFrameRequest,
     HelperRect,
     HelperTargetStatus,
@@ -34,7 +36,9 @@ from overlay_client.backend import (
     probe_gnome_shell_helper_health,
     probe_gnome_shell_helper_presentation,
     probe_gnome_shell_helper_target,
+    resolve_gnome_shell_raster_content_visibility,
 )
+from overlay_client.backend.presentation_policy import BackendPresentationContentVisibility
 from overlay_client.backend.shell_raster_frame import (
     SHELL_RASTER_FRAME_RENDERER,
     ShellRasterFrameBuildResult,
@@ -374,6 +378,7 @@ def run_gnome_shell_helper_presentation_cycle(
     title_bar_compensation_enabled: bool = False,
     title_bar_compensation_height: int = 0,
     presentation_refresh_requested: bool = False,
+    content_visibility: BackendPresentationContentVisibility = BackendPresentationContentVisibility.VISIBLE,
     fetch_health: Callable[[], object] | None = None,
     fetch_target: Callable[[], object] | None = None,
     fetch_presentation: Callable[[HelperPresentationRequest], object] | None = None,
@@ -535,11 +540,19 @@ def run_gnome_shell_helper_presentation_cycle(
                 shell_raster_runtime_enabled=shell_raster_runtime_enabled,
             )
         )
+        content_visibility_resolution = _resolve_shell_raster_content_visibility(
+            content_visibility,
+            health_status=health_status,
+        )
         request = _shell_raster_bridge_request(
             target_status,
             request,
             env=os.environ,
             allow_unfocused_target=allow_unfocused_shell_raster_target,
+            content_visibility=content_visibility_resolution.wire_visibility,
+            content_visibility_diagnostics=_shell_raster_content_visibility_diagnostics(
+                content_visibility_resolution
+            ),
             shell_raster_frame_provider=shell_raster_frame_provider,
             shell_raster_runtime_enabled=shell_raster_runtime_enabled,
             suppress_pyqt_fallback_on_shell_raster_failure=suppress_pyqt_fallback_on_shell_raster_failure,
@@ -881,6 +894,8 @@ def _shell_raster_bridge_request(
     *,
     env: Mapping[str, str],
     allow_unfocused_target: bool = False,
+    content_visibility: HelperRasterContentVisibility | None = None,
+    content_visibility_diagnostics: Mapping[str, object] | None = None,
     shell_raster_frame_provider: Callable[
         [HelperTargetStatus | None, HelperPresentationRequest | None, bool],
         ShellRasterFrameBuildResult,
@@ -907,6 +922,8 @@ def _shell_raster_bridge_request(
             request,
             result,
             allow_unfocused_target=allow_unfocused_target,
+            content_visibility=content_visibility,
+            content_visibility_diagnostics=content_visibility_diagnostics,
         )
         if (
             bridged_request is request
@@ -935,6 +952,8 @@ def _shell_raster_bridge_request(
         request,
         result,
         allow_unfocused_target=allow_unfocused_target,
+        content_visibility=content_visibility,
+        content_visibility_diagnostics=content_visibility_diagnostics,
     )
 
 
@@ -962,18 +981,61 @@ def _request_with_shell_raster_frame(
     result: ShellRasterFrameBuildResult,
     *,
     allow_unfocused_target: bool,
+    content_visibility: HelperRasterContentVisibility | None = None,
+    content_visibility_diagnostics: Mapping[str, object] | None = None,
 ) -> HelperPresentationRequest:
     if result.request is None:
         return request
+    diagnostics = dict(result.request.diagnostics or {})
+    if content_visibility_diagnostics:
+        diagnostics["content_visibility"] = dict(content_visibility_diagnostics)
     shell_raster_frame = replace(
         result.request,
         allow_unfocused_target=bool(allow_unfocused_target),
+        content_visibility=content_visibility,
+        diagnostics=diagnostics or None,
     )
     return replace(
         request,
         renderer=SHELL_RASTER_FRAME_RENDERER,
         shell_raster_frame=shell_raster_frame,
     )
+
+
+def _resolve_shell_raster_content_visibility(
+    content_visibility: BackendPresentationContentVisibility,
+    *,
+    health_status: HelperHealthStatus,
+) -> HelperRasterContentVisibilityResolution:
+    """Map neutral intent to the optional GNOME helper field inside the bundle."""
+
+    requested_visibility = (
+        HelperRasterContentVisibility.SUPPRESSED
+        if content_visibility is BackendPresentationContentVisibility.SUPPRESSED
+        else HelperRasterContentVisibility.VISIBLE
+    )
+    return resolve_gnome_shell_raster_content_visibility(
+        requested_visibility,
+        health_status=health_status,
+    )
+
+
+def _shell_raster_content_visibility_diagnostics(
+    resolution: HelperRasterContentVisibilityResolution,
+) -> dict[str, object]:
+    """Expose capability fallback details without converting success to a lifecycle error."""
+
+    if (
+        not resolution.supported
+        and resolution.requested_visibility is HelperRasterContentVisibility.VISIBLE
+    ):
+        return {}
+    return {
+        "requested": resolution.requested_visibility.value,
+        "effective": resolution.effective_visibility.value,
+        "supported": resolution.supported,
+        "reason": resolution.degrade_reason,
+    }
 
 
 def _shell_raster_runtime_allows_windowed_managed_pyqt(

@@ -2,6 +2,65 @@
 
 ## Outcome
 
+## Native GNOME content-suppression Step 4 automated validation (2026-08-28)
+
+**Automated validation complete — no live validation authorized.** The focused
+suite passed (`228 passed`), and the stale fake GNOME runner was repaired
+(scoped consumer/boundary suite: `47 passed`). Outside the socket-restricted
+sandbox, both `make check` and `make test` passed Ruff, mypy, and **1,691
+tests**; `git diff --check` passed. No helper reload, D-Bus action, EDMC/Elite
+startup, or live GNOME validation occurred.
+
+**Next:** Obtain explicit approval to update/reload the installed helper and
+run the manual focus-transition/two-monitor acceptance matrix.
+
+**Deployment update:** User authorized `scripts/dev_gnome_helper.sh update
+--yes --no-enable`. The installed helper now exactly matches the source; it
+was not enabled or reloaded. Log out and back in before helper-status or live
+acceptance claims.
+
+**Post-login prerequisite:** User reported an active, healthy GNOME helper on
+Wayland with `shell_raster_content_visibility` advertised and raster code/actor
+feature gates enabled. The manual focus-transition matrix is now ready.
+
+**Live acceptance result:** Failed on the first unchecked-preference focus-loss
+case: the overlay remained visible. The installed helper is not the blocker;
+source review shows that the generic matched-managed-surface
+`prepared_surface_allows_unfocused_content` policy escape hatch returns visible
+content before the new native GNOME content-suppression request can be emitted.
+Remediation must preserve fullscreen actor continuity and change only the
+policy decision path that selects the neutral content intent.
+
+**Retained-content remediation validation:** Live client evidence showed the
+active route was not the managed-surface policy: a successful Shell-raster frame
+intentionally reported non-Qt attachment and was then treated as unavailable.
+That generic misclassification is corrected with a GNOME-bundle-declared,
+helper-supported neutral retained-content fact. Unit and follow-surface coverage
+proves `visible -> suppressed -> visible` without a Qt remap; the managed-PyQt
+focus-unreliability path is unchanged. Focused suite: **274 passed**. Outside
+the socket-restricted sandbox, both `make check` and `make test` passed Ruff,
+mypy, and **1,696 tests**. Restart only the Python overlay client before the
+live matrix; no helper update/reload is needed.
+
+**Focused remap-warm-up remediation:** A subsequent live log exposed
+`target_focused_remap_warmup`: because the generic Qt surface is deliberately
+unmapped for a retained Shell-raster actor, the policy repeatedly suppressed
+focused content for its remap warm-up interval.  The neutral retained-content
+fact now makes that actor the policy-visible surface, without mapping Qt or
+changing the helper.  RED reproduced the incorrect `suppressed` intent;
+targeted tests passed (**4 passed**), the focused suite passed (**275 passed**),
+and outside the socket-restricted sandbox `make check` and `make test` each
+passed Ruff, mypy, and **1,697 tests**.  Restart EDMC only; do not reload or
+update the helper.
+
+**Live acceptance complete:** After restarting EDMC, the user verified every
+native-GNOME matrix case: focused content remains continuously visible without
+flashing; unchecked focus loss remains visible through the existing debounce
+then suppresses content without a black screen; focus return restores without
+a flash; checked mode remains visible; repeated focus cycles are stable; and
+two-monitor fullscreen placement remains correct.  No helper reload/update
+was required.
+
 ## Post-iteration native GNOME focus-visibility regression (2026-08-28)
 
 **Safety rollback accepted.** Commit `8ef91cd` attempted to make the unchecked

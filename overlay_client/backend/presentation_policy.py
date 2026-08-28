@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 
 BACKEND_PRESENTATION_FOCUS_LOSS_HIDE_SAMPLES = 2
 BACKEND_PRESENTATION_FOCUS_LOSS_DEBOUNCE_SECONDS = 1.0
@@ -11,6 +12,13 @@ BACKEND_PRESENTATION_REMAP_WARMUP_SECONDS = 2.0
 BACKEND_PRESENTATION_SURFACE_HIDDEN = "hidden"
 BACKEND_PRESENTATION_SURFACE_MAPPED_VISIBLE = "mapped_visible"
 BACKEND_PRESENTATION_SURFACE_MAPPED_SUPPRESSED = "mapped_suppressed"
+
+
+class BackendPresentationContentVisibility(str, Enum):
+    """Backend-neutral intent for presentation content visibility."""
+
+    VISIBLE = "visible"
+    SUPPRESSED = "suppressed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +31,7 @@ class BackendPresentationVisibilitySnapshot:
     target_minimized: bool = False
     presentation_available: bool = False
     presentation_attachable: bool = False
+    retained_content_visibility_available: bool = False
     overlay_window_found: bool = False
     presentation_rect_match: bool = False
     prepared_surface_requires_mapping: bool = False
@@ -56,6 +65,14 @@ class BackendPresentationVisibilityDecision:
     @property
     def content_suppressed(self) -> bool:
         return not self.content_visible
+
+    @property
+    def content_visibility(self) -> BackendPresentationContentVisibility:
+        """Return the neutral content intent represented by this decision."""
+
+        if self.content_visible:
+            return BackendPresentationContentVisibility.VISIBLE
+        return BackendPresentationContentVisibility.SUPPRESSED
 
 
 def decide_backend_presentation_visibility(
@@ -105,7 +122,7 @@ def decide_backend_presentation_visibility(
             surface_action=BACKEND_PRESENTATION_SURFACE_HIDDEN,
             content_visible=False,
         )
-    if not snapshot.presentation_attachable:
+    if not snapshot.presentation_attachable and not snapshot.retained_content_visibility_available:
         return BackendPresentationVisibilityDecision(
             False,
             "presentation_not_attachable",

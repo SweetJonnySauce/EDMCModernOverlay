@@ -20,7 +20,10 @@ from overlay_client.controller_mode import ControllerModeProfile, ControllerMode
 from overlay_client.data_client import OverlayDataClient
 from overlay_client.backend import ProbeSource
 from overlay_client.backend.consumers import BackendPresentationCycleResult
-from overlay_client.backend.presentation_policy import BackendPresentationVisibilityState
+from overlay_client.backend.presentation_policy import (
+    BackendPresentationContentVisibility,
+    BackendPresentationVisibilityState,
+)
 from overlay_client.backend.status import format_status_report_line
 from overlay_client.debug_config import DEBUG_CONFIG_ENABLED, DebugConfig
 from overlay_client.debug_cycle_overlay import CycleOverlayView, DebugOverlayView
@@ -169,6 +172,7 @@ class SetupSurfaceMixin:
         }
         self._backend_presentation_visibility_state = BackendPresentationVisibilityState()
         self._backend_presentation_content_suppressed: bool = False
+        self._backend_presentation_content_visibility = BackendPresentationContentVisibility.VISIBLE
         self._shell_raster_frame_cache_identity: object | None = None
         self._shell_raster_frame_cache_result: object | None = None
         self._shell_raster_frame_work_counts: Dict[str, int] = {

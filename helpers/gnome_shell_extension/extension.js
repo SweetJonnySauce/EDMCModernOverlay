@@ -10,6 +10,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {
     HELPER_CAPABILITIES,
+    HELPER_CAPABILITY_RASTER_CONTENT_VISIBILITY,
     HELPER_COORDINATE_SPACE,
     HELPER_DBUS_HEALTH_METHOD,
     HELPER_DBUS_HELLO_METHOD,
@@ -281,6 +282,9 @@ class HelperHealthService {
         }
         if (this._featureGate.presentationEnabled) {
             capabilities.push('presentation_state');
+        }
+        if (this._featureGate.rasterCodeEnabled && this._featureGate.rasterActorEnabled) {
+            capabilities.push(HELPER_CAPABILITY_RASTER_CONTENT_VISIBILITY);
         }
         if (this._featureGate.mode === HELPER_DEV_MODE_DEFAULT) {
             return HELPER_CAPABILITIES;
@@ -1277,6 +1281,7 @@ class HelperHealthService {
             'shell_raster_frame_diagnostics',
             'shellRasterFrameDiagnostics',
         );
+        const contentVisibilityRequest = this._shellRasterContentVisibilityRequest(payload);
         const multiRegionRequested = frameRegions.length > 0;
 
         const windows = this._enumerateWindowEntries();
@@ -1436,9 +1441,28 @@ class HelperHealthService {
                 byteSize,
                 staleTimeoutMs,
             });
-        const degradeReasons = frameResult.visible ? [] : frameResult.reasons;
+        const contentVisibilityResult = frameResult.visible
+            ? this._applyShellRasterContentVisibility({
+                targetToken,
+                contentVisibility: contentVisibilityRequest.effectiveVisibility,
+            })
+            : {
+                effectiveVisibility: 'visible',
+                applied: false,
+                degraded: true,
+                reason: 'content_visibility_actor_unavailable',
+            };
+        const contentVisibilityDegraded = Boolean(
+            contentVisibilityRequest.degraded || contentVisibilityResult.degraded,
+        );
+        const contentVisibilityReason = contentVisibilityRequest.reason || contentVisibilityResult.reason;
+        const degradeReasons = frameResult.visible
+            ? (contentVisibilityDegraded ? [contentVisibilityReason] : [])
+            : frameResult.reasons;
         return this._presentationPayload({
-            status: frameResult.visible ? 'presentation_applied' : 'presentation_degraded',
+            status: frameResult.visible && !contentVisibilityDegraded
+                ? 'presentation_applied'
+                : 'presentation_degraded',
             action,
             targetToken,
             requestedRect: targetRect,
@@ -1457,7 +1481,9 @@ class HelperHealthService {
             frameRect,
             frameDimensions: frameResult.frameDimensions,
             cleanupAction: frameResult.cleanupAction,
-            detail: frameResult.visible ? '' : 'shell raster frame unavailable',
+            detail: frameResult.visible
+                ? (contentVisibilityDegraded ? 'shell raster content visibility degraded' : '')
+                : 'shell raster frame unavailable',
             shellRasterFrame: this._shellRasterFramePayload({
                 requestedAction: normalisedAction,
                 visible: frameResult.visible,
@@ -1479,6 +1505,12 @@ class HelperHealthService {
                 cleanupAction: frameResult.cleanupAction,
                 sessionId: frameResult.sessionId,
                 allowUnfocusedTarget,
+                contentVisibilityRequested: contentVisibilityRequest.requestedVisibility,
+                contentVisibility: contentVisibilityResult.effectiveVisibility,
+                contentVisibilitySupported: contentVisibilityRequest.supported,
+                contentVisibilityApplied: contentVisibilityResult.applied,
+                contentVisibilityDegraded,
+                contentVisibilityReason,
                 requestDiagnostics,
                 helperTiming: frameResult.timing,
                 updateReason: frameResult.updateReason,
@@ -2270,6 +2302,95 @@ class HelperHealthService {
         };
     }
 
+    _shellRasterContentVisibilityRequest(payload) {
+        const rawVisibility = payload?.content_visibility ?? payload?.contentVisibility;
+        if (rawVisibility === null || rawVisibility === undefined) {
+            return {
+                requestedVisibility: 'visible',
+                effectiveVisibility: 'visible',
+                supported: true,
+                degraded: false,
+                reason: '',
+            };
+        }
+        const requestedVisibility = typeof rawVisibility === 'string'
+            ? rawVisibility.trim().toLowerCase()
+            : '';
+        if (requestedVisibility === 'visible' || requestedVisibility === 'suppressed') {
+            return {
+                requestedVisibility,
+                effectiveVisibility: requestedVisibility,
+                supported: true,
+                degraded: false,
+                reason: '',
+            };
+        }
+        return {
+            requestedVisibility: requestedVisibility || 'visible',
+            effectiveVisibility: 'visible',
+            supported: true,
+            degraded: true,
+            reason: 'content_visibility_malformed',
+        };
+    }
+
+    _applyShellRasterContentVisibility({ targetToken, contentVisibility }) {
+        const records = this._shellRasterActorRecords(targetToken);
+        const effectiveVisibility = contentVisibility === 'suppressed' ? 'suppressed' : 'visible';
+        if (!records.length) {
+            return {
+                effectiveVisibility: 'visible',
+                applied: false,
+                degraded: true,
+                reason: 'content_visibility_actor_unavailable',
+            };
+        }
+        try {
+            for (const record of records) {
+                if (typeof record.actor?.set_opacity !== 'function') {
+                    throw new Error('Shell raster actor opacity mutation unavailable');
+                }
+                record.actor.set_opacity(effectiveVisibility === 'suppressed' ? 0 : 255);
+                record.actor.set_reactive?.(false);
+                record.contentVisibility = effectiveVisibility;
+            }
+        } catch (_error) {
+            for (const record of records) {
+                try {
+                    record.actor?.set_opacity?.(255);
+                    record.actor?.set_reactive?.(false);
+                    record.contentVisibility = 'visible';
+                } catch (restoreError) {
+                    this._logException('raster_content_visibility_restore_failed', restoreError, {
+                        target_token: targetToken,
+                    });
+                }
+            }
+            this._logException('raster_content_visibility_apply_failed', _error, {
+                target_token: targetToken,
+                requested_visibility: effectiveVisibility,
+                actor_count: records.length,
+            });
+            return {
+                effectiveVisibility: 'visible',
+                applied: false,
+                degraded: true,
+                reason: 'content_visibility_mutation_failed',
+            };
+        }
+        this._logDiagnostic('raster_content_visibility_applied', {
+            target_token: targetToken,
+            content_visibility: effectiveVisibility,
+            actor_count: records.length,
+        });
+        return {
+            effectiveVisibility,
+            applied: true,
+            degraded: false,
+            reason: '',
+        };
+    }
+
     _shellRasterFramePayload({
         requestedAction,
         visible,
@@ -2292,6 +2413,12 @@ class HelperHealthService {
         sessionId = '',
         focusRiskReason = '',
         allowUnfocusedTarget = false,
+        contentVisibilityRequested = 'visible',
+        contentVisibility = 'visible',
+        contentVisibilitySupported = false,
+        contentVisibilityApplied = false,
+        contentVisibilityDegraded = false,
+        contentVisibilityReason = '',
         requestDiagnostics = null,
         helperTiming = null,
         updateReason = '',
@@ -2322,6 +2449,12 @@ class HelperHealthService {
             cleanup_action: cleanupAction,
             focus_risk_reason: focusRiskReason,
             allow_unfocused_target: Boolean(allowUnfocusedTarget),
+            content_visibility_requested: String(contentVisibilityRequested || 'visible'),
+            content_visibility: String(contentVisibility || 'visible'),
+            content_visibility_supported: Boolean(contentVisibilitySupported),
+            content_visibility_applied: Boolean(contentVisibilityApplied),
+            content_visibility_degraded: Boolean(contentVisibilityDegraded),
+            content_visibility_reason: String(contentVisibilityReason || ''),
             update_reason: updateReason,
         };
         const diagnostics = this._shellRasterFrameDiagnostics(requestDiagnostics, helperTiming);

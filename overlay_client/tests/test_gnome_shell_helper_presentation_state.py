@@ -4,6 +4,7 @@ import pytest
 
 from overlay_client.backend import (
     GNOME_SHELL_HELPER_CAPABILITIES,
+    GNOME_SHELL_HELPER_CAPABILITY_RASTER_CONTENT_VISIBILITY,
     GNOME_SHELL_HELPER_COORDINATE_SPACE,
     GNOME_SHELL_HELPER_RECT_REASON_FRAME_FALLBACK_CLAMPED,
     GNOME_SHELL_HELPER_RECT_REASON_FRAME_FALLBACK_OUTSIDE_MONITOR,
@@ -16,11 +17,13 @@ from overlay_client.backend import (
     HelperPresentationAction,
     HelperPresentationRequest,
     HelperPresentationState,
+    HelperRasterContentVisibility,
     HelperRasterFrameRequest,
     HelperRect,
     HelperTargetState,
     build_gnome_shell_helper_presentation_request,
     probe_gnome_shell_helper_presentation,
+    resolve_gnome_shell_raster_content_visibility,
     validate_gnome_shell_helper_health_payload,
     validate_gnome_shell_helper_presentation_payload,
     validate_gnome_shell_helper_target_payload,
@@ -453,6 +456,176 @@ def test_validate_presentation_accepts_shell_raster_renderer_when_requested() ->
     assert status.frame_version == "v1"
     assert status.frame_rect == frame_rect
     assert status.frame_dimensions == HelperRect(0, 0, 520, 128)
+
+
+def test_shell_raster_content_visibility_contract_serializes_only_for_supported_helper() -> None:
+    helper_health = _health_status(
+        capabilities=[
+            *GNOME_SHELL_HELPER_CAPABILITIES,
+            GNOME_SHELL_HELPER_CAPABILITY_RASTER_CONTENT_VISIBILITY,
+        ]
+    )
+    resolution = resolve_gnome_shell_raster_content_visibility(
+        HelperRasterContentVisibility.SUPPRESSED,
+        health_status=helper_health,
+    )
+    frame = HelperRasterFrameRequest(
+        action="update",
+        frame_version="v1",
+        target_token="meta:21",
+        target_rect=HelperRect(0, 0, 3440, 1440),
+        frame_rect=HelperRect(24, 24, 520, 128),
+        scale=1.0,
+        image_path="/run/user/1000/EDMCModernOverlay/shell-raster/frame.png",
+        checksum="abc123",
+        byte_size=128,
+        stale_timeout_ms=5000,
+        allow_unfocused_target=True,
+        content_visibility=resolution.wire_visibility,
+    )
+
+    assert resolution.supported is True
+    assert resolution.effective_visibility is HelperRasterContentVisibility.SUPPRESSED
+    assert resolution.degrade_reason == ""
+    assert frame.to_payload()["content_visibility"] == "suppressed"
+    assert frame.signature() != HelperRasterFrameRequest(
+        action="update",
+        frame_version="v1",
+        target_token="meta:21",
+        target_rect=HelperRect(0, 0, 3440, 1440),
+        frame_rect=HelperRect(24, 24, 520, 128),
+        scale=1.0,
+        image_path="/run/user/1000/EDMCModernOverlay/shell-raster/frame.png",
+        checksum="abc123",
+        byte_size=128,
+        stale_timeout_ms=5000,
+        allow_unfocused_target=True,
+    ).signature()
+    assert frame.to_payload()["allow_unfocused_target"] is True
+
+
+@pytest.mark.parametrize(
+    ("health_overrides", "expected_reason"),
+    [
+        ({}, "shell_raster_content_visibility_capability_missing"),
+        ({"capabilities": "malformed"}, "shell_raster_content_visibility_helper_unhealthy"),
+        ({"status": "inactive"}, "shell_raster_content_visibility_helper_unhealthy"),
+    ],
+)
+def test_shell_raster_content_visibility_unsupported_helpers_remain_on_visible_noop(
+    health_overrides: dict[str, object],
+    expected_reason: str,
+) -> None:
+    resolution = resolve_gnome_shell_raster_content_visibility(
+        HelperRasterContentVisibility.SUPPRESSED,
+        health_status=_health_status(**health_overrides),
+    )
+    frame = HelperRasterFrameRequest(
+        action="update",
+        frame_version="v1",
+        target_token="meta:21",
+        target_rect=HelperRect(0, 0, 3440, 1440),
+        frame_rect=HelperRect(24, 24, 520, 128),
+        scale=1.0,
+        image_path="/run/user/1000/EDMCModernOverlay/shell-raster/frame.png",
+        checksum="abc123",
+        byte_size=128,
+        stale_timeout_ms=5000,
+        allow_unfocused_target=True,
+        content_visibility=resolution.wire_visibility,
+    )
+
+    assert resolution.supported is False
+    assert resolution.effective_visibility is HelperRasterContentVisibility.VISIBLE
+    assert resolution.wire_visibility is None
+    assert resolution.degrade_reason == expected_reason
+    assert "content_visibility" not in frame.to_payload()
+    assert frame.to_payload()["allow_unfocused_target"] is True
+
+
+def test_shell_raster_content_visibility_result_parsing_fails_closed() -> None:
+    target = _target_status(
+        target=_target_window(
+            frameRect={"x": 0, "y": 0, "width": 3440, "height": 1440},
+            bufferRect={"x": 0, "y": 0, "width": 3440, "height": 1440},
+            contentRect={"x": 0, "y": 0, "width": 3440, "height": 1440},
+            decorationInsets={"left": 0, "top": 0, "right": 0, "bottom": 0},
+            monitorRect={"x": 0, "y": 0, "width": 3440, "height": 1440},
+            fullscreen=True,
+        )
+    )
+    helper_health = _health_status(
+        capabilities=[
+            *GNOME_SHELL_HELPER_CAPABILITIES,
+            GNOME_SHELL_HELPER_CAPABILITY_RASTER_CONTENT_VISIBILITY,
+        ]
+    )
+    frame_rect = HelperRect(24, 24, 520, 128)
+    request = HelperPresentationRequest(
+        action=HelperPresentationAction.ATTACH,
+        target_token="meta:21",
+        content_rect=HelperRect(0, 0, 3440, 1440),
+        renderer="gnome_shell_raster_frame",
+        shell_raster_frame=HelperRasterFrameRequest(
+            action="update",
+            frame_version="v1",
+            target_token="meta:21",
+            target_rect=HelperRect(0, 0, 3440, 1440),
+            frame_rect=frame_rect,
+            scale=1.0,
+            image_path="/run/user/1000/EDMCModernOverlay/shell-raster/frame.png",
+            checksum="abc123",
+            byte_size=128,
+            stale_timeout_ms=5000,
+            allow_unfocused_target=True,
+            content_visibility=HelperRasterContentVisibility.SUPPRESSED,
+        ),
+    )
+
+    valid = validate_gnome_shell_helper_presentation_payload(
+        _presentation_payload(
+            requested_rect={"x": 0, "y": 0, "width": 3440, "height": 1440},
+            applied_rect=frame_rect.to_payload(),
+            renderer="gnome_shell_raster_frame",
+            shell_raster_frame={
+                "frame_version": "v1",
+                "frame_rect": frame_rect.to_payload(),
+                "content_visibility": "suppressed",
+                "content_visibility_supported": True,
+            },
+        ),
+        health_status=helper_health,
+        target_status=target,
+        request=request,
+        observed_at_monotonic=210.0,
+        now_monotonic=210.0,
+    )
+    malformed = validate_gnome_shell_helper_presentation_payload(
+        _presentation_payload(
+            requested_rect={"x": 0, "y": 0, "width": 3440, "height": 1440},
+            applied_rect=frame_rect.to_payload(),
+            renderer="gnome_shell_raster_frame",
+            shell_raster_frame={
+                "frame_version": "v1",
+                "frame_rect": frame_rect.to_payload(),
+                "content_visibility": "hidden",
+                "content_visibility_supported": True,
+            },
+        ),
+        health_status=helper_health,
+        target_status=target,
+        request=request,
+        observed_at_monotonic=210.0,
+        now_monotonic=210.0,
+    )
+
+    assert valid.content_visibility is HelperRasterContentVisibility.SUPPRESSED
+    assert valid.content_visibility_supported is True
+    assert malformed.content_visibility is None
+    assert malformed.content_visibility_supported is False
+    assert malformed.state is HelperPresentationState.DEGRADED
+    assert "shell_raster_content_visibility_malformed" in malformed.degrade_reasons
+    assert request.to_payload()["allow_unfocused_target"] is True
 
 
 def test_validate_presentation_degrades_frame_rect_fallback_even_when_applied_rect_matches() -> None:

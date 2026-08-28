@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import QApplication
 from overlay_client.backend.consumers import BackendPresentationCycleResult, run_backend_presentation_cycle
 from overlay_client.backend.presentation_policy import (
     BACKEND_PRESENTATION_SURFACE_HIDDEN,
+    BackendPresentationContentVisibility,
     BackendPresentationVisibilityDecision,
     BackendPresentationVisibilityState,
     decide_backend_presentation_visibility,
@@ -318,6 +319,11 @@ class FollowSurfaceMixin:
                 title_bar_compensation_enabled=bool(getattr(self, "_title_bar_enabled", False)),
                 title_bar_compensation_height=int(getattr(self, "_title_bar_height", 0) or 0),
                 presentation_refresh_requested=presentation_refresh_requested,
+                content_visibility=getattr(
+                    self,
+                    "_backend_presentation_content_visibility",
+                    BackendPresentationContentVisibility.VISIBLE,
+                ),
                 prepare_surface=self._prepare_backend_presentation_surface,
                 raster_frame_provider=getattr(self, "_build_backend_shell_raster_content_frame", None),
             )
@@ -352,6 +358,14 @@ class FollowSurfaceMixin:
         if result.reset_surface_state:
             self._reset_backend_presentation_surface_state()
         currently_visible = self._backend_presentation_surface_is_mapped(result)
+        if (
+            result.visibility_snapshot.retained_content_visibility_available
+            and not result.should_show_overlay
+        ):
+            # A retained backend actor remains present while its generic Qt
+            # surface intentionally stays unmapped.  Treat that actor as the
+            # visible surface so focus return cannot start the Qt remap warm-up.
+            currently_visible = True
         decision = decide_backend_presentation_visibility(
             result.visibility_snapshot,
             keep_overlay_visible=bool(getattr(self, "_keep_overlay_visible", False)),
@@ -361,6 +375,10 @@ class FollowSurfaceMixin:
         )
         self._backend_presentation_visibility_state = decision.state
         self._last_backend_presentation_surface_action = decision.surface_action
+        self._set_backend_presentation_content_visibility(
+            decision.content_visibility if decision.show else BackendPresentationContentVisibility.VISIBLE,
+            request_refresh=decision.show and not result.visibility_snapshot.prepared_surface_requires_mapping,
+        )
         self._log_backend_presentation_result(result, decision)
         self._update_backend_presentation_visibility(decision, result)
         if decision.show and result.scale_size is not None:
@@ -380,6 +398,7 @@ class FollowSurfaceMixin:
         self._backend_presentation_refresh_requested = False
         self._last_backend_surface_preparation_key = ()
         self._backend_presentation_visibility_state = BackendPresentationVisibilityState()
+        self._backend_presentation_content_visibility = BackendPresentationContentVisibility.VISIBLE
         self._last_backend_presentation_surface_action = BACKEND_PRESENTATION_SURFACE_HIDDEN
 
     def _prepare_backend_presentation_surface(self, preparation: BackendPresentationSurfacePreparation) -> bool:
@@ -712,9 +731,16 @@ class FollowSurfaceMixin:
                 return
             self.show()
 
+        retained_content_only = bool(
+            result.visibility_snapshot.retained_content_visibility_available and not result.should_show_overlay
+        )
         new_state = self._visibility_helper.update_visibility(
             decision.show,
-            is_visible_fn=(lambda: self._backend_presentation_surface_is_mapped(result))
+            is_visible_fn=(
+                (lambda: True)
+                if retained_content_only
+                else (lambda: self._backend_presentation_surface_is_mapped(result))
+            )
             if decision.show
             else (lambda: self.isVisible()),
             show_fn=_show_with_backend_prime,
@@ -751,6 +777,25 @@ class FollowSurfaceMixin:
             reason or "unspecified",
             self.format_scale_debug(),
         )
+
+    def _set_backend_presentation_content_visibility(
+        self,
+        content_visibility: BackendPresentationContentVisibility,
+        *,
+        request_refresh: bool,
+    ) -> None:
+        """Retain the next neutral content intent without duplicating policy debounce."""
+
+        current = getattr(
+            self,
+            "_backend_presentation_content_visibility",
+            BackendPresentationContentVisibility.VISIBLE,
+        )
+        if current is content_visibility:
+            return
+        self._backend_presentation_content_visibility = content_visibility
+        if request_refresh:
+            self._backend_presentation_refresh_requested = True
 
     def _prime_backend_presentation_map_geometry(self, result: BackendPresentationCycleResult) -> None:
         rect = result.prime_rect

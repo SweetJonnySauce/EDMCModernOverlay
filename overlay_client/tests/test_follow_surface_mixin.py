@@ -126,6 +126,8 @@ from overlay_client.backend import (
 )
 from overlay_client.backend.consumers import BackendPresentationCycleResult
 from overlay_client.backend.presentation_policy import (
+    BackendPresentationContentVisibility,
+    BackendPresentationVisibilityDecision,
     BackendPresentationVisibilitySnapshot,
     BackendPresentationVisibilityState,
 )
@@ -285,6 +287,8 @@ class _FollowSurfaceStub(FollowSurfaceMixin):
         self._last_backend_presentation_log = None
         self._backend_presentation_visibility_state = BackendPresentationVisibilityState()
         self._backend_presentation_content_suppressed = False
+        self._backend_presentation_content_visibility = BackendPresentationContentVisibility.VISIBLE
+        self._backend_presentation_refresh_requested = False
         self._last_screen_name = None
         self._transient_parent_window = None
         self._transient_parent_id = None
@@ -456,10 +460,12 @@ def _fake_backend_presentation_result(
     target_showing_on_workspace: bool = True,
     target_minimized: bool = False,
     presentation_attachable: bool = True,
+    retained_content_visibility_available: bool = False,
     overlay_window_found: bool = True,
     presentation_rect_match: bool = True,
     prepared_surface_requires_mapping: bool = False,
     prepared_surface_allows_unfocused_content: bool = False,
+    should_show_overlay: bool = True,
     prime_rect: tuple[int, int, int, int] | None = (10, 20, 300, 200),
     geometry_diagnostics: dict[str, object] | None = None,
 ) -> BackendPresentationCycleResult:
@@ -484,6 +490,7 @@ def _fake_backend_presentation_result(
         "target_minimized": target_minimized,
         "presentation_available": True,
         "presentation_attachable": presentation_attachable,
+        "retained_content_visibility_available": retained_content_visibility_available,
         "overlay_window_found": overlay_window_found,
         "presentation_rect_match": presentation_rect_match,
         "prepared_surface_requires_mapping": prepared_surface_requires_mapping,
@@ -498,7 +505,7 @@ def _fake_backend_presentation_result(
     if geometry_diagnostics is not None:
         diagnostics["target_geometry_diagnostics"] = geometry_diagnostics
     return BackendPresentationCycleResult(
-        should_show_overlay=True,
+        should_show_overlay=should_show_overlay,
         scale_size=(300, 200),
         prime_rect=prime_rect,
         prime_rect_source="requested_rect" if prime_rect is not None else "unavailable",
@@ -509,6 +516,7 @@ def _fake_backend_presentation_result(
             target_minimized=target_minimized,
             presentation_available=True,
             presentation_attachable=presentation_attachable,
+            retained_content_visibility_available=retained_content_visibility_available,
             overlay_window_found=overlay_window_found,
             presentation_rect_match=presentation_rect_match,
             prepared_surface_requires_mapping=prepared_surface_requires_mapping,
@@ -1312,6 +1320,195 @@ def test_refresh_follow_geometry_suppresses_content_without_hiding_after_soft_fo
     assert stub._update_calls == 1
     assert stub._visibility_helper.calls == [True]
     assert stub._backend_presentation_visibility_state.focus_loss_samples == 2
+
+
+def test_refresh_follow_geometry_transports_debounced_neutral_content_intent_on_next_cycle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _FollowSurfaceStub()
+    stub._visible = True
+    result = _fake_backend_presentation_result(target_has_focus=False)
+    observed: list[tuple[BackendPresentationContentVisibility, bool]] = []
+
+    def fake_cycle(*_args, **kwargs):
+        observed.append((kwargs["content_visibility"], kwargs["presentation_refresh_requested"]))
+        return result
+
+    monkeypatch.setattr("overlay_client.follow_surface.run_backend_presentation_cycle", fake_cycle)
+    ticks = iter((10.0, 11.1, 11.2))
+    monkeypatch.setattr("overlay_client.follow_surface.time.monotonic", lambda: next(ticks))
+
+    stub._refresh_follow_geometry()
+    stub._refresh_follow_geometry()
+    stub._refresh_follow_geometry()
+
+    assert observed == [
+        (BackendPresentationContentVisibility.VISIBLE, False),
+        (BackendPresentationContentVisibility.VISIBLE, False),
+        (BackendPresentationContentVisibility.SUPPRESSED, True),
+    ]
+    assert stub._backend_presentation_content_visibility is BackendPresentationContentVisibility.SUPPRESSED
+    assert stub._backend_presentation_refresh_requested is False
+
+
+def test_refresh_follow_geometry_transports_suppressed_intent_for_retained_content_without_normal_attachment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _FollowSurfaceStub()
+    stub._visible = True
+    result = _fake_backend_presentation_result(
+        target_has_focus=False,
+        presentation_attachable=False,
+        retained_content_visibility_available=True,
+    )
+    observed: list[tuple[BackendPresentationContentVisibility, bool]] = []
+
+    def fake_cycle(*_args, **kwargs):
+        observed.append((kwargs["content_visibility"], kwargs["presentation_refresh_requested"]))
+        return result
+
+    monkeypatch.setattr("overlay_client.follow_surface.run_backend_presentation_cycle", fake_cycle)
+    ticks = iter((10.0, 11.1, 11.2))
+    monkeypatch.setattr("overlay_client.follow_surface.time.monotonic", lambda: next(ticks))
+
+    stub._refresh_follow_geometry()
+    stub._refresh_follow_geometry()
+    stub._refresh_follow_geometry()
+
+    assert observed == [
+        (BackendPresentationContentVisibility.VISIBLE, False),
+        (BackendPresentationContentVisibility.VISIBLE, False),
+        (BackendPresentationContentVisibility.SUPPRESSED, True),
+    ]
+    assert stub._backend_presentation_content_visibility is BackendPresentationContentVisibility.SUPPRESSED
+
+
+def test_retained_content_visibility_does_not_map_the_generic_qt_surface() -> None:
+    stub = _FollowSurfaceStub()
+    result = _fake_backend_presentation_result(
+        presentation_attachable=False,
+        retained_content_visibility_available=True,
+        should_show_overlay=False,
+    )
+    decision = BackendPresentationVisibilityDecision(
+        show=True,
+        reason="focus_lost_suppressed",
+        state=BackendPresentationVisibilityState(),
+        content_visible=False,
+    )
+
+    stub._update_backend_presentation_visibility(decision, result)
+
+    assert stub._visible is False
+    assert "show" not in stub._event_order
+    assert stub._backend_presentation_content_suppressed is True
+
+
+def test_refresh_follow_geometry_treats_retained_actor_as_mapped_when_target_is_focused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _FollowSurfaceStub()
+    result = _fake_backend_presentation_result(
+        target_has_focus=True,
+        presentation_attachable=False,
+        retained_content_visibility_available=True,
+        should_show_overlay=False,
+    )
+
+    monkeypatch.setattr("overlay_client.follow_surface.run_backend_presentation_cycle", lambda *_args, **_kwargs: result)
+    monkeypatch.setattr("overlay_client.follow_surface.time.monotonic", lambda: 10.0)
+
+    stub._refresh_follow_geometry()
+
+    assert stub._backend_presentation_content_visibility is BackendPresentationContentVisibility.VISIBLE
+    assert stub._backend_presentation_content_suppressed is False
+    assert "show" not in stub._event_order
+
+
+def test_refresh_follow_geometry_restores_neutral_content_intent_on_focus_return(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _FollowSurfaceStub()
+    stub._visible = True
+    stub._backend_presentation_content_visibility = BackendPresentationContentVisibility.SUPPRESSED
+    stub._backend_presentation_visibility_state = BackendPresentationVisibilityState(
+        focus_loss_samples=2,
+        focus_lost_since_monotonic=10.0,
+    )
+    result = _fake_backend_presentation_result(target_has_focus=True)
+    observed: list[tuple[BackendPresentationContentVisibility, bool]] = []
+
+    def fake_cycle(*_args, **kwargs):
+        observed.append((kwargs["content_visibility"], kwargs["presentation_refresh_requested"]))
+        return result
+
+    monkeypatch.setattr("overlay_client.follow_surface.run_backend_presentation_cycle", fake_cycle)
+    ticks = iter((12.0, 12.1))
+    monkeypatch.setattr("overlay_client.follow_surface.time.monotonic", lambda: next(ticks))
+
+    stub._refresh_follow_geometry()
+    stub._refresh_follow_geometry()
+
+    assert observed == [
+        (BackendPresentationContentVisibility.SUPPRESSED, False),
+        (BackendPresentationContentVisibility.VISIBLE, True),
+    ]
+    assert stub._backend_presentation_content_visibility is BackendPresentationContentVisibility.VISIBLE
+    assert stub._backend_presentation_refresh_requested is False
+
+
+def test_refresh_follow_geometry_keeps_neutral_content_intent_visible_when_preference_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _FollowSurfaceStub()
+    stub._visible = True
+    stub._keep_overlay_visible = True
+    result = _fake_backend_presentation_result(target_has_focus=False)
+    observed: list[tuple[BackendPresentationContentVisibility, bool]] = []
+
+    def fake_cycle(*_args, **kwargs):
+        observed.append((kwargs["content_visibility"], kwargs["presentation_refresh_requested"]))
+        return result
+
+    monkeypatch.setattr("overlay_client.follow_surface.run_backend_presentation_cycle", fake_cycle)
+    ticks = iter((10.0, 11.1))
+    monkeypatch.setattr("overlay_client.follow_surface.time.monotonic", lambda: next(ticks))
+
+    stub._refresh_follow_geometry()
+    stub._refresh_follow_geometry()
+
+    assert observed == [
+        (BackendPresentationContentVisibility.VISIBLE, False),
+        (BackendPresentationContentVisibility.VISIBLE, False),
+    ]
+    assert stub._backend_presentation_content_visibility is BackendPresentationContentVisibility.VISIBLE
+    assert stub._backend_presentation_refresh_requested is False
+
+
+def test_refresh_follow_geometry_resets_neutral_content_intent_after_hard_target_loss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _FollowSurfaceStub()
+    stub._visible = True
+    stub._backend_presentation_content_visibility = BackendPresentationContentVisibility.SUPPRESSED
+    result = BackendPresentationCycleResult(
+        should_show_overlay=False,
+        visibility_snapshot=BackendPresentationVisibilitySnapshot(target_available=False),
+    )
+    observed: list[BackendPresentationContentVisibility] = []
+
+    def fake_cycle(*_args, **kwargs):
+        observed.append(kwargs["content_visibility"])
+        return result
+
+    monkeypatch.setattr("overlay_client.follow_surface.run_backend_presentation_cycle", fake_cycle)
+
+    stub._refresh_follow_geometry()
+
+    assert observed == [BackendPresentationContentVisibility.SUPPRESSED]
+    assert stub._visible is False
+    assert stub._backend_presentation_content_visibility is BackendPresentationContentVisibility.VISIBLE
+    assert stub._backend_presentation_refresh_requested is False
 
 
 def test_refresh_follow_geometry_restores_suppressed_content_without_remap_on_focus_return(

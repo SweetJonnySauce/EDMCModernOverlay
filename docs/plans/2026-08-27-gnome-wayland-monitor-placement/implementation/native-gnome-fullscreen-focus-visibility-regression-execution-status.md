@@ -1,14 +1,16 @@
 # Native GNOME Fullscreen Raster Focus-Visibility Regression: Execution Status
 
-**Authoritative implementation plan:**
-`implementation/native-gnome-fullscreen-focus-visibility-regression-plan.md`
+**Historical plan status:** Invalid — do not execute or resume this plan.
+
+**Replacement implementation plan:**
+`implementation/native-gnome-shell-raster-content-suppression-plan.md`
 
 ## Step Dashboard
 
 | Step | Status | Evidence / decision | Next action |
 | --- | --- | --- | --- |
 | 1 | Closed — unsafe implementation rolled back | `a5e44a1` restored the prior eligible fullscreen/full-monitor continuity guard after direct preference authorization caused black focus return. | Do not reattempt this design. |
-| 2 | Completed — safety rollback accepted | User confirmed the black-screen regression is gone after the rollback. The unchecked-preference enhancement remains explicitly deferred. | Begin a new renderer-level suppression design only with fresh approval. |
+| 2 | Completed — safety rollback accepted | User confirmed the black-screen regression is gone after the rollback. The unchecked-preference enhancement remains explicitly deferred. | Superseded by the replacement content-suppression plan; do not resume this plan. |
 
 ## Context Ledger
 
@@ -38,4 +40,5 @@ main-thread review context. Every implementation handoff must contain exactly:
 - [x] Step 2 automated validation recorded.
 - [x] Safety rollback live focus-return verification completed by the user.
 - [x] Safety rollback source/test/docs scope reconciled; focused validation and scoped commit remain in this remediation context.
-- [ ] New renderer-level content-suppression design approved and implemented; the original plan cannot safely provide this behavior.
+- [x] New renderer-level content-suppression design and plan recorded; the original plan cannot safely provide this behavior.
+- [ ] Replacement plan approved, implemented, and live-validated.

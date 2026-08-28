@@ -39,21 +39,36 @@ class GnomeShellPresentationRuntime:
                 return BackendPresentationRuntimeResult(helper_unavailable=True)
             return None
         runner = request.presentation_cycle_runner or self._presentation_cycle_runner()
+        presentation_result = runner(
+            standalone_mode=request.standalone_mode,
+            keep_overlay_visible=request.keep_overlay_visible,
+            previous_surface_action=request.previous_surface_action,
+            title_bar_compensation_enabled=request.title_bar_compensation_enabled,
+            title_bar_compensation_height=request.title_bar_compensation_height,
+            presentation_refresh_requested=request.presentation_refresh_requested,
+            content_visibility=request.content_visibility,
+            prepare_surface=request.prepare_surface,
+            shell_raster_frame_provider=request.raster_frame_provider,
+            shell_raster_runtime_enabled=self.profile.fullscreen_shell_raster_active,
+            suppress_pyqt_fallback_on_shell_raster_failure=(
+                self.profile.suppress_managed_pyqt_fallback_on_shell_raster_failure
+            ),
+        )
         return BackendPresentationRuntimeResult(
-            presentation_result=runner(
-                standalone_mode=request.standalone_mode,
-                keep_overlay_visible=request.keep_overlay_visible,
-                previous_surface_action=request.previous_surface_action,
-                title_bar_compensation_enabled=request.title_bar_compensation_enabled,
-                title_bar_compensation_height=request.title_bar_compensation_height,
-                presentation_refresh_requested=request.presentation_refresh_requested,
-                prepare_surface=request.prepare_surface,
-                shell_raster_frame_provider=request.raster_frame_provider,
-                shell_raster_runtime_enabled=self.profile.fullscreen_shell_raster_active,
-                suppress_pyqt_fallback_on_shell_raster_failure=(
-                    self.profile.suppress_managed_pyqt_fallback_on_shell_raster_failure
-                ),
-            )
+            presentation_result=presentation_result,
+            retained_content_visibility_available=self._retained_content_visibility_available(
+                presentation_result
+            ),
+        )
+
+    @staticmethod
+    def _retained_content_visibility_available(presentation_result: object) -> bool:
+        """Expose only a neutral retained-content fact to generic consumers."""
+
+        presentation_status = getattr(presentation_result, "presentation_status", None)
+        return bool(
+            getattr(presentation_result, "shell_raster_frame_presented", False)
+            and getattr(presentation_status, "content_visibility_supported", False)
         )
 
     @staticmethod

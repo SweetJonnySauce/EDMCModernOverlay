@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Protocol, runtime_checkable
 
+from overlay_client.backend.presentation_policy import BackendPresentationContentVisibility
+
 
 PresentationCycleRunner = Callable[..., object]
 SurfacePreparer = Callable[[object], bool]
@@ -32,6 +34,7 @@ class BackendPresentationRuntimeRequest:
     title_bar_compensation_enabled: bool = False
     title_bar_compensation_height: int = 0
     presentation_refresh_requested: bool = False
+    content_visibility: BackendPresentationContentVisibility = BackendPresentationContentVisibility.VISIBLE
     presentation_cycle_runner: PresentationCycleRunner | None = None
     prepare_surface: SurfacePreparer | None = None
     raster_frame_provider: RasterFrameProvider | None = None
@@ -43,6 +46,7 @@ class BackendPresentationRuntimeResult:
 
     presentation_result: object | None = None
     helper_unavailable: bool = False
+    retained_content_visibility_available: bool = False
 
 
 @runtime_checkable
