@@ -477,8 +477,8 @@ def test_backend_presentation_cycle_wraps_gnome_helper_result_when_helper_availa
         assert previous_surface_action == "mapped_visible"
         assert prepare_surface is None
         assert shell_raster_frame_provider is None
-        assert shell_raster_runtime_enabled is False
-        assert suppress_pyqt_fallback_on_shell_raster_failure is False
+        assert shell_raster_runtime_enabled is True
+        assert suppress_pyqt_fallback_on_shell_raster_failure is True
         return _FakeGnomePresentationResult()
 
     result = run_backend_presentation_cycle(
@@ -513,7 +513,7 @@ def test_backend_presentation_cycle_wraps_gnome_helper_result_when_helper_availa
     assert result.diagnostics["prepared_surface_allows_unfocused_content"] is False
 
 
-def test_native_gnome_bundle_owns_an_inactive_future_shell_raster_profile():
+def test_native_gnome_bundle_owns_an_active_fullscreen_shell_raster_profile():
     bundle = gnome_shell_wayland.build_gnome_shell_wayland_bundle()
 
     runtime = bundle.presentation_runtime
@@ -521,8 +521,8 @@ def test_native_gnome_bundle_owns_an_inactive_future_shell_raster_profile():
     assert runtime is not None
     assert runtime.profile.owns_helper_presentation is True
     assert runtime.profile.supports_fullscreen_shell_raster is True
-    assert runtime.profile.fullscreen_shell_raster_active is False
-    assert runtime.profile.suppress_managed_pyqt_fallback_on_shell_raster_failure is False
+    assert runtime.profile.fullscreen_shell_raster_active is True
+    assert runtime.profile.suppress_managed_pyqt_fallback_on_shell_raster_failure is True
 
 
 def test_backend_presentation_cycle_transports_generic_surface_reset_action():

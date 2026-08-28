@@ -68,8 +68,8 @@ class GnomeShellPresentationRuntime:
 _NATIVE_GNOME_PRESENTATION_PROFILE = BackendPresentationRuntimeProfile(
     owns_helper_presentation=True,
     supports_fullscreen_shell_raster=True,
-    fullscreen_shell_raster_active=False,
-    suppress_managed_pyqt_fallback_on_shell_raster_failure=False,
+    fullscreen_shell_raster_active=True,
+    suppress_managed_pyqt_fallback_on_shell_raster_failure=True,
 )
 
 _LEGACY_RASTER_PRESENTATION_PROFILE = BackendPresentationRuntimeProfile(

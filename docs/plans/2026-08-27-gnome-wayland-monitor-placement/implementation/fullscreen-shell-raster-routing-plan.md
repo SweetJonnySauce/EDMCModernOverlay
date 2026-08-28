@@ -8,7 +8,7 @@ artifacts for that approach.
 ## Checklist
 
 - [x] Step 1: Lift native-GNOME presentation configuration behind a bundle-owned seam.
-- [ ] Step 2: Enable real-content Shell raster for eligible native-GNOME fullscreen targets.
+- [x] Step 2: Enable real-content Shell raster for eligible native-GNOME fullscreen targets.
 - [ ] Step 3: Wire safe presenter transitions and fullscreen failure suppression.
 - [ ] Step 4: Validate the native GNOME route and record live evidence.
 
@@ -18,7 +18,7 @@ artifacts for that approach.
 | --- | --- | --- |
 | 0 | Evidence and replacement design | Completed |
 | 1 | Backend-boundary seam | Completed |
-| 2 | Fullscreen raster routing | Pending |
+| 2 | Fullscreen raster routing | Completed |
 | 3 | Transition/failure wiring | Pending |
 | 4 | Automated and live acceptance | Pending |
 
@@ -42,9 +42,9 @@ artifacts for that approach.
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 2.1 | Select real-content raster for eligible `gnome_shell_wayland` fullscreen targets | Pending |
-| 2.2 | Preserve managed PyQt for windowed targets | Pending |
-| 2.3 | Fail closed when fullscreen raster cannot be built or proven | Pending |
+| 2.1 | Select real-content raster for eligible `gnome_shell_wayland` fullscreen targets | Completed |
+| 2.2 | Preserve managed PyQt for windowed targets | Completed |
+| 2.3 | Fail closed when fullscreen raster cannot be built or proven | Completed |
 
 ### Phase 3: Transition and lifecycle safety
 

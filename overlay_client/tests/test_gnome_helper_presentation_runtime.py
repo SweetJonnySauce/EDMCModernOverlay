@@ -48,6 +48,9 @@ from overlay_client.backend import (
     HelperRasterFrameRegionRequest,
     HelperRect,
 )
+from overlay_client.backend.bundles.gnome_shell_wayland import build_gnome_shell_wayland_bundle
+from overlay_client.backend.contracts import HelperKind
+from overlay_client.backend.presentation_runtime import BackendPresentationRuntimeRequest
 from overlay_client.backend.bundles._gnome_shell_helper_presentation import (
     GNOME_HELPER_BORDERLESS_FULLSCREEN_PREP_ENV,
     GNOME_HELPER_FULLSCREEN_HANDOFF_GUARD_ENV,
@@ -1452,6 +1455,94 @@ def test_selected_shell_raster_runtime_uses_provider_without_env_gates(monkeypat
     assert result.should_show_overlay is False
     assert calls[0].renderer == "gnome_shell_raster_frame"
     assert calls[0].shell_raster_frame is not None
+
+
+def test_native_gnome_runtime_routes_eligible_fullscreen_to_real_content_raster(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(GNOME_HELPER_SHELL_RASTER_BRIDGE_ENV, raising=False)
+    monkeypatch.delenv(GNOME_HELPER_SHELL_RASTER_RUNTIME_ENV, raising=False)
+    runtime = build_gnome_shell_wayland_bundle().presentation_runtime
+    assert runtime is not None
+    status = type(
+        "NativeGnomeStatus",
+        (),
+        {
+            "helper_states": (
+                type(
+                    "HelperState",
+                    (),
+                    {"helper": HelperKind.GNOME_SHELL_EXTENSION, "available": True},
+                )(),
+            )
+        },
+    )()
+    calls: list[HelperPresentationRequest] = []
+
+    def provider(
+        _target_status,
+        request: HelperPresentationRequest | None,
+        _include_diagnostics: bool,
+    ) -> ShellRasterFrameBuildResult:
+        assert request is not None
+        rect = request.content_rect
+        assert rect is not None
+        return ShellRasterFrameBuildResult(
+            request=HelperRasterFrameRequest(
+                action="update",
+                frame_version="phase14-real-content-cropped-v1:native-gnome:abc123",
+                target_token=request.target_token,
+                target_rect=rect,
+                frame_rect=HelperRect(rect.x + 10, rect.y + 10, rect.width - 20, rect.height - 20),
+                scale=1.0,
+                image_path="/tmp/native-gnome-real-content-cropped.png",
+                checksum="abc123",
+                byte_size=123,
+                stale_timeout_ms=SHELL_RASTER_FRAME_DEFAULT_TIMEOUT_MS,
+            ),
+            eligible=True,
+        )
+
+    def fetch_presentation(request: HelperPresentationRequest) -> dict[str, object]:
+        calls.append(request)
+        assert request.shell_raster_frame is not None
+        frame_rect = request.shell_raster_frame.frame_rect.to_payload()
+        return _presentation_payload(
+            request,
+            requested_rect=frame_rect,
+            applied_rect=frame_rect,
+            renderer="gnome_shell_raster_frame",
+            shell_raster_frame={
+                "frame_version": request.shell_raster_frame.frame_version,
+                "frame_rect": frame_rect,
+            },
+        )
+
+    def runner(**kwargs):
+        return run_gnome_shell_helper_presentation_cycle(
+            fetch_health=_health_payload,
+            fetch_target=lambda: _target_payload(_borderless_target()),
+            fetch_presentation=fetch_presentation,
+            clock=lambda: 100.0,
+            **kwargs,
+        )
+
+    runtime_result = runtime.run_presentation_cycle(
+        status,
+        BackendPresentationRuntimeRequest(
+            presentation_cycle_runner=runner,
+            raster_frame_provider=provider,
+        ),
+    )
+
+    assert runtime_result is not None
+    result = runtime_result.presentation_result
+    assert result is not None
+    assert result.shell_raster_frame_presented is True
+    assert result.should_show_overlay is False
+    assert calls[0].renderer == "gnome_shell_raster_frame"
+    assert calls[0].shell_raster_frame is not None
+    assert calls[0].shell_raster_frame.frame_version.startswith("phase14-real-content-cropped")
 
 
 def test_selected_shell_raster_failure_clears_and_does_not_fallback_to_pyqt(
