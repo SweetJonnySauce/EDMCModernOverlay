@@ -3,7 +3,7 @@
 ## Checklist
 
 - [x] Step 1: Add guarded monitor transfer to normal GNOME presentation.
-- [ ] Step 2: Prove the native-helper readback and backend boundary contracts.
+- [x] Step 2: Prove the native-helper readback and backend boundary contracts.
 - [ ] Step 3: Deploy the helper update and validate live GNOME Wayland handoff.
 
 ## Phase Status
@@ -11,8 +11,8 @@
 | Phase | Description | Status |
 | --- | --- | --- |
 | 1 | Helper normal-path correction | Completed |
-| 2 | Contract validation and observability | Blocked on required local commit |
-| 3 | Live GNOME Wayland delivery | Pending |
+| 2 | Contract validation and observability | Completed |
+| 3 | Live GNOME Wayland delivery | In progress — manual delivery gate completed; live matrix pending |
 
 ### Phase 1: Helper normal-path correction
 
@@ -30,15 +30,15 @@
 | 2.1 | Preserve and prove applied-rectangle mismatch/retry/backoff behavior | Completed |
 | 2.2 | Make the normal-path transfer decision diagnosable without changing the helper protocol | Completed |
 | 2.3 | Verify the architecture boundary and run the required automated gates | Completed with retained remediation-01 logs; root `make check` remains environment-limited |
-| 2.4 | Create the required conventional local commit after validation | Blocked: sandbox Git metadata is read-only |
+| 2.4 | Create the required conventional local commit after validation | Completed in `fe35ac29ce96e1a17360fc1d298b1b657d730443`. |
 
 ### Phase 3: Live GNOME Wayland delivery
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 3.1 | Install/reload the changed helper in the target GNOME session | Pending |
-| 3.2 | Validate primary-to-secondary and secondary-to-primary handoff, input, stacking, and resize behavior | Pending |
-| 3.3 | Record evidence, resolve remaining live-only issues, and prepare the reviewed change for commit | Pending |
+| 3.1 | Install/reload the changed helper in the target GNOME session | Completed by the user: clean replacement; GNOME Wayland (`ubuntu:GNOME`); installed, enabled/ACTIVE, healthy DBus health; protocol 3; `full_helper` presentation enabled. |
+| 3.2 | Validate primary-to-secondary and secondary-to-primary handoff, input, stacking, and resize behavior | In progress — awaiting five-case user-provided non-secret acceptance evidence. |
+| 3.3 | Record evidence, resolve remaining live-only issues, and prepare the reviewed change for commit | Pending the complete passing manual matrix; no workaround or commit before then. |
 
 ## Step 1: Add guarded monitor transfer to normal GNOME presentation
 
@@ -177,6 +177,11 @@ Record the exact helper reload/install command used, session type, GNOME Shell
 version, target and overlay monitor indexes, requested/applied rectangles,
 action labels, and pass/fail result for every matrix case. Run `make check`
 again after any code change made while resolving live findings.
+
+**2026-08-27 pre-gate evidence:** The required deterministic regression passed
+with 156 tests in 0.37s. The helper deployment and status commands remain
+uninvoked pending separate explicit user approval; task-generation approval
+does not authorize session mutation or a session-bus health probe.
 
 **Integration:** This is the deployment-level proof of the helper change from
 Steps 1–2. It exercises only the native GNOME Wayland backend; a successful

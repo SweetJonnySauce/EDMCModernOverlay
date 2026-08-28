@@ -8,10 +8,10 @@
 | Step | Status | Evidence / decision | Next action |
 | --- | --- | --- | --- |
 | 0 | Completed | Design approved after live Mutter diagnostics established that both external-PyQt monitor-transfer orderings are silent no-ops. | Generate the Step 1 task breakdown in a fresh context. |
-| 1 | Completed | Fresh Step 1 remediation restored the native profile to helper-owned/raster-capable but inactive, while retaining active legacy raster compatibility. Required focused suite: 43 passed; scoped Ruff and `git diff --check` passed. | Main-thread reconcile the scoped commit, then proceed sequentially to Step 2. |
+| 1 | Completed — fallback remediation | Native GNOME now uses an explicit non-terminal helper-unavailable profile policy and falls through to legacy follow; legacy raster remains terminal/fail-closed. Independent focused fallback suite: 157 passed; Ruff and diff check passed. | Re-run project gate in a loopback-permitting environment for release-grade completion. |
 | 2 | Completed — fresh activation task | Independent RED proof found the inactive native profile and native real-content route both failed; profile-only activation then passed the exact focused plus boundary suite (165 passed), scoped Ruff, and `git diff --check`. | Main-thread reconcile the scoped commit and handoff, then begin Step 3 with a fresh generator context. |
 | 3 | Completed | Fresh RED→GREEN code-assist repair moved the acknowledged clear before managed preparation/attach, made guarded cached-raster HIDE_ALL exits clear/reset, and retained fullscreen suppression. Focused Step 3 suite: 140 passed. | Main-thread reconcile commit, handoff, and acceptance evidence before Step 4. |
-| 4 | Completed with documented environment limitations | Combined focused suite passed (201). Scoped Ruff and whitespace checks passed. `make check` stopped because system Python lacks Ruff; `make test` stopped at 27 PyQt6 collection errors; root dependency setup could not reach PyPI. User confirmed the manual Wayland matrix passes and explicitly approved skipping per-case diagnostic capture. | Retain the environment limitations for a future fully provisioned project-check run. |
+| 4 | Reopened — environment limitation only | `make PYTHON=overlay_client/.venv/bin/python check` passes Ruff/mypy and all test assertions (1,649 passed, 21 skipped); five pressure-snapshot loopback socket fixture setups are sandbox-blocked. Manual Wayland acceptance remains user-reported/accepted. | Re-run the five socket setups in a socket-permitting environment. |
 
 ## Context Ledger
 
@@ -39,15 +39,17 @@ changed; Validation commands/results; Decisions; Risks; Next exact action.`
 | 4 | `step04-validation-breakdown-2026-08-27` | Fresh code-task-generator | Completed — no functional task | Independent source/acceptance audit confirms Step 4 is validation-only, so no code task was generated. It authorizes the combined focused suite, `make check`, `make test`, scoped diff review, then the user-gated live matrix with required diagnostics. | N/A — no implementation handoff |
 | 4 | `step04-main-automated-validation-2026-08-27` | Main-thread validation | Completed with environment limitations | Combined focused suite: 201 passed. Scoped Ruff and `git diff --check` passed. `make check` stopped because `python3 -m ruff` is unavailable; `make test` stopped with 27 PyQt6 collection errors. Root `.venv` setup could not reach PyPI, so those project targets were not retried. | `/home/jon/handoffs/handoff-20260827-step04-fullscreen-shell-raster-routing-automated.md` |
 | 4 | `step04-manual-acceptance-2026-08-27` | User-gated live acceptance | Completed by user report | User reports all six Wayland matrix cases pass and explicitly authorizes skipping the normally required renderer/geometry/transition/degrade diagnostic capture. No agent performed a live action. | `/home/jon/handoffs/handoff-20260827-step04-fullscreen-shell-raster-routing-manual.md` |
+| iteration | `iteration-checklist-2026-08-27` | Main-thread validation | Reopened Step 1/4 | Focused routing suite: 219 passed. Root Makefile bypasses activation; `make PYTHON=overlay_client/.venv/bin/python check` passed Ruff/mypy and then failed one native-helper-unavailable legacy-follow regression plus five sandbox-blocked socket harness setups. | `../iteration-checklist.md` |
+| remediation | `native-helper-unavailable-main-validation-2026-08-27` | Main-thread validation | Completed with environment limitation | Fresh task and code-assist contexts restored neutral native fall-through and terminal legacy-raster helper-loss ownership. Independent focused suite: 157 passed; Ruff and diff check passed. Project gate: 1,649 passed, 21 skipped, 5 sandbox-blocked pressure-snapshot loopback setups; no assertion failures. | `/home/jon/handoffs/handoff-20260827-native-gnome-helper-unavailable-fallback.md` |
 
 ## Reconciliation Checklist
 
 - [x] Approved design and implementation plan are present.
 - [x] Historical monitor-transfer artifacts are preserved and excluded from this routing run.
 - [x] Step 1 generated task files are reviewed and approved.
-- [x] Step 1 implementation, validation, and scoped commit are reconciled against the current source; the native profile is capable but inactive and retains the active legacy compatibility route.
+- [x] Step 1 regression is corrected and reconciled: native GNOME without helper preserves the legacy follow fallback.
 - [x] Step 2 source, task acceptance evidence, validation, and scoped commit are reconciled against the current native runtime profile.
 - [x] Steps 2 and 3 are completed and reconciled against current source, task evidence, handoffs, commits, and focused validation.
-- [x] Step 4 automated validation is complete with recorded environment limitations.
+- [ ] Step 4 full automated validation is green in a socket-permitting environment after the fallback regression is fixed.
 - [x] Step 4 live GNOME matrix is accepted by explicit user report and diagnostic-evidence waiver.
 - [x] Final plan stages and manual acceptance record are accurate; project-check environment limitations remain documented.

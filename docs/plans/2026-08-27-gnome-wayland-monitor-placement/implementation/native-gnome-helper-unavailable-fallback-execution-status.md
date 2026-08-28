@@ -66,6 +66,6 @@ main-thread review context is recorded here. Code-assist handoffs use exactly:
 - [x] Prompt, approved design, implementation plan, remediation plan, and governing artifacts read.
 - [x] Existing routing dashboard, iteration checklist, task/code-assist artifacts, relevant handoffs, commits, and dirty-worktree baseline reconciled.
 - [x] Fresh cohesive task generated and main-thread scope-reviewed.
-- [ ] Fresh code-assist TDD implementation completed and handed off.
+- [x] Fresh code-assist TDD implementation completed and handed off.
 - [x] Focused validation, project gate, diff review, secret scan, and progress reconciliation completed; project gate remains socket-limited in this sandbox.
 - [x] Scoped local commit safely established: only remediation-owned source, tests, task/code-assist artifacts, and this new dashboard will be staged; user-owned pre-existing paths remain unstaged.

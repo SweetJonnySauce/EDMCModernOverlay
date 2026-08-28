@@ -1,16 +1,16 @@
 # GNOME Wayland Fullscreen Shell-Raster Routing: Implementation Plan
 
-**Status:** Completed. This supersedes the monitor-transfer approach
+**Status:** Completed with sandbox-limited project gate. This supersedes the monitor-transfer approach
 for the observed GNOME/Mutter fullscreen failure. It leaves its diagnostics and
 commits intact as evidence; it does not overwrite the in-progress delivery
 artifacts for that approach.
 
 ## Checklist
 
-- [x] Step 1: Lift native-GNOME presentation configuration behind a bundle-owned seam.
+- [x] Step 1: Lift native-GNOME presentation configuration behind a bundle-owned seam (native helper-unavailable legacy-follow fallback restored and regression-tested).
 - [x] Step 2: Enable real-content Shell raster for eligible native-GNOME fullscreen targets.
 - [x] Step 3: Wire safe presenter transitions and fullscreen failure suppression.
-- [x] Step 4: Validate the native GNOME route and record live evidence.
+- [ ] Step 4: Validate the native GNOME route and record live evidence (all assertions are green; project gate remains blocked by five sandbox loopback socket setups).
 
 ## Phase Status
 
@@ -20,7 +20,7 @@ artifacts for that approach.
 | 1 | Backend-boundary seam | Completed |
 | 2 | Fullscreen raster routing | Completed |
 | 3 | Transition/failure wiring | Completed |
-| 4 | Automated and live acceptance | Completed — automated evidence recorded; user confirmed the manual Wayland matrix passes and explicitly waived per-case diagnostic capture |
+| 4 | Automated and live acceptance | Reopened — manual matrix and all assertions pass, but the project gate has five sandbox-blocked loopback socket setups |
 
 ### Phase 0: Evidence and replacement design
 
@@ -36,7 +36,7 @@ artifacts for that approach.
 | --- | --- | --- |
 | 1.1 | Add a bundle-owned GNOME presentation runtime/profile seam | Completed: remediation restored the normal native profile to capable-but-inactive; legacy raster remains active |
 | 1.2 | Move raw GNOME/raster selection decisions out of generic consumer dispatch | Completed |
-| 1.3 | Prove X11/xcompat remain outside the GNOME runtime path | Completed |
+| 1.3 | Prove X11/xcompat remain outside the GNOME runtime path | Completed — fallback regression restored; focused architecture coverage passed |
 
 ### Phase 2: Fullscreen raster routing
 
@@ -58,8 +58,8 @@ artifacts for that approach.
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 4.1 | Run focused automated tests and architecture gate | Completed — combined focused suite passed: 201 tests; architecture boundary included |
-| 4.2 | Run project checks and record limitations | Completed with environment limitations — scoped Ruff passed; `make check` lacks system Ruff and `make test` lacks usable system PyQt6; root dev dependency install could not reach PyPI |
+| 4.1 | Run focused automated tests and architecture gate | Completed — native fallback-focused suite passed 157 tests, including architecture coverage |
+| 4.2 | Run project checks and record limitations | Completed with sandbox limitation — `make PYTHON=overlay_client/.venv/bin/python check` passes Ruff/mypy and all assertions (1,649 passed, 21 skipped); five pressure-snapshot setups cannot bind loopback |
 | 4.3 | Perform live GNOME two-monitor acceptance matrix | Completed — user confirmed the Wayland matrix passes and explicitly approved skipping diagnostic capture |
 
 ## Step 1: Lift native-GNOME presentation configuration behind a bundle-owned seam
