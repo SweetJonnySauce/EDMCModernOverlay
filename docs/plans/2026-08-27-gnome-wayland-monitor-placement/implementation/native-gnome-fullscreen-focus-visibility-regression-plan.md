@@ -10,14 +10,14 @@ treat this historical plan as authority for another direct authorization change.
 - [x] Step 1: Attempt the unchecked-preference actor suppression and record its live black-screen regression.
 - [x] Safety rollback: Restore the prior fullscreen Shell-raster actor-continuity authorization.
 - [ ] Follow-up design: Define safe renderer-level content suppression that preserves actor continuity.
-- [ ] Live rollback check: Verify the black screen is gone without claiming unchecked-preference hiding.
+- [x] Live rollback check: User confirmed the black screen is gone without claiming unchecked-preference hiding.
 
 ## Phase Status
 
 | Phase | Description | Status |
 | --- | --- | --- |
 | 1 | Restore the focus-visibility contract in the native GNOME bundle | Superseded — direct preference-to-actor authorization is unsafe; safety rollback is complete |
-| 2 | Automated and live acceptance | Blocked — rollback needs user verification, then a new content-suppression design |
+| 2 | Safety rollback acceptance | Completed — user confirmed the black-screen regression is gone; new content-suppression design remains separate |
 
 ### Phase 1: Restore the focus-visibility contract in the native GNOME bundle
 
@@ -31,7 +31,7 @@ treat this historical plan as authority for another direct authorization change.
 | Stage | Description | Status |
 | --- | --- | --- |
 | 2.1 | Run focused unit/source-contract coverage and the project gates | Completed — focused suite: 152 passed; elevated `make check` and `make test`: Ruff/mypy clean and 1,675 tests passed each. The ordinary sandbox run was blocked only by five loopback-socket fixture setups. |
-| 2.2 | Verify focus-loss and focus-return behavior in a live GNOME Wayland session | Failed — user observed a black screen on click/focus return after the Step 1 change |
+| 2.2 | Verify focus-loss and focus-return behavior in a live GNOME Wayland session | Completed for rollback safety — user confirmed the black screen is gone; unchecked-preference hiding remains deferred |
 
 ## Scope and diagnosis
 

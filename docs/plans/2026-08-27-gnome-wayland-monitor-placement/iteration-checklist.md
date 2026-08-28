@@ -2,6 +2,23 @@
 
 ## Outcome
 
+## Post-iteration native GNOME focus-visibility regression (2026-08-28)
+
+**Safety rollback accepted.** Commit `8ef91cd` attempted to make the unchecked
+preference directly disable fullscreen Shell-raster `allow_unfocused_target`.
+The live focus-return test exposed a black-screen regression because that flag
+also controls compositor actor continuity. Commit `a5e44a1` restored the prior
+eligible-fullscreen continuity guard; the user confirmed the black screen is
+gone.
+
+**Outstanding product behavior:** the unchecked preference remains ineffective
+for eligible fullscreen native GNOME Shell raster. It requires a new approved
+renderer-level content-suppression design; do not retry direct actor
+authorization control.
+
+**Validation:** rollback-focused runtime/source/frame suite: 152 passed.
+The preceding elevated project gates each passed Ruff, mypy, and 1,675 tests.
+
 **Implementation status: complete.** Commit `0946437`
 (`fix(gnome): restore native helper fallback`) fixes the native-GNOME
 helper-unavailable regression introduced by fullscreen Shell-raster routing.

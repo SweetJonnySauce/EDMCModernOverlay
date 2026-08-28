@@ -7,8 +7,8 @@
 
 | Step | Status | Evidence / decision | Next action |
 | --- | --- | --- | --- |
-| 1 | Completed — safety rollback | The direct preference-to-actor authorization was replaced with the prior eligible fullscreen/full-monitor continuity guard. | Ask the user to verify the black screen is gone; do not reattempt checkbox behavior without a new design. |
-| 2 | Blocked pending live rollback check and new design | The manual focus-return case remains release blocking until the user verifies the black screen is gone; checkbox behavior is intentionally unresolved. | Ask for the live rollback check, then create a separate renderer-level content-suppression design. |
+| 1 | Closed — unsafe implementation rolled back | `a5e44a1` restored the prior eligible fullscreen/full-monitor continuity guard after direct preference authorization caused black focus return. | Do not reattempt this design. |
+| 2 | Completed — safety rollback accepted | User confirmed the black-screen regression is gone after the rollback. The unchecked-preference enhancement remains explicitly deferred. | Begin a new renderer-level suppression design only with fresh approval. |
 
 ## Context Ledger
 
@@ -28,6 +28,7 @@ main-thread review context. Every implementation handoff must contain exactly:
 | 2 | `step02-manual-acceptance-2026-08-27` | User-gated live acceptance | Awaiting user | The plan prohibits agent control of GNOME/EDMC/Elite or DBus probes. User must perform the documented focus/placement matrix and return non-secret visual results plus available diagnostics. | N/A — manual gate |
 | 2 | `step02-live-regression-2026-08-28` | User-reported live acceptance | Failed — release blocking | With the unchecked preference, clicking/focusing away from and back to Elite causes a black screen. Static trace ties the new direct `allow_unfocused_target=False` path to the extension's transient `target_not_focused` actor suspension. | Do not continue live retesting; rollback/design decision required |
 | 1 | `step01-remediation-01-code-assist-2026-08-28` | Fresh code-assist remediation | Completed — committed locally | RED proved direct preference forwarding sent `allow_unfocused_target=False`; GREEN restored the eligible fullscreen/full-monitor continuity guard and its unit coverage. Focused suite: 152 passed; `git diff --check` passed; changed-text secret scan clean. | `/home/jon/handoffs/handoff-20260828-070135.md` |
+| 2 | `step02-rollback-manual-verification-2026-08-28` | User-reported live verification | Completed | User confirmed the rollback removed the black-screen focus-return regression. The original checkbox behavior is still present and is explicitly deferred to a separate renderer-level suppression design. | N/A — user observation |
 
 ## Reconciliation Checklist
 
@@ -35,6 +36,6 @@ main-thread review context. Every implementation handoff must contain exactly:
 - [x] Step 1 task breakdown reviewed in its own fresh context.
 - [x] Step 1 code-assist task committed and independently reviewed.
 - [x] Step 2 automated validation recorded.
-- [ ] Step 2 live focus/placement matrix completed by the user with non-secret evidence — blocked by black-screen regression.
+- [x] Safety rollback live focus-return verification completed by the user.
 - [x] Safety rollback source/test/docs scope reconciled; focused validation and scoped commit remain in this remediation context.
 - [ ] New renderer-level content-suppression design approved and implemented; the original plan cannot safely provide this behavior.
