@@ -35,7 +35,7 @@ class GnomeShellPresentationRuntime:
         request: BackendPresentationRuntimeRequest,
     ) -> BackendPresentationRuntimeResult | None:
         if not self.helper_presentation_available(status):
-            if self.profile.fullscreen_shell_raster_active:
+            if self.profile.helper_unavailable_is_terminal:
                 return BackendPresentationRuntimeResult(helper_unavailable=True)
             return None
         runner = request.presentation_cycle_runner or self._presentation_cycle_runner()
@@ -70,6 +70,7 @@ _NATIVE_GNOME_PRESENTATION_PROFILE = BackendPresentationRuntimeProfile(
     supports_fullscreen_shell_raster=True,
     fullscreen_shell_raster_active=True,
     suppress_managed_pyqt_fallback_on_shell_raster_failure=True,
+    helper_unavailable_is_terminal=False,
 )
 
 _LEGACY_RASTER_PRESENTATION_PROFILE = BackendPresentationRuntimeProfile(
@@ -77,6 +78,7 @@ _LEGACY_RASTER_PRESENTATION_PROFILE = BackendPresentationRuntimeProfile(
     supports_fullscreen_shell_raster=True,
     fullscreen_shell_raster_active=True,
     suppress_managed_pyqt_fallback_on_shell_raster_failure=True,
+    helper_unavailable_is_terminal=True,
 )
 
 

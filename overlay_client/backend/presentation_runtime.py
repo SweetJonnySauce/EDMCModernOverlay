@@ -13,12 +13,13 @@ RasterFrameProvider = Callable[[object | None, object | None, bool], object]
 
 @dataclass(frozen=True, slots=True)
 class BackendPresentationRuntimeProfile:
-    """Bundle-declared presentation ownership and Shell-raster policy."""
+    """Bundle-declared presentation ownership, raster, and helper-loss policy."""
 
     owns_helper_presentation: bool
     supports_fullscreen_shell_raster: bool
     fullscreen_shell_raster_active: bool
     suppress_managed_pyqt_fallback_on_shell_raster_failure: bool
+    helper_unavailable_is_terminal: bool
 
 
 @dataclass(frozen=True, slots=True)

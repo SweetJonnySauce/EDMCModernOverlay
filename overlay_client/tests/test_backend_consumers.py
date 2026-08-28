@@ -513,7 +513,7 @@ def test_backend_presentation_cycle_wraps_gnome_helper_result_when_helper_availa
     assert result.diagnostics["prepared_surface_allows_unfocused_content"] is False
 
 
-def test_native_gnome_bundle_owns_an_active_fail_closed_fullscreen_shell_raster_profile():
+def test_native_gnome_bundle_owns_an_active_fullscreen_shell_raster_profile_with_nonterminal_helper_loss():
     bundle = gnome_shell_wayland.build_gnome_shell_wayland_bundle()
 
     runtime = bundle.presentation_runtime
@@ -523,6 +523,7 @@ def test_native_gnome_bundle_owns_an_active_fail_closed_fullscreen_shell_raster_
     assert runtime.profile.supports_fullscreen_shell_raster is True
     assert runtime.profile.fullscreen_shell_raster_active is True
     assert runtime.profile.suppress_managed_pyqt_fallback_on_shell_raster_failure is True
+    assert runtime.profile.helper_unavailable_is_terminal is False
 
 
 def test_backend_presentation_cycle_transports_generic_surface_reset_action():
@@ -702,6 +703,41 @@ def test_legacy_shell_raster_bundle_owns_an_active_shell_raster_profile():
     assert runtime.profile.supports_fullscreen_shell_raster is True
     assert runtime.profile.fullscreen_shell_raster_active is True
     assert runtime.profile.suppress_managed_pyqt_fallback_on_shell_raster_failure is True
+    assert runtime.profile.helper_unavailable_is_terminal is True
+
+
+def test_backend_presentation_cycle_selected_native_gnome_without_helper_falls_through_to_legacy_follow():
+    status = BackendSelectionStatus(
+        probe=PlatformProbeResult(
+            operating_system=OperatingSystem.LINUX,
+            session_type=SessionType.WAYLAND,
+            qt_platform_name="wayland",
+            compositor="gnome-shell",
+        ),
+        selected_backend=BackendDescriptor(
+            BackendFamily.NATIVE_WAYLAND,
+            BackendInstance.GNOME_SHELL_WAYLAND,
+        ),
+        classification=CapabilityClassification.DEGRADED_OVERLAY,
+        helper_states=(
+            HelperCapabilityState(
+                helper=HelperKind.GNOME_SHELL_EXTENSION,
+                required=True,
+                installed=False,
+                enabled=False,
+                approved=False,
+            ),
+        ),
+    )
+    calls: list[str] = []
+
+    result = run_backend_presentation_cycle(
+        status,
+        gnome_runner=lambda **_: calls.append("called") or _FakeGnomePresentationResult(),
+    )
+
+    assert calls == []
+    assert result is None
 
 
 def test_backend_presentation_cycle_selected_shell_raster_without_helper_consumes_follow_path():
