@@ -6,7 +6,7 @@
 - [x] Choose test type: manual live GNOME Wayland integration/acceptance plus deterministic regression; no harness.
 - [x] Run the deterministic pre-gate regression and retain its log.
 - [x] Prepare exact delivery commands and their side effects without invoking them.
-- [ ] Obtain separate explicit user approval for the manual gate.
+- [x] Close the manual monitor-transfer gate as superseded; the user accepted the fullscreen Shell-raster live matrix instead.
 
 ## Acceptance scenarios
 

@@ -1,6 +1,6 @@
 # Native GNOME Helper-Unavailable Fallback: Remediation Plan
 
-**Status:** Proposed — discovered by the 2026-08-27 full-suite iteration.
+**Status:** Completed in `0946437` — project gate remains sandbox-limited.
 
 ## Problem and invariant
 
@@ -24,41 +24,41 @@ distinction.  It must not be inferred from `fullscreen_shell_raster_active`.
 
 ## Checklist
 
-- [ ] Step 1: Make helper-unavailable ownership an explicit bundle profile policy.
-- [ ] Step 2: Prove native fallback and compatibility fail-closed behavior.
-- [ ] Step 3: Run project validation and reconcile the reopened routing plan.
+- [x] Step 1: Make helper-unavailable ownership an explicit bundle profile policy.
+- [x] Step 2: Prove native fallback and compatibility fail-closed behavior.
+- [x] Step 3: Run project validation and reconcile the reopened routing plan.
 
 ## Phase status
 
 | Phase | Description | Status |
 | --- | --- | --- |
-| 1 | Bundle-owned helper-unavailable policy | Pending |
-| 2 | Regression and boundary coverage | Pending |
-| 3 | Full validation and progress reconciliation | Pending |
+| 1 | Bundle-owned helper-unavailable policy | Completed |
+| 2 | Regression and boundary coverage | Completed |
+| 3 | Full validation and progress reconciliation | Completed with sandbox limitation |
 
 ### Phase 1: Bundle-owned helper-unavailable policy
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 1.1 | Add a neutral, explicitly named profile field for whether missing helper ownership is terminal | Pending |
-| 1.2 | Set native GNOME to fall through and legacy raster to remain fail-closed | Pending |
-| 1.3 | Remove the incorrect coupling to fullscreen-raster activation | Pending |
+| 1.1 | Add a neutral, explicitly named profile field for whether missing helper ownership is terminal | Completed — `helper_unavailable_is_terminal` |
+| 1.2 | Set native GNOME to fall through and legacy raster to remain fail-closed | Completed |
+| 1.3 | Remove the incorrect coupling to fullscreen-raster activation | Completed |
 
 ### Phase 2: Regression and boundary coverage
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 2.1 | Turn the failing native helper-unavailable follow-surface test green | Pending |
-| 2.2 | Add direct bundle/runtime assertions for the native fall-through and legacy fail-closed cases | Pending |
-| 2.3 | Confirm generic consumers retain no raw GNOME/raster dispatch | Pending |
+| 2.1 | Turn the failing native helper-unavailable follow-surface test green | Completed |
+| 2.2 | Add direct bundle/runtime assertions for the native fall-through and legacy fail-closed cases | Completed |
+| 2.3 | Confirm generic consumers retain no raw GNOME/raster dispatch | Completed |
 
 ### Phase 3: Full validation and progress reconciliation
 
 | Stage | Description | Status |
 | --- | --- | --- |
-| 3.1 | Run focused tests, lint, and type checking | Pending |
-| 3.2 | Run the project check with the overlay-client interpreter and separate code failures from sandbox limits | Pending |
-| 3.3 | Update the routing plan and iteration checklist only after the regression is resolved | Pending |
+| 3.1 | Run focused tests, lint, and type checking | Completed — focused suite, Ruff, and mypy passed |
+| 3.2 | Run the project check with the overlay-client interpreter and separate code failures from sandbox limits | Completed with sandbox limitation — five loopback socket setups remain blocked |
+| 3.3 | Update the routing plan and iteration checklist only after the regression is resolved | Completed |
 
 ## Step 1: Make helper-unavailable ownership explicit
 

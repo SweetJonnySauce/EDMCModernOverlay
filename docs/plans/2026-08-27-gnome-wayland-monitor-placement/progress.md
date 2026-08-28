@@ -3,8 +3,8 @@
 | Phase | Goal | Status |
 |---|---|---|
 | 1 | Research and remediation design | Completed |
-| 2 | Implementation and automated validation | Ready to begin |
-| 3 | Manual Wayland validation and merge closure | Pending |
+| 2 | Implementation and automated validation | Completed with sandbox-limited socket harness gate |
+| 3 | Manual Wayland validation and merge closure | Completed for the Shell-raster replacement route; old monitor-transfer delivery was superseded |
 
 ## Phase 1 stages
 

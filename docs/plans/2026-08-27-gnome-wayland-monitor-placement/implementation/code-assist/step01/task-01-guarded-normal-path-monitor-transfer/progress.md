@@ -50,8 +50,6 @@
   only in five unrelated loopback-socket harness fixtures after 1,639 passed
   and 21 skipped. The default `make check` could not start because its root
   `python3` lacks Ruff. Neither command will be retried unchanged.
-- [ ] Local commit: blocked. `git add helpers/gnome_shell_extension/extension.js
-  overlay_client/tests/test_gnome_shell_helper_extension_source.py
-  docs/plans/2026-08-27-gnome-wayland-monitor-placement/implementation` failed
-  once because Git cannot create `.git/index.lock` (`Read-only file system`).
-  No paths were staged or committed; do not retry unchanged. Never push.
+- [x] Local commit: completed by the user as `fa94da3c`. The original sandbox
+  staging attempt failed once because Git could not create `.git/index.lock`
+  (`Read-only file system`); it was not retried unchanged. Never push.

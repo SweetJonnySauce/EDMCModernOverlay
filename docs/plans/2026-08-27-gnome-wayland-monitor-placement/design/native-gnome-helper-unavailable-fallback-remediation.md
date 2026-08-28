@@ -1,6 +1,6 @@
 # Design: Native GNOME Helper-Unavailable Legacy-Follow Fallback
 
-**Status:** Proposed
+**Status:** Implemented in `0946437`; project gate remains sandbox-limited.
 
 ## Context
 

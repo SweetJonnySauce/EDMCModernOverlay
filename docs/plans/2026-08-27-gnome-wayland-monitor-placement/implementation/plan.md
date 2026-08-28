@@ -4,7 +4,7 @@
 
 - [x] Step 1: Add guarded monitor transfer to normal GNOME presentation.
 - [x] Step 2: Prove the native-helper readback and backend boundary contracts.
-- [ ] Step 3: Deploy the helper update and validate live GNOME Wayland handoff.
+- [x] Step 3: Retire the monitor-transfer live-delivery step as superseded by fullscreen Shell-raster routing.
 
 ## Phase Status
 
@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | 1 | Helper normal-path correction | Completed |
 | 2 | Contract validation and observability | Completed |
-| 3 | Live GNOME Wayland delivery | In progress — manual delivery gate completed; live matrix pending |
+| 3 | Live GNOME Wayland delivery | Completed — superseded before matrix execution; live acceptance is recorded against the fullscreen Shell-raster routing plan |
 
 ### Phase 1: Helper normal-path correction
 
@@ -37,8 +37,8 @@
 | Stage | Description | Status |
 | --- | --- | --- |
 | 3.1 | Install/reload the changed helper in the target GNOME session | Completed by the user: clean replacement; GNOME Wayland (`ubuntu:GNOME`); installed, enabled/ACTIVE, healthy DBus health; protocol 3; `full_helper` presentation enabled. |
-| 3.2 | Validate primary-to-secondary and secondary-to-primary handoff, input, stacking, and resize behavior | In progress — awaiting five-case user-provided non-secret acceptance evidence. |
-| 3.3 | Record evidence, resolve remaining live-only issues, and prepare the reviewed change for commit | Pending the complete passing manual matrix; no workaround or commit before then. |
+| 3.2 | Validate primary-to-secondary and secondary-to-primary handoff, input, stacking, and resize behavior | Completed — superseded before executing the obsolete external-PyQt transfer matrix; Shell-raster live matrix was accepted separately. |
+| 3.3 | Record evidence, resolve remaining live-only issues, and prepare the reviewed change for commit | Completed — historical transfer work is retained as evidence; routing commits and their acceptance record are authoritative. |
 
 ## Step 1: Add guarded monitor transfer to normal GNOME presentation
 

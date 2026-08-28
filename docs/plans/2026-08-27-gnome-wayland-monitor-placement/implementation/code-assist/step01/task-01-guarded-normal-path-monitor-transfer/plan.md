@@ -4,11 +4,11 @@
 
 - [x] Reconcile approved task, plan, design, research, status, Git state, and logs.
 - [x] Select deterministic source-contract/unit-style tests; no harness test.
-- [ ] RED: add source-contract expectations and run the focused test.
-- [ ] GREEN: add the guarded normal-path transfer with fallback diagnostics.
-- [ ] REFACTOR: review names, control flow, and unchanged helper boundaries.
-- [ ] Validate focused pytest and `git diff --check`.
-- [ ] Update task/status evidence and make the local conventional commit.
+- [x] RED: add source-contract expectations and run the focused test.
+- [x] GREEN: add the guarded normal-path transfer with fallback diagnostics.
+- [x] REFACTOR: review names, control flow, and unchanged helper boundaries.
+- [x] Validate focused pytest and `git diff --check`.
+- [x] Update task/status evidence and make the local conventional commit (`fa94da3c`).
 
 ## Test scenarios
 

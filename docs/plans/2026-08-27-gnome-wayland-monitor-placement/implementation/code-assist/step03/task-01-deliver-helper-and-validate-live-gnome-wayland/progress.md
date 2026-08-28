@@ -8,14 +8,15 @@
 - [x] Ran deterministic pre-gate regression: 156 passed in 0.37s; log retained in `logs/focused-pytest.log`.
 - [x] Recorded that the user personally completed the separately approved helper update/status gate without agent live actions.
 - [x] Recorded non-secret helper readiness: GNOME Wayland (`ubuntu:GNOME`), files installed, enabled/ACTIVE, healthy DBus health, protocol 3, and `full_helper` presentation enabled.
-- [ ] Collect and record the complete live acceptance matrix.
-- [ ] Inspect final scoped evidence/documents and commit only after every live case passes.
+- [x] Close the monitor-transfer live matrix as superseded; do not attribute the accepted Shell-raster matrix to the external-PyQt transfer approach.
+- [x] Reconcile final scoped evidence/documents: transfer artifacts remain historical evidence and routing commits are authoritative.
 
 ## Manual gate
 
 Completed by the user after separate approval. The agent did not execute either
-command or any equivalent GNOME/session action. The task is now pending the
-five-case live acceptance matrix and non-secret evidence only.
+command or any equivalent GNOME/session action. The remaining transfer matrix
+was retired when Mutter proved the external-PyQt move calls are no-ops; it is
+not a pending acceptance gate for the Shell-raster replacement route.
 
 ## Decision record
 

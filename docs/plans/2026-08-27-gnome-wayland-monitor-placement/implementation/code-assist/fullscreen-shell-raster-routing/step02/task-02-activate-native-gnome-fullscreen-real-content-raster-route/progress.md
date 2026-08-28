@@ -6,7 +6,7 @@
 - [x] GREEN: enabled only the normal native profile flags; exact focused suite including architecture coverage passed (165 passed).
 - [x] REFACTOR: no simplification was warranted; the two existing profile flags remain the smallest bundle-owned seam.
 - [x] Validation: exact task suite and boundary coverage passed; scoped Ruff and `git diff --check` passed; scope/secret review found no static proof-frame production selection, protocol edits, raw generic dispatch, X11/xcompat changes, or credentials (the scan's token-name matches are existing test fixtures).
-- [ ] Commit: stage only this task's scoped source/tests/artifacts and commit locally.
+- [x] Commit: `33ec919b2ee6e337e026dd1b062938837e435c29` (`feat(gnome): activate native fullscreen raster route`).
 
 ## Auto-mode decision log
 
