@@ -9,12 +9,11 @@ The native GNOME bundle now falls through to the established legacy follower
 when its helper is unavailable. The compatibility raster identity remains
 terminal and fail-closed.
 
-**Release-readiness status: not fully verified in this environment.** The
-independent focused routing suite passed, Ruff and mypy passed, and all 1,649
-collected test assertions passed. Five real-socket harness fixtures cannot bind
-`127.0.0.1:0` within this sandbox; 21 GUI-dependent tests were skipped as
-configured. The local Python 3.12.3 64-bit interpreter also is not the tested
-EDMC Python 3.13.9+ 32-bit runtime.
+**Release-readiness status: locally verified.** Outside the sandbox, the five
+real-socket harness fixtures pass and both full project gates pass: Ruff and
+mypy are clean, and each run collected **1,675 passing tests**. The local
+Python 3.12.3 64-bit interpreter is still not the tested EDMC Python 3.13.9+
+32-bit runtime, so that remains a release-environment compatibility check.
 
 No production code was changed while performing this checklist.
 
@@ -24,7 +23,7 @@ No production code was changed while performing this checklist.
 | --- | --- | --- |
 | 1.1 | Reconcile approved artifacts, commits, task/code-assist records, handoffs, and worktree ownership | Completed |
 | 1.2 | Audit implementation against the backend-boundary and fallback contracts | Completed |
-| 1.3 | Rerun focused and project validation with `overlay_client/.venv` | Completed with sandbox limitation |
+| 1.3 | Rerun focused and project validation with `overlay_client/.venv` | Completed |
 | 1.4 | Review EDMC compliance, worktree safety, and residual risks | Completed |
 | 1.5 | Record iteration decision | Completed |
 
@@ -50,8 +49,8 @@ No production code was changed while performing this checklist.
 | V1 | Does the expanded focused native-GNOME suite pass? | Yes | `source overlay_client/.venv/bin/activate && PYQT_TESTS=1 python -m pytest` over follow-surface, backend-consumers, helper-runtime, architecture, raster-frame, repaint, transition, and extension-source suites: **251 passed in 1.24s**. |
 | V2 | Does scoped lint pass? | Yes | `overlay_client/.venv/bin/python -m ruff check` over the two production files and focused test files passed. |
 | V3 | Does whitespace validation pass? | Yes | `git diff --check` passed during the implementation; this checklist's documentation diff is checked before handoff. |
-| V4 | Does `make check` pass using the requested overlay-client environment? | No — sandbox-limited | `source overlay_client/.venv/bin/activate && make PYTHON="$VIRTUAL_ENV/bin/python" check` passed Ruff and mypy; pytest reported **1,649 passed, 21 skipped, 5 errors**. Each error is a `tests/test_harness_pressure_ab_snapshot.py` fixture unable to bind `127.0.0.1:0`. No assertion failed. |
-| V5 | Does `make test` pass with that environment? | No — sandbox-limited | The same command form with `test` reported **1,649 passed, 21 skipped, 5 loopback socket setup errors**; no assertion failed. |
+| V4 | Does `make check` pass using the requested overlay-client environment? | Yes | Outside the sandbox: `source overlay_client/.venv/bin/activate && make PYTHON="$VIRTUAL_ENV/bin/python" check` passed Ruff, mypy, and **1,675 tests**. |
+| V5 | Does `make test` pass with that environment? | Yes | Outside the sandbox: the same command form with `test` passed **1,675 tests**. The formerly blocked socket file passes independently: **8 passed**. |
 | V6 | Does the EDMC Python baseline check pass locally? | No | `source overlay_client/.venv/bin/activate && python scripts/check_edmc_python.py` reports Python 3.12.3 64-bit, while the documented tested runtime is Python 3.13.9+ 32-bit. |
 | V7 | Was the live GNOME matrix accepted? | Yes, user-reported | The previously recorded six-case Wayland matrix remains accepted, with per-case diagnostic capture explicitly waived by the user. This iteration performed no live GNOME, DBus, EDMC, or Elite actions. |
 
@@ -60,7 +59,7 @@ No production code was changed while performing this checklist.
 | ID | Check | Yes/No | Evidence and action |
 | --- | --- | --- | --- |
 | S1 | Is the fallback repair committed? | Yes | `0946437 fix(gnome): restore native helper fallback` contains only the two approved production files, `test_backend_consumers.py`, and implementation-owned task/code-assist/dashboard artifacts. |
-| S2 | Is the worktree clean? | No | Historical monitor-transfer documentation, local settings, and untracked planning artifacts remain. They are user-owned, preserved, and unstaged. This checklist is also an untracked documentation artifact until the user elects to stage it. |
+| S2 | Is the worktree clean? | No | The local `overlay_settings.json` change and this post-validation documentation update remain unstaged. Neither is production code. |
 | S3 | Were unrelated paths reset, deleted, staged, pushed, or externally mutated? | No | The iteration used read-only inspection, tests, and documentation updates only. |
 | S4 | Is a real desktop screenshot or new diagnostic capture attached? | No | No live action was authorized or needed for this fallback-policy repair; the earlier user waiver remains in effect. |
 
@@ -77,21 +76,11 @@ No production code was changed while performing this checklist.
 
 ## Residual risks and required follow-up
 
-1. In a loopback-socket-permitting environment, rerun:
-
-   ```bash
-   source overlay_client/.venv/bin/activate
-   make PYTHON="$VIRTUAL_ENV/bin/python" check
-   make PYTHON="$VIRTUAL_ENV/bin/python" test
-   ```
-
-   The five `test_harness_pressure_ab_snapshot.py` fixtures must pass before
-   claiming a fully green project gate.
-2. Run `python scripts/check_edmc_python.py` in the tested EDMC 3.13.9+
+1. Run `python scripts/check_edmc_python.py` in the tested EDMC 3.13.9+
    32-bit runtime before release-grade plugin compatibility acceptance.
-3. Retain the compatibility `GNOME_SHELL_RASTER` override/status cleanup as a
+2. Retain the compatibility `GNOME_SHELL_RASTER` override/status cleanup as a
    separate approved compatibility-removal effort; it is not part of this fix.
-4. If an independent release reviewer requires reproducible desktop proof,
+3. If an independent release reviewer requires reproducible desktop proof,
    repeat the already accepted GNOME matrix and retain non-secret diagnostics.
 
 ## Iteration decision
@@ -99,8 +88,6 @@ No production code was changed while performing this checklist.
 - Reopen requirements or design: **No**.
 - Rework the implemented native GNOME fallback code: **No**.
 - Accept the focused implementation and all assertion-bearing tests: **Yes**.
-- Treat the project-wide release gate as fully green: **No**, pending the five
-  loopback-socket fixtures in a permitted environment and EDMC-runtime
-  validation.
-- Accept the routing implementation as complete: **Yes, with the documented
-  environment-limited release-validation follow-up.**
+- Treat the project-wide local release gate as fully green: **Yes**.
+- Accept the routing implementation as complete: **Yes**. The only remaining
+  release-environment follow-up is EDMC 3.13.9+ 32-bit compatibility validation.

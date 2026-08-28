@@ -8,10 +8,10 @@
 | Step | Status | Evidence / decision | Next action |
 | --- | --- | --- | --- |
 | 0 | Completed | Design approved after live Mutter diagnostics established that both external-PyQt monitor-transfer orderings are silent no-ops. | Generate the Step 1 task breakdown in a fresh context. |
-| 1 | Completed — fallback remediation | Native GNOME now uses an explicit non-terminal helper-unavailable profile policy and falls through to legacy follow; legacy raster remains terminal/fail-closed. Independent focused fallback suite: 157 passed; Ruff and diff check passed. | Re-run project gate in a loopback-permitting environment for release-grade completion. |
+| 1 | Completed — fallback remediation | Native GNOME now uses an explicit non-terminal helper-unavailable profile policy and falls through to legacy follow; legacy raster remains terminal/fail-closed. Independent focused fallback suite: 157 passed; Ruff and diff check passed. | Completed. |
 | 2 | Completed — fresh activation task | Independent RED proof found the inactive native profile and native real-content route both failed; profile-only activation then passed the exact focused plus boundary suite (165 passed), scoped Ruff, and `git diff --check`. | Main-thread reconcile the scoped commit and handoff, then begin Step 3 with a fresh generator context. |
 | 3 | Completed | Fresh RED→GREEN code-assist repair moved the acknowledged clear before managed preparation/attach, made guarded cached-raster HIDE_ALL exits clear/reset, and retained fullscreen suppression. Focused Step 3 suite: 140 passed. | Main-thread reconcile commit, handoff, and acceptance evidence before Step 4. |
-| 4 | Reopened — environment limitation only | `make PYTHON=overlay_client/.venv/bin/python check` passes Ruff/mypy and all test assertions (1,649 passed, 21 skipped); five pressure-snapshot loopback socket fixture setups are sandbox-blocked. Manual Wayland acceptance remains user-reported/accepted. | Re-run the five socket setups in a socket-permitting environment. |
+| 4 | Completed | The five real-socket fixtures pass outside the sandbox (8 passed). Elevated local `make check` and `make test` both pass: Ruff/mypy clean and 1,675 tests passed. Manual Wayland acceptance remains user-reported/accepted. | Completed; EDMC runtime baseline remains release-environment follow-up. |
 
 ## Context Ledger
 
@@ -41,6 +41,7 @@ changed; Validation commands/results; Decisions; Risks; Next exact action.`
 | 4 | `step04-manual-acceptance-2026-08-27` | User-gated live acceptance | Completed by user report | User reports all six Wayland matrix cases pass and explicitly authorizes skipping the normally required renderer/geometry/transition/degrade diagnostic capture. No agent performed a live action. | `/home/jon/handoffs/handoff-20260827-step04-fullscreen-shell-raster-routing-manual.md` |
 | iteration | `iteration-checklist-2026-08-27` | Main-thread validation | Reopened Step 1/4 | Focused routing suite: 219 passed. Root Makefile bypasses activation; `make PYTHON=overlay_client/.venv/bin/python check` passed Ruff/mypy and then failed one native-helper-unavailable legacy-follow regression plus five sandbox-blocked socket harness setups. | `../iteration-checklist.md` |
 | remediation | `native-helper-unavailable-main-validation-2026-08-27` | Main-thread validation | Completed with environment limitation | Fresh task and code-assist contexts restored neutral native fall-through and terminal legacy-raster helper-loss ownership. Independent focused suite: 157 passed; Ruff and diff check passed. Project gate: 1,649 passed, 21 skipped, 5 sandbox-blocked pressure-snapshot loopback setups; no assertion failures. | `/home/jon/handoffs/handoff-20260827-native-gnome-helper-unavailable-fallback.md` |
+| validation | `loopback-project-gate-2026-08-27` | Main-thread validation | Completed | Sandbox retry: 3 passed, 5 socket setup errors. Elevated retry: 8 passed. Elevated `make check` and `make test`: Ruff/mypy passed and 1,675 tests passed each. | N/A — command-only validation |
 
 ## Reconciliation Checklist
 
@@ -50,6 +51,6 @@ changed; Validation commands/results; Decisions; Risks; Next exact action.`
 - [x] Step 1 regression is corrected and reconciled: native GNOME without helper preserves the legacy follow fallback.
 - [x] Step 2 source, task acceptance evidence, validation, and scoped commit are reconciled against the current native runtime profile.
 - [x] Steps 2 and 3 are completed and reconciled against current source, task evidence, handoffs, commits, and focused validation.
-- [ ] Step 4 full automated validation is green in a socket-permitting environment after the fallback regression is fixed.
+- [x] Step 4 full automated validation is green in a socket-permitting environment after the fallback regression is fixed.
 - [x] Step 4 live GNOME matrix is accepted by explicit user report and diagnostic-evidence waiver.
-- [x] Final plan stages and manual acceptance record are accurate; project-check environment limitations remain documented.
+- [x] Final plan stages and manual acceptance record are accurate; EDMC-runtime baseline validation remains documented separately.

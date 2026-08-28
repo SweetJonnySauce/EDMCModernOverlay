@@ -1,6 +1,6 @@
 # Implementation Plan: Native GNOME Helper-Unavailable Legacy-Follow Fallback
 
-**Status:** Completed with sandbox-limited project gate
+**Status:** Completed
 
 **Design:** [Native GNOME Helper-Unavailable Legacy-Follow Fallback](../design/native-gnome-helper-unavailable-fallback-remediation.md)
 
@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | 1 | Contract and regression tests | Completed |
 | 2 | Bundle-profile implementation | Completed |
-| 3 | Validation and progress reconciliation | Completed with sandbox limitation |
+| 3 | Validation and progress reconciliation | Completed |
 
 ### Phase 1: Contract and regression tests
 
@@ -40,7 +40,7 @@
 | Stage | Description | Status |
 | --- | --- | --- |
 | 3.1 | Run focused unit/architecture tests and scoped Ruff | Completed — 157 passed; Ruff and diff check passed |
-| 3.2 | Run project check using the overlay-client interpreter | Completed with sandbox limitation — 1,649 passed, 21 skipped, 5 loopback socket setup errors |
+| 3.2 | Run project check using the overlay-client interpreter | Completed — elevated `make check` and `make test` passed: 1,675 tests, Ruff, and mypy |
 | 3.3 | Record code result separately from any sandbox socket-harness limitation | Completed — no assertion failures remain |
 | 3.4 | Mark the fullscreen-routing plan/iteration stages only after a green regression result | Completed |
 

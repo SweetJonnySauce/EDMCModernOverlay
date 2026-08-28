@@ -1,6 +1,6 @@
 # Native GNOME Helper-Unavailable Fallback: Remediation Plan
 
-**Status:** Completed in `0946437` — project gate remains sandbox-limited.
+**Status:** Completed in `0946437` — full local project gates passed.
 
 ## Problem and invariant
 
@@ -34,7 +34,7 @@ distinction.  It must not be inferred from `fullscreen_shell_raster_active`.
 | --- | --- | --- |
 | 1 | Bundle-owned helper-unavailable policy | Completed |
 | 2 | Regression and boundary coverage | Completed |
-| 3 | Full validation and progress reconciliation | Completed with sandbox limitation |
+| 3 | Full validation and progress reconciliation | Completed |
 
 ### Phase 1: Bundle-owned helper-unavailable policy
 
@@ -57,7 +57,7 @@ distinction.  It must not be inferred from `fullscreen_shell_raster_active`.
 | Stage | Description | Status |
 | --- | --- | --- |
 | 3.1 | Run focused tests, lint, and type checking | Completed — focused suite, Ruff, and mypy passed |
-| 3.2 | Run the project check with the overlay-client interpreter and separate code failures from sandbox limits | Completed with sandbox limitation — five loopback socket setups remain blocked |
+| 3.2 | Run the project check with the overlay-client interpreter and separate code failures from sandbox limits | Completed — elevated `make check` and `make test` passed, including the five loopback socket fixtures |
 | 3.3 | Update the routing plan and iteration checklist only after the regression is resolved | Completed |
 
 ## Step 1: Make helper-unavailable ownership explicit
