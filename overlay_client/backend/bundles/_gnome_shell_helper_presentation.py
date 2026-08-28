@@ -500,8 +500,8 @@ def run_gnome_shell_helper_presentation_cycle(
             if transition_decision.action is PresentationTransitionAction.HIDE_ALL:
                 managed_surface_reset_requested = True
                 state.shell_raster_managed_commit_pending = False
-                if transition_decision.reason == "target_token_replaced":
-                    return _replaced_target_transition_result(
+                if _runtime_state_has_shell_raster_presentation(state):
+                    return _hide_all_shell_raster_transition_result(
                         state,
                         health_status=health_status,
                         target_status=target_status,
@@ -510,6 +510,17 @@ def run_gnome_shell_helper_presentation_cycle(
                         health_cache_hit=health_cache_hit,
                         decision=transition_decision,
                     )
+                _clear_presentation_cache(state)
+                return GnomeHelperPresentationCycleResult(
+                    health_status=health_status,
+                    target_status=target_status,
+                    request=request,
+                    presentation_skipped=True,
+                    presentation_skip_reason=transition_decision.reason,
+                    health_cache_hit=health_cache_hit,
+                    managed_surface_reset_requested=True,
+                    **_transition_diagnostics_kwargs(transition_decision),
+                )
             if (
                 transition_decision.action is PresentationTransitionAction.COMMIT_MANAGED
                 and transition_previous_state.mode
@@ -545,7 +556,7 @@ def run_gnome_shell_helper_presentation_cycle(
             request,
             shell_raster_runtime_enabled=shell_raster_runtime_enabled,
         )
-        if transition_clear_reason and not shell_raster_transition_clear_requested and not transition_guard_enabled:
+        if transition_clear_reason and not shell_raster_transition_clear_requested:
             shell_raster_transition_clear_requested = True
             shell_raster_transition_clear_reason = transition_clear_reason
             shell_raster_transition_clear_succeeded = _clear_shell_raster_frame_for_managed_pyqt_transition(
@@ -553,7 +564,9 @@ def run_gnome_shell_helper_presentation_cycle(
                 request,
                 reason=transition_clear_reason,
             )
-            if not shell_raster_transition_clear_succeeded:
+            if shell_raster_transition_clear_succeeded:
+                state.shell_raster_managed_commit_pending = False
+            else:
                 state.next_suppressed_target_poll_at = 0.0
                 presentation_status = _shell_raster_transition_clear_failed_status(
                     target_status,
@@ -561,6 +574,7 @@ def run_gnome_shell_helper_presentation_cycle(
                     reason=transition_clear_reason,
                     now_monotonic=now,
                 )
+                _clear_presentation_cache(state)
                 return GnomeHelperPresentationCycleResult(
                     health_status=health_status,
                     target_status=target_status,
@@ -719,31 +733,6 @@ def run_gnome_shell_helper_presentation_cycle(
             retry_reasons.append("applied_rect_mismatch")
             continue
         break
-
-    if (
-        transition_guard_enabled
-        and state.shell_raster_managed_commit_pending
-        and request is not None
-        and presentation_status is not None
-        and request.renderer != SHELL_RASTER_FRAME_RENDERER
-        and _presentation_status_is_matching_success(presentation_status, request)
-    ):
-        shell_raster_transition_clear_requested = True
-        shell_raster_transition_clear_reason = GNOME_HELPER_REASON_SHELL_RASTER_TO_MANAGED_PYQT_CLEAR
-        shell_raster_transition_clear_succeeded = _clear_shell_raster_frame_for_managed_pyqt_transition(
-            presentation_fetcher,
-            request,
-            reason=shell_raster_transition_clear_reason,
-        )
-        if shell_raster_transition_clear_succeeded:
-            state.shell_raster_managed_commit_pending = False
-        else:
-            presentation_status = _shell_raster_transition_clear_failed_status(
-                target_status,
-                request,
-                reason=shell_raster_transition_clear_reason,
-                now_monotonic=now,
-            )
 
     if (
         transition_guard_enabled
@@ -1579,7 +1568,7 @@ def _held_shell_raster_transition_result(
     )
 
 
-def _replaced_target_transition_result(
+def _hide_all_shell_raster_transition_result(
     state: GnomeHelperPresentationRuntimeState,
     *,
     health_status: HelperHealthStatus,

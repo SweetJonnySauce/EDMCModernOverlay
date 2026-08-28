@@ -1805,7 +1805,7 @@ def test_default_guard_transient_fullscreen_handoff_holds_raster_without_managed
     assert calls[-1].shell_raster_frame.action == "clear"
 
 
-def test_guarded_persistent_fullscreen_loss_prepares_then_confirms_before_raster_clear(
+def test_guarded_persistent_fullscreen_loss_clears_before_managed_preparation_and_attach(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(GNOME_HELPER_FULLSCREEN_HANDOFF_GUARD_ENV, "1")
@@ -1813,6 +1813,7 @@ def test_guarded_persistent_fullscreen_loss_prepares_then_confirms_before_raster
     state = GnomeHelperPresentationRuntimeState()
     calls: list[HelperPresentationRequest] = []
     preparations = []
+    events: list[str] = []
     target = _borderless_target()
 
     def provider(target_status, request, _include_diagnostics) -> ShellRasterFrameBuildResult:
@@ -1839,8 +1840,10 @@ def test_guarded_persistent_fullscreen_loss_prepares_then_confirms_before_raster
         calls.append(request)
         frame = request.shell_raster_frame
         if frame is not None and frame.action == "clear":
+            events.append("clear")
             return {"status": "shell_raster_frame_cleared"}
         if frame is not None:
+            events.append("raster_attach")
             rect = frame.frame_rect.to_payload()
             return _presentation_payload(
                 request,
@@ -1849,6 +1852,7 @@ def test_guarded_persistent_fullscreen_loss_prepares_then_confirms_before_raster
                 renderer="gnome_shell_raster_frame",
                 shell_raster_frame={"frame_rect": rect},
             )
+        events.append("managed_attach")
         return _presentation_payload(request)
 
     def run_cycle():
@@ -1857,7 +1861,7 @@ def test_guarded_persistent_fullscreen_loss_prepares_then_confirms_before_raster
             fetch_health=_health_payload,
             fetch_target=lambda: _target_payload(target),
             fetch_presentation=fetch_presentation,
-            prepare_surface=lambda preparation: preparations.append(preparation) or True,
+            prepare_surface=lambda preparation: events.append("prepare") or preparations.append(preparation) or True,
             shell_raster_frame_provider=provider,
             shell_raster_runtime_enabled=True,
             suppress_pyqt_fallback_on_shell_raster_failure=True,
@@ -1867,6 +1871,7 @@ def test_guarded_persistent_fullscreen_loss_prepares_then_confirms_before_raster
         )
 
     run_cycle()
+    events.clear()
     target = _borderless_target(
         frameRect={"x": 0, "y": 29, "width": 3440, "height": 1411},
         bufferRect={"x": 0, "y": 29, "width": 3440, "height": 1411},
@@ -1886,17 +1891,18 @@ def test_guarded_persistent_fullscreen_loss_prepares_then_confirms_before_raster
     assert second_pending.transition_action == "hold_raster"
     assert stabilizing.transition_action == "commit_managed"
     assert stabilizing.surface_preparation_action == "stabilizing"
+    assert stabilizing.shell_raster_transition_clear_requested is True
+    assert stabilizing.shell_raster_transition_clear_succeeded is True
     assert committed.transition_action == "commit_managed"
-    assert committed.shell_raster_transition_clear_requested is True
-    assert committed.shell_raster_transition_clear_succeeded is True
     assert len(preparations) == 1
+    assert events == ["clear", "prepare", "managed_attach"]
     assert [call.renderer for call in calls] == [
         "gnome_shell_raster_frame",
-        "pyqt",
         "gnome_shell_raster_frame",
+        "pyqt",
     ]
-    assert calls[-1].shell_raster_frame is not None
-    assert calls[-1].shell_raster_frame.action == "clear"
+    assert calls[-2].shell_raster_frame is not None
+    assert calls[-2].shell_raster_frame.action == "clear"
 
 
 def test_selected_shell_raster_windowed_startup_uses_managed_pyqt_without_clear(
