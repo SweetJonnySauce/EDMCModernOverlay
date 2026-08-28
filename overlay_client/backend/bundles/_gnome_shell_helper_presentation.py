@@ -527,19 +527,11 @@ def run_gnome_shell_helper_presentation_cycle(
                 in {PresentationTransitionMode.SHELL_RASTER, PresentationTransitionMode.FULLSCREEN_HANDOFF}
             ):
                 state.shell_raster_managed_commit_pending = True
-        allow_unfocused_shell_raster_target = (
-            keep_overlay_visible
-            or _shell_raster_runtime_allows_unfocused_fullscreen_target(
-                target_status,
-                request,
-                shell_raster_runtime_enabled=shell_raster_runtime_enabled,
-            )
-        )
         request = _shell_raster_bridge_request(
             target_status,
             request,
             env=os.environ,
-            allow_unfocused_target=allow_unfocused_shell_raster_target,
+            allow_unfocused_target=keep_overlay_visible,
             shell_raster_frame_provider=shell_raster_frame_provider,
             shell_raster_runtime_enabled=shell_raster_runtime_enabled,
             suppress_pyqt_fallback_on_shell_raster_failure=suppress_pyqt_fallback_on_shell_raster_failure,
@@ -984,37 +976,6 @@ def _shell_raster_runtime_allows_windowed_managed_pyqt(
         return False
     target = target_status.target if target_status is not None and target_status.found else None
     return target is not None and not target.fullscreen
-
-
-def _shell_raster_runtime_allows_unfocused_fullscreen_target(
-    target_status: HelperTargetStatus | None,
-    request: HelperPresentationRequest | None,
-    *,
-    shell_raster_runtime_enabled: bool,
-) -> bool:
-    if not shell_raster_runtime_enabled:
-        return False
-    if request is None or request.action is not HelperPresentationAction.ATTACH:
-        return False
-    target = target_status.target if target_status is not None and target_status.found else None
-    if target is None or not target.fullscreen:
-        return False
-    if target.minimized or not target.showing_on_workspace:
-        return False
-    if target.content_rect is None or target.monitor_rect is None or request.content_rect is None:
-        return False
-    if not target.content_rect.valid or not target.monitor_rect.valid or not request.content_rect.valid:
-        return False
-    tolerance = int(max(0, request.rect_tolerance))
-    return _helper_rects_match(
-        target.content_rect,
-        target.monitor_rect,
-        tolerance=tolerance,
-    ) and _helper_rects_match(
-        request.content_rect,
-        target.monitor_rect,
-        tolerance=tolerance,
-    )
 
 
 def _request_with_windowed_title_bar_compensation(
