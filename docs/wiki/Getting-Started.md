@@ -63,6 +63,24 @@ overlay.send_shape(
     ttl=5,
 )
 ```
+# Send a circle shape
+Use `shape="circle"` for a first-class circle primitive. Its `x` and `y` are
+the centre, and `radius` and `thickness` must be positive; do not send `w` or
+`h`. 
+>⚠️ **Note:** `send_shape("circle"...)` is not backwards compatible - See [Developer FAQ](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Developer-FAQs#i-use-send_shapecircle-how-come-some-cmdrs-cannot-see-them-on-their-overlay)
+```python
+overlay.send_shape(
+    "myplugin-radius",
+    "circle",
+    color="#80d0ff",
+    fill="#1a1a1acc",
+    x=100,
+    y=100,
+    radius=50,
+    thickness=2,
+    ttl=5,
+)
+```
 # Send a vector image
 ```python
 overlay.send_raw({

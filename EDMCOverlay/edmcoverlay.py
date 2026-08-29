@@ -35,6 +35,7 @@ MODERN_OVERLAY_IDENTITY: Dict[str, str] = {
 
 _UNAVAILABLE_WARN_TS: float = 0.0
 _UNAVAILABLE_SUPPRESSED: int = 0
+_SHAPE_THICKNESS_UNSET = object()
 
 
 def _legacy_coerce_int(value: Any, default: int = 0) -> int:
@@ -173,7 +174,12 @@ def normalise_legacy_payload(message: Mapping[str, Any]) -> Optional[Dict[str, A
             "ttl": ttl,
         }
         vector = _lookup("vector", "Vector")
-        if shape_lower == "vect":
+        if shape_lower == "circle":
+            payload["radius"] = _lookup("radius", "Radius")
+            payload["thickness"] = _lookup("thickness", "Thickness")
+        elif shape_lower == "rect" and ("thickness" in msg or "Thickness" in msg):
+            payload["thickness"] = _lookup("thickness", "Thickness")
+        elif shape_lower == "vect":
             normalised_points = _normalise_vector_points(vector, item_id=item_id, plugin=plugin)
             if normalised_points is None:
                 LOGGER.warning("Dropping vect payload with insufficient points: id=%s vector=%s", item_id, vector)
@@ -303,14 +309,33 @@ class Overlay:
         self,
         shapeid: str,
         shape: str,
-        color: str,
-        fill: str,
-        x: int,
-        y: int,
-        w: int,
-        h: int,
-        ttl: int,
+        color: str = "white",
+        fill: str = "",
+        x: int = 0,
+        y: int = 0,
+        w: Optional[int] = None,
+        h: Optional[int] = None,
+        ttl: int = 4,
+        *,
+        radius: Any = None,
+        thickness: Any = _SHAPE_THICKNESS_UNSET,
     ) -> None:
+        if shape == "circle":
+            payload = {
+                "type": "shape",
+                "shape": shape,
+                "id": shapeid,
+                "color": color,
+                "fill": fill,
+                "x": int(x),
+                "y": int(y),
+                "radius": radius,
+                "thickness": None if thickness is _SHAPE_THICKNESS_UNSET else thickness,
+                "ttl": ttl,
+            }
+            self._emit_payload(payload)
+            return
+
         payload = {
             "type": "shape",
             "shape": shape,
@@ -323,6 +348,8 @@ class Overlay:
             "h": int(h),
             "ttl": ttl,
         }
+        if shape == "rect" and thickness is not _SHAPE_THICKNESS_UNSET:
+            payload["thickness"] = thickness
         self._emit_payload(payload)
 
     # ------------------------------------------------------------------

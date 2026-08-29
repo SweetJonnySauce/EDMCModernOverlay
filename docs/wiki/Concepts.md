@@ -35,7 +35,9 @@ An EDMC plugin that handles the undifferentiated heavy lifting of displaying Pay
 An "in game" real-time configuration utility that CMDRs can use to configure Plugin Groups without having to manually touch configuration files or individual Plugin settings.
 
 ## Payloads
-An atomic message or shape that is sent to an Overlay to be displayed on screen. As of the writing of this wiki the types of Payloads available are text messages (`send_message`), rectangular shapes (`send_shape`), and vector images (`send_raw`)
+An atomic message or shape that is sent to an Overlay to be displayed on screen. As of the writing of this wiki the types of Payloads available are text messages (`send_message`), rectangle and circle shapes (`send_shape`), and vector images (`send_raw`). 
+
+>⚠️ Note: circle shapes are not backwards compatible - See [Developer FAQ](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Developer-FAQs#i-use-send_shapecircle-how-come-some-cmdrs-cannot-see-them-on-their-overlay)
 
 ## Payload Name
 Every Payload sent to the Overlay has a name (`msgid` in the API calls). Plugins can then reference this name in subsequent Payloads to change what is being displayed or to clear the information being sent from the screen (either by sending a null string "" or a TTL of 0. EDMCModernOverlay provides advanced capabilities beyond what the legacy overlays provide by grouping like Payload Names. 

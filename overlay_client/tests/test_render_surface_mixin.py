@@ -4,12 +4,12 @@ from typing import Any, Optional, Tuple
 
 import pytest
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QBrush, QColor, QPen
 
 from overlay_client.group_transform import GroupKey
 from overlay_client.legacy_store import LegacyItem
-from overlay_client.paint_commands import _MessagePaintCommand, _RectPaintCommand
-from overlay_client.render_surface import RenderSurfaceMixin, _MeasuredText, _OverlayBounds
+from overlay_client.paint_commands import _CirclePaintCommand, _MessagePaintCommand, _RectPaintCommand
+from overlay_client.render_surface import RenderSurfaceMixin, _MeasuredText, _OverlayBounds, _StrokeWidthSpec
 
 
 class _StubMode:
@@ -80,10 +80,10 @@ class _StubFill:
 
 
 class _StubGroupContext:
-    def __init__(self) -> None:
+    def __init__(self, scale: float = 1.0) -> None:
         self.fill = _StubFill()
         self.transform_context = None
-        self.scale = 1.0
+        self.scale = scale
         self.selected_anchor = None
         self.base_anchor_point = None
         self.anchor_for_transform = None
@@ -120,6 +120,24 @@ class _RectSurface(_StubSurface):
 
     def _compute_rect_transform(self, *args, **kwargs):  # noqa: ANN002, ANN003
         return ([(0.0, 0.0), (2.0, 0.0), (0.0, 1.0), (2.0, 1.0)], [], None, None)
+
+
+class _CircleSurface(_RectSurface):
+    def __init__(self) -> None:
+        super().__init__()
+        self.rect_transform_calls: list[Tuple[object, ...]] = []
+
+    def _group_offsets(self, group_transform) -> Tuple[float, float]:  # noqa: ANN001
+        return (getattr(group_transform, "dx", 0.0), getattr(group_transform, "dy", 0.0))
+
+    def _compute_rect_transform(self, *args, **kwargs):  # noqa: ANN002, ANN003
+        self.rect_transform_calls.append(args)
+        return (
+            [(100.2, 200.4), (140.7, 200.4), (100.2, 220.9), (140.7, 220.9)],
+            [(90.0, 190.0), (130.0, 190.0), (90.0, 210.0), (130.0, 210.0)],
+            (80.0, 180.0, 150.0, 230.0),
+            (101.0, 201.0),
+        )
 
 
 class _CacheCaptureSurface(RenderSurfaceMixin):
@@ -315,11 +333,20 @@ def test_qcolor_from_background_accepts_named_colors() -> None:
     assert color.isValid()
 
 
-def _build_rect_command(surface: _RectSurface, border_spec: str, *, fill_spec: str = "#112233"):
+def _build_rect_command(
+    surface: _RectSurface,
+    border_spec: str,
+    *,
+    fill_spec: str = "#112233",
+    thickness: float | None = None,
+):
+    data = {"color": border_spec, "fill": fill_spec, "x": 1.0, "y": 2.0, "w": 3.0, "h": 4.0}
+    if thickness is not None:
+        data["thickness"] = thickness
     legacy_item = LegacyItem(
         item_id="rect-1",
         kind="rect",
-        data={"color": border_spec, "fill": fill_spec, "x": 1.0, "y": 2.0, "w": 3.0, "h": 4.0},
+        data=data,
         plugin="plugin",
     )
     return surface._build_rect_command(legacy_item, _RectStubMapper(), GroupKey("plugin"), None, None)
@@ -353,3 +380,201 @@ def test_rect_command_valid_border_color_uses_pen(monkeypatch: pytest.MonkeyPatc
     assert cmd.pen.style() == Qt.PenStyle.SolidLine
     assert cmd.pen.color().name() == QColor("#ff00ff").name()
     assert cmd.pen.width() == surface._line_width("legacy_rect")
+
+
+@pytest.mark.parametrize(("scale", "expected_width"), [(0.5, 1), (1.0, 2), (2.0, 4)])
+@pytest.mark.parametrize("shape", ["rect", "circle"])
+def test_explicit_shape_thickness_scales_with_group_context(
+    monkeypatch: pytest.MonkeyPatch,
+    scale: float,
+    expected_width: int,
+    shape: str,
+) -> None:
+    surface = _CircleSurface()
+    monkeypatch.setattr(
+        "overlay_client.render_surface.build_group_context",
+        lambda *args, **kwargs: _StubGroupContext(scale=scale),
+    )
+
+    if shape == "rect":
+        cmd = _build_rect_command(surface, "#ff00ff", thickness=2)
+    else:
+        cmd = _build_circle_command(surface, thickness=2)
+
+    assert cmd.pen.width() == expected_width
+    expected_join = Qt.PenJoinStyle.MiterJoin if shape == "rect" else Qt.PenJoinStyle.BevelJoin
+    assert cmd.pen.joinStyle() == expected_join
+
+
+def test_omitted_rect_thickness_keeps_unscaled_legacy_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    surface = _RectSurface()
+    monkeypatch.setattr(
+        "overlay_client.render_surface.build_group_context",
+        lambda *args, **kwargs: _StubGroupContext(scale=2.0),
+    )
+
+    cmd = _build_rect_command(surface, "#ff00ff")
+
+    assert cmd.pen.width() == surface._line_width("legacy_rect")
+
+
+def test_explicit_rect_thickness_uses_miter_join_without_changing_legacy_join(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    surface = _RectSurface()
+    monkeypatch.setattr(
+        "overlay_client.render_surface.build_group_context",
+        lambda *args, **kwargs: _StubGroupContext(),
+    )
+
+    explicit_command = _build_rect_command(surface, "#ff00ff", thickness=2)
+    legacy_command = _build_rect_command(surface, "#ff00ff")
+
+    assert explicit_command.pen.joinStyle() == Qt.PenJoinStyle.MiterJoin
+    assert legacy_command.pen.joinStyle() == Qt.PenJoinStyle.BevelJoin
+
+
+def test_explicit_stroke_resolution_copies_the_source_pen(monkeypatch: pytest.MonkeyPatch) -> None:
+    surface = _RectSurface()
+    monkeypatch.setattr(
+        "overlay_client.render_surface.build_group_context",
+        lambda *args, **kwargs: _StubGroupContext(scale=2.0),
+    )
+    source_pen = QPen(QColor("#ff00ff"))
+    source_pen.setWidth(9)
+    legacy_item = LegacyItem(item_id="pen-copy", kind="rect", data={}, plugin="plugin")
+
+    cmd = surface._build_bounded_shape_command(
+        legacy_item,
+        _RectStubMapper(),
+        GroupKey("plugin"),
+        None,
+        None,
+        kind="rect",
+        pen=source_pen,
+        brush=QBrush(Qt.BrushStyle.NoBrush),
+        stroke_width=_StrokeWidthSpec(explicit_logical_width=2),
+        raw_x=1,
+        raw_y=2,
+        raw_w=3,
+        raw_h=4,
+    )
+
+    assert source_pen.width() == 9
+    assert cmd.pen is not source_pen
+    assert cmd.pen.width() == 4
+
+
+def _build_circle_command(
+    surface: _CircleSurface,
+    *,
+    border_spec: str = "#ff00ff",
+    fill_spec: str = "#112233",
+    group_transform=None,
+    thickness: float = 5.0,
+):
+    legacy_item = LegacyItem(
+        item_id="circle-1",
+        kind="circle",
+        data={
+            "color": border_spec,
+            "fill": fill_spec,
+            "x": 10.0,
+            "y": 20.0,
+            "radius": 3.0,
+            "thickness": thickness,
+        },
+        plugin="plugin",
+    )
+    return surface._build_circle_command(legacy_item, _RectStubMapper(), GroupKey("plugin"), group_transform, None)
+
+
+def test_circle_command_derives_square_and_reuses_transformed_group_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    surface = _CircleSurface()
+    monkeypatch.setattr(
+        "overlay_client.render_surface.build_group_context",
+        lambda *args, **kwargs: _StubGroupContext(),
+    )
+    group_transform = SimpleNamespace(dx=1.25, dy=-2.5)
+
+    cmd = _build_circle_command(surface, group_transform=group_transform)
+
+    assert isinstance(cmd, _CirclePaintCommand)
+    assert surface.rect_transform_calls[0][7:11] == (7.0, 17.0, 6.0, 6.0)
+    assert surface.rect_transform_calls[0][11:13] == (1.25, -2.5)
+    assert cmd.pen.width() == 5
+    assert cmd.pen.color().name() == QColor("#ff00ff").name()
+    assert cmd.brush.color().name() == QColor("#112233").name()
+    assert (cmd.x, cmd.y, cmd.width, cmd.height) == (100, 200, 40, 20)
+    assert cmd.bounds == (100, 200, 140, 220)
+    assert cmd.overlay_bounds == (100.2, 200.4, 140.7, 220.9)
+    assert cmd.base_overlay_bounds == (90.0, 190.0, 130.0, 210.0)
+    assert cmd.reference_overlay_bounds == (80.0, 180.0, 150.0, 230.0)
+    assert cmd.effective_anchor == (101.0, 201.0)
+    assert cmd.cycle_anchor == (120, 210)
+    assert cmd.debug_vertices == [(100, 200), (140, 200), (100, 220), (140, 220)]
+
+
+@pytest.mark.parametrize(
+    ("border_spec", "fill_spec"),
+    [("none", "#112233"), ("not-a-colour", ""), ("#ff00ff", "not-a-colour")],
+)
+def test_circle_command_uses_no_pen_or_no_brush_for_transparent_styles(
+    monkeypatch: pytest.MonkeyPatch,
+    border_spec: str,
+    fill_spec: str,
+) -> None:
+    surface = _CircleSurface()
+    monkeypatch.setattr(
+        "overlay_client.render_surface.build_group_context",
+        lambda *args, **kwargs: _StubGroupContext(),
+    )
+
+    cmd = _build_circle_command(surface, border_spec=border_spec, fill_spec=fill_spec)
+
+    assert cmd is not None
+    if border_spec in {"none", "not-a-colour"}:
+        assert cmd.pen.style() == Qt.PenStyle.NoPen
+    if not fill_spec or fill_spec == "not-a-colour":
+        assert cmd.brush.style() == Qt.BrushStyle.NoBrush
+
+
+def test_circle_dispatch_contributes_square_bounds_anchor_and_cycle_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    surface = _CircleSurface()
+    circle = LegacyItem(
+        item_id="circle-dispatch",
+        kind="circle",
+        data={"color": "#ff00ff", "fill": "#112233", "x": 10, "y": 20, "radius": 3, "thickness": 5},
+        plugin="plugin",
+    )
+    group_key = GroupKey("plugin", "group")
+    surface._payload_model = SimpleNamespace(store=SimpleNamespace(items=lambda: [(circle.item_id, circle)]))
+    surface._group_coordinator = SimpleNamespace(resolve_group_key=lambda *args: group_key)
+    surface._grouping_helper = SimpleNamespace(get_transform=lambda key: SimpleNamespace(dx=1.25, dy=-2.5))
+    surface._override_manager = object()
+    monkeypatch.setattr(
+        "overlay_client.render_surface.build_group_context",
+        lambda *args, **kwargs: _StubGroupContext(),
+    )
+
+    commands, bounds_by_group, overlay_bounds_by_group, anchors_by_group, transforms_by_group = (
+        surface._build_legacy_commands_for_pass(_RectStubMapper(), None)
+    )
+
+    assert len(commands) == 1
+    assert isinstance(commands[0], _CirclePaintCommand)
+    assert bounds_by_group[group_key.as_tuple()].__dict__ == {
+        "min_x": 100,
+        "min_y": 200,
+        "max_x": 140,
+        "max_y": 220,
+    }
+    assert overlay_bounds_by_group[group_key.as_tuple()].__dict__ == {
+        "min_x": 100.2,
+        "min_y": 200.4,
+        "max_x": 140.7,
+        "max_y": 220.9,
+    }
+    assert anchors_by_group == {group_key.as_tuple(): (101.0, 201.0)}
+    assert transforms_by_group[group_key.as_tuple()].dx == 1.25
+    assert commands[0].cycle_anchor == (120, 210)

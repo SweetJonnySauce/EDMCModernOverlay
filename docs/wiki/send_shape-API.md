@@ -1,8 +1,13 @@
-`send_shape` is the legacy helper for drawing rectangles on the Overlay. It is part of the `EDMCOverlay.edmcoverlay.Overlay` compatibility layer and emits a `LegacyOverlay` shape payload. Coordinates use the legacy 1280x960 virtual canvas; the overlay client scales them to the current window size.
+`send_shape` is the legacy helper for drawing rectangles on the Overlay. It is part of the `EDMCOverlay.edmcoverlay.Overlay` compatibility layer and emits a `LegacyOverlay` shape payload. Coordinates use the legacy 1280x960 virtual canvas; the overlay client scales them to the current window size. `send_shape` also supports drawing circles in EDMCModernOverlay as of version 0.9.2. 
+>⚠️ **Note:** circle shapes are not backwards compatible - See [Developer FAQ](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Developer-FAQs#i-use-send_shapecircle-how-come-some-cmdrs-cannot-see-them-on-their-overlay)
 
 This document covers the payload shape, defaults, and common usage patterns for `send_shape`.
 
-## API signature
+# API signature
+
+## Rectangle
+
+The positional rectangle signature remains supported:
 
 ```python
 from EDMCOverlay import edmcoverlay
@@ -21,21 +26,61 @@ overlay.send_shape(
 )
 ```
 
-`send_shape` wraps and publishes this legacy payload:
+To request an explicit rectangle border width, use keyword arguments and add
+`thickness` (see compatibility note below). Omitting it leaves the legacy rectangle payload unchanged and lets
+the client keep its configured `legacy_rect` border width:
+
+```python
+overlay.send_shape(
+    "myplugin-box",
+    "rect",
+    color="#80d0ff",
+    fill="none",
+    x=100,
+    y=100,
+    w=200,
+    h=80,
+    thickness=2,
+    ttl=5,
+)
+```
+>⚠️ **Note:** `thickness` is an EDMCModernOverlay extension and is not backwards compatible. The original [`inorton/EDMCOverlay`](https://github.com/inorton/EDMCOverlay) `send_shape` helper has a fixed positional signature and does not accept this keyword; passing `thickness=` raises `TypeError`, rather than being ignored. Plugins that also support the original overlay must omit `thickness` or branch after detecting EDMCModernOverlay.
+
+## Circle
+
+>⚠️ **Note:** circle shapes are not backwards compatible - See [Developer FAQ](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Developer-FAQs#i-use-send_shapecircle-how-come-some-cmdrs-cannot-see-them-on-their-overlay)
+
+For a circle,  use named arguments for parameters, do not rely on positional. A circle has a center (`x`, `y`), not a top-left corner, requires `radius`, and does not send `w` or `h`:
+
+```python
+overlay.send_shape(
+    id="my-circle",
+    shape="circle",
+    color="#80d0ff",
+    fill="none",
+    x=100,
+    y=100,
+    radius=50,
+    thickness=2,
+    ttl=5,
+)
+```
+
+The circle form wraps and publishes this legacy payload:
 
 ```json
 {
   "event": "LegacyOverlay",
   "type": "shape",
-  "shape": "rect",
-  "id": "my-rect-id",
+  "shape": "circle",
+  "id": "myplugin-radius",
   "color": "#80d0ff",
   "fill": "#1a1a1acc",
-  "x": 40,
-  "y": 40,
-  "w": 200,
-  "h": 60,
-  "ttl": 6
+  "x": 100,
+  "y": 100,
+  "radius": 50,
+  "thickness": 2,
+  "ttl": 5
 }
 ```
 
@@ -44,11 +89,13 @@ overlay.send_shape(
 | Field | Type | Notes |
 |-------|------|-------|
 | `id` | string | Required. Stable identifier used for updates, grouping, and clears. Prefix matching is case-insensitive. |
-| `shape` | string | Required. Use `rect`. Other shapes are ignored or dropped. |
+| `shape` | string | Required. Use `rect` or `circle`. <br>⚠️ **Note:** circle shapes are not backwards compatible - See [Developer FAQ](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Developer-FAQs#i-use-send_shapecircle-how-come-some-cmdrs-cannot-see-them-on-their-overlay)|
 | `color` | string | Required. Border color. Named color or `#RRGGBB`/`#AARRGGBB`. |
-| `fill` | string | Required. Fill color. Named color or `#RRGGBB`/`#AARRGGBB`. Empty/falsey values render transparent. |
-| `x` / `y` | integer | Required. Top-left corner of the rectangle in the 1280x960 legacy canvas. |
-| `w` / `h` | integer | Required. Width/height in the 1280x960 legacy canvas. |
+| `fill` | string | Required. Fill color. Named color or `#RRGGBB`/`#AARRGGBB`. Empty or `"none"` renders transparent. |
+| `x` / `y` | integer | Required. Rectangle: top-left corner. Circle: center, both in the 1280x960 legacy canvas. |
+| `w` / `h` | integer | Required for `rect` only. Width/height in the 1280x960 legacy canvas. Do not send these for `circle`. |
+| `radius` | integer | Required and strictly positive for `circle`; the circle radius in legacy-canvas units. |
+| `thickness` | integer | Required and strictly positive for `circle`; optional and strictly positive for `rect`. When supplied, it is a legacy-canvas border width that scales with the shape. When omitted for `rect`, no field is sent and the existing client-controlled rectangle width is preserved. <br>⚠️ **Note:** `thickness` is not backwards compatible|
 | `ttl` | integer | Required. Seconds before expiry. `0` (or any value <= 0) makes the shape persistent. |
 
 If you need vector shapes (`shape="vect"`), use `send_raw` and include a `vector` list. `send_shape` does not accept vector points.
@@ -103,11 +150,34 @@ overlay.send_shape(
 )
 ```
 
+### Example 3: Circle with transparent fill
+
+```python
+overlay.send_shape(
+    id="myplugin-radius",
+    shape="circle",
+    color="#80d0ff",
+    fill="none",
+    x=100,
+    y=100,
+    radius=50,
+    thickness=2,
+    ttl=5,
+)
+```
+
 ## Runtime behavior
 
 - Shapes with the same `id` replace the existing entry and refresh the TTL.
-- `fill` defaults to transparent when empty or falsey.
-- Only `rect` is supported by `send_shape`; use `send_raw` for vectors.
+- Clear a shape by its stable `id` using the existing raw clear-by-ID behavior.
+- `fill` is transparent when empty or `"none"`; `color` requests the circle or rectangle border colour.
+- Explicit thickness is resolved after the viewport/group transform: it is scaled,
+  rounded, and clamped to at least one physical pixel. This applies to both
+  supported shapes.
+- Circle `radius` and `thickness`, and an explicitly supplied rectangle
+  `thickness`, must be numeric and strictly positive. Invalid geometry is warned
+  about and dropped by the client before it can replace a visible same-ID shape.
+- `rect` and `circle` are supported by `send_shape`; use `send_raw` for vectors.
 - Plugin ownership is inferred from `id` prefixes (case-insensitive). If your payloads do not include a `plugin` field, add prefixes via `define_plugin_group` so the overlay can attribute payloads correctly.
 
 ## Debugging

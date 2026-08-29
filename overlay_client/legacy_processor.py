@@ -12,6 +12,8 @@ from overlay_client.legacy_store import LegacyItem, LegacyItemStore
 LOGGER = logging.getLogger("EDMC.ModernOverlay.LegacyProcessor")
 
 _MARKER_TEXT_SIZE_CHOICES = {"small", "normal", "large", "huge"}
+_STROKE_THICKNESS_REQUIRED = {"circle": True, "rect": False}
+_STROKE_THICKNESS_MISSING = object()
 
 
 def _normalise_marker_text_size(value: Any) -> Optional[str]:
@@ -36,7 +38,7 @@ def _hashable_payload_snapshot(item_type: str, payload: Mapping[str, Any]) -> tu
     if item_type == "shape":
         shape_name = str(payload.get("shape") or "").lower()
         if shape_name == "rect":
-            return (
+            snapshot = (
                 shape_name,
                 payload.get("color", ""),
                 payload.get("fill", ""),
@@ -44,6 +46,20 @@ def _hashable_payload_snapshot(item_type: str, payload: Mapping[str, Any]) -> tu
                 payload.get("y", 0),
                 payload.get("w", 0),
                 payload.get("h", 0),
+                payload.get("__mo_transform__", None),
+            )
+            if "thickness" in payload:
+                return (*snapshot[:-1], payload["thickness"], snapshot[-1])
+            return snapshot
+        if shape_name == "circle":
+            return (
+                shape_name,
+                payload.get("color", ""),
+                payload.get("fill", ""),
+                payload.get("x", 0),
+                payload.get("y", 0),
+                payload.get("radius", 0),
+                payload.get("thickness", 0),
                 payload.get("__mo_transform__", None),
             )
         if shape_name == "vect":
@@ -116,6 +132,39 @@ def _point_has_marker_or_text(point: Mapping[str, Any]) -> bool:
     if text is None:
         return False
     return str(text) != ""
+
+
+def _positive_legacy_int(value: Any) -> Optional[int]:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _validate_shape_stroke_thickness(
+    shape_name: str,
+    message: Mapping[str, Any],
+    item_id: str,
+) -> tuple[bool, Optional[int]]:
+    """Validate optional logical stroke width for shapes that opt in."""
+
+    required = _STROKE_THICKNESS_REQUIRED.get(shape_name)
+    if required is None:
+        return True, None
+    thickness_value = message.get("thickness", _STROKE_THICKNESS_MISSING)
+    if thickness_value is _STROKE_THICKNESS_MISSING and not required:
+        return True, None
+    thickness = _positive_legacy_int(thickness_value)
+    if thickness is not None:
+        return True, thickness
+    LOGGER.warning(
+        "Dropping %s payload with invalid thickness: id=%s thickness=%r",
+        shape_name,
+        item_id,
+        None if thickness_value is _STROKE_THICKNESS_MISSING else thickness_value,
+    )
+    return False, None
 
 
 _LEGACY_CONTENT_KEYS = {
@@ -233,6 +282,9 @@ def process_legacy_payload(
     if item_type == "shape":
         shape_name = str(payload.get("shape") or "").lower()
         message = dict(payload)
+        valid_thickness, thickness = _validate_shape_stroke_thickness(shape_name, message, item_id)
+        if not valid_thickness:
+            return False
         if shape_name == "rect":
             data = {
                 "color": message.get("color", "white"),
@@ -242,6 +294,8 @@ def process_legacy_payload(
                 "w": int(message.get("w", 0)),
                 "h": int(message.get("h", 0)),
             }
+            if thickness is not None:
+                data["thickness"] = thickness
             data["__mo_ttl__"] = ttl
             if trace_fn:
                 snapshot = _hashable_payload_snapshot("shape", payload)
@@ -262,6 +316,47 @@ def process_legacy_payload(
             store.set(
                 item_id,
                 LegacyItem(item_id=item_id, kind="rect", data=data, expiry=expiry, plugin=plugin_name),
+            )
+            return True
+        if shape_name == "circle":
+            radius_value = message.get("radius")
+            radius = _positive_legacy_int(radius_value)
+            if radius is None:
+                LOGGER.warning(
+                    "Dropping circle payload with invalid radius: id=%s radius=%r",
+                    item_id,
+                    radius_value,
+                )
+                return False
+            assert thickness is not None
+            data = {
+                "color": message.get("color", "white"),
+                "fill": message.get("fill") or "#00000000",
+                "x": int(message.get("x", 0)),
+                "y": int(message.get("y", 0)),
+                "radius": radius,
+                "thickness": thickness,
+            }
+            data["__mo_ttl__"] = ttl
+            if trace_fn:
+                snapshot = _hashable_payload_snapshot("shape", payload)
+                trace_fn(
+                    "legacy_processor:dedupe_snapshot",
+                    payload,
+                    {"item_id": item_id, "plugin": plugin_name, "snapshot": snapshot},
+                )
+            transform_meta = message.get("__mo_transform__")
+            if isinstance(transform_meta, Mapping):
+                try:
+                    transform_meta = dict(transform_meta)
+                except (TypeError, ValueError):
+                    transform_meta = None
+            if transform_meta is not None:
+                data["__mo_transform__"] = transform_meta
+            data["__mo_updated__"] = now_iso
+            store.set(
+                item_id,
+                LegacyItem(item_id=item_id, kind="circle", data=data, expiry=expiry, plugin=plugin_name),
             )
             return True
         if shape_name == "vect":

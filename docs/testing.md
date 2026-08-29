@@ -80,5 +80,6 @@ Automated tests cannot replace eyeballing the overlay, especially when dealing w
 5. **Ad-hoc payloads**  
    - `python3 tests/send_overlay_shape.py --length 220 --angle 45` draws a synthetic vector arrow so you can confirm scaling remains isotropic.  
    - `python3 tests/send_overlay_text.py --text "Lorem ipsum"` is useful for checking font metrics after tinkering with viewport math.
+   - `overlay_client/.venv/bin/python utils/shape_gallery.py --ttl 0` publishes a persistent circle/rectangle gallery with varied color, size, placement, fill, and border thickness. Start the overlay first; rerun with a finite `--ttl` to let the examples expire automatically.
 
 Capture screenshots or copy the debug overlay text whenever a regression is suspected; keeping before/after evidence in the issue tracker has been invaluable when verifying ultrawide fixes.
