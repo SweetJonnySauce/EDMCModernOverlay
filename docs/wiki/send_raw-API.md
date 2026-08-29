@@ -40,7 +40,7 @@ overlay.send_raw({
 | `text` | string | Optional. Non-empty makes this a message. Empty string clears a message by `id`. |
 | `color` | string | Optional. Named color or `#RRGGBB`/`#AARRGGBB`. Defaults to `white` for messages/shapes. |
 | `size` | enum | Optional. Message size preset: `small`, `normal`, `large`, or `huge` (case-insensitive). Defaults to `normal`. **Note:** top-level `size` applies to messages only. |
-| `x` / `y` | integer | Optional. `rect` uses a top-left corner; `circle` uses a centre, both in the 1280x960 legacy canvas. |
+| `x` / `y` | integer | Optional. `rect` uses a top-left corner; `circle` uses a center, both in the 1280x960 legacy canvas. |
 | `ttl` | integer | Optional. Seconds before expiry. `0` (or any value <= 0) makes the payload persistent. Default is `4`. |
 | `shape` | string | Optional. Shape name (e.g., `rect`, `circle`, `vect`). |
 | `fill` | string | Optional. Fill color for `rect` or `circle`; empty or `"none"` is transparent. |
@@ -109,12 +109,11 @@ overlay.send_raw({
     "y": 50,
     "w": 300,
     "h": 80,
-    "thickness": 2,
     "ttl": 6,
 })
 ```
-
 ### Example 3: Circle
+>⚠️ Note: circle shapes are not backwards compatible - See [Developer FAQ](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/Developer-FAQs#i-use-send_shapecircle-how-come-some-cmdrs-cannot-see-them-on-their-overlay)
 
 ```python
 from EDMCOverlay import edmcoverlay
@@ -174,9 +173,9 @@ Clears are resolved by `id`; other fields are ignored when `text` is empty.
 
 ## Runtime behavior
 
-- Messages and shapes with the same `id` replace the existing entry and refresh the TTL.
+- Messages with the same `id` replace the existing entry and refresh the TTL.
 - Empty `text` removes the message immediately.
-- A `shape="circle"` uses centre `x`/`y`, positive `radius` and `thickness`, the requested `color` border, and an optional transparent `fill`. It is a shape primitive, not a `marker: "circle"` vector point.
+- A `shape="circle"` uses center `x`/`y`, positive `radius` and `thickness`, the requested `color` border, and an optional transparent `fill`. It is a shape primitive, not a `marker: "circle"` vector point.
 - Explicit `thickness` for `circle` or `rect` is a logical legacy-canvas width;
   the renderer scales, rounds, and clamps it to at least one physical pixel.
   Omitted rectangle thickness keeps the current client-controlled width.

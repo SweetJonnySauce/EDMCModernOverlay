@@ -6,12 +6,6 @@ Test the overlay by following these [troubleshooting steps](https://github.com/S
 ## What EDMC plugins is EDMCModernOverlay compatible with?  
 EDMCModernOverlay is compatible with any plugin that is also compatible with EDMC. It's up to that plugin to decide to implement an overlay feature. What is displayed on screen is decided by the other plugins, not by EDMCModernOverlay.
 
-## Which graphical payload primitives are supported?
-Plugins can send messages, rectangle shapes, circle shapes, and vector payloads.
-Use `shape="circle"` for a circle primitive; `marker: "circle"` remains a
-vector-point marker and is not a circle-shape payload. See the `send_shape` and
-`send_raw` API references for their field contracts.
-
 ## Does EDMCModernOverlay work with EDR "out of the box"?
 Yes! EDMCModernOverlay does work with [EDR](https://github.com/lekeno/edr) "out of the box" without any major issues. In fact, you can see four "out of the box" EDR overlays in the screenshot in the [README.md](https://github.com/SweetJonnySauce/EDMCModernOverlay/blob/main/README.md) file of this repo. There is one caveat to note though regarding aspect ratios of how the graphs are displayed that can be easily be overcome by setting some overlay configs in EDR. See https://github.com/SweetJonnySauce/EDMCModernOverlay/issues/47 for more information. There is one open issue regarding EDR Navroute not being stretched across the entire width of Ultrawide monitors. It is also described in the previously mentioned Github issue.
 

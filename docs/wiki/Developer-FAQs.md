@@ -34,4 +34,8 @@ Normal is 12 pixels and the difference between other named sizes (font step) is 
 
 <img width="353" height="214" alt="image" src="https://github.com/user-attachments/assets/bb10d9c9-6fe9-4a61-8e8a-fe40db3783ab" />
 
+## I use `send_shape("circle"...)`, how come some CMDRs cannot see them on their overlay?
+>⚠️ `send_shape("circle"...)` is not backwards compatible. 
+
+If the CMDRs that use your plugin are raising issues regarding the use of "circle", then they are most likely using a legacy overlay (EDMCOveray or edmcoverlay2) or an older version of EDMCModernOverlay. "circle" was added to EDMCModernOverlay in version 0.9.2. Either advise them to upgrade, or handle the legacy path in your code as well.
 
