@@ -7,7 +7,7 @@
   "client_log_retention": 5,
   "gridlines_enabled": false,
   "gridline_spacing": 120,
-  "keep_overlay_visible": true,
+  "keep_overlay_visible": false,
   "standalone_mode": false,
   "manual_backend_override": "",
   "physical_clamp_enabled": false,

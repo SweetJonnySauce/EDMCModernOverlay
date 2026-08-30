@@ -686,5 +686,17 @@
         "controllerPreviewBoxMode": "last"
       }
     }
+  },
+  "EDMC-ExplorerLite": {
+    "matchingPrefixes": [
+      "explorerlite-summary-"
+    ],
+    "idPrefixGroups": {
+      "ExplorerLite Summary": {
+        "idPrefixes": [
+          "explorerlite-summary-"
+        ]
+      }
+    }
   }
 }
