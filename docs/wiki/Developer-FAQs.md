@@ -24,7 +24,10 @@ It depends, but it is a good practice. If you have simple payloads that only con
 The X/Y position is the upper left point of the text string.
 
 ## Are any other shapes aside from rectangles supported?
-No. If you want to do more complex objects, use send_raw and vect images.
+Yes. `send_shape` supports first-class `rect` and `circle` primitives. Circle
+`x`/`y` coordinates are its centre and it requires a positive `radius`; it is
+not the same thing as a vector point with `marker: "circle"`. Use `send_raw`
+and `shape="vect"` for vector images.
 
 ## How do I add emojis to my text?
 Just include the actual Unicode emoji in the text you send; Modern Overlay is Unicode‑safe end‑to‑end (i.e. `text="Mission logged 📝"`). If you prefer escape names in Python, use N{...} in a normal string (not a raw string). 
@@ -34,4 +37,10 @@ Normal is 12 pixels and the difference between other named sizes (font step) is 
 
 <img width="353" height="214" alt="image" src="https://github.com/user-attachments/assets/bb10d9c9-6fe9-4a61-8e8a-fe40db3783ab" />
 
+## I use `send_shape("circle"...)`, how come some CMDRs cannot see them on their overlay?
+`send_shape(..., "circle", ...)` is an EDMCModernOverlay extension. Legacy
+overlays do not implement that primitive, so a plugin that supports both must
+detect the available overlay and use a compatible fallback where needed.
 
+## CMDRs using my plugin are raising issues about rectangle shapes not working or throwing type errors.
+This is most likely because you are using the `thickness` parameter in `send_shape`. Explicit `thickness` is an EDMCModernOverlay extension; legacy overlays do not accept that keyword. Omit it or use a compatibility branch when supporting those overlays. See [`send_shape` API wiki](https://github.com/SweetJonnySauce/EDMCModernOverlay/wiki/send_shape-API#rectangle)

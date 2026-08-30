@@ -11,7 +11,7 @@ from overlay_client.legacy_store import LegacyItem, LegacyItemStore
 LOGGER = logging.getLogger("EDMC.ModernOverlay.LegacyProcessor")
 
 _MARKER_TEXT_SIZE_CHOICES = {"small", "normal", "large", "huge"}
-_STROKE_THICKNESS_REQUIRED = {"circle": True, "rect": False}
+_STROKE_THICKNESS_SHAPES = {"circle", "rect"}
 _STROKE_THICKNESS_MISSING = object()
 
 
@@ -160,13 +160,12 @@ def _validate_shape_stroke_thickness(
     message: Mapping[str, Any],
     item_id: str,
 ) -> tuple[bool, Optional[int]]:
-    """Validate optional logical stroke width for shapes that opt in."""
+    """Validate an explicitly supplied logical stroke width for supported shapes."""
 
-    required = _STROKE_THICKNESS_REQUIRED.get(shape_name)
-    if required is None:
+    if shape_name not in _STROKE_THICKNESS_SHAPES:
         return True, None
     thickness_value = message.get("thickness", _STROKE_THICKNESS_MISSING)
-    if thickness_value is _STROKE_THICKNESS_MISSING and not required:
+    if thickness_value is _STROKE_THICKNESS_MISSING:
         return True, None
     thickness = _positive_legacy_int(thickness_value)
     if thickness is not None:
@@ -341,15 +340,15 @@ def process_legacy_payload(
                     radius_value,
                 )
                 return False
-            assert thickness is not None
             data = {
                 "color": message.get("color", "white"),
                 "fill": message.get("fill") or "#00000000",
                 "x": int(message.get("x", 0)),
                 "y": int(message.get("y", 0)),
                 "radius": radius,
-                "thickness": thickness,
             }
+            if thickness is not None:
+                data["thickness"] = thickness
             data["__mo_ttl__"] = ttl
             if trace_fn:
                 snapshot = _hashable_payload_snapshot("shape", payload)

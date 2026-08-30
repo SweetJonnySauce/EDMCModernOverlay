@@ -369,6 +369,19 @@ def accumulate_group_bounds(
             xs = [pt[0] for pt in corners]
             ys = [pt[1] for pt in corners]
             bounds.update_rect(min(xs), min(ys), max(xs), max(ys))
+        elif kind == "circle":
+            x_val = float(logical.get("x", data.get("x", 0.0)))
+            y_val = float(logical.get("y", data.get("y", 0.0)))
+            radius = float(logical.get("radius", data.get("radius", 0.0)))
+            corners = [
+                transform_point(x_val - radius, y_val - radius),
+                transform_point(x_val + radius, y_val - radius),
+                transform_point(x_val - radius, y_val + radius),
+                transform_point(x_val + radius, y_val + radius),
+            ]
+            xs = [pt[0] for pt in corners]
+            ys = [pt[1] for pt in corners]
+            bounds.update_rect(min(xs), min(ys), max(xs), max(ys))
         elif kind == "vector":
             points = logical.get("points") if isinstance(logical, Mapping) else None
             if not isinstance(points, list):

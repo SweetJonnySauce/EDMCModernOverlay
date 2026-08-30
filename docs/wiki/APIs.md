@@ -33,4 +33,4 @@ overlay.send_message("demo", "Hello CMDR", "yellow", 100, 150, ttl=5, size="larg
 overlay.send_shape("demo-frame", "rect", "#ffffff", "#40000000", 80, 120, 420, 160, ttl=5)
 ```
 
-Under the hood the compatibility layer forwards payloads through `send_overlay_message`, so no socket management or process monitoring is required. The overlay client understands the legacy message/rectangle schema, making migration from the original EDMCOverlay plugin largely turnkey.
+Under the hood the compatibility layer forwards payloads through `send_overlay_message`, so no socket management or process monitoring is required. The overlay client understands the legacy message and rectangle schema, plus the EDMCModernOverlay circle and explicit-thickness extensions. This keeps basic legacy migration turnkey while allowing plugins to opt into the newer shape primitives when their compatibility target permits it.

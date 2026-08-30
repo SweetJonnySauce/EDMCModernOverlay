@@ -50,10 +50,6 @@ overlay.send_message(
 )
 ```
 # Send a rectangle shape
-Omit `thickness` to preserve the client-configured legacy rectangle border
-width. Supply a positive `thickness` only when the shape needs an explicit
-legacy-canvas width that scales with its rendered bounds.
-
 ```python
 overlay.send_shape(
     shapeid="myplugin-box",
@@ -64,14 +60,16 @@ overlay.send_shape(
     y=100,
     w=200,
     h=80,
-    thickness=2,
     ttl=5,
 )
 ```
 # Send a circle shape
 Use `shape="circle"` for a first-class circle primitive. Its `x` and `y` are
-the centre, and `radius` and `thickness` must be positive; do not send `w` or
-`h`.
+the centre, and `radius` must be positive; do not send `w` or `h`.
+`thickness` may be omitted to retain the client-controlled default. When
+supplied, it must be positive and is an unscaled logical Qt-pixel border width.
+Circle shapes and explicit `thickness` are EDMCModernOverlay extensions, not
+legacy-overlay features.
 ```python
 overlay.send_shape(
     "myplugin-radius",
@@ -121,7 +119,7 @@ overlay.send_raw(
 )
 
 ```
-X/Y is the center point of the marker. The "circle" marker produces a filled dot as seen on EDR Navroute and the "cross" marker produces an X as seen on Bioscan Radar. This marker is distinct from a `shape="circle"` payload: vector markers are per-point decorations and do not use circle `radius`, `thickness`, or `fill` fields. By default, all marker labels are to the right and below the marker. With EDMCModernOverlay, you can adjust the vertical placement of the label to be above or in-line with the marker by setting the `marker_label_position` property for the plugin group in `define_plugin_group` (described below)
+X/Y is the center point of the marker. The "circle" marker produces a filled dot as seen on EDR Navroute and the "cross" marker produces an X as seen on Bioscan Radar. By default, all marker labels are to the right and below the marker. With EDMCModernOverlay, you can adjust the vertical placement of the label to be above or in-line with the marker by setting the `marker_label_position` property for the plugin group in `define_plugin_group` (described below)
 
 
 

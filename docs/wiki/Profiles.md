@@ -1,5 +1,8 @@
 Profiles let you save different overlay layouts/visibility sets and switch between them automatically based on what you are doing in-game (ship, SRV, fighter, on-foot, etc.).
 
+<img width="1075" height="589" alt="image" src="https://github.com/user-attachments/assets/5ca95603-fc87-417a-8ee2-f1af3d97fd0e" />
+
+
 ## Open the Profiles Tab
 1. Open EDMC.
 2. Open `Settings` for `EDMCModernOverlay`.

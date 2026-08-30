@@ -19,7 +19,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from overlay_client.viewport_helper import ScaleMode, compute_viewport_transform
+from overlay_client.viewport_helper import (  # noqa: E402 - direct script execution needs sys.path setup above
+    ScaleMode,
+    compute_viewport_transform,
+)
 
 
 def _positive_finite(value: float, name: str) -> float:

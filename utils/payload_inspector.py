@@ -1061,6 +1061,21 @@ class PayloadInspectorApp:
                     width=2,
                     smooth=True,
                 )
+        elif shape == "circle":
+            radius = _coerce_number(data.get("radius"))
+            if radius > 0:
+                center_x = offset_x + (x or 0) * scale
+                center_y = offset_y + (y or 0) * scale
+                scaled_radius = radius * scale
+                canvas.create_oval(
+                    center_x - scaled_radius,
+                    center_y - scaled_radius,
+                    center_x + scaled_radius,
+                    center_y + scaled_radius,
+                    outline=color if self._is_valid_color(color) else "#80d0ff",
+                    width=2,
+                    fill=fill_color if self._is_valid_color(fill_color) else "",
+                )
         elif shape == "rect" or shape == "message" or text:
             box_w = max(10, (w or 0) * scale)
             box_h = max(10, (h or 0) * scale)

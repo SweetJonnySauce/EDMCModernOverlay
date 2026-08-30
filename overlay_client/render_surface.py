@@ -122,7 +122,7 @@ class _MeasuredText:
 class _StrokeWidthSpec:
     """Internal opt-in stroke policy for bounded legacy shapes."""
 
-    explicit_logical_width: Optional[float] = None
+    explicit_pixel_width: Optional[float] = None
     default_pixel_width: Optional[int] = None
 _LINE_WIDTH_DEFAULTS_FALLBACK: Dict[str, int] = {
     "grid": 1,
@@ -2205,8 +2205,11 @@ class RenderSurfaceMixin:
         transform_context = group_ctx.transform_context
         scale = group_ctx.scale
         if pen.style() != Qt.PenStyle.NoPen:
-            if stroke_width.explicit_logical_width is not None:
-                resolved_width = max(1, int(round(stroke_width.explicit_logical_width * scale)))
+            if stroke_width.explicit_pixel_width is not None:
+                try:
+                    resolved_width = max(1, int(round(float(stroke_width.explicit_pixel_width))))
+                except (TypeError, ValueError, OverflowError):
+                    resolved_width = None
             else:
                 resolved_width = stroke_width.default_pixel_width
             if resolved_width is not None:
@@ -2358,7 +2361,7 @@ class RenderSurfaceMixin:
             pen=pen,
             brush=brush,
             stroke_width=_StrokeWidthSpec(
-                explicit_logical_width=item.get("thickness"),
+                explicit_pixel_width=item.get("thickness"),
                 default_pixel_width=None if "thickness" in item else self._line_width("legacy_rect"),
             ),
             raw_x=float(item.get("x", 0)),
@@ -2409,7 +2412,10 @@ class RenderSurfaceMixin:
             kind="circle",
             pen=pen,
             brush=brush,
-            stroke_width=_StrokeWidthSpec(explicit_logical_width=item.get("thickness")),
+            stroke_width=_StrokeWidthSpec(
+                explicit_pixel_width=item.get("thickness"),
+                default_pixel_width=None if "thickness" in item else self._line_width("legacy_rect"),
+            ),
             raw_x=raw_x,
             raw_y=raw_y,
             raw_w=diameter,

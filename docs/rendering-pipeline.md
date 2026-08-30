@@ -31,8 +31,9 @@ This document explains how a payload travels from EDMC into the Modern Overlay c
      positive explicit logical thickness. Omitting it retains the legacy
      client-configured border width.
    - `shape:circle` → circle payload with centre coordinates, positive radius,
-     positive border thickness, fill/border data, and normal TTL/storage
-     metadata. Raw/TCP normalization retains its fields; client validation drops
+     optional positive border thickness, fill/border data, and normal TTL/storage
+     metadata. An omitted thickness uses the client-controlled `legacy_rect`
+     width. Raw/TCP normalization retains its fields; client validation drops
      invalid geometry before a same-ID drawable item can be stored or replaced.
    - `shape:vect` → vector payload with ordered points, optional markers/text. Marker label `size` accepts
      legacy presets (`small`, `normal`, `large`, `huge`); payload-level `size`/`text_size` provides the
@@ -65,7 +66,7 @@ For every legacy item, the window builds a paint command. Each builder emits inp
 
 ### Rectangles (`_build_rect_command`)
 
-1. Build pen/brush from payload colors and compute remapped rectangle corners via `remap_rect_points()`. An explicit thickness is a logical value resolved at the shared bounded-shape boundary; an omitted rectangle uses its existing pixel-width setting unchanged.
+1. Build pen/brush from payload colors and compute remapped rectangle corners via `remap_rect_points()`. An explicit thickness is a logical Qt-pixel value resolved at the shared bounded-shape boundary without viewport/group scaling; an omitted rectangle uses its existing pixel-width setting unchanged.
 2. Emit:
    - `paint:rect_input`
    - `paint:rect_output` (both overlay-space and pixel-space bounds)  
@@ -77,11 +78,12 @@ For every legacy item, the window builds a paint command. Each builder emits inp
    `x - radius` / `y - radius`; width/height are `2 * radius`.
 2. Send that square through the same legacy rectangle/group/viewport mapping as
    rectangles, including group placement, anchors, and cycle-target bounds.
-3. Build the requested border pen from `color` and `thickness`, and the fill
-   brush from `fill`; empty or `none` fill uses no brush. The shared bounded
-   shape path scales explicit logical widths with the group scale, rounds them,
-   and clamps them to one physical pixel. The shared payload opacity behaviour
-   is applied after width resolution when the command paints.
+3. Build the requested border pen from `color` and optional `thickness`, and
+   the fill brush from `fill`; empty or `none` fill uses no brush. Explicit
+   circle thickness is a logical Qt-pixel width: it is rounded and has a one
+   pixel minimum. Omitted thickness uses the client-controlled `legacy_rect`
+   width. The shared payload opacity behaviour is applied after width resolution
+   when the command paints.
 4. This path intentionally adds no `paint:circle_*` trace stage. It reuses the
    established bounded-shape mapping rather than introducing a separate circle
    trace protocol.
