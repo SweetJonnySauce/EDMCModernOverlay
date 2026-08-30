@@ -53,6 +53,21 @@ def test_send_shape_circle_preserves_stable_id_and_ttl(monkeypatch):
     ]
 
 
+def test_send_shape_omits_unset_circle_thickness(monkeypatch):
+    published = []
+    monkeypatch.setattr(edmcoverlay, "send_overlay_message", lambda payload: published.append(payload) or True)
+
+    edmcoverlay.Overlay().send_shape(
+        "default-circle",
+        "circle",
+        x=100,
+        y=200,
+        radius=50,
+    )
+
+    assert "thickness" not in published[-1]
+
+
 def test_send_shape_preserves_positional_rectangle_payload(monkeypatch):
     published = []
     monkeypatch.setattr(edmcoverlay, "send_overlay_message", lambda payload: published.append(payload) or True)
@@ -129,28 +144,33 @@ def test_normalise_raw_circle_preserves_canonical_geometry_and_metadata():
 
 
 @pytest.mark.parametrize(
-    ("message", "radius", "thickness"),
+    ("message", "radius", "thickness", "has_thickness"),
     [
         (
             {"Shape": "circle", "Id": "circle-alias", "Radius": "invalid", "Thickness": -2},
             "invalid",
             -2,
+            True,
         ),
         (
             {"shape": "circle", "id": "circle-zero", "radius": 0, "thickness": 0},
             0,
             0,
+            True,
         ),
-        ({"shape": "circle", "id": "circle-missing"}, None, None),
+        ({"shape": "circle", "id": "circle-missing"}, None, None, False),
     ],
 )
-def test_normalise_raw_circle_preserves_aliased_and_invalid_geometry(message, radius, thickness):
+def test_normalise_raw_circle_preserves_aliased_and_invalid_geometry(message, radius, thickness, has_thickness):
     payload = edmcoverlay.normalise_legacy_payload(message)
 
     assert payload is not None
     assert payload["type"] == "shape"
     assert payload["radius"] == radius
-    assert payload["thickness"] == thickness
+    if has_thickness:
+        assert payload["thickness"] == thickness
+    else:
+        assert "thickness" not in payload
 
 
 def test_normalise_raw_rectangle_and_vector_contracts_are_unchanged():

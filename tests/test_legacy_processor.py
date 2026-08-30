@@ -86,6 +86,52 @@ def test_process_rect_payload_preserves_valid_explicit_thickness():
     assert item.data["thickness"] == 3
 
 
+def test_process_circle_payload_allows_omitted_thickness():
+    store = LegacyItemStore()
+
+    changed = process_legacy_payload(
+        store,
+        {
+            "type": "shape",
+            "shape": "circle",
+            "id": "circle-default-width",
+            "color": "#abcdef",
+            "fill": "#112233",
+            "x": 5,
+            "y": 6,
+            "radius": 40,
+            "ttl": 3,
+        },
+    )
+
+    assert changed is True
+    item = store.get("circle-default-width")
+    assert item is not None
+    assert item.kind == "circle"
+    assert "thickness" not in item.data
+
+
+def test_process_normalised_raw_circle_allows_omitted_thickness():
+    store = LegacyItemStore()
+    payload = normalise_legacy_payload(
+        {
+            "shape": "circle",
+            "id": "raw-circle-default-width",
+            "x": 5,
+            "y": 6,
+            "radius": 40,
+            "ttl": 3,
+        },
+    )
+
+    assert payload is not None
+    assert "thickness" not in payload
+    assert process_legacy_payload(store, payload) is True
+    item = store.get("raw-circle-default-width")
+    assert item is not None
+    assert "thickness" not in item.data
+
+
 @pytest.mark.parametrize("invalid_thickness", [None, "not-a-number", 0, -1])
 def test_invalid_explicit_rect_thickness_warns_and_preserves_existing_item(
     caplog: pytest.LogCaptureFixture,
@@ -347,7 +393,7 @@ def test_circle_zero_ttl_uses_existing_next_purge_contract(monkeypatch: pytest.M
         ("radius", "not-a-number", False),
         ("radius", 0, False),
         ("radius", -1, False),
-        ("thickness", None, True),
+        ("thickness", None, False),
         ("thickness", "not-a-number", False),
         ("thickness", 0, False),
         ("thickness", -1, False),
@@ -388,7 +434,7 @@ def test_invalid_circle_geometry_warns_and_preserves_existing_item(
         ("radius", "not-a-number", False),
         ("radius", 0, False),
         ("radius", -1, False),
-        ("thickness", None, True),
+        ("thickness", None, False),
         ("thickness", "not-a-number", False),
         ("thickness", 0, False),
         ("thickness", -1, False),

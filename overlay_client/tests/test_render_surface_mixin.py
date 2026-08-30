@@ -382,8 +382,8 @@ def test_rect_command_valid_border_color_uses_pen(monkeypatch: pytest.MonkeyPatc
     assert cmd.pen.width() == surface._line_width("legacy_rect")
 
 
-@pytest.mark.parametrize(("scale", "expected_width"), [(0.5, 1), (1.0, 2), (2.0, 4)])
-def test_explicit_rect_thickness_scales_with_group_context(
+@pytest.mark.parametrize(("scale", "expected_width"), [(0.5, 2), (1.0, 2), (2.0, 2)])
+def test_explicit_rect_thickness_uses_unscaled_logical_pixels(
     monkeypatch: pytest.MonkeyPatch,
     scale: float,
     expected_width: int,
@@ -431,6 +431,18 @@ def test_omitted_rect_thickness_keeps_unscaled_legacy_default(monkeypatch: pytes
     assert cmd.pen.width() == surface._line_width("legacy_rect")
 
 
+def test_omitted_circle_thickness_keeps_unscaled_legacy_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    surface = _CircleSurface()
+    monkeypatch.setattr(
+        "overlay_client.render_surface.build_group_context",
+        lambda *args, **kwargs: _StubGroupContext(scale=2.0),
+    )
+
+    cmd = _build_circle_command(surface, thickness=None)
+
+    assert cmd.pen.width() == surface._line_width("legacy_rect")
+
+
 def test_explicit_rect_thickness_uses_miter_join_without_changing_legacy_join(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -466,7 +478,7 @@ def test_explicit_stroke_resolution_copies_the_source_pen(monkeypatch: pytest.Mo
         kind="rect",
         pen=source_pen,
         brush=QBrush(Qt.BrushStyle.NoBrush),
-        stroke_width=_StrokeWidthSpec(explicit_logical_width=2),
+        stroke_width=_StrokeWidthSpec(explicit_pixel_width=2),
         raw_x=1,
         raw_y=2,
         raw_w=3,
@@ -475,7 +487,7 @@ def test_explicit_stroke_resolution_copies_the_source_pen(monkeypatch: pytest.Mo
 
     assert source_pen.width() == 9
     assert cmd.pen is not source_pen
-    assert cmd.pen.width() == 4
+    assert cmd.pen.width() == 2
 
 
 def _build_circle_command(
@@ -484,19 +496,21 @@ def _build_circle_command(
     border_spec: str = "#ff00ff",
     fill_spec: str = "#112233",
     group_transform=None,
-    thickness: float = 5.0,
+    thickness: Optional[float] = 5.0,
 ):
+    data = {
+        "color": border_spec,
+        "fill": fill_spec,
+        "x": 10.0,
+        "y": 20.0,
+        "radius": 3.0,
+    }
+    if thickness is not None:
+        data["thickness"] = thickness
     legacy_item = LegacyItem(
         item_id="circle-1",
         kind="circle",
-        data={
-            "color": border_spec,
-            "fill": fill_spec,
-            "x": 10.0,
-            "y": 20.0,
-            "radius": 3.0,
-            "thickness": thickness,
-        },
+        data=data,
         plugin="plugin",
     )
     return surface._build_circle_command(legacy_item, _RectStubMapper(), GroupKey("plugin"), group_transform, None)

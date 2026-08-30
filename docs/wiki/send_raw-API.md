@@ -46,7 +46,7 @@ overlay.send_raw({
 | `fill` | string | Optional. Fill color for `rect` or `circle`; empty or `"none"` is transparent. |
 | `w` / `h` | integer | Optional. Width/height for `shape="rect"`. |
 | `radius` | integer | Required, strictly positive radius for `shape="circle"`. |
-| `thickness` | integer | Required, strictly positive border width for `shape="circle"`; optional, strictly positive border width for `shape="rect"`. An explicit value uses legacy-canvas units and scales with the shape. Omitting it for `rect` preserves the existing client-controlled default. |
+| `thickness` | integer | Optional, strictly positive border width for `shape="circle"` and `shape="rect"`. An explicit value is a logical Qt-pixel width. Omitting it for either shape preserves the existing client-controlled `legacy_rect` default. |
 | `vector` | array | Optional. Vector points for `shape="vect"`. |
 | `plugin` | string | Optional. Source plugin label for attribution/grouping. |
 | `command` | string | Optional. `exit` clears all; `noop` does nothing; other values are ignored. |
@@ -135,10 +135,10 @@ overlay.send_raw({
 
 Raw/TCP normalization retains supported shape thickness fields for the client.
 It does not make the geometry decision: the client warns and drops a missing,
-non-numeric, zero, or negative circle `radius`/`thickness`, or an explicitly
-supplied invalid rectangle `thickness`, before that payload can replace a
-visible same-ID shape. An omitted rectangle thickness keeps the existing client
-default.
+non-numeric, zero, or negative circle `radius`, or an explicitly supplied
+non-numeric, zero, or negative thickness for either shape, before that payload
+can replace a visible same-ID shape. Omitted thickness uses the existing
+client-controlled `legacy_rect` default.
 
 ### Example 4: Vector with marker label size
 
@@ -175,10 +175,11 @@ Clears are resolved by `id`; other fields are ignored when `text` is empty.
 
 - Messages with the same `id` replace the existing entry and refresh the TTL.
 - Empty `text` removes the message immediately.
-- A `shape="circle"` uses center `x`/`y`, positive `radius` and `thickness`, the requested `color` border, and an optional transparent `fill`. It is a shape primitive, not a `marker: "circle"` vector point.
-- Explicit `thickness` for `circle` or `rect` is a logical legacy-canvas width;
-  the renderer scales, rounds, and clamps it to at least one physical pixel.
-  Omitted rectangle thickness keeps the current client-controlled width.
+- A `shape="circle"` uses center `x`/`y`, a positive `radius`, the requested `color` border, and an optional transparent `fill`. Its `thickness` is optional. It is a shape primitive, not a `marker: "circle"` vector point.
+- Explicit circle and rectangle `thickness` are logical Qt-pixel widths; the
+  renderer rounds and clamps them to at least one pixel without viewport/group
+  scaling. Omitted thickness for either shape keeps the current
+  client-controlled `legacy_rect` width.
 - Vector payloads with insufficient points are dropped (unless a single point has `marker` or `text`).
 - Size presets are derived from the overlay font settings; adjust the "Font Step" and base font size in preferences to tune `small`/`large`/`huge`.
 - Plugin ownership is inferred from `id` prefixes (case-insensitive). If your payloads do not include a `plugin` field, add prefixes via `define_plugin_group` so the overlay can attribute payloads correctly.
