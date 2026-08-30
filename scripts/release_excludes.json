@@ -29,6 +29,8 @@
     "*.md"
   ],
   "substrings": [
-    "overlay_client/.venv"
+    "overlay_client/.venv",
+    "overlay_client/fonts/preferred_fonts.txt",
+    "overlay_client/fonts/emoji_fallbacks.txt"
   ]
 }
