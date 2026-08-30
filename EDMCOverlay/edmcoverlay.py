@@ -176,7 +176,8 @@ def normalise_legacy_payload(message: Mapping[str, Any]) -> Optional[Dict[str, A
         vector = _lookup("vector", "Vector")
         if shape_lower == "circle":
             payload["radius"] = _lookup("radius", "Radius")
-            payload["thickness"] = _lookup("thickness", "Thickness")
+            if "thickness" in msg or "Thickness" in msg:
+                payload["thickness"] = _lookup("thickness", "Thickness")
         elif shape_lower == "rect" and ("thickness" in msg or "Thickness" in msg):
             payload["thickness"] = _lookup("thickness", "Thickness")
         elif shape_lower == "vect":
@@ -330,9 +331,10 @@ class Overlay:
                 "x": int(x),
                 "y": int(y),
                 "radius": radius,
-                "thickness": None if thickness is _SHAPE_THICKNESS_UNSET else thickness,
                 "ttl": ttl,
             }
+            if thickness is not _SHAPE_THICKNESS_UNSET:
+                payload["thickness"] = thickness
             self._emit_payload(payload)
             return
 

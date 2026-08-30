@@ -18,10 +18,37 @@ DEFAULT_TTL_SECONDS = 60
 DEFAULT_TIMEOUT_SECONDS = 5.0
 
 
+def _shape_label_payload(shape: Mapping[str, Any]) -> Dict[str, Any]:
+    """Describe one gallery shape immediately above its bounding box."""
+
+    shape_name = str(shape["shape"])
+    label_name = "Rectangle" if shape_name == "rect" else "Circle"
+    variant = str(shape["id"]).removeprefix(f"shape-gallery-{shape_name}-").replace("-", " ")
+    width = f"thickness={shape['thickness']}" if "thickness" in shape else "default thickness"
+    if shape_name == "rect":
+        label_x = int(shape["x"])
+        label_y = max(0, int(shape["y"]) - 18)
+    else:
+        radius = int(shape["radius"])
+        label_x = int(shape["x"]) - radius
+        label_y = max(0, int(shape["y"]) - radius - 18)
+    variant_id = str(shape["id"]).removeprefix("shape-gallery-")
+    return {
+        "type": "message",
+        "id": f"shape-gallery-label-{variant_id}",
+        "text": f"{label_name}: {variant} ({width})",
+        "color": shape["color"],
+        "x": label_x,
+        "y": label_y,
+        "size": "small",
+        "ttl": shape["ttl"],
+    }
+
+
 def build_gallery_payloads(ttl: int = DEFAULT_TTL_SECONDS) -> List[Dict[str, Any]]:
     """Return a stable gallery that exercises shape appearance variations."""
 
-    return [
+    shapes = [
         {
             "type": "shape",
             "shape": "rect",
@@ -46,6 +73,18 @@ def build_gallery_payloads(ttl: int = DEFAULT_TTL_SECONDS) -> List[Dict[str, Any
             "w": 380,
             "h": 180,
             "thickness": 6,
+            "ttl": ttl,
+        },
+        {
+            "type": "shape",
+            "shape": "rect",
+            "id": "shape-gallery-rect-default-outline",
+            "color": "#ffd166",
+            "fill": "none",
+            "x": 60,
+            "y": 260,
+            "w": 250,
+            "h": 100,
             "ttl": ttl,
         },
         {
@@ -83,6 +122,17 @@ def build_gallery_payloads(ttl: int = DEFAULT_TTL_SECONDS) -> List[Dict[str, Any
             "y": 440,
             "radius": 110,
             "thickness": 4,
+            "ttl": ttl,
+        },
+        {
+            "type": "shape",
+            "shape": "circle",
+            "id": "shape-gallery-circle-default-outline",
+            "color": "#ffd166",
+            "fill": "none",
+            "x": 180,
+            "y": 680,
+            "radius": 50,
             "ttl": ttl,
         },
         {
@@ -146,6 +196,7 @@ def build_gallery_payloads(ttl: int = DEFAULT_TTL_SECONDS) -> List[Dict[str, Any
             "ttl": ttl,
         },
     ]
+    return [*shapes, *(_shape_label_payload(shape) for shape in shapes)]
 
 
 def _read_port(port_file: Path) -> int:

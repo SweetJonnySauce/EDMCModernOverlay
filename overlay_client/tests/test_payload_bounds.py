@@ -85,6 +85,64 @@ def test_message_bounds_fill_mode_uses_text_measurements(monkeypatch) -> None:
     assert (bounds.max_y - bounds.min_y) == pytest.approx(fake_height)
 
 
+def test_circle_bounds_cover_full_radius() -> None:
+    bounds = GroupBounds()
+    item = LegacyItem(
+        item_id="circle",
+        kind="circle",
+        data={"x": 100, "y": 200, "radius": 25},
+        expiry=None,
+        plugin="test",
+    )
+
+    payload_transform.accumulate_group_bounds(
+        bounds,
+        item,
+        pixels_per_overlay_unit=1.0,
+        font_family="Eurostile",
+        preset_point_size=lambda _label: 12.0,
+    )
+
+    assert bounds.is_valid()
+    assert bounds.min_x == pytest.approx(75.0)
+    assert bounds.min_y == pytest.approx(175.0)
+    assert bounds.max_x == pytest.approx(125.0)
+    assert bounds.max_y == pytest.approx(225.0)
+
+
+def test_circle_bounds_transform_full_radius() -> None:
+    bounds = GroupBounds()
+    item = LegacyItem(
+        item_id="circle",
+        kind="circle",
+        data={
+            "x": 100,
+            "y": 200,
+            "radius": 25,
+            "__mo_transform__": {
+                "scale": {"x": 2.0, "y": 0.5},
+                "offset": {"x": 10.0, "y": -20.0},
+            },
+        },
+        expiry=None,
+        plugin="test",
+    )
+
+    payload_transform.accumulate_group_bounds(
+        bounds,
+        item,
+        pixels_per_overlay_unit=1.0,
+        font_family="Eurostile",
+        preset_point_size=lambda _label: 12.0,
+    )
+
+    assert bounds.is_valid()
+    assert bounds.min_x == pytest.approx(160.0)
+    assert bounds.min_y == pytest.approx(67.5)
+    assert bounds.max_x == pytest.approx(260.0)
+    assert bounds.max_y == pytest.approx(92.5)
+
+
 def test_overlay_bounds_dataclass_tracks_min_max() -> None:
     bounds = _OverlayBounds()
     bounds.include_rect(10.0, 20.0, 30.0, 60.0)
