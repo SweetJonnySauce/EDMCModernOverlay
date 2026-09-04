@@ -11,6 +11,8 @@
     * [[Changing Fonts]]
 * [[FAQs]]
 * [[Troubleshooting]]
+* [[Backend Compatibility]]
+* [[Distro Installation Compatibility]]
 * [[How To Guides]]
     * [VoiceAttack Integration](https://github.com/SweetJonnySauce/EDMCModernOverlay/blob/main/docs/wiki/VoiceAttack_Integration.md)
 ***

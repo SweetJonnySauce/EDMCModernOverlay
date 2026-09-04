@@ -689,12 +689,29 @@
   },
   "EDMC-ExplorerLite": {
     "matchingPrefixes": [
-      "explorerlite-summary-"
+      "explorerlite-radar-"
     ],
     "idPrefixGroups": {
       "ExplorerLite Summary": {
         "idPrefixes": [
           "explorerlite-summary-"
+        ]
+      },
+      "ExplorerLite Radar": {
+        "idPrefixes": [
+          "explorerlite-radar-"
+        ]
+      }
+    }
+  },
+  "EDO Relevant Data": {
+    "matchingPrefixes": [
+      "edo-relevant-data-"
+    ],
+    "idPrefixGroups": {
+      "EDO Relevant Data": {
+        "idPrefixes": [
+          "edo-relevant-data-"
         ]
       }
     }
