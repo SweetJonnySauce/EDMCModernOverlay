@@ -1,13 +1,15 @@
 # EDMC Modern Overlay
 [![Github All Releases](https://img.shields.io/github/downloads/SweetJonnySauce/EDMCModernOverlay/total.svg)](https://github.com/SweetJonnySauce/EDMCModernOverlay/releases/latest)
 [![GitHub Latest Version](https://img.shields.io/github/v/release/SweetJonnySauce/EDMCModernOverlay)](https://github.com/SweetJonnySauce/EDMCModernOverlay/releases/latest)
+[![AILevel](https://img.shields.io/badge/Level-4.%20Local%20Autonomous%20Agent-purple?logo=openaigym&logoColor=white&link=https%3A%2F%2Feclipsesource.com%2Fblogs%2F2025%2F06%2F26%2Fai-coding-spectrum-levels-of-assistance%2F)]([![AILevel](https://img.shields.io/badge/Level-4.%20Local%20Autonomous%20Agent-purple?logo=openaigym&logoColor=white&link=https%3A%2F%2Feclipsesource.com%2Fblogs%2F2025%2F06%2F26%2Fai-coding-spectrum-levels-of-assistance%2F
+)
 [![Build Status][build-badge]][build-url]
-[![VirusTotal](https://img.shields.io/badge/VirusTotal-clean-brightgreen.svg)](https://www.virustotal.com/gui/file/c8f951c109065fea9164dd9adb7f40403ded57eaf92108fb45451f0dc46510c8)
+[![VirusTotal](https://img.shields.io/badge/VirusTotal-clean-brightgreen.svg)](https://www.virustotal.com/gui/file/8ef97545995e2bb48a53196cf52c04773ba64a87e6c4343a98241ad7ab6217ab)
 
 [build-badge]: https://github.com/SweetJonnySauce/EDMCModernOverlay/actions/workflows/ci.yml/badge.svg?branch=main
 [build-url]: https://github.com/SweetJonnySauce/EDMCModernOverlay/actions/workflows/ci.yml
 
-🔥🔥🔥0.9.0 has been released. Get it [here](https://github.com/SweetJonnySauce/EDMCModernOverlay/releases/latest)🔥🔥🔥
+🔥🔥🔥0.9.2 has been released. Get it [here](https://github.com/SweetJonnySauce/EDMCModernOverlay/releases/latest)🔥🔥🔥
 
 EDMC Modern Overlay (packaged as `EDMCModernOverlay`) replaces [EDMCOverlay](https://github.com/inorton/EDMCOverlay) and [edmcoverlay2](https://github.com/pan-mroku/edmcoverlay2). It is a cross-platform (Windows and Linux) plugin for Elite Dangerous Market Connector ([EDMC](https://github.com/EDCD/EDMarketConnector)). It streams data from other EDMC plugins to be displayed in your game window. EDMCModernOverlay supports fullscreen, borderless, and windowed mode on any display size. It also now has a standalone mode as an experimental feature in 0.7.7 for use in SteamVR. The [plugin releases](https://github.com/SweetJonnySauce/EDMC-ModernOverlay/releases/latest) include Windows (powershell and .exe) and Linux installers.
 
