@@ -1840,7 +1840,7 @@ classify_plugin_directory() {
 }
 
 ensure_edmc_not_running() {
-    if command -v pgrep >/dev/null 2>&1 && pgrep -f "EDMarketConnector" >/dev/null 2>&1; then
+    if command -v pgrep >/dev/null 2>&1 && pgrep -f "EDMarketConnector.py" >/dev/null 2>&1; then
         echo "⚠️  EDMarketConnector appears to be running."
         log_verbose "EDMarketConnector process detected via pgrep."
         if [[ "$ASSUME_YES" == true ]]; then
