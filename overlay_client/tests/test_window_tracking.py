@@ -118,6 +118,48 @@ def test_gnome_tracker_falls_back_to_x11_without_extension(monkeypatch) -> None:
     assert tracker.poll() == expected
 
 
+def test_gnome_tracker_falls_back_to_x11_when_elite_is_not_in_window_calls(monkeypatch) -> None:
+    expected = WindowState(
+        x=1080,
+        y=311,
+        width=1920,
+        height=1080,
+        is_foreground=True,
+        is_visible=True,
+        identifier="0x1234",
+    )
+    commands = []
+
+    class FakeFallbackTracker:
+        def __init__(self, logger, title_hint, monitor_provider) -> None:
+            pass
+
+        def set_monitor_provider(self, provider) -> None:
+            pass
+
+        def poll(self):
+            return expected
+
+    def fake_gdbus(command, **kwargs):
+        commands.append(command)
+        return types.SimpleNamespace(returncode=0, stdout=repr((json.dumps([]),)), stderr="")
+
+    monkeypatch.setattr(window_tracking.subprocess, "run", fake_gdbus)
+    monkeypatch.setattr(window_tracking, "_WmctrlTracker", FakeFallbackTracker)
+    monkeypatch.setattr(window_tracking.sys, "platform", "linux")
+    monkeypatch.setenv("EDMC_OVERLAY_SESSION_TYPE", "wayland")
+    monkeypatch.setenv("EDMC_OVERLAY_COMPOSITOR", "gnome-shell")
+    monkeypatch.setenv("EDMC_OVERLAY_FORCE_XWAYLAND", "1")
+    monkeypatch.delenv("FLATPAK_ID", raising=False)
+
+    tracker = window_tracking.create_elite_window_tracker(logging.getLogger("test.gnome"))
+
+    assert tracker is not None
+    assert tracker.poll() == expected
+    assert len(commands) == 1
+    assert commands[0][commands[0].index("--method") + 1].endswith(".List")
+
+
 def test_gnome_tracker_uses_host_gdbus_inside_flatpak(monkeypatch) -> None:
     commands = []
 
