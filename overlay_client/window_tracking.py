@@ -1029,9 +1029,9 @@ class _GnomeTracker(_WaylandTrackerBase):
                 best = state
                 best_area = area
 
-        state = target or best
-        if state is None:
+        selected_state: Optional[WindowState] = target or best
+        if selected_state is None:
             return self._poll_x11_fallback()
 
         # Window Calls Details returns Mutter's frame rectangle in virtual-desktop coordinates.
-        return self._complete(state)
+        return self._complete(selected_state)
