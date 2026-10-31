@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from PyQt6.QtWidgets import QApplication
 
+from overlay_client import data_client as data_client_module
 from overlay_client.data_client import OverlayDataClient
 
 
@@ -125,3 +126,71 @@ def test_flush_outgoing_logs_write_failure(qt_app):
     log_records = asyncio.run(_run())
 
     assert any("Failed to write outgoing payload" in record.getMessage() for record in log_records)
+
+
+def test_run_requests_shutdown_after_server_unavailable_timeout(monkeypatch, qt_app, tmp_path):
+    port_file = tmp_path / "port.json"
+    port_file.write_text('{"port": 12345}', encoding="utf-8")
+    monkeypatch.setattr(data_client_module, "SERVER_UNAVAILABLE_TIMEOUT_SECONDS", 0.03)
+
+    async def fail_to_connect(host, port):
+        raise ConnectionRefusedError("server is down")
+
+    monkeypatch.setattr(data_client_module.asyncio, "open_connection", fail_to_connect)
+    client = OverlayDataClient(port_file)
+    shutdown_requests = []
+    client.shutdown_requested.connect(lambda: shutdown_requests.append(True))
+    logger = logging.getLogger("EDMC.ModernOverlay.Client.DataClient")
+    log_messages = []
+
+    class CaptureHandler(logging.Handler):
+        def emit(self, record):
+            log_messages.append(record.getMessage())
+
+    handler = CaptureHandler()
+    logger.addHandler(handler)
+    try:
+        asyncio.run(client._run())
+    finally:
+        logger.removeHandler(handler)
+
+    assert shutdown_requests == [True]
+    assert any("Connect failed to 127.0.0.1:12345" in message for message in log_messages)
+    assert any("Retry 1; shutdown in" in message for message in log_messages)
+
+
+def test_run_does_not_time_out_a_live_quiet_connection(monkeypatch, qt_app, tmp_path):
+    port_file = tmp_path / "port.json"
+    port_file.write_text('{"port": 12345}', encoding="utf-8")
+    monkeypatch.setattr(data_client_module, "SERVER_UNAVAILABLE_TIMEOUT_SECONDS", 0.01)
+
+    class QuietReader:
+        async def readline(self):
+            await asyncio.sleep(0.02)
+            client._stop_event.set()  # type: ignore[attr-defined]
+            return b'{"heartbeat-free": true}\n'
+
+    class QuietWriter:
+        def write(self, data):
+            return None
+
+        async def drain(self):
+            return None
+
+        def close(self):
+            return None
+
+        async def wait_closed(self):
+            return None
+
+    async def connect(host, port):
+        return QuietReader(), QuietWriter()
+
+    monkeypatch.setattr(data_client_module.asyncio, "open_connection", connect)
+    client = OverlayDataClient(port_file)
+    shutdown_requests = []
+    client.shutdown_requested.connect(lambda: shutdown_requests.append(True))
+
+    asyncio.run(client._run())
+
+    assert shutdown_requests == []

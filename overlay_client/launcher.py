@@ -285,6 +285,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     data_client.message_received.connect(_build_payload_handler(helper, window, group_filter=group_filter))
     data_client.status_changed.connect(window.set_status_text)
+    data_client.shutdown_requested.connect(app.quit)
 
     window.show()
     data_client.start()
