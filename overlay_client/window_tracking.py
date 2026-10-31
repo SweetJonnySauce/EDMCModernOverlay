@@ -1,6 +1,7 @@
 """Cross-platform helpers for tracking the Elite Dangerous game window."""
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import os
@@ -180,7 +181,11 @@ def create_elite_window_tracker(
         session = (os.environ.get("EDMC_OVERLAY_SESSION_TYPE") or os.environ.get("XDG_SESSION_TYPE") or "").lower()
         compositor = (os.environ.get("EDMC_OVERLAY_COMPOSITOR") or "").lower()
         force_xwayland = os.environ.get("EDMC_OVERLAY_FORCE_XWAYLAND") == "1"
-        if session == "wayland" and not force_xwayland:
+        desktop = (os.environ.get("XDG_CURRENT_DESKTOP") or "").upper()
+        is_gnome = compositor in {"gnome-shell", "mutter"} or (
+            not compositor and ("GNOME" in desktop or bool(os.environ.get("GNOME_SHELL_SESSION_MODE")))
+        )
+        if session == "wayland" and (not force_xwayland or is_gnome):
             tracker = _create_wayland_tracker(logger, title_hint, monitor_provider, compositor)
             if tracker is not None:
                 return tracker
@@ -222,10 +227,7 @@ def _create_wayland_tracker(
     if compositor == "kwin":
         return _KWinTracker(logger, title_hint, monitor_provider)
     if compositor in {"gnome-shell", "mutter"}:
-        logger.info(
-            "GNOME Shell Wayland compositor detected; follow mode requires the EDMC Modern Overlay GNOME extension."
-        )
-        return None
+        return _GnomeTracker(logger, title_hint, monitor_provider)
     if compositor == "cosmic":
         logger.info("COSMIC Wayland compositor detected; follow mode backend not yet implemented.")
         return None
@@ -907,3 +909,129 @@ class _KWinTracker(_WaylandTrackerBase):
         monitors = self._monitors()
         augmented = _augment_state_with_monitors(state, monitors, self._logger)
         return self._complete(augmented)
+
+
+class _GnomeTracker(_WaylandTrackerBase):
+    """Use the Window Calls GNOME Shell extension, falling back to X11 tracking."""
+
+    _BUS_NAME = "org.gnome.Shell"
+    _OBJECT_PATH = "/org/gnome/Shell/Extensions/Windows"
+
+    def __init__(
+        self,
+        logger: logging.Logger,
+        title_hint: str,
+        monitor_provider: Optional[MonitorProvider],
+    ) -> None:
+        super().__init__(logger, title_hint, monitor_provider)
+        self._x11_fallback = _WmctrlTracker(logger, title_hint, monitor_provider)
+        self._warned = False
+
+    def set_monitor_provider(self, provider: Optional[MonitorProvider]) -> None:
+        super().set_monitor_provider(provider)
+        self._x11_fallback.set_monitor_provider(provider)
+
+    def _poll_x11_fallback(self) -> Optional[WindowState]:
+        return self._complete(self._x11_fallback.poll())
+
+    def _call_json_method(self, method: str, *args: object) -> Any:
+        command = []
+        if os.environ.get("FLATPAK_ID"):
+            command.extend(["flatpak-spawn", "--host"])
+        command.extend(
+            [
+                "gdbus",
+                "call",
+                "--session",
+                "--dest",
+                self._BUS_NAME,
+                "--object-path",
+                self._OBJECT_PATH,
+                "--method",
+                f"org.gnome.Shell.Extensions.Windows.{method}",
+                *(str(arg) for arg in args),
+            ]
+        )
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=1.0,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or f"gdbus exited with status {result.returncode}")
+        try:
+            reply = ast.literal_eval(result.stdout.strip())
+        except (SyntaxError, ValueError) as exc:
+            raise RuntimeError("gdbus returned an invalid method reply") from exc
+        if not isinstance(reply, tuple) or len(reply) != 1 or not isinstance(reply[0], str):
+            raise RuntimeError("gdbus returned an unexpected method reply")
+        return json.loads(reply[0])
+
+    def poll(self) -> Optional[WindowState]:
+        cached = self._maybe_use_cache()
+        if cached is not None:
+            return cached
+        try:
+            windows = self._call_json_method("List")
+        except Exception as exc:
+            if not self._warned:
+                self._logger.warning("Window Calls GNOME Shell query unavailable; using X11 fallback: %s", exc)
+                self._warned = True
+            return self._poll_x11_fallback()
+        if not isinstance(windows, list):
+            self._logger.debug("Window Calls returned an invalid window list")
+            return self._poll_x11_fallback()
+
+        target: Optional[WindowState] = None
+        best: Optional[WindowState] = None
+        best_area = 0
+        for window in windows:
+            if not isinstance(window, dict) or not self._matches(str(window.get("title") or "")):
+                continue
+            try:
+                window_id = int(window["id"])
+                details = self._call_json_method("Details", window_id)
+            except Exception as exc:
+                self._logger.debug("Window Calls details query failed for Elite window: %s", exc)
+                continue
+            if not isinstance(details, dict):
+                continue
+
+            info = {**window, **details}
+            try:
+                x = int(info["x"])
+                y = int(info["y"])
+                width = int(info["width"])
+                height = int(info["height"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if width <= 0 or height <= 0:
+                continue
+
+            state = WindowState(
+                x=x,
+                y=y,
+                width=width,
+                height=height,
+                is_foreground=bool(info.get("focus", False)),
+                is_visible=bool(info.get("in_current_workspace", True)) and not bool(info.get("minimized", False)),
+                identifier=f"gnome-{window_id}",
+                global_x=x,
+                global_y=y,
+            )
+            if state.is_foreground:
+                target = state
+                break
+            area = width * height
+            if area > best_area:
+                best = state
+                best_area = area
+
+        state = target or best
+        if state is None:
+            return self._poll_x11_fallback()
+
+        # Window Calls Details returns Mutter's frame rectangle in virtual-desktop coordinates.
+        return self._complete(state)

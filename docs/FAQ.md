@@ -170,7 +170,9 @@ Modern Overlay now ships with compositor-aware helpers and multiple fallbacks. T
   ```
 - **KDE Plasma (KWin):** Set `force_xwayland` to **false** in `overlay_settings.json`. KWin—Plasma handles Wayland windows natively, and forcing XWayland can break input/stacking.
 
-- **XWayland mode:** On Wayland sessions the overlay forces itself to launch under XWayland for compatibility. Keep this path in mind on GNOME Shell (Wayland), where native layer-shell hooks are not yet available; the overlay behaves like it does on X11 and stays pinned above Elite.
+- **GNOME Shell (Wayland):** Install and enable [Window Calls](https://extensions.gnome.org/extension/4724/window-calls/) to let the overlay track native Wayland game windows. The client calls its read-only `List` and `Details` D-Bus methods. If EDMC uses sandbox Python, the client invokes host `gdbus` with `flatpak-spawn --host`; EDMC must have the `org.freedesktop.Flatpak` D-Bus permission described in the [Flatpak D-Bus access guide](wiki/Installation-FAQs.md#flatpak-dbus-access). If the overlay already runs with host Python, it calls `gdbus` directly. This enables window tracking, not GNOME-specific overlay stacking guarantees.
+
+- **XWayland mode:** When `force_xwayland` is enabled, the overlay launches under XWayland for compatibility. On GNOME Shell this lets the existing X11 tracker find Elite when Elite itself is running through XWayland.
   ```bash
   # Example for Debian/Ubuntu; xprop/xwininfo ship in x11-utils and swaymsg comes with sway.
   sudo apt install wmctrl x11-utils sway
