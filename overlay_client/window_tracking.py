@@ -230,6 +230,8 @@ def _create_wayland_tracker(
         return _HyprlandTracker(logger, title_hint, monitor_provider)
     if compositor == "kwin":
         return _KWinTracker(logger, title_hint, monitor_provider)
+    if compositor in {"gnome-shell", "mutter"}:
+        return _GnomeTracker(logger, title_hint, monitor_provider)
     if compositor == "cosmic":
         logger.info("COSMIC Wayland compositor detected; follow mode backend not yet implemented.")
         return None
