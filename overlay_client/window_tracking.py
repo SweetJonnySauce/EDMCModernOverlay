@@ -909,7 +909,7 @@ class _KWinTracker(_WaylandTrackerBase):
 
 
 class _GnomeTracker(_WaylandTrackerBase):
-    """Use the Window Calls GNOME Shell extension, falling back to X11 tracking."""
+    """Use the Window Calls GNOME Shell extension on GNOME Wayland."""
 
     _BUS_NAME = "org.gnome.Shell"
     _OBJECT_PATH = "/org/gnome/Shell/Extensions/Windows"
@@ -921,15 +921,7 @@ class _GnomeTracker(_WaylandTrackerBase):
         monitor_provider: Optional[MonitorProvider],
     ) -> None:
         super().__init__(logger, title_hint, monitor_provider)
-        self._x11_fallback = _WmctrlTracker(logger, title_hint, monitor_provider)
         self._warned = False
-
-    def set_monitor_provider(self, provider: Optional[MonitorProvider]) -> None:
-        super().set_monitor_provider(provider)
-        self._x11_fallback.set_monitor_provider(provider)
-
-    def _poll_x11_fallback(self) -> Optional[WindowState]:
-        return self._complete(self._x11_fallback.poll())
 
     def _call_json_method(self, method: str, *args: object) -> Any:
         command = []
@@ -974,12 +966,12 @@ class _GnomeTracker(_WaylandTrackerBase):
             windows = self._call_json_method("List")
         except Exception as exc:
             if not self._warned:
-                self._logger.warning("Window Calls GNOME Shell query unavailable; using X11 fallback: %s", exc)
+                self._logger.warning("Window Calls GNOME Shell query unavailable: %s", exc)
                 self._warned = True
-            return self._poll_x11_fallback()
+            return self._complete(None)
         if not isinstance(windows, list):
             self._logger.debug("Window Calls returned an invalid window list")
-            return self._poll_x11_fallback()
+            return self._complete(None)
 
         target: Optional[WindowState] = None
         best: Optional[WindowState] = None
@@ -1028,7 +1020,7 @@ class _GnomeTracker(_WaylandTrackerBase):
 
         selected_state: Optional[WindowState] = target or best
         if selected_state is None:
-            return self._poll_x11_fallback()
+            return self._complete(None)
 
         # Window Calls Details returns Mutter's frame rectangle in virtual-desktop coordinates.
         return self._complete(selected_state)
