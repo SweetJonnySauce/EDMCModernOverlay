@@ -21,6 +21,7 @@ class PlatformContext:
     session_type: str = ""
     compositor: str = ""
     force_xwayland: bool = False
+    xwayland_on_wayland: bool = False
     flatpak: bool = False
     flatpak_app: str = ""
 
@@ -263,7 +264,7 @@ class PlatformController:
         if sys.platform.startswith("win"):
             self._logger.debug("Selecting Windows integration for overlay client")
             return _WindowsIntegration(self._widget, self._logger, self._context)
-        if self._context.force_xwayland or self._platform_name.startswith("xcb"):
+        if self._context.force_xwayland or self._context.xwayland_on_wayland or self._platform_name.startswith("xcb"):
             self._logger.debug("Selecting XCB/X11 integration for overlay client")
             return _XcbIntegration(self._widget, self._logger, self._context)
         if (os.environ.get("XDG_SESSION_TYPE") or "").lower() == "x11":
@@ -293,7 +294,11 @@ class PlatformController:
         if not session:
             session = (os.environ.get("XDG_SESSION_TYPE") or "").lower()
         platform_name = (QGuiApplication.platformName() or self._platform_name or "").lower()
-        if session == "wayland" and (self._context.force_xwayland or platform_name.startswith("xcb")):
+        if session == "wayland" and (
+            self._context.force_xwayland
+            or self._context.xwayland_on_wayland
+            or platform_name.startswith("xcb")
+        ):
             return "Wayland (XWayland)"
         if platform_name.startswith("wayland"):
             return "Wayland"

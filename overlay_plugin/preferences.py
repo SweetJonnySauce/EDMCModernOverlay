@@ -80,6 +80,7 @@ PROFILE_STATUS_POLL_INTERVAL_MS = 750
 DEFAULT_DEBUG_OVERLAY_CORNER = "SE"
 DEFAULT_GRIDLINES_ENABLED = True
 DEFAULT_FORCE_XWAYLAND = True
+DEFAULT_XWAYLAND_ON_WAYLAND = False
 DEFAULT_MAX_FONT_POINT = 12.0
 DEFAULT_LEGACY_FONT_STEP = 4
 DEFAULT_TITLE_BAR_HEIGHT = 30
@@ -99,6 +100,7 @@ CONFIG_BACKED_PREFERENCE_NAMES = (
     "force_render",
     STANDALONE_MODE_PREF_KEY,
     "force_xwayland",
+    "xwayland_on_wayland",
     "physical_clamp_enabled",
     "physical_clamp_overrides",
     "show_debug_overlay",
@@ -624,6 +626,7 @@ class Preferences:
     force_render: bool = False
     standalone_mode: bool = False
     force_xwayland: bool = DEFAULT_FORCE_XWAYLAND
+    xwayland_on_wayland: bool = DEFAULT_XWAYLAND_ON_WAYLAND
     physical_clamp_enabled: bool = False
     physical_clamp_overrides: Dict[str, float] = field(default_factory=dict)
     show_debug_overlay: bool = False
@@ -741,6 +744,10 @@ class Preferences:
                 self.standalone_mode,
             ),
             "force_xwayland": _config_get_bool(_config_key("force_xwayland"), self.force_xwayland),
+            "xwayland_on_wayland": _config_get_bool(
+                _config_key("xwayland_on_wayland"),
+                self.xwayland_on_wayland,
+            ),
             "physical_clamp_enabled": _config_get_bool(
                 _config_key("physical_clamp_enabled"),
                 self.physical_clamp_enabled,
@@ -822,6 +829,10 @@ class Preferences:
             self.standalone_mode,
         )
         self.force_xwayland = _coerce_bool(data.get("force_xwayland"), self.force_xwayland)
+        self.xwayland_on_wayland = _coerce_bool(
+            data.get("xwayland_on_wayland"),
+            self.xwayland_on_wayland,
+        )
         self.physical_clamp_enabled = _coerce_bool(
             data.get("physical_clamp_enabled"),
             self.physical_clamp_enabled,
@@ -915,6 +926,7 @@ class Preferences:
             "force_render": bool(self.force_render),
             STANDALONE_MODE_PREF_KEY: bool(self.standalone_mode),
             "force_xwayland": bool(self.force_xwayland),
+            "xwayland_on_wayland": bool(self.xwayland_on_wayland),
             "physical_clamp_enabled": bool(self.physical_clamp_enabled),
             "physical_clamp_overrides": dict(self.physical_clamp_overrides or {}),
             "show_debug_overlay": bool(self.show_debug_overlay),
@@ -955,6 +967,7 @@ class Preferences:
         _config_set_value(_config_key("force_render"), bool(self.force_render))
         _config_set_value(_config_key(STANDALONE_MODE_PREF_KEY), bool(self.standalone_mode))
         _config_set_value(_config_key("force_xwayland"), bool(self.force_xwayland))
+        _config_set_value(_config_key("xwayland_on_wayland"), bool(self.xwayland_on_wayland))
         _config_set_value(_config_key("physical_clamp_enabled"), bool(self.physical_clamp_enabled))
         try:
             overrides_payload = json.dumps(self.physical_clamp_overrides)

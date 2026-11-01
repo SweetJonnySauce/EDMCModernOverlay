@@ -1446,10 +1446,11 @@ class _PluginRuntime:
         )
         platform_context = self._platform_context_payload()
         LOGGER.debug(
-            "Overlay launch context: session=%s compositor=%s force_xwayland=%s qt_platform=%s",
+            "Overlay launch context: session=%s compositor=%s force_xwayland=%s xwayland_on_wayland=%s qt_platform=%s",
             platform_context.get("session_type"),
             platform_context.get("compositor"),
             platform_context.get("force_xwayland"),
+            platform_context.get("xwayland_on_wayland"),
             launch_env.get("QT_QPA_PLATFORM"),
         )
         self.watchdog = OverlayWatchdog(
@@ -3412,6 +3413,7 @@ class _PluginRuntime:
         session = (env.get("XDG_SESSION_TYPE") or "").lower()
         compositor = self._detect_wayland_compositor()
         force_xwayland = bool(self._preferences.force_xwayland)
+        xwayland_on_wayland = session == "wayland" and bool(self._preferences.xwayland_on_wayland)
         log_level_payload = self._build_log_level_payload()
         env["EDMC_OVERLAY_LOG_LEVEL"] = str(log_level_payload.get("value"))
         log_level_name = log_level_payload.get("name") or logging.getLevelName(logging.INFO)
@@ -3420,12 +3422,15 @@ class _PluginRuntime:
         env["EDMC_OVERLAY_SESSION_TYPE"] = session or "unknown"
         env["EDMC_OVERLAY_COMPOSITOR"] = compositor
         env["EDMC_OVERLAY_FORCE_XWAYLAND"] = "1" if force_xwayland else "0"
+        env["EDMC_OVERLAY_XWAYLAND_ON_WAYLAND"] = "1" if xwayland_on_wayland else "0"
         env["EDMC_OVERLAY_IS_FLATPAK"] = "1" if self._flatpak_context.get("is_flatpak") else "0"
         app_id = self._flatpak_context.get("app_id")
         if app_id:
             env["EDMC_OVERLAY_FLATPAK_ID"] = str(app_id)
         if sys.platform.startswith("linux"):
-            if session == "wayland" and not force_xwayland:
+            if xwayland_on_wayland:
+                env["QT_QPA_PLATFORM"] = "xcb"
+            elif session == "wayland" and not force_xwayland:
                 env.setdefault("QT_QPA_PLATFORM", "wayland")
                 env.setdefault("QT_WAYLAND_DISABLE_WINDOWDECORATION", "1")
                 env.setdefault("QT_WAYLAND_LAYER_SHELL", "1")
@@ -3502,6 +3507,7 @@ class _PluginRuntime:
             "session_type": session or "unknown",
             "compositor": self._detect_wayland_compositor(),
             "force_xwayland": bool(self._preferences.force_xwayland),
+            "xwayland_on_wayland": session == "wayland" and bool(self._preferences.xwayland_on_wayland),
         }
         if self._flatpak_context.get("is_flatpak"):
             context["flatpak"] = True

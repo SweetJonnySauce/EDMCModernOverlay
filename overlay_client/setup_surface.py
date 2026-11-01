@@ -142,10 +142,11 @@ class SetupSurfaceMixin:
         self._platform_context = _initial_platform_context(initial)
         self._platform_controller = PlatformController(self, _CLIENT_LOGGER, self._platform_context)
         _CLIENT_LOGGER.debug(
-            "Platform controller initialised: session=%s compositor=%s force_xwayland=%s",
+            "Platform controller initialised: session=%s compositor=%s force_xwayland=%s xwayland_on_wayland=%s",
             self._platform_context.session_type or "unknown",
             self._platform_context.compositor or "unknown",
             self._platform_context.force_xwayland,
+            self._platform_context.xwayland_on_wayland,
         )
         self._window_controller = WindowController(log_fn=_CLIENT_LOGGER.debug)
         self._visibility_helper = VisibilityHelper(log_fn=_CLIENT_LOGGER.debug)
@@ -459,10 +460,11 @@ class SetupSurfaceMixin:
         self._apply_legacy_scale()
         self._platform_controller.prepare_window(self.windowHandle())
         _CLIENT_LOGGER.debug(
-            "Platform controller initialised: session=%s compositor=%s force_xwayland=%s",
+            "Platform controller initialised: session=%s compositor=%s force_xwayland=%s xwayland_on_wayland=%s",
             self._platform_context.session_type or "unknown",
             self._platform_context.compositor or "unknown",
             self._platform_context.force_xwayland,
+            self._platform_context.xwayland_on_wayland,
         )
         self._platform_controller.apply_click_through(True)
         self._apply_standalone_window_identity()
