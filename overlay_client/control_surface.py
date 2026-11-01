@@ -930,11 +930,6 @@ class ControlSurfaceMixin:
             force_flag = self._platform_context.force_xwayland
         else:
             force_flag = bool(force_value)
-        xwayland_value = context_payload.get("xwayland_on_wayland")
-        if xwayland_value is None:
-            xwayland_flag = self._platform_context.xwayland_on_wayland
-        else:
-            xwayland_flag = bool(xwayland_value)
         flatpak_value = context_payload.get("flatpak")
         if flatpak_value is None:
             flatpak_flag = self._platform_context.flatpak
@@ -949,7 +944,6 @@ class ControlSurfaceMixin:
             session_type=session,
             compositor=compositor,
             force_xwayland=force_flag,
-            xwayland_on_wayland=xwayland_flag,
             flatpak=flatpak_flag,
             flatpak_app=flatpak_app_label,
         )
@@ -962,11 +956,10 @@ class ControlSurfaceMixin:
         self._interaction_controller.reapply_current(reason="platform_context_update")
         self._restore_drag_interactivity()
         _CLIENT_LOGGER.debug(
-            "Platform context updated: session=%s compositor=%s force_xwayland=%s xwayland_on_wayland=%s flatpak=%s",
+            "Platform context updated: session=%s compositor=%s force_xwayland=%s flatpak=%s",
             new_context.session_type or "unknown",
             new_context.compositor or "unknown",
             new_context.force_xwayland,
-            new_context.xwayland_on_wayland,
             new_context.flatpak,
         )
         self._status = self._format_status_message(self._status_raw)

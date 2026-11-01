@@ -123,7 +123,7 @@ class SetupSurfaceMixin:
         self._data_client: Optional[OverlayDataClient] = None
         self._last_follow_state: Optional[WindowState] = None
         self._lost_window_logged: bool = False
-        self._last_tracker_state: Optional[Tuple[str, int, int, int, int, bool, bool]] = None
+        self._last_tracker_state: Optional[Tuple[str, int, int, int, int]] = None
         self._last_geometry_log: Optional[Tuple[int, int, int, int]] = None
         self._last_move_log: Optional[Tuple[int, int]] = None
         self._last_screen_name: Optional[str] = None
@@ -142,11 +142,10 @@ class SetupSurfaceMixin:
         self._platform_context = _initial_platform_context(initial)
         self._platform_controller = PlatformController(self, _CLIENT_LOGGER, self._platform_context)
         _CLIENT_LOGGER.debug(
-            "Platform controller initialised: session=%s compositor=%s force_xwayland=%s xwayland_on_wayland=%s",
+            "Platform controller initialised: session=%s compositor=%s force_xwayland=%s",
             self._platform_context.session_type or "unknown",
             self._platform_context.compositor or "unknown",
             self._platform_context.force_xwayland,
-            self._platform_context.xwayland_on_wayland,
         )
         self._window_controller = WindowController(log_fn=_CLIENT_LOGGER.debug)
         self._visibility_helper = VisibilityHelper(log_fn=_CLIENT_LOGGER.debug)
@@ -161,7 +160,7 @@ class SetupSurfaceMixin:
             set_widget_attribute_fn=lambda attr, enabled: self.setAttribute(attr, enabled),
             set_window_flag_fn=self._set_window_flag,
             ensure_visible_fn=lambda: self.show() if not self.isVisible() else None,
-            raise_fn=lambda: self._raise_overlay_if_supported() if self.isVisible() else None,
+            raise_fn=lambda: self.raise_() if self.isVisible() else None,
             set_children_attr_fn=lambda transparent: self._set_children_click_through(transparent),
             transparent_input_supported=self._transparent_input_supported,
             set_window_transparent_input_fn=lambda transparent: self.windowHandle().setFlag(Qt.WindowType.WindowTransparentForInput, transparent) if self.windowHandle() else None,
@@ -303,10 +302,6 @@ class SetupSurfaceMixin:
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Window
         )
-        compositor = (self._platform_context.compositor or "").lower()
-        platform_name = (QGuiApplication.platformName() or "").lower()
-        if platform_name.startswith("wayland") and compositor in {"gnome-shell", "mutter"}:
-            window_flags |= Qt.WindowType.WindowDoesNotAcceptFocus
         if sys.platform.startswith("linux"):
             window_flags |= Qt.WindowType.X11BypassWindowManagerHint
         self.setWindowFlags(window_flags)
@@ -460,11 +455,10 @@ class SetupSurfaceMixin:
         self._apply_legacy_scale()
         self._platform_controller.prepare_window(self.windowHandle())
         _CLIENT_LOGGER.debug(
-            "Platform controller initialised: session=%s compositor=%s force_xwayland=%s xwayland_on_wayland=%s",
+            "Platform controller initialised: session=%s compositor=%s force_xwayland=%s",
             self._platform_context.session_type or "unknown",
             self._platform_context.compositor or "unknown",
             self._platform_context.force_xwayland,
-            self._platform_context.xwayland_on_wayland,
         )
         self._platform_controller.apply_click_through(True)
         self._apply_standalone_window_identity()

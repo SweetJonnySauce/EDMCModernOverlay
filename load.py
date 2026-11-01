@@ -1450,7 +1450,7 @@ class _PluginRuntime:
             platform_context.get("session_type"),
             platform_context.get("compositor"),
             platform_context.get("force_xwayland"),
-            platform_context.get("xwayland_on_wayland"),
+            launch_env.get("EDMC_OVERLAY_XWAYLAND_ON_WAYLAND"),
             launch_env.get("QT_QPA_PLATFORM"),
         )
         self.watchdog = OverlayWatchdog(
@@ -3507,7 +3507,6 @@ class _PluginRuntime:
             "session_type": session or "unknown",
             "compositor": self._detect_wayland_compositor(),
             "force_xwayland": bool(self._preferences.force_xwayland),
-            "xwayland_on_wayland": session == "wayland" and bool(self._preferences.xwayland_on_wayland),
         }
         if self._flatpak_context.get("is_flatpak"):
             context["flatpak"] = True

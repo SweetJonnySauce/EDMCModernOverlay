@@ -1,6 +1,5 @@
 import pytest
 
-from overlay_client import follow_surface
 from overlay_client.follow_surface import FollowSurfaceMixin
 from overlay_client.window_tracking import WindowState
 
@@ -258,84 +257,3 @@ def test_handle_missing_follow_state_force_render_enables_visibility(monkeypatch
 
     assert applied == [True, True]  # click-through and restore
     assert stub._visibility_helper.calls == [True]
-
-
-def test_raise_overlay_if_supported_only_skips_gnome_wayland(monkeypatch: pytest.MonkeyPatch):
-    stub = _FollowSurfaceStub()
-    raised = []
-    stub.raise_ = lambda: raised.append(True)  # type: ignore[assignment]
-    stub._platform_context = type("PlatformContextStub", (), {"compositor": "gnome-shell"})()
-    monkeypatch.setattr(stub, "_is_wayland", lambda: True)
-
-    stub._raise_overlay_if_supported()
-
-    assert raised == []
-
-    stub._platform_context.compositor = "kwin"
-    stub._raise_overlay_if_supported()
-    assert raised == [True]
-
-    stub._platform_context.compositor = "gnome-shell"
-    monkeypatch.setattr(stub, "_is_wayland", lambda: False)
-    stub._raise_overlay_if_supported()
-
-    assert raised == [True, True]
-
-
-def test_update_follow_visibility_retries_gnome_compositor_stacking(monkeypatch):
-    scheduled = []
-    monkeypatch.setattr(follow_surface.QTimer, "singleShot", lambda delay, callback: scheduled.append((delay, callback)))
-    stub = _FollowSurfaceStub()
-    stub._platform_context = type("PlatformContextStub", (), {"compositor": "gnome-shell"})()
-    stub._is_wayland = lambda: True  # type: ignore[assignment]
-    stub.windowTitle = lambda: "EDMC Modern Overlay"  # type: ignore[assignment]
-    setattr(stub, "isVisible", lambda: True)
-    stacking_calls = []
-
-    def set_overlay_above(title, above):
-        stacking_calls.append((title, above))
-        return not above or stacking_calls.count((title, above)) == 2
-
-    setattr(stub, "_window_tracker", type(
-        "StubTracker",
-        (),
-        {"set_overlay_above": lambda self, title, above: set_overlay_above(title, above)},
-    )())
-
-    stub._update_follow_visibility(True)
-    assert stacking_calls == []
-    assert [delay for delay, _ in scheduled] == [100]
-
-    scheduled.pop(0)[1]()
-    assert stacking_calls == [("EDMC Modern Overlay", True)]
-    assert [delay for delay, _ in scheduled] == [100]
-
-    scheduled.pop(0)[1]()
-    stub._update_follow_visibility(False)
-
-    assert stacking_calls == [
-        ("EDMC Modern Overlay", True),
-        ("EDMC Modern Overlay", True),
-        ("EDMC Modern Overlay", False),
-    ]
-
-
-def test_apply_follow_state_does_not_make_synchronous_gnome_stacking_request():
-    stub = _FollowSurfaceStub()
-    stacking_calls = []
-    setattr(stub, "_normalise_tracker_geometry", lambda state: ((0, 0, 10, 10), (0, 0, 10, 10), None, (0, 0, 10, 10)))
-    setattr(stub, "_resolve_and_apply_geometry", lambda tracker, desired: desired)
-    setattr(stub, "_post_process_follow_state", lambda state, target: None)
-    setattr(stub, "_window_controller", type("StubWindowController", (), {"_fullscreen_hint_logged": False})())
-    setattr(stub, "_window_tracker", type(
-        "StubTracker",
-        (),
-        {"set_overlay_above": lambda self, title, above: stacking_calls.append((title, above))},
-    )())
-
-    FollowSurfaceMixin._apply_follow_state(
-        stub,
-        WindowState(0, 0, 10, 10, is_foreground=True, is_visible=True),
-    )
-
-    assert stacking_calls == []

@@ -17,7 +17,6 @@ class InitialClientSettings:
     force_render: bool = False
     standalone_mode: bool = False
     force_xwayland: bool = True
-    xwayland_on_wayland: bool = False
     physical_clamp_enabled: bool = False
     physical_clamp_overrides: Dict[str, float] = field(default_factory=dict)
     show_debug_overlay: bool = False
@@ -173,7 +172,6 @@ def load_initial_settings(settings_path: Path) -> InitialClientSettings:
     force_render = bool(data.get("force_render", defaults.force_render))
     standalone_mode = bool(data.get("standalone_mode", defaults.standalone_mode))
     force_xwayland = bool(data.get("force_xwayland", defaults.force_xwayland))
-    xwayland_on_wayland = bool(data.get("xwayland_on_wayland", defaults.xwayland_on_wayland))
     physical_clamp_enabled = bool(data.get("physical_clamp_enabled", defaults.physical_clamp_enabled))
     show_debug_overlay = bool(data.get("show_debug_overlay", defaults.show_debug_overlay))
     try:
@@ -249,7 +247,6 @@ def load_initial_settings(settings_path: Path) -> InitialClientSettings:
         force_render=force_render,
         standalone_mode=standalone_mode,
         force_xwayland=force_xwayland,
-        xwayland_on_wayland=xwayland_on_wayland,
         show_debug_overlay=show_debug_overlay,
         min_font_point=min_font,
         max_font_point=max_font,
