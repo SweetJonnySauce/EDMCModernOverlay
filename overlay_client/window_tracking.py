@@ -222,8 +222,6 @@ def _create_wayland_tracker(
     compositor_hint: str,
 ) -> Optional[WindowTracker]:
     compositor = (compositor_hint or "").lower()
-    if compositor in {"gnome-shell", "mutter"}:
-        return _GnomeTracker(logger, title_hint, monitor_provider)
     if compositor in {"sway", "wlroots", "wayfire"}:
         return _SwayTracker(logger, title_hint, monitor_provider)
     if compositor == "hyprland":
