@@ -51,7 +51,8 @@ def test_gnome_tracker_reads_window_state_from_session_bus(monkeypatch) -> None:
     monkeypatch.setattr(window_tracking.subprocess, "run", fake_run)
     monkeypatch.setattr(window_tracking.sys, "platform", "linux")
     monkeypatch.setenv("EDMC_OVERLAY_SESSION_TYPE", "wayland")
-    monkeypatch.setenv("EDMC_OVERLAY_COMPOSITOR", "gnome-shell")
+    monkeypatch.delenv("EDMC_OVERLAY_COMPOSITOR", raising=False)
+    monkeypatch.setenv("XDG_CURRENT_DESKTOP", "GNOME")
     monkeypatch.setenv("EDMC_OVERLAY_FORCE_XWAYLAND", "1")
     monkeypatch.setenv("EDMC_OVERLAY_IS_FLATPAK", "1")
     monkeypatch.delenv("FLATPAK_ID", raising=False)
@@ -116,6 +117,36 @@ def test_gnome_tracker_falls_back_to_x11_without_extension(monkeypatch) -> None:
 
     assert tracker is not None
     assert tracker.poll() == expected
+
+
+def test_force_xwayland_keeps_x11_tracker_for_non_gnome_wayland(monkeypatch) -> None:
+    selected = []
+
+    class FakeWaylandTracker:
+        def __init__(self, logger, title_hint, monitor_provider) -> None:
+            selected.append("wayland")
+
+    class FakeFallbackTracker:
+        def __init__(self, logger, title_hint, monitor_provider) -> None:
+            selected.append("x11")
+
+        def set_monitor_provider(self, provider) -> None:
+            pass
+
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(window_tracking, "_SwayTracker", FakeWaylandTracker)
+    monkeypatch.setattr(window_tracking, "_WmctrlTracker", FakeFallbackTracker)
+    monkeypatch.setattr(window_tracking.sys, "platform", "linux")
+    monkeypatch.setenv("EDMC_OVERLAY_SESSION_TYPE", "wayland")
+    monkeypatch.setenv("EDMC_OVERLAY_COMPOSITOR", "sway")
+    monkeypatch.setenv("EDMC_OVERLAY_FORCE_XWAYLAND", "1")
+
+    tracker = window_tracking.create_elite_window_tracker(logging.getLogger("test.sway"))
+
+    assert tracker is not None
+    assert selected == ["x11"]
 
 
 def test_gnome_tracker_falls_back_to_x11_when_elite_is_not_in_window_calls(monkeypatch) -> None:
