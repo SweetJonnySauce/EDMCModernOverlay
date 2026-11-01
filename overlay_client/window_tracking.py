@@ -202,16 +202,15 @@ def create_elite_window_tracker(
 
 def _resolve_wayland_compositor(compositor_hint: str) -> str:
     compositor = (compositor_hint or "").lower()
-    env = os.environ
     if compositor:
         return compositor
-    if env.get("SWAYSOCK"):
+    if os.environ.get("SWAYSOCK"):
         return "sway"
-    if env.get("HYPRLAND_INSTANCE_SIGNATURE"):
+    if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
         return "hyprland"
-    if "KDE" in (env.get("XDG_CURRENT_DESKTOP") or "").upper() or env.get("KDE_FULL_SESSION"):
+    if "KDE" in (os.environ.get("XDG_CURRENT_DESKTOP") or "").upper() or os.environ.get("KDE_FULL_SESSION"):
         return "kwin"
-    if "GNOME" in (env.get("XDG_CURRENT_DESKTOP") or "").upper() or env.get("GNOME_SHELL_SESSION_MODE"):
+    if "GNOME" in (os.environ.get("XDG_CURRENT_DESKTOP") or "").upper() or os.environ.get("GNOME_SHELL_SESSION_MODE"):
         return "gnome-shell"
     return ""
 
