@@ -924,23 +924,18 @@ class _GnomeTracker(_WaylandTrackerBase):
         self._warned = False
 
     def _call_json_method(self, method: str, *args: object) -> Any:
-        command = []
-        if os.environ.get("FLATPAK_ID"):
-            command.extend(["flatpak-spawn", "--host"])
-        command.extend(
-            [
-                "gdbus",
-                "call",
-                "--session",
-                "--dest",
-                self._BUS_NAME,
-                "--object-path",
-                self._OBJECT_PATH,
-                "--method",
-                f"org.gnome.Shell.Extensions.Windows.{method}",
-                *(str(arg) for arg in args),
-            ]
-        )
+        command = [
+            "gdbus",
+            "call",
+            "--session",
+            "--dest",
+            self._BUS_NAME,
+            "--object-path",
+            self._OBJECT_PATH,
+            "--method",
+            f"org.gnome.Shell.Extensions.Windows.{method}",
+            *(str(arg) for arg in args),
+        ]
         result = subprocess.run(
             command,
             check=False,
