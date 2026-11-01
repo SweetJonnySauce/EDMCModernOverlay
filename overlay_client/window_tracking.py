@@ -180,13 +180,7 @@ def create_elite_window_tracker(
     if platform.startswith("linux"):
         session = (os.environ.get("EDMC_OVERLAY_SESSION_TYPE") or os.environ.get("XDG_SESSION_TYPE") or "").lower()
         compositor = (os.environ.get("EDMC_OVERLAY_COMPOSITOR") or "").lower()
-        force_xwayland = os.environ.get("EDMC_OVERLAY_FORCE_XWAYLAND") == "1"
-        xwayland_on_wayland = os.environ.get("EDMC_OVERLAY_XWAYLAND_ON_WAYLAND") == "1"
-        desktop = (os.environ.get("XDG_CURRENT_DESKTOP") or "").upper()
-        is_gnome = compositor in {"gnome-shell", "mutter"} or (
-            not compositor and ("GNOME" in desktop or bool(os.environ.get("GNOME_SHELL_SESSION_MODE")))
-        )
-        if session == "wayland" and not xwayland_on_wayland and (not force_xwayland or is_gnome):
+        if session == "wayland":
             tracker = _create_wayland_tracker(logger, title_hint, monitor_provider, compositor)
             if tracker is not None:
                 return tracker

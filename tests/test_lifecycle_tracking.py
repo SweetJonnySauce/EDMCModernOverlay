@@ -57,7 +57,6 @@ class _FakePrefs:
         self.gridline_spacing = 120
         self.force_render = False
         self.force_xwayland = False
-        self.xwayland_on_wayland = False
         self.show_debug_overlay = False
         self.min_font_point = 6.0
         self.max_font_point = 24.0
@@ -176,7 +175,7 @@ def test_stop_without_start_is_safe(monkeypatch, tmp_path):
     assert runtime._tracked_handles == [runtime.broadcaster]
 
 
-def test_xwayland_on_wayland_launch_env_is_independent_of_force_xwayland(monkeypatch, tmp_path):
+def test_force_xwayland_launch_env_selects_qt_backend(monkeypatch, tmp_path):
     runtime = _make_runtime(monkeypatch, tmp_path)
     monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
     monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
@@ -185,20 +184,11 @@ def test_xwayland_on_wayland_launch_env_is_independent_of_force_xwayland(monkeyp
     env = runtime._build_overlay_environment()
     assert env["QT_QPA_PLATFORM"] == "wayland"
     assert env["EDMC_OVERLAY_FORCE_XWAYLAND"] == "0"
-    assert env["EDMC_OVERLAY_XWAYLAND_ON_WAYLAND"] == "0"
 
-    runtime._preferences.xwayland_on_wayland = True
-    env = runtime._build_overlay_environment()
-    assert env["QT_QPA_PLATFORM"] == "xcb"
-    assert env["EDMC_OVERLAY_FORCE_XWAYLAND"] == "0"
-    assert env["EDMC_OVERLAY_XWAYLAND_ON_WAYLAND"] == "1"
-
-    runtime._preferences.xwayland_on_wayland = False
     runtime._preferences.force_xwayland = True
     env = runtime._build_overlay_environment()
     assert env["QT_QPA_PLATFORM"] == "xcb"
     assert env["EDMC_OVERLAY_FORCE_XWAYLAND"] == "1"
-    assert env["EDMC_OVERLAY_XWAYLAND_ON_WAYLAND"] == "0"
 
 
 def test_hotkeys_manager_start_stop_are_lightweight_tie_ins(monkeypatch, tmp_path):

@@ -118,44 +118,6 @@ def test_gnome_tracker_falls_back_to_x11_without_extension(monkeypatch) -> None:
     assert tracker.poll() == expected
 
 
-def test_xwayland_on_wayland_uses_x11_tracker_without_window_calls(monkeypatch) -> None:
-    expected = WindowState(
-        x=10,
-        y=20,
-        width=800,
-        height=600,
-        is_foreground=True,
-        is_visible=True,
-        identifier="0x1234",
-    )
-
-    class FakeFallbackTracker:
-        def __init__(self, logger, title_hint, monitor_provider) -> None:
-            pass
-
-        def set_monitor_provider(self, provider) -> None:
-            pass
-
-        def poll(self):
-            return expected
-
-    def fail_gdbus(command, **kwargs):
-        raise AssertionError("Window Calls must not be queried in XWayland-on-Wayland mode")
-
-    monkeypatch.setattr(window_tracking.subprocess, "run", fail_gdbus)
-    monkeypatch.setattr(window_tracking, "_WmctrlTracker", FakeFallbackTracker)
-    monkeypatch.setattr(window_tracking.sys, "platform", "linux")
-    monkeypatch.setenv("EDMC_OVERLAY_SESSION_TYPE", "wayland")
-    monkeypatch.setenv("EDMC_OVERLAY_COMPOSITOR", "gnome-shell")
-    monkeypatch.setenv("EDMC_OVERLAY_FORCE_XWAYLAND", "0")
-    monkeypatch.setenv("EDMC_OVERLAY_XWAYLAND_ON_WAYLAND", "1")
-
-    tracker = window_tracking.create_elite_window_tracker(logging.getLogger("test.gnome"))
-
-    assert tracker is not None
-    assert tracker.poll() == expected
-
-
 def test_gnome_tracker_falls_back_to_x11_when_elite_is_not_in_window_calls(monkeypatch) -> None:
     expected = WindowState(
         x=1080,

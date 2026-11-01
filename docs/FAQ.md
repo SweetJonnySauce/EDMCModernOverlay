@@ -172,7 +172,7 @@ Modern Overlay now ships with compositor-aware helpers and multiple fallbacks. T
 
 - **GNOME Shell (Wayland):** For native-Wayland Elite, install/enable [Window Calls](https://extensions.gnome.org/extension/4724/window-calls/) so the client can read Elite's geometry and focus through `List` and `Details`. If Elite runs under XWayland, the existing X11 tracker is used. In Flatpak, sandboxed Python invokes host `gdbus` with `flatpak-spawn --host`, requiring the `org.freedesktop.Flatpak` D-Bus permission described in the [Flatpak D-Bus access guide](wiki/Installation-FAQs.md#flatpak-dbus-access); a client already running with host Python invokes `gdbus` directly. Window Calls provides tracking, not stacking or click-through guarantees.
 
-- **XWayland mode:** When `force_xwayland` is enabled, the overlay launches under XWayland for compatibility. On GNOME Shell this keeps the existing X11 tracker path for Elite running through XWayland. For a native-Wayland Elite window with an XWayland overlay, set `force_xwayland` to **false** and `xwayland_on_wayland` to **true** in `overlay_settings.json`; this uses the X11 tracker and bypasses Window Calls without changing the existing `force_xwayland` behavior.
+- **XWayland mode:** When `force_xwayland` is enabled, the overlay launches under XWayland for compatibility. Window tracking follows the compositor session independently; on GNOME Wayland, Window Calls is used to track Elite whether the overlay itself uses Wayland or XWayland.
   ```bash
   # Example for Debian/Ubuntu; xprop/xwininfo ship in x11-utils and swaymsg comes with sway.
   sudo apt install wmctrl x11-utils sway

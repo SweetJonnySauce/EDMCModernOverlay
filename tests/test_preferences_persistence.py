@@ -53,7 +53,6 @@ def test_preferences_save_persists_config_and_shadow(plugin_dir: Path, monkeypat
     preferences.payload_nudge_gutter = 40
     preferences.physical_clamp_overrides = {"DisplayPort-2": 1.0}
     preferences.standalone_mode = True
-    preferences.xwayland_on_wayland = True
     preferences.controller_toggle_argument = "tog"
     preferences.global_payload_opacity = 73
     preferences.last_on_payload_opacity = 80
@@ -65,7 +64,6 @@ def test_preferences_save_persists_config_and_shadow(plugin_dir: Path, monkeypat
     assert shadow["payload_nudge_gutter"] == 40
     assert shadow["physical_clamp_overrides"] == {"DisplayPort-2": 1.0}
     assert shadow["standalone_mode"] is True
-    assert shadow["xwayland_on_wayland"] is True
     assert shadow["controller_toggle_argument"] == "tog"
     assert shadow["global_payload_opacity"] == 73
     assert shadow["last_on_payload_opacity"] == 80
@@ -75,7 +73,6 @@ def test_preferences_save_persists_config_and_shadow(plugin_dir: Path, monkeypat
     assert config.store[prefs._config_key("payload_nudge_gutter")] == 40
     assert json.loads(config.store[prefs._config_key("physical_clamp_overrides")]) == {"DisplayPort-2": 1.0}
     assert config.store[prefs._config_key(STANDALONE_MODE_PREF_KEY)] is True
-    assert config.store[prefs._config_key("xwayland_on_wayland")] is True
     assert config.store[prefs._config_key("controller_toggle_argument")] == "tog"
     assert config.store[prefs._config_key("global_payload_opacity")] == 73
     assert config.store[prefs._config_key("last_on_payload_opacity")] == 80
@@ -91,7 +88,6 @@ def test_preferences_reload_merges_shadow_when_config_empty(plugin_dir: Path, mo
     first.payload_nudge_gutter = 40
     first.physical_clamp_overrides = {"DisplayPort-2": 1.0, "HDMI-0": 1.25}
     first.standalone_mode = True
-    first.xwayland_on_wayland = True
     first.controller_toggle_argument = "toggle"
     first.global_payload_opacity = 64
     first.last_on_payload_opacity = 75
@@ -107,7 +103,6 @@ def test_preferences_reload_merges_shadow_when_config_empty(plugin_dir: Path, mo
     assert reloaded.payload_nudge_gutter == 40
     assert reloaded.physical_clamp_overrides == {"DisplayPort-2": 1.0, "HDMI-0": 1.25}
     assert reloaded.standalone_mode is True
-    assert reloaded.xwayland_on_wayland is True
     assert reloaded.controller_toggle_argument == "toggle"
     assert reloaded.global_payload_opacity == 64
     assert reloaded.last_on_payload_opacity == 75
@@ -121,7 +116,6 @@ def test_preferences_reload_merges_shadow_when_config_empty(plugin_dir: Path, mo
         "HDMI-0": 1.25,
     }
     assert reloaded_config.store[prefs._config_key(STANDALONE_MODE_PREF_KEY)] is True
-    assert reloaded_config.store[prefs._config_key("xwayland_on_wayland")] is True
     assert reloaded_config.store[prefs._config_key("controller_toggle_argument")] == "toggle"
     assert reloaded_config.store[prefs._config_key("global_payload_opacity")] == 64
     assert reloaded_config.store[prefs._config_key("last_on_payload_opacity")] == 75
@@ -208,7 +202,6 @@ def test_preferences_fresh_install_defaults_match_legacy_overlay_layout(
 
     assert preferences.scale_mode == "fill"
     assert preferences.force_xwayland is True
-    assert preferences.xwayland_on_wayland is False
     assert preferences.title_bar_height == 30
     assert preferences.status_message_gutter == 20
     assert preferences.payload_nudge_gutter == 20
