@@ -94,26 +94,33 @@ class _WaylandIntegration(_IntegrationBase):
     def __init__(self, widget: QWidget, logger: logging.Logger, context: PlatformContext) -> None:
         super().__init__(widget, logger, context)
         self._layer_shell = None
+        self._initialization_logged = False
+        self._gnome_notice_logged = False
+        self._native_transparency_notice_logged = False
 
     def prepare_window(self, window: Optional[QWindow]) -> None:
         super().prepare_window(window)
         if window is None:
             return
         compositor = (self._context.compositor or "").lower()
-        self._logger.debug(
-            "Wayland integration initialising: platform=%s compositor=%s force_xwayland=%s",
-            QGuiApplication.platformName(),
-            compositor or "unknown",
-            self._context.force_xwayland,
-        )
+        if not self._initialization_logged:
+            self._logger.debug(
+                "Wayland integration initialising: platform=%s compositor=%s force_xwayland=%s",
+                QGuiApplication.platformName(),
+                compositor or "unknown",
+                self._context.force_xwayland,
+            )
+            self._initialization_logged = True
         if compositor in {"sway", "wayfire", "wlroots", "hyprland"}:
             self._initialise_layer_shell(window)
         elif compositor == "kwin":
             self._logger.debug("KWin Wayland detected; relying on Qt input flags for click-through")
         elif compositor in {"gnome-shell", "mutter"}:
-            self._logger.info(
-                "GNOME Shell detected – install the EDMC Modern Overlay GNOME extension for full click-through support."
-            )
+            if not self._gnome_notice_logged:
+                self._logger.info(
+                    "GNOME Shell native Wayland stacking/click-through are limited; Window Calls provides game tracking and best-effort overlay stacking."
+                )
+                self._gnome_notice_logged = True
         else:
             if compositor:
                 self._logger.debug("Unknown Wayland compositor '%s'; falling back to generic behaviour", compositor)
@@ -223,9 +230,11 @@ class _WaylandIntegration(_IntegrationBase):
     def _apply_native_transparency(self, window: QWindow) -> None:
         native_getter = getattr(window, "nativeInterface", None)
         if not callable(native_getter):
-            self._logger.debug(
-                "QWindow.nativeInterface() unavailable; skipping Wayland native transparency hook (Qt<6.6?)"
-            )
+            if not self._native_transparency_notice_logged:
+                self._logger.debug(
+                    "QWindow.nativeInterface() unavailable; skipping Wayland native transparency hook (Qt<6.6?)"
+                )
+                self._native_transparency_notice_logged = True
             return
         native_interface = native_getter()
         try:
@@ -235,7 +244,9 @@ class _WaylandIntegration(_IntegrationBase):
                 if wl_surface:
                     self._logger.debug("Wayland wl_surface acquired; compositor should honour transparent input")
         except Exception as exc:  # pragma: no cover - diagnostic only
-            self._logger.debug("Unable to query Wayland native resources: %s", exc)
+            if not self._native_transparency_notice_logged:
+                self._logger.debug("Unable to query Wayland native resources: %s", exc)
+                self._native_transparency_notice_logged = True
 
 
 class PlatformController:

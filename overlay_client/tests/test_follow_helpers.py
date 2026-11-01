@@ -12,6 +12,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))  # noqa: E402
 from overlay_client.client_config import InitialClientSettings  # noqa: E402
 from overlay_client.debug_config import DebugConfig  # noqa: E402
 from overlay_client.follow_geometry import ScreenInfo  # noqa: E402
+from overlay_client.follow_controller import FollowController  # noqa: E402
 from overlay_client.overlay_client import OverlayWindow  # noqa: E402
 from overlay_client.window_tracking import WindowState  # noqa: E402
 
@@ -140,3 +141,31 @@ def test_post_process_follow_state_calls_transient_parent_and_visibility(monkeyp
     assert isinstance(parent_calls[0], WindowState)
     assert visibility_calls == [False]
     assert window._fullscreen_hint_logged in {False, True}
+
+
+def test_follow_controller_logs_focus_transitions_without_geometry_changes():
+    states = [
+        WindowState(10, 20, 100, 50, is_foreground=False, is_visible=True, identifier="elite"),
+        WindowState(10, 20, 100, 50, is_foreground=True, is_visible=True, identifier="elite"),
+    ]
+    logged = []
+
+    class Logger:
+        @staticmethod
+        def debug(*args):
+            logged.append(args)
+
+    controller = FollowController(
+        poll_fn=lambda: states.pop(0),
+        logger=Logger(),
+        tracking_timer=None,
+        debug_suffix=lambda: "",
+    )
+
+    controller.refresh()
+    controller.refresh()
+
+    assert len(logged) == 2
+    assert logged[0][0] == logged[1][0] == "Tracker state: id=%s global=(%d,%d) size=%dx%d foreground=%s visible=%s; %s"
+    assert logged[0][6] is False
+    assert logged[1][6] is True

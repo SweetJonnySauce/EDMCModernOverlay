@@ -5,7 +5,7 @@ import logging
 import sys
 from typing import Optional, Tuple
 
-from PyQt6.QtCore import Qt, QRect, QSize
+from PyQt6.QtCore import Qt, QRect, QSize, QTimer
 from PyQt6.QtGui import QGuiApplication, QWindow, QScreen
 from PyQt6.QtWidgets import QApplication
 
@@ -27,6 +27,12 @@ DEFAULT_WINDOW_BASE_HEIGHT = 960
 class FollowSurfaceMixin:
     """Follow/window orchestration, platform hooks, and visibility helpers."""
 
+    def _raise_overlay_if_supported(self) -> None:
+        compositor = str(getattr(getattr(self, "_platform_context", None), "compositor", "")).lower()
+        if self._is_wayland() and compositor in {"gnome-shell", "mutter"}:
+            return
+        self.raise_()
+
     def _apply_drag_state(self) -> None:
         window = self.windowHandle()
         _CLIENT_LOGGER.debug(
@@ -45,7 +51,7 @@ class FollowSurfaceMixin:
             if self._cursor_saved:
                 self.setCursor(self._saved_cursor)
                 self._cursor_saved = False
-        self.raise_()
+        self._raise_overlay_if_supported()
 
     def _poll_modifiers(self) -> None:
         if not self._drag_enabled or self._drag_active:
@@ -281,7 +287,7 @@ class FollowSurfaceMixin:
         def _set_geometry(target: Tuple[int, int, int, int]) -> None:
             self._last_set_geometry = target
             self.setGeometry(QRect(*target))
-            self.raise_()
+            self._raise_overlay_if_supported()
 
         def _classify_override(target: Tuple[int, int, int, int], actual: Tuple[int, int, int, int]) -> str:
             classification = self._classify_geometry_override(target, actual)
@@ -446,16 +452,59 @@ class FollowSurfaceMixin:
             self._clear_wm_override(reason="follow state lost")
             self._update_follow_visibility(False)
 
+    def _set_gnome_overlay_above(self, above: bool) -> bool:
+        if not self._is_wayland():
+            return True
+        compositor = str(getattr(getattr(self, "_platform_context", None), "compositor", "")).lower()
+        if compositor not in {"gnome-shell", "mutter"}:
+            return True
+        tracker = getattr(self, "_window_tracker", None)
+        set_above_fn = getattr(tracker, "set_overlay_above", None)
+        if callable(set_above_fn):
+            return bool(set_above_fn(self.windowTitle(), above))
+        return False
+
+    def _schedule_gnome_overlay_above(self) -> None:
+        if not self._is_wayland():
+            return
+        compositor = str(getattr(getattr(self, "_platform_context", None), "compositor", "")).lower()
+        if compositor not in {"gnome-shell", "mutter"}:
+            return
+        if getattr(self, "_gnome_above_retry_pending", False):
+            return
+
+        attempts_remaining = 3
+        setattr(self, "_gnome_above_retry_pending", True)
+
+        def attempt() -> None:
+            nonlocal attempts_remaining
+            setattr(self, "_gnome_above_retry_pending", False)
+            is_visible_fn = getattr(self, "isVisible", None)
+            if not callable(is_visible_fn) or not is_visible_fn():
+                return
+            if self._set_gnome_overlay_above(True):
+                return
+            attempts_remaining -= 1
+            if attempts_remaining > 0:
+                setattr(self, "_gnome_above_retry_pending", True)
+                QTimer.singleShot(100, attempt)
+
+        QTimer.singleShot(100, attempt)
+
     def _update_follow_visibility(self, show: bool) -> None:
+        if not show:
+            self._set_gnome_overlay_above(False)
         new_state = self._visibility_helper.update_visibility(
             show,
             is_visible_fn=lambda: self.isVisible(),
             show_fn=lambda: self.show(),
             hide_fn=lambda: self.hide(),
-            raise_fn=lambda: self.raise_(),
+            raise_fn=self._raise_overlay_if_supported,
             apply_drag_state_fn=self._apply_drag_state,
             format_scale_debug_fn=self.format_scale_debug,
         )
+        if show:
+            self._schedule_gnome_overlay_above()
         # keep compatibility for any consumers expecting cached state
         self._last_visibility_state = new_state
 

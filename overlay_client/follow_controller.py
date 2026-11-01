@@ -28,7 +28,7 @@ class FollowController:
         self._wm_override_timestamp: float = 0.0
         self._wm_override_reason: Optional[str] = None
         self._wm_override_classification: Optional[str] = None
-        self._last_tracker_state: Optional[Tuple[str, int, int, int, int]] = None
+        self._last_tracker_state: Optional[Tuple[str, int, int, int, int, bool, bool]] = None
         self._follow_resume_at: float = 0.0
         self._follow_enabled: bool = True
         self._drag_active: bool = False
@@ -85,7 +85,15 @@ class FollowController:
             return None
         global_x = state.global_x if state.global_x is not None else state.x
         global_y = state.global_y if state.global_y is not None else state.y
-        tracker_key = (state.identifier, global_x, global_y, state.width, state.height)
+        tracker_key = (
+            state.identifier,
+            global_x,
+            global_y,
+            state.width,
+            state.height,
+            state.is_foreground,
+            state.is_visible,
+        )
         if tracker_key != self._last_tracker_state:
             self._logger.debug(
                 "Tracker state: id=%s global=(%d,%d) size=%dx%d foreground=%s visible=%s; %s",
@@ -157,7 +165,7 @@ class FollowController:
         return self._wm_override_classification
 
     @property
-    def last_tracker_state(self) -> Optional[Tuple[str, int, int, int, int]]:
+    def last_tracker_state(self) -> Optional[Tuple[str, int, int, int, int, bool, bool]]:
         return self._last_tracker_state
 
     @property

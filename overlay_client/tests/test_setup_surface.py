@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import pytest
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPaintEvent, QShowEvent
 from PyQt6.QtWidgets import QApplication
 
 from overlay_client.client_config import InitialClientSettings
 from overlay_client.debug_config import DebugConfig
+from overlay_client import setup_surface
 from overlay_client.overlay_client import OverlayWindow, _LINE_WIDTH_DEFAULTS
 
 
@@ -27,6 +29,32 @@ def test_setup_surface_initialises_defaults(qt_app):
         assert window._text_cache_generation == 0
         assert window._repaint_timer.interval() == window._REPAINT_DEBOUNCE_MS
         assert window._legacy_timer.isActive()
+    finally:
+        window._legacy_timer.stop()
+        window._modifier_timer.stop()
+        window._tracking_timer.stop()
+        window.close()
+
+
+@pytest.mark.pyqt_required
+def test_native_gnome_wayland_overlay_does_not_accept_focus(monkeypatch, qt_app):
+    monkeypatch.setenv("EDMC_OVERLAY_SESSION_TYPE", "wayland")
+    monkeypatch.setenv("EDMC_OVERLAY_COMPOSITOR", "gnome-shell")
+    monkeypatch.setenv("EDMC_OVERLAY_FORCE_XWAYLAND", "0")
+
+    class WaylandGuiApplication:
+        @staticmethod
+        def platformName() -> str:
+            return "wayland"
+
+        @staticmethod
+        def primaryScreen():
+            return QApplication.primaryScreen()
+
+    monkeypatch.setattr(setup_surface, "QGuiApplication", WaylandGuiApplication)
+    window = OverlayWindow(InitialClientSettings(force_xwayland=False), DebugConfig())
+    try:
+        assert window.windowFlags() & Qt.WindowType.WindowDoesNotAcceptFocus
     finally:
         window._legacy_timer.stop()
         window._modifier_timer.stop()

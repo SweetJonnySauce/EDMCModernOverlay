@@ -52,7 +52,7 @@ def test_gnome_tracker_reads_window_state_from_session_bus(monkeypatch) -> None:
     monkeypatch.setattr(window_tracking.sys, "platform", "linux")
     monkeypatch.setenv("EDMC_OVERLAY_SESSION_TYPE", "wayland")
     monkeypatch.setenv("EDMC_OVERLAY_COMPOSITOR", "gnome-shell")
-    monkeypatch.setenv("EDMC_OVERLAY_FORCE_XWAYLAND", "1")
+    monkeypatch.setenv("EDMC_OVERLAY_FORCE_XWAYLAND", "0")
     monkeypatch.setenv("EDMC_OVERLAY_IS_FLATPAK", "1")
     monkeypatch.delenv("FLATPAK_ID", raising=False)
 
@@ -149,7 +149,7 @@ def test_gnome_tracker_falls_back_to_x11_when_elite_is_not_in_window_calls(monke
     monkeypatch.setattr(window_tracking.sys, "platform", "linux")
     monkeypatch.setenv("EDMC_OVERLAY_SESSION_TYPE", "wayland")
     monkeypatch.setenv("EDMC_OVERLAY_COMPOSITOR", "gnome-shell")
-    monkeypatch.setenv("EDMC_OVERLAY_FORCE_XWAYLAND", "1")
+    monkeypatch.setenv("EDMC_OVERLAY_FORCE_XWAYLAND", "0")
     monkeypatch.delenv("FLATPAK_ID", raising=False)
 
     tracker = window_tracking.create_elite_window_tracker(logging.getLogger("test.gnome"))
@@ -182,7 +182,7 @@ def test_gnome_tracker_uses_host_gdbus_inside_flatpak(monkeypatch) -> None:
     monkeypatch.setattr(window_tracking.sys, "platform", "linux")
     monkeypatch.setenv("EDMC_OVERLAY_SESSION_TYPE", "wayland")
     monkeypatch.setenv("EDMC_OVERLAY_COMPOSITOR", "gnome-shell")
-    monkeypatch.setenv("EDMC_OVERLAY_FORCE_XWAYLAND", "1")
+    monkeypatch.setenv("EDMC_OVERLAY_FORCE_XWAYLAND", "0")
     monkeypatch.setenv("EDMC_OVERLAY_IS_FLATPAK", "1")
     monkeypatch.setenv("FLATPAK_ID", "io.edcd.EDMarketConnector")
 
@@ -191,3 +191,36 @@ def test_gnome_tracker_uses_host_gdbus_inside_flatpak(monkeypatch) -> None:
     assert tracker is not None
     assert tracker.poll() is None
     assert commands[0][:4] == ["flatpak-spawn", "--host", "gdbus", "call"]
+
+
+def test_gnome_tracker_sets_and_clears_overlay_above(monkeypatch) -> None:
+    commands = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        method = command[command.index("--method") + 1].rsplit(".", 1)[-1]
+        if method == "List":
+            reply = json.dumps([{"id": 99, "title": "EDMC Modern Overlay"}])
+            return types.SimpleNamespace(returncode=0, stdout=repr((reply,)), stderr="")
+        return types.SimpleNamespace(returncode=0, stdout="()", stderr="")
+
+    monkeypatch.setattr(window_tracking.subprocess, "run", fake_run)
+    monkeypatch.setattr(window_tracking.sys, "platform", "linux")
+    monkeypatch.setenv("EDMC_OVERLAY_SESSION_TYPE", "wayland")
+    monkeypatch.setenv("EDMC_OVERLAY_COMPOSITOR", "gnome-shell")
+    monkeypatch.setenv("EDMC_OVERLAY_FORCE_XWAYLAND", "0")
+    monkeypatch.delenv("FLATPAK_ID", raising=False)
+
+    tracker = window_tracking.create_elite_window_tracker(logging.getLogger("test.gnome"))
+
+    assert tracker is not None
+    set_above = getattr(tracker, "set_overlay_above")
+    assert set_above("EDMC Modern Overlay", True) is True
+    assert set_above("EDMC Modern Overlay", True) is True
+    assert set_above("EDMC Modern Overlay", False) is True
+    assert [command[command.index("--method") + 1].rsplit(".", 1)[-1] for command in commands] == [
+        "List",
+        "MakeAbove",
+        "MakeAbove",
+        "UnmakeAbove",
+    ]

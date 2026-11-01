@@ -181,11 +181,7 @@ def create_elite_window_tracker(
         session = (os.environ.get("EDMC_OVERLAY_SESSION_TYPE") or os.environ.get("XDG_SESSION_TYPE") or "").lower()
         compositor = (os.environ.get("EDMC_OVERLAY_COMPOSITOR") or "").lower()
         force_xwayland = os.environ.get("EDMC_OVERLAY_FORCE_XWAYLAND") == "1"
-        desktop = (os.environ.get("XDG_CURRENT_DESKTOP") or "").upper()
-        is_gnome = compositor in {"gnome-shell", "mutter"} or (
-            not compositor and ("GNOME" in desktop or bool(os.environ.get("GNOME_SHELL_SESSION_MODE")))
-        )
-        if session == "wayland" and (not force_xwayland or is_gnome):
+        if session == "wayland" and not force_xwayland:
             tracker = _create_wayland_tracker(logger, title_hint, monitor_provider, compositor)
             if tracker is not None:
                 return tracker
@@ -926,6 +922,8 @@ class _GnomeTracker(_WaylandTrackerBase):
         super().__init__(logger, title_hint, monitor_provider)
         self._x11_fallback = _WmctrlTracker(logger, title_hint, monitor_provider)
         self._warned = False
+        self._overlay_above = False
+        self._overlay_above_window_id: Optional[int] = None
 
     def set_monitor_provider(self, provider: Optional[MonitorProvider]) -> None:
         super().set_monitor_provider(provider)
@@ -934,7 +932,7 @@ class _GnomeTracker(_WaylandTrackerBase):
     def _poll_x11_fallback(self) -> Optional[WindowState]:
         return self._complete(self._x11_fallback.poll())
 
-    def _call_json_method(self, method: str, *args: object) -> Any:
+    def _call_method(self, method: str, *args: object) -> Tuple[Any, ...]:
         command = []
         if os.environ.get("FLATPAK_ID"):
             command.extend(["flatpak-spawn", "--host"])
@@ -965,9 +963,62 @@ class _GnomeTracker(_WaylandTrackerBase):
             reply = ast.literal_eval(result.stdout.strip())
         except (SyntaxError, ValueError) as exc:
             raise RuntimeError("gdbus returned an invalid method reply") from exc
-        if not isinstance(reply, tuple) or len(reply) != 1 or not isinstance(reply[0], str):
+        if not isinstance(reply, tuple):
             raise RuntimeError("gdbus returned an unexpected method reply")
+        return reply
+
+    def _call_json_method(self, method: str, *args: object) -> Any:
+        reply = self._call_method(method, *args)
+        if len(reply) != 1 or not isinstance(reply[0], str):
+            raise RuntimeError("gdbus returned an unexpected JSON method reply")
         return json.loads(reply[0])
+
+    def set_overlay_above(self, overlay_title: str, above: bool) -> bool:
+        """Ask Window Calls to keep the overlay above other windows without activating it."""
+        if not above and not self._overlay_above:
+            return True
+
+        was_above = self._overlay_above
+        window_id = self._overlay_above_window_id
+        if window_id is None:
+            try:
+                windows = self._call_json_method("List")
+            except Exception as exc:
+                self._logger.debug("Window Calls overlay lookup failed: %s", exc)
+                return False
+            if not isinstance(windows, list):
+                return False
+            overlay_window = next(
+                (
+                    window
+                    for window in windows
+                    if isinstance(window, dict) and str(window.get("title") or "") == overlay_title
+                ),
+                None,
+            )
+            if overlay_window is None:
+                self._logger.debug("Window Calls did not list overlay window '%s'", overlay_title)
+                return False
+            try:
+                window_id = int(overlay_window["id"])
+            except (KeyError, TypeError, ValueError):
+                return False
+
+        method = "MakeAbove" if above else "UnmakeAbove"
+        try:
+            self._call_method(method, window_id)
+        except Exception as exc:
+            self._logger.debug("Window Calls %s failed for overlay: %s", method, exc)
+            if above:
+                self._overlay_above = False
+                self._overlay_above_window_id = None
+            return False
+
+        self._overlay_above = above
+        self._overlay_above_window_id = window_id if above else None
+        if above and not was_above:
+            self._logger.debug("Window Calls %s applied to overlay window id=%s", method, window_id)
+        return True
 
     def poll(self) -> Optional[WindowState]:
         cached = self._maybe_use_cache()
