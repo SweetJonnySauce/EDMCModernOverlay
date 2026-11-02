@@ -128,15 +128,21 @@ def test_flush_outgoing_logs_write_failure(qt_app):
     assert any("Failed to write outgoing payload" in record.getMessage() for record in log_records)
 
 
-def test_run_requests_shutdown_after_server_unavailable_timeout(monkeypatch, qt_app, tmp_path):
+def test_run_requests_shutdown_after_five_failed_connection_attempts(monkeypatch, qt_app, tmp_path):
     port_file = tmp_path / "port.json"
     port_file.write_text('{"port": 12345}', encoding="utf-8")
-    monkeypatch.setattr(data_client_module, "SERVER_UNAVAILABLE_TIMEOUT_SECONDS", 0.03)
+    attempts = []
+    delays = []
 
     async def fail_to_connect(host, port):
+        attempts.append(port)
         raise ConnectionRefusedError("server is down")
 
+    async def record_sleep(delay):
+        delays.append(delay)
+
     monkeypatch.setattr(data_client_module.asyncio, "open_connection", fail_to_connect)
+    monkeypatch.setattr(data_client_module.asyncio, "sleep", record_sleep)
     client = OverlayDataClient(port_file)
     shutdown_requests = []
     client.shutdown_requested.connect(lambda: shutdown_requests.append(True))
@@ -155,14 +161,21 @@ def test_run_requests_shutdown_after_server_unavailable_timeout(monkeypatch, qt_
         logger.removeHandler(handler)
 
     assert shutdown_requests == [True]
-    assert any("Connect failed to 127.0.0.1:12345" in message for message in log_messages)
-    assert any("Retry 1; shutdown in" in message for message in log_messages)
+    assert len(attempts) == 5
+    assert delays == [1.0, 1.5, 2.25, 3.375]
+    retry_messages = [message for message in log_messages if "Connect failed to 127.0.0.1:12345" in message]
+    assert [message.rsplit("(", 1)[-1] for message in retry_messages] == [
+        "Retry 1/5)",
+        "Retry 2/5)",
+        "Retry 3/5)",
+        "Retry 4/5)",
+    ]
+    assert log_messages[-1] == "Overlay server unavailable after 5 tries; closing client"
 
 
 def test_run_does_not_time_out_a_live_quiet_connection(monkeypatch, qt_app, tmp_path):
     port_file = tmp_path / "port.json"
     port_file.write_text('{"port": 12345}', encoding="utf-8")
-    monkeypatch.setattr(data_client_module, "SERVER_UNAVAILABLE_TIMEOUT_SECONDS", 0.01)
 
     class QuietReader:
         async def readline(self):
