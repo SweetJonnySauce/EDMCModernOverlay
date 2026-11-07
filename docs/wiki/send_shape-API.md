@@ -22,7 +22,7 @@ overlay.send_shape(
     y,        # top edge in 1280x960
     w,        # width in 1280x960
     h,        # height in 1280x960
-    ttl,      # seconds; 0 means persistent
+    ttl,      # seconds; 0 or negative expires immediately
 )
 ```
 
@@ -96,7 +96,7 @@ The circle form wraps and publishes this legacy payload:
 | `w` / `h` | integer | Required for `rect` only. Width/height in the 1280x960 legacy canvas. Do not send these for `circle`. |
 | `radius` | integer | Required and strictly positive for `circle`; the circle radius in legacy-canvas units. |
 | `thickness` | integer | Optional and strictly positive for `circle` and `rect`. An explicit value is a logical Qt-pixel border width and does not scale with the shape. When omitted, no field is sent and the existing client-controlled width is used. <br>⚠️ **Note:** `thickness` is not backwards compatible|
-| `ttl` | integer | Required. Seconds before expiry. `0` (or any value <= 0) makes the shape persistent. |
+| `ttl` | integer | Required. Seconds before expiry. `0` or any negative value expires immediately. |
 
 If you need vector shapes (`shape="vect"`), use `send_raw` and include a `vector` list. `send_shape` does not accept vector points.
 
@@ -133,6 +133,8 @@ overlay.send_shape(
 
 ### Example 2: Filled banner block
 
+Refresh the same shape `id` before its five-second TTL expires to keep the background visible alongside a refreshed banner message.
+
 ```python
 from EDMCOverlay import edmcoverlay
 
@@ -146,7 +148,7 @@ overlay.send_shape(
     20,
     400,
     90,
-    0,  # persistent until cleared
+    5,  # refresh before five seconds elapse to keep visible
 )
 ```
 
@@ -169,6 +171,7 @@ overlay.send_shape(
 ## Runtime behavior
 
 - Shapes with the same `id` replace the existing entry and refresh the TTL.
+- `ttl <= 0` expires on the next client purge and may briefly flash on screen. It does not make the shape persistent. Use a positive TTL and refresh before expiry for ongoing display.
 - Clear a shape by its stable `id` using the existing raw clear-by-ID behavior.
 - `fill` is transparent when empty or `"none"`; `color` requests the circle or rectangle border colour.
 - Explicit circle and rectangle thickness are resolved as logical Qt-pixel
