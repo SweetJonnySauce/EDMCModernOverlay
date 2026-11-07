@@ -14,7 +14,7 @@ overlay.send_message(
     color,   # color string (named or #RRGGBB/#AARRGGBB)
     x,       # left edge in 1280x960
     y,       # top edge in 1280x960
-    ttl=4,   # seconds; 0 means persistent
+    ttl=4,   # seconds; 0 or negative expires immediately
     size="normal",
 )
 ```
@@ -43,7 +43,7 @@ overlay.send_message(
 | `text` | string | Required. An empty string removes the existing message with the same `id`. `\n` creates multi-line output. |
 | `color` | string | Required. Named color or `#RRGGBB`/`#AARRGGBB`. |
 | `x` / `y` | integer | Required. Top-left corner of the text block in the 1280x960 legacy canvas. |
-| `ttl` | integer | Optional. Seconds before expiry. `0` (or any value <= 0) makes the message persistent. |
+| `ttl` | integer | Optional. Seconds before expiry; defaults to `4`. `0` or any negative value expires immediately. |
 | `size` | enum | Optional. `small`, `normal`, `large`, or `huge` (case-insensitive). Unknown values render as `normal`. |
 
 ## Coordinate system
@@ -75,7 +75,9 @@ overlay.send_message(
 )
 ```
 
-### Example 2: Persistent banner
+### Example 2: Refreshable banner
+
+Send this message again with the same `id` before its five-second TTL expires to keep the banner visible. Schedule refreshes through your plugin's normal update mechanism; do not block EDMC hooks with a sleep loop.
 
 ```python
 from EDMCOverlay import edmcoverlay
@@ -87,7 +89,7 @@ overlay.send_message(
     "#ffd27f",
     100,
     20,
-    ttl=0,       # persistent until cleared
+    ttl=5,       # refresh before five seconds elapse to keep visible
     size="large",
 )
 ```
@@ -112,6 +114,7 @@ Clears are resolved by `id`; position and color are ignored when `text` is empty
 ## Runtime behavior
 
 - Messages with the same `id` replace the existing entry and refresh the TTL.
+- `ttl <= 0` expires on the next client purge and may briefly flash on screen. It does not make the message persistent. Use a positive TTL and refresh before expiry for ongoing display.
 - Empty `text` removes the message immediately.
 - Size presets are derived from the overlay font settings; adjust the "Font Step" and base font size in preferences to tune small/large/huge.
 - Plugin ownership is inferred from `id` prefixes (case-insensitive). If your plugin does not populate a `plugin` field, add prefixes via `define_plugin_group` so the overlay can attribute payloads correctly.

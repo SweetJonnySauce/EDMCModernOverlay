@@ -41,7 +41,7 @@ overlay.send_raw({
 | `color` | string | Optional. Named color or `#RRGGBB`/`#AARRGGBB`. Defaults to `white` for messages/shapes. |
 | `size` | enum | Optional. Message size preset: `small`, `normal`, `large`, or `huge` (case-insensitive). Defaults to `normal`. **Note:** top-level `size` applies to messages only. |
 | `x` / `y` | integer | Optional. `rect` uses a top-left corner; `circle` uses a center, both in the 1280x960 legacy canvas. |
-| `ttl` | integer | Optional. Seconds before expiry. `0` (or any value <= 0) makes the payload persistent. Default is `4`. |
+| `ttl` | integer | Optional. Seconds before expiry; defaults to `4`. `0` or any negative value expires immediately. |
 | `shape` | string | Optional. Shape name (e.g., `rect`, `circle`, `vect`). |
 | `fill` | string | Optional. Fill color for `rect` or `circle`; empty or `"none"` is transparent. |
 | `w` / `h` | integer | Optional. Width/height for `shape="rect"`. |
@@ -174,6 +174,7 @@ Clears are resolved by `id`; other fields are ignored when `text` is empty.
 ## Runtime behavior
 
 - Messages with the same `id` replace the existing entry and refresh the TTL.
+- Message and shape payloads with `ttl <= 0` expire on the next client purge and may briefly flash on screen. They do not persist. Use a positive TTL and refresh the same `id` before expiry for ongoing display. Raw clear payloads follow the dispatch order above.
 - Empty `text` removes the message immediately.
 - A `shape="circle"` uses center `x`/`y`, a positive `radius`, the requested `color` border, and an optional transparent `fill`. Its `thickness` is optional. It is a shape primitive, not a `marker: "circle"` vector point.
 - Explicit circle and rectangle `thickness` are logical Qt-pixel widths; the
