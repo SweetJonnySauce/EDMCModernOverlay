@@ -31,6 +31,26 @@ from EDMCOverlay import edmcoverlay
 overlay = edmcoverlay.Overlay()
 overlay.send_message("demo", "Hello CMDR", "yellow", 100, 150, ttl=5, size="large")
 overlay.send_shape("demo-frame", "rect", "#ffffff", "#40000000", 80, 120, 420, 160, ttl=5)
+overlay.send_table(
+    "demo-table",
+    [
+        ["Material", "Required", "Provided"],
+        ["Ceramic Composites", 500, 125],
+        ["Titanium", 250, 200],
+    ],
+    x=100,
+    y=300,
+    ttl=5,
+    size="large",
+    columns=[
+        {"align": "left"},
+        {"align": "right"},
+        {"align": "right"},
+    ],
+    row_colors=["yellow", "white"],
+)
 ```
+
+`send_table()` measures each cell using the actual proportional font used by the overlay, so columns align by rendered width rather than by character count. See [`send_table-API.md`](send_table-API.md) for the full argument list.
 
 Under the hood the compatibility layer forwards payloads through `send_overlay_message`, so no socket management or process monitoring is required. The overlay client understands the legacy message/rectangle schema, making migration from the original EDMCOverlay plugin largely turnkey.

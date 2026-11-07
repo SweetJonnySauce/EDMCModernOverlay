@@ -26,6 +26,19 @@ def _normalise_marker_text_size(value: Any) -> Optional[str]:
 
 
 def _hashable_payload_snapshot(item_type: str, payload: Mapping[str, Any]) -> tuple:
+    if item_type == "table":
+        try:
+            snapshot_rows = json.dumps(payload.get("rows", []), sort_keys=True, default=str)
+            snapshot_options = json.dumps(
+                {key: value for key, value in payload.items() if key not in {"rows", "ttl"}},
+                sort_keys=True,
+                default=str,
+            )
+        except Exception:
+            snapshot_rows = repr(payload.get("rows", []))
+            snapshot_options = repr(payload)
+        return ("table", snapshot_rows, snapshot_options)
+
     if item_type == "message":
         return (
             payload.get("text", ""),
@@ -240,6 +253,48 @@ def process_legacy_payload(
     plugin_name = _extract_plugin(payload)
 
     now_iso = datetime.now(UTC).isoformat()
+
+    if item_type == "table":
+        rows = payload.get("rows", [])
+        if not isinstance(rows, list) or not rows:
+            store.remove(item_id)
+            return True
+
+        normalised_rows = []
+        for raw_row in rows:
+            if isinstance(raw_row, (list, tuple)):
+                normalised_rows.append([str(value) for value in raw_row])
+            else:
+                normalised_rows.append([str(raw_row)])
+
+        data = {
+            "rows": normalised_rows,
+            "x": int(payload.get("x", 0)),
+            "y": int(payload.get("y", 0)),
+            "size": payload.get("size", "normal"),
+            "padding": payload.get("padding", 6),
+            "columns": payload.get("columns", []),
+            "header": bool(payload.get("header", True)),
+            "header_bold": bool(payload.get("header_bold", True)),
+            "header_color": payload.get("header_color", "white"),
+            "header_background": payload.get("header_background", ""),
+            "row_colors": payload.get("row_colors", []),
+            "row_backgrounds": payload.get("row_backgrounds", []),
+            "background": payload.get("background", ""),
+        }
+        data["__mo_ttl__"] = ttl
+        transform_meta = payload.get("__mo_transform__")
+        if isinstance(transform_meta, Mapping):
+            try:
+                data["__mo_transform__"] = dict(transform_meta)
+            except Exception:
+                data["__mo_transform__"] = transform_meta
+        data["__mo_updated__"] = now_iso
+        store.set(
+            item_id,
+            LegacyItem(item_id=item_id, kind="table", data=data, expiry=expiry, plugin=plugin_name),
+        )
+        return True
 
     if item_type == "message":
         text = payload.get("text", "")

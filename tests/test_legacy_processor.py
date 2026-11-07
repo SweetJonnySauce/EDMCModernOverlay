@@ -549,3 +549,47 @@ def test_rectangle_and_vector_dedupe_snapshots_remain_unchanged():
             "__mo_transform__": transform,
         },
     ) == ("vect", "green", "large", ((1, 2, "red", "circle", "A", "small"),), transform)
+
+
+def test_process_table_payload():
+    store = LegacyItemStore()
+    changed = process_legacy_payload(
+        store,
+        {
+            "type": "table",
+            "id": "table1",
+            "rows": [
+                ["Material", "Required"],
+                ["Ceramic Composites", 500],
+            ],
+            "x": 100,
+            "y": 200,
+            "ttl": 5,
+            "size": "large",
+            "columns": [{"align": "left"}, {"align": "right"}],
+            "row_colors": ["yellow"],
+            "header_color": "white",
+        },
+    )
+    assert changed is True
+    item = store.get("table1")
+    assert item is not None
+    assert item.kind == "table"
+    assert item.data["rows"][1] == ["Ceramic Composites", "500"]
+    assert item.data["row_colors"] == ["yellow"]
+
+
+def test_normalise_table_payload():
+    payload = normalise_legacy_payload(
+        {
+            "type": "table",
+            "id": "table1",
+            "rows": [["A", 1], ["B", 2]],
+            "x": 10,
+            "y": 20,
+            "ttl": 10,
+        }
+    )
+    assert payload is not None
+    assert payload["type"] == "table"
+    assert payload["rows"] == [["A", 1], ["B", 2]]

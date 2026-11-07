@@ -144,6 +144,30 @@ def normalise_legacy_payload(message: Mapping[str, Any]) -> Optional[Dict[str, A
     ttl = _legacy_coerce_int(_lookup("ttl", "TTL"), default=4)
     plugin = _legacy_coerce_str(_lookup("plugin", "Plugin", "plugin_name", "PluginName", "source_plugin"))
 
+    table_rows = _lookup("rows", "Rows")
+    if table_rows is not None:
+        payload: Dict[str, Any] = {
+            "type": "table",
+            "id": item_id or "",
+            "rows": table_rows,
+            "x": _legacy_coerce_int(_lookup("x", "X"), 0),
+            "y": _legacy_coerce_int(_lookup("y", "Y"), 0),
+            "ttl": ttl,
+            "size": _lookup("size", "Size") or "normal",
+            "columns": _lookup("columns", "Columns") or [],
+            "padding": _lookup("padding", "Padding") if _lookup("padding", "Padding") is not None else 6,
+            "header": _lookup("header", "Header") if _lookup("header", "Header") is not None else True,
+            "header_bold": _lookup("header_bold", "HeaderBold") if _lookup("header_bold", "HeaderBold") is not None else True,
+            "header_color": _lookup("header_color", "HeaderColor") or "white",
+            "header_background": _lookup("header_background", "HeaderBackground") or "",
+            "row_colors": _lookup("row_colors", "RowColors") or [],
+            "row_backgrounds": _lookup("row_backgrounds", "RowBackgrounds") or [],
+            "background": _lookup("background", "Background") or "",
+        }
+        if plugin:
+            payload["plugin"] = plugin
+        return payload
+
     if text is not None and text != "":
         payload = {
             "type": "message",
@@ -303,6 +327,55 @@ class Overlay:
             "y": int(y),
             "ttl": ttl,
             "size": size,
+        }
+        self._emit_payload(payload)
+
+    def send_table(
+        self,
+        tableid: str,
+        rows: Sequence[Sequence[Any]],
+        x: int = 0,
+        y: int = 0,
+        ttl: int = 4,
+        size: str = "normal",
+        *,
+        columns: Optional[Sequence[Mapping[str, Any]]] = None,
+        padding: float = 6.0,
+        header: bool = True,
+        header_bold: bool = True,
+        header_color: str = "white",
+        header_background: str = "",
+        row_colors: Optional[Sequence[str]] = None,
+        row_backgrounds: Optional[Sequence[str]] = None,
+        background: str = "",
+    ) -> None:
+        """Display a table using the overlay's actual proportional font metrics.
+
+        Column widths are measured by the Modern Overlay renderer unless an
+        explicit ``width`` is supplied in a column definition.  Alignment is
+        therefore independent of character count.
+        """
+        if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes, bytearray)):
+            raise TypeError("rows must be a sequence of rows")
+
+        payload = {
+            "type": "table",
+            "id": str(tableid),
+            "rows": [list(row) if isinstance(row, Sequence) and not isinstance(row, (str, bytes, bytearray))
+                     else [row] for row in rows],
+            "x": int(x),
+            "y": int(y),
+            "ttl": int(ttl),
+            "size": str(size),
+            "columns": list(columns) if columns is not None else [],
+            "padding": float(padding),
+            "header": bool(header),
+            "header_bold": bool(header_bold),
+            "header_color": str(header_color),
+            "header_background": str(header_background),
+            "row_colors": list(row_colors) if row_colors is not None else [],
+            "row_backgrounds": list(row_backgrounds) if row_backgrounds is not None else [],
+            "background": str(background),
         }
         self._emit_payload(payload)
 

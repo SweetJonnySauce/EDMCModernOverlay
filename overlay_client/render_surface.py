@@ -20,6 +20,7 @@ from overlay_client.paint_commands import (
     _CirclePaintCommand,
     _LegacyPaintCommand,
     _MessagePaintCommand,
+    _TablePaintCommand,
     _RectPaintCommand,
     _VectorPaintCommand,
 )
@@ -797,6 +798,15 @@ class RenderSurfaceMixin:
                     overlay_hint,
                     collect_only=collect_only,
                 )
+            elif legacy_item.kind == "table":
+                command = self._build_table_command(
+                    legacy_item,
+                    mapper,
+                    group_key,
+                    group_transform,
+                    overlay_hint,
+                    collect_only=collect_only,
+                )
             elif legacy_item.kind == "rect":
                 command = self._build_rect_command(
                     legacy_item,
@@ -1531,6 +1541,231 @@ class RenderSurfaceMixin:
                     "mode": mapper.transform.mode.value,
                 },
             )
+        return command
+
+    def _build_table_command(
+        self,
+        legacy_item: LegacyItem,
+        mapper: LegacyMapper,
+        group_key: GroupKey,
+        group_transform: Optional[GroupTransform],
+        overlay_bounds_hint: Optional[_OverlayBounds],
+        collect_only: bool = False,
+    ) -> Optional[_TablePaintCommand]:
+        """Build a table using measured font widths rather than character counts."""
+        item = legacy_item.data
+        item_id = legacy_item.item_id
+        plugin_name = legacy_item.plugin
+        state = self._viewport_state()
+
+        rows_raw = item.get("rows") or []
+        if not isinstance(rows_raw, Sequence) or isinstance(rows_raw, (str, bytes, bytearray)):
+            return None
+
+        rows: List[List[str]] = []
+        for raw_row in rows_raw:
+            if not isinstance(raw_row, Sequence) or isinstance(raw_row, (str, bytes, bytearray)):
+                raw_row = [raw_row]
+            rows.append([str(value) for value in raw_row])
+
+        if not rows:
+            return None
+
+        max_columns = max((len(row) for row in rows), default=0)
+        if max_columns <= 0:
+            return None
+        for row in rows:
+            row.extend([""] * (max_columns - len(row)))
+
+        size = str(item.get("size", "normal")).lower()
+        scaled_point_size = self._legacy_preset_point_size(size, state, mapper)
+
+        offset_x, offset_y = self._group_offsets(group_transform)
+        group_ctx = build_group_context(
+            mapper,
+            state,
+            group_transform,
+            overlay_bounds_hint,
+            offset_x,
+            offset_y,
+            group_anchor_point=self._group_anchor_point,
+            group_base_point=self._group_base_point,
+        )
+        fill = group_ctx.fill
+        transform_context = group_ctx.transform_context
+        scale = max(float(fill.scale), 1e-6)
+
+        transform_meta = item.get("__mo_transform__")
+        raw_left = float(item.get("x", 0))
+        raw_top = float(item.get("y", 0))
+
+        (
+            adjusted_left,
+            adjusted_top,
+            base_left_logical,
+            base_top_logical,
+            effective_anchor,
+            _translation_dx,
+            _translation_dy,
+        ) = self._compute_message_transform(
+            plugin_name,
+            item_id,
+            fill,
+            transform_context,
+            transform_meta,
+            mapper,
+            group_transform,
+            overlay_bounds_hint,
+            raw_left,
+            raw_top,
+            offset_x,
+            offset_y,
+            group_ctx.selected_anchor,
+            group_ctx.base_anchor_point,
+            group_ctx.anchor_for_transform,
+            group_ctx.base_translation_dx,
+            group_ctx.base_translation_dy,
+            False,
+            collect_only,
+        )
+
+        font = QFont(self._font_family)
+        self._apply_font_fallbacks(font)
+        font.setPointSizeF(scaled_point_size)
+
+        padding = max(0.0, float(item.get("padding", 6.0)))
+        padding_px = padding * scale
+
+        header = bool(item.get("header", True))
+        header_bold = bool(item.get("header_bold", True))
+
+        # Measure each cell with the actual proportional font used by the overlay.
+        normal_metrics = QFontMetrics(font)
+        bold_font = QFont(font)
+        bold_font.setWeight(QFont.Weight.Bold)
+        bold_metrics = QFontMetrics(bold_font)
+
+        explicit_columns = item.get("columns") or []
+        explicit_widths = []
+        alignments: List[str] = []
+        for index in range(max_columns):
+            spec = explicit_columns[index] if index < len(explicit_columns) else {}
+            if isinstance(spec, Mapping):
+                try:
+                    width = float(spec.get("width", 0) or 0)
+                except (TypeError, ValueError):
+                    width = 0.0
+                align = str(spec.get("align", "left")).lower()
+            else:
+                width = 0.0
+                align = "left"
+            explicit_widths.append(max(0.0, width))
+            alignments.append(align)
+
+        widths_px: List[int] = []
+        for col in range(max_columns):
+            measured = 0
+            for row_index, row in enumerate(rows):
+                metrics = bold_metrics if (header and row_index == 0 and header_bold) else normal_metrics
+                measured = max(measured, metrics.horizontalAdvance(row[col]))
+            if explicit_widths[col] > 0:
+                width_px = int(round(explicit_widths[col] * scale))
+            else:
+                width_px = measured + int(round(padding_px * 2))
+            widths_px.append(max(1, width_px))
+
+        # Row height is also derived from the actual font metrics.
+        max_line_spacing = max(normal_metrics.lineSpacing(), normal_metrics.height(), 1)
+        if header and header_bold:
+            max_line_spacing = max(max_line_spacing, bold_metrics.lineSpacing(), bold_metrics.height())
+        #row_height_px = max(1, max_line_spacing + int(round(padding_px * 2)))
+        row_height_px = max(1, max_line_spacing)
+        row_height = row_height_px / scale
+        column_widths = [width / scale for width in widths_px]
+
+        x = int(round(fill.screen_x(adjusted_left)))
+        y = int(round(fill.screen_y(adjusted_top)))
+        total_width = sum(widths_px)
+        total_height = row_height_px * len(rows)
+        bounds = (x, y, x + total_width, y + total_height)
+
+        overlay_bounds: Optional[Tuple[float, float, float, float]] = None
+        base_overlay_bounds: Optional[Tuple[float, float, float, float]] = None
+        if group_ctx.scale > 0.0:
+            overlay_bounds = (
+                (bounds[0] - group_ctx.base_offset_x) / group_ctx.scale,
+                (bounds[1] - group_ctx.base_offset_y) / group_ctx.scale,
+                (bounds[2] - group_ctx.base_offset_x) / group_ctx.scale,
+                (bounds[3] - group_ctx.base_offset_y) / group_ctx.scale,
+            )
+            base_x = int(round(fill.screen_x(base_left_logical)))
+            base_y = int(round(fill.screen_y(base_top_logical)))
+            base_bounds = (base_x, base_y, base_x + total_width, base_y + total_height)
+            base_overlay_bounds = (
+                (base_bounds[0] - group_ctx.base_offset_x) / group_ctx.scale,
+                (base_bounds[1] - group_ctx.base_offset_y) / group_ctx.scale,
+                (base_bounds[2] - group_ctx.base_offset_x) / group_ctx.scale,
+                (base_bounds[3] - group_ctx.base_offset_y) / group_ctx.scale,
+            )
+
+        def _colors(key: str, default: str) -> List[QColor]:
+            raw = item.get(key) or []
+            if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes, bytearray)):
+                raw = []
+            result: List[QColor] = []
+            for value in raw:
+                color = QColor(str(value))
+                result.append(color if color.isValid() else QColor(default))
+            return result
+
+        row_colors = _colors("row_colors", "white")
+        row_backgrounds = _colors("row_backgrounds", "#00000000")
+        header_color = QColor(str(item.get("header_color", "white")))
+        if not header_color.isValid():
+            header_color = QColor("white")
+        header_background_value = item.get("header_background")
+        header_background = None
+        if header_background_value:
+            candidate = QColor(str(header_background_value))
+            if candidate.isValid():
+                header_background = candidate
+        background_value = item.get("background")
+        background = None
+        if background_value:
+            candidate = QColor(str(background_value))
+            if candidate.isValid():
+                background = candidate
+        
+        command = _TablePaintCommand(
+            group_key=group_key,
+            group_transform=group_transform,
+            legacy_item=legacy_item,
+            bounds=bounds,
+            overlay_bounds=overlay_bounds,
+            effective_anchor=effective_anchor,
+            rows=rows,
+            x=x,
+            y=y,
+            point_size=scaled_point_size,
+            column_widths=column_widths,
+            column_alignments=alignments,
+            row_colors=row_colors,
+            row_backgrounds=row_backgrounds,
+            header_color=header_color,
+            header_background=header_background,
+            header=header,
+            background=background,
+            padding=padding,
+            row_height=row_height,
+            header_bold=header_bold,
+            font_family=self._font_family,
+            font_fallbacks=tuple(getattr(self, "_font_fallbacks", ())),
+            scale=scale,
+            base_overlay_bounds=base_overlay_bounds,
+            debug_vertices=[(x, y)],
+            raw_min_x=raw_left,
+            right_just_multiplier=2,
+        )
         return command
 
     def _build_rect_command(
