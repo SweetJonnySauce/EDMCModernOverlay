@@ -47,6 +47,7 @@ class _DummyBroadcaster:
 class _FakePrefs:
     def __init__(self, plugin_dir):
         self.plugin_dir = plugin_dir
+        self.dev_mode = False
         self.overlay_opacity = 0.5
         self.show_connection_status = False
         self.debug_overlay_corner = "NW"
@@ -172,6 +173,22 @@ def test_stop_without_start_is_safe(monkeypatch, tmp_path):
     assert not runtime._tracked_threads
     # Broadcaster is created during __init__; when not started, handles remain limited to it.
     assert runtime._tracked_handles == [runtime.broadcaster]
+
+
+def test_force_xwayland_launch_env_selects_qt_backend(monkeypatch, tmp_path):
+    runtime = _make_runtime(monkeypatch, tmp_path)
+    monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
+    monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
+    monkeypatch.setattr(runtime, "_detect_wayland_compositor", lambda: "gnome-shell")
+
+    env = runtime._build_overlay_environment()
+    assert env["QT_QPA_PLATFORM"] == "wayland"
+    assert env["EDMC_OVERLAY_FORCE_XWAYLAND"] == "0"
+
+    runtime._preferences.force_xwayland = True
+    env = runtime._build_overlay_environment()
+    assert env["QT_QPA_PLATFORM"] == "xcb"
+    assert env["EDMC_OVERLAY_FORCE_XWAYLAND"] == "1"
 
 
 def test_hotkeys_manager_start_stop_are_lightweight_tie_ins(monkeypatch, tmp_path):

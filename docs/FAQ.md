@@ -170,6 +170,8 @@ Modern Overlay now ships with compositor-aware helpers and multiple fallbacks. T
   ```
 - **KDE Plasma (KWin):** Set `force_xwayland` to **false** in `overlay_settings.json`. KWin—Plasma handles Wayland windows natively, and forcing XWayland can break input/stacking.
 
+- **GNOME Shell (mutter):** Install/enable [Window Calls](https://extensions.gnome.org/extension/4724/window-calls/) so the client can read its Mutter geometry and focus through `List` and `Details`. For Proton, `PROTON_ENABLE_WAYLAND=1` enables Elite's Wayland backend. This is separate from the desktop session being Wayland and from `force_xwayland`, which controls only the overlay client's Qt backend. The client invokes `gdbus` directly, including for Flatpak EDMC installs, where the client runs on the host; see the [Flatpak D-Bus access guide](wiki/Installation-FAQs.md#flatpak-dbus-access). Window Calls provides tracking, not stacking or click-through guarantees.
+
 - **XWayland mode:** On Wayland sessions the overlay forces itself to launch under XWayland for compatibility. Keep this path in mind on GNOME Shell (Wayland), where native layer-shell hooks are not yet available; the overlay behaves like it does on X11 and stays pinned above Elite.
   ```bash
   # Example for Debian/Ubuntu; xprop/xwininfo ship in x11-utils and swaymsg comes with sway.
