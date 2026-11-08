@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from PyQt6.QtWidgets import QApplication
 
+from overlay_client import data_client as data_client_module
 from overlay_client.data_client import OverlayDataClient
 
 
@@ -125,3 +126,84 @@ def test_flush_outgoing_logs_write_failure(qt_app):
     log_records = asyncio.run(_run())
 
     assert any("Failed to write outgoing payload" in record.getMessage() for record in log_records)
+
+
+def test_run_requests_shutdown_after_five_failed_connection_attempts(monkeypatch, qt_app, tmp_path):
+    port_file = tmp_path / "port.json"
+    port_file.write_text('{"port": 12345}', encoding="utf-8")
+    attempts = []
+    delays = []
+
+    async def fail_to_connect(host, port):
+        attempts.append(port)
+        raise ConnectionRefusedError("server is down")
+
+    async def record_sleep(delay):
+        delays.append(delay)
+
+    monkeypatch.setattr(data_client_module.asyncio, "open_connection", fail_to_connect)
+    monkeypatch.setattr(data_client_module.asyncio, "sleep", record_sleep)
+    client = OverlayDataClient(port_file)
+    shutdown_requests = []
+    client.shutdown_requested.connect(lambda: shutdown_requests.append(True))
+    logger = logging.getLogger("EDMC.ModernOverlay.Client.DataClient")
+    log_messages = []
+
+    class CaptureHandler(logging.Handler):
+        def emit(self, record):
+            log_messages.append(record.getMessage())
+
+    handler = CaptureHandler()
+    logger.addHandler(handler)
+    try:
+        asyncio.run(client._run())
+    finally:
+        logger.removeHandler(handler)
+
+    assert shutdown_requests == [True]
+    assert len(attempts) == 5
+    assert delays == [1.0, 1.5, 2.25, 3.375]
+    retry_messages = [message for message in log_messages if "Connect failed to 127.0.0.1:12345" in message]
+    assert [message.rsplit("(", 1)[-1] for message in retry_messages] == [
+        "Retry 1/5)",
+        "Retry 2/5)",
+        "Retry 3/5)",
+        "Retry 4/5)",
+    ]
+    assert log_messages[-1] == "Overlay server unavailable after 5 tries; closing client"
+
+
+def test_run_does_not_time_out_a_live_quiet_connection(monkeypatch, qt_app, tmp_path):
+    port_file = tmp_path / "port.json"
+    port_file.write_text('{"port": 12345}', encoding="utf-8")
+
+    class QuietReader:
+        async def readline(self):
+            await asyncio.sleep(0.02)
+            client._stop_event.set()  # type: ignore[attr-defined]
+            return b'{"heartbeat-free": true}\n'
+
+    class QuietWriter:
+        def write(self, data):
+            return None
+
+        async def drain(self):
+            return None
+
+        def close(self):
+            return None
+
+        async def wait_closed(self):
+            return None
+
+    async def connect(host, port):
+        return QuietReader(), QuietWriter()
+
+    monkeypatch.setattr(data_client_module.asyncio, "open_connection", connect)
+    client = OverlayDataClient(port_file)
+    shutdown_requests = []
+    client.shutdown_requested.connect(lambda: shutdown_requests.append(True))
+
+    asyncio.run(client._run())
+
+    assert shutdown_requests == []

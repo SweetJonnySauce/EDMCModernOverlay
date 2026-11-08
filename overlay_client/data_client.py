@@ -18,6 +18,9 @@ try:  # pragma: no cover - defensive fallback when running standalone
 except Exception:  # pragma: no cover - fallback when module unavailable
     MODERN_OVERLAY_VERSION = "unknown"
 
+MAX_SERVER_CONNECT_ATTEMPTS = 5
+CONNECT_TIMEOUT_SECONDS = 5.0
+
 
 class _ReleaseLogLevelFilter(logging.Filter):
     """Promote debug logs to INFO in release builds so diagnostics stay visible."""
@@ -45,6 +48,7 @@ class OverlayDataClient(QObject):
 
     message_received = pyqtSignal(dict)
     status_changed = pyqtSignal(str)
+    shutdown_requested = pyqtSignal()
 
     def __init__(self, port_file: Path, loop_sleep: float = 1.0) -> None:
         super().__init__()
@@ -53,6 +57,7 @@ class OverlayDataClient(QObject):
         self._thread: Optional[threading.Thread] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._stop_event = threading.Event()
+        self._server_retry_attempts = 0
         self._last_metadata: Dict[str, Any] = {}
         self._outgoing: Optional[asyncio.Queue[Optional[Dict[str, Any]]]] = None
         self._pending: "queue.Queue[Dict[str, Any]]" = queue.Queue(maxsize=32)
@@ -61,6 +66,7 @@ class OverlayDataClient(QObject):
         if self._thread and self._thread.is_alive():
             return
         self._stop_event.clear()
+        self._server_retry_attempts = 0
         self._thread = threading.Thread(target=self._thread_main, name="EDMCOverlay-Client", daemon=True)
         self._thread.start()
 
@@ -112,6 +118,8 @@ class OverlayDataClient(QObject):
         while not self._stop_event.is_set():
             metadata = self._read_port()
             if metadata is None:
+                if self._record_failed_attempt():
+                    return
                 self.status_changed.emit("Waiting for port.json…")
                 await asyncio.sleep(self._loop_sleep)
                 continue
@@ -119,14 +127,28 @@ class OverlayDataClient(QObject):
             reader = None
             writer = None
             try:
-                reader, writer = await asyncio.open_connection("127.0.0.1", port)
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection("127.0.0.1", port),
+                    timeout=CONNECT_TIMEOUT_SECONDS,
+                )
             except (OSError, asyncio.TimeoutError) as exc:
-                self.status_changed.emit(f"Connect failed: {exc}")
-                _LOGGER.warning("Connect failed to 127.0.0.1:%s: %s", port, exc)
+                if self._record_failed_attempt():
+                    return
+                self.status_changed.emit(
+                    f"Connect failed: {exc} (retry {self._server_retry_attempts}/{MAX_SERVER_CONNECT_ATTEMPTS})"
+                )
+                _LOGGER.warning(
+                    "Connect failed to 127.0.0.1:%s: %s (Retry %d/%d)",
+                    port,
+                    exc,
+                    self._server_retry_attempts,
+                    MAX_SERVER_CONNECT_ATTEMPTS,
+                )
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 1.5, 10.0)
                 continue
 
+            self._server_retry_attempts = 0
             script_label = MODERN_OVERLAY_VERSION if MODERN_OVERLAY_VERSION and MODERN_OVERLAY_VERSION != "unknown" else "unknown"
             if script_label != "unknown" and not script_label.lower().startswith("v"):
                 script_label = f"v{script_label}"
@@ -189,8 +211,24 @@ class OverlayDataClient(QObject):
                         await writer.wait_closed()
                     except OSError as exc:
                         _LOGGER.debug("Error closing writer: %s", exc)
+            if self._stop_event.is_set():
+                return
             await asyncio.sleep(backoff)
             backoff = min(backoff * 1.5, 10.0)
+
+    def _record_failed_attempt(self) -> bool:
+        """Count a failed attempt; return True once the budget is spent and shutdown was requested."""
+        self._server_retry_attempts += 1
+        if self._server_retry_attempts < MAX_SERVER_CONNECT_ATTEMPTS:
+            return False
+        self._request_shutdown_after_server_timeout()
+        return True
+
+    def _request_shutdown_after_server_timeout(self) -> None:
+        message = f"Overlay server unavailable after {MAX_SERVER_CONNECT_ATTEMPTS} tries; closing client"
+        _LOGGER.warning(message)
+        self.status_changed.emit(message)
+        self.shutdown_requested.emit()
 
     async def _flush_outgoing(
         self,
